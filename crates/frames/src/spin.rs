@@ -56,7 +56,8 @@ impl Spin {
     /// The turns are removed with an exact remainder before scaling, so the angle keeps full
     /// precision however large t is; what remains is t's own spacing (1.2e-7 s at t = 1e9 s).
     pub fn angle(&self, t: f64) -> f64 {
-        self.angle_at_epoch_radians + TAU * (t.rem_euclid(self.period_seconds) / self.period_seconds)
+        self.angle_at_epoch_radians
+            + TAU * (t.rem_euclid(self.period_seconds) / self.period_seconds)
     }
 
     /// Spin rate, radians per second.

@@ -47,7 +47,10 @@ pub fn suggested_step_seconds(bodies: &[CelestialBody], steps_per_orbit: f64) ->
         .iter()
         .filter_map(|b| Some(b.orbit_period_seconds? * b.periapsis_fraction?.powf(1.5)))
         .fold(f64::INFINITY, f64::min);
-    assert!(tightest.is_finite(), "suggested step: the system has no orbiting bodies");
+    assert!(
+        tightest.is_finite(),
+        "suggested step: the system has no orbiting bodies"
+    );
     tightest / steps_per_orbit
 }
 
@@ -84,9 +87,16 @@ impl Ephemeris {
             "ephemeris step {}",
             options.step_seconds
         );
-        assert!(options.chunk_steps >= 2, "ephemeris chunk steps {}", options.chunk_steps);
+        assert!(
+            options.chunk_steps >= 2,
+            "ephemeris chunk steps {}",
+            options.chunk_steps
+        );
         let n = system.bodies.len();
-        assert!(system.positions.len() == n && system.velocities.len() == n, "state does not match body count");
+        assert!(
+            system.positions.len() == n && system.velocities.len() == n,
+            "state does not match body count"
+        );
         let mut ephemeris = Self {
             bodies: system.bodies.clone(),
             step_seconds: options.step_seconds,
@@ -150,7 +160,11 @@ impl Ephemeris {
 
     /// Barycentric states of every body at t.
     pub fn states_at(&self, t: f64, positions: &mut [DVec3], mut velocities: Option<&mut [DVec3]>) {
-        assert!(positions.len() == self.bodies.len(), "positions for {} bodies", positions.len());
+        assert!(
+            positions.len() == self.bodies.len(),
+            "positions for {} bodies",
+            positions.len()
+        );
         let (basis, left, right) = self.bracket(t);
         for (i, position) in positions.iter_mut().enumerate() {
             let (p, v) = Self::interpolate(&basis, left, right, i, velocities.is_some());
@@ -159,6 +173,26 @@ impl Ephemeris {
                 out[i] = v;
             }
         }
+    }
+
+    pub fn positions_at(&self, t: f64, positions: &mut [DVec3]) {
+        self.states_at(t, positions, None);
+    }
+
+    pub fn body_position(&self, body: usize, t: f64) -> DVec3 {
+        assert!(
+            body < self.bodies.len(),
+            "body {body} is not in this ephemeris"
+        );
+        let (basis, left, right) = self.bracket(t);
+        Self::interpolate(&basis, left, right, body, false).0
+    }
+
+    /// Acceleration of this coordinate origin, subtracted by the vessel propagator. A plain
+    /// barycentric ephemeris is inertial; lab/multiscale's FrameEphemeris is not, and will make
+    /// this a trait when it is ported.
+    pub fn frame_acceleration_at(&self, _t: f64) -> DVec3 {
+        DVec3::ZERO
     }
 
     /// Total energy of the integrator's newest state, scaled by G (masses are GM).
@@ -185,7 +219,11 @@ impl Ephemeris {
         for (i, m) in self.gm.iter().enumerate() {
             let (qx, qy, qz) = (q[i * 3], q[i * 3 + 1], q[i * 3 + 2]);
             let (vx, vy, vz) = (v[i * 3], v[i * 3 + 1], v[i * 3 + 2]);
-            l += DVec3::new(m * (qy * vz - qz * vy), m * (qz * vx - qx * vz), m * (qx * vy - qy * vx));
+            l += DVec3::new(
+                m * (qy * vz - qz * vy),
+                m * (qz * vx - qx * vz),
+                m * (qx * vy - qy * vx),
+            );
         }
         l
     }
@@ -228,7 +266,12 @@ impl Ephemeris {
                 let dy = q[j * 3 + 1] - yi;
                 let dz = q[j * 3 + 2] - zi;
                 let r2 = dx * dx + dy * dy + dz * dz;
-                assert!(r2 > 0.0, "ephemeris: bodies {} and {} coincide", self.bodies[i].id, self.bodies[j].id);
+                assert!(
+                    r2 > 0.0,
+                    "ephemeris: bodies {} and {} coincide",
+                    self.bodies[i].id,
+                    self.bodies[j].id
+                );
                 let inv = 1.0 / (r2 * r2.sqrt());
                 let (si, sj) = (gm[j] * inv, gm[i] * inv);
                 out[i * 3] += dx * si;
@@ -261,14 +304,20 @@ impl Ephemeris {
     fn sample(&self, step: usize) -> &[f64] {
         let per_sample = self.bodies.len() * SAMPLE_STRIDE;
         let chunk_index = step / self.chunk_steps;
-        let chunk = self.chunks.get(&chunk_index).unwrap_or_else(|| panic!("ephemeris: sample {step} is not retained"));
+        let chunk = self
+            .chunks
+            .get(&chunk_index)
+            .unwrap_or_else(|| panic!("ephemeris: sample {step} is not retained"));
         let base = (step - chunk_index * self.chunk_steps) * per_sample;
         &chunk[base..base + per_sample]
     }
 
     /// The basis and the samples either side of t.
     fn bracket(&self, t: f64) -> (HermiteBasis, &[f64], &[f64]) {
-        assert!(self.last_step > 0, "ephemeris: no interval integrated yet; extend first");
+        assert!(
+            self.last_step > 0,
+            "ephemeris: no interval integrated yet; extend first"
+        );
         assert!(
             t >= self.start_time() && t <= self.end_time(),
             "ephemeris: t = {t} outside covered [{}, {}]",
@@ -277,12 +326,19 @@ impl Ephemeris {
         );
         let h = self.step_seconds;
         // t is inside [start, end]; the clamp only absorbs the closed right end and division rounding.
-        let k = (((t - self.epoch_seconds) / h).floor() as usize).clamp(self.first_step, self.last_step - 1);
+        let k = (((t - self.epoch_seconds) / h).floor() as usize)
+            .clamp(self.first_step, self.last_step - 1);
         let s = (t - self.epoch_seconds - k as f64 * h) / h;
         (HermiteBasis::new(h, s), self.sample(k), self.sample(k + 1))
     }
 
-    fn interpolate(basis: &HermiteBasis, left: &[f64], right: &[f64], body: usize, with_velocity: bool) -> (DVec3, DVec3) {
+    fn interpolate(
+        basis: &HermiteBasis,
+        left: &[f64],
+        right: &[f64],
+        body: usize,
+        with_velocity: bool,
+    ) -> (DVec3, DVec3) {
         let o = body * SAMPLE_STRIDE;
         let (mut p, mut v) = ([0.0; 3], [f64::NAN; 3]);
         for c in 0..3 {
@@ -300,7 +356,10 @@ impl Ephemeris {
 
 impl BodyStates for Ephemeris {
     fn body_state(&self, body: BodyId, t: f64) -> (DVec3, DVec3) {
-        assert!(body.0 < self.bodies.len(), "{body:?} is not in this ephemeris");
+        assert!(
+            body.0 < self.bodies.len(),
+            "{body:?} is not in this ephemeris"
+        );
         let (basis, left, right) = self.bracket(t);
         Self::interpolate(&basis, left, right, body.0, true)
     }

@@ -39,10 +39,15 @@ impl HermiteBasis {
 
     /// One coordinate: samples (p, v, a) at the start (0) and end (1) of the step.
     pub fn position(&self, p0: f64, p1: f64, v0: f64, v1: f64, a0: f64, a1: f64) -> f64 {
-        p0 + self.h5 * (p1 - p0) + self.h * (self.h1 * v0 + self.h4 * v1) + self.hh * (self.h2 * a0 + self.h3 * a1)
+        p0 + self.h5 * (p1 - p0)
+            + self.h * (self.h1 * v0 + self.h4 * v1)
+            + self.hh * (self.h2 * a0 + self.h3 * a1)
     }
 
     pub fn velocity(&self, p0: f64, p1: f64, v0: f64, v1: f64, a0: f64, a1: f64) -> f64 {
-        self.d5 * (p1 - p0) / self.h + self.d1 * v0 + self.d4 * v1 + self.h * (self.d2 * a0 + self.d3 * a1)
+        self.d5 * (p1 - p0) / self.h
+            + self.d1 * v0
+            + self.d4 * v1
+            + self.h * (self.d2 * a0 + self.d3 * a1)
     }
 }

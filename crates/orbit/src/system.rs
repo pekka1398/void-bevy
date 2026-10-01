@@ -5,7 +5,10 @@ use glam::DVec3;
 use serde::Deserialize;
 use void_frames::Spin;
 
-use crate::kepler::{EllipticElements, orbital_period_seconds, solve_kepler_elliptic, state_from_elements, true_anomaly};
+use crate::kepler::{
+    EllipticElements, orbital_period_seconds, solve_kepler_elliptic, state_from_elements,
+    true_anomaly,
+};
 
 /// CODATA 2018, m^3 kg^-1 s^-2.
 pub const GRAVITATIONAL_CONSTANT: f64 = 6.6743e-11;
@@ -140,12 +143,24 @@ pub struct BuiltSystem {
 
 fn assert_body_spec(spec: &BodySpec, is_root: bool) {
     let id = &spec.id;
-    assert!(spec.mass_kg > 0.0 && spec.mass_kg.is_finite(), "{id}: mass {}", spec.mass_kg);
-    assert!(spec.radius_meters > 0.0 && spec.radius_meters.is_finite(), "{id}: radius {}", spec.radius_meters);
+    assert!(
+        spec.mass_kg > 0.0 && spec.mass_kg.is_finite(),
+        "{id}: mass {}",
+        spec.mass_kg
+    );
+    assert!(
+        spec.radius_meters > 0.0 && spec.radius_meters.is_finite(),
+        "{id}: radius {}",
+        spec.radius_meters
+    );
     match spec.rotation {
         RotationSpec::Locked(rot) => {
             assert!(!is_root, "{id}: the root body cannot be tidally locked");
-            assert!(rot.period_seconds > 0.0 && rot.period_seconds.is_finite(), "{id}: locked period {}", rot.period_seconds);
+            assert!(
+                rot.period_seconds > 0.0 && rot.period_seconds.is_finite(),
+                "{id}: locked period {}",
+                rot.period_seconds
+            );
             assert!(
                 (0.0..FRAC_PI_2).contains(&rot.obliquity_to_orbit_radians),
                 "{id}: obliquity to orbit {}",
@@ -153,7 +168,11 @@ fn assert_body_spec(spec: &BodySpec, is_root: bool) {
             );
         }
         RotationSpec::Spin(rot) => {
-            assert!(rot.period_seconds > 0.0 && rot.period_seconds.is_finite(), "{id}: rotation period {}", rot.period_seconds);
+            assert!(
+                rot.period_seconds > 0.0 && rot.period_seconds.is_finite(),
+                "{id}: rotation period {}",
+                rot.period_seconds
+            );
             assert!(
                 (0.0..=std::f64::consts::PI).contains(&rot.obliquity_radians),
                 "{id}: obliquity {}",
@@ -173,9 +192,18 @@ fn assert_body_spec(spec: &BodySpec, is_root: bool) {
             field.reference_radius_meters
         );
     }
-    assert!(!(is_root && spec.orbit.is_some()), "{id}: the root body cannot have an orbit");
-    assert!(is_root || spec.orbit.is_some(), "{id}: a non-root body requires an orbit");
-    assert!(spec.orbit.is_some() == spec.orbit_plane.is_some(), "{id}: orbit and orbitPlane go together");
+    assert!(
+        !(is_root && spec.orbit.is_some()),
+        "{id}: the root body cannot have an orbit"
+    );
+    assert!(
+        is_root || spec.orbit.is_some(),
+        "{id}: a non-root body requires an orbit"
+    );
+    assert!(
+        spec.orbit.is_some() == spec.orbit_plane.is_some(),
+        "{id}: orbit and orbitPlane go together"
+    );
     if let Some(orbit) = &spec.orbit {
         orbit.assert_valid(id);
     }
@@ -184,7 +212,10 @@ fn assert_body_spec(spec: &BodySpec, is_root: bool) {
 /// A state given in the parent's equatorial axes, in ecliptic axes.
 fn to_ecliptic((position, velocity): (DVec3, DVec3), parent: &BodySpec) -> (DVec3, DVec3) {
     let RotationSpec::Spin(rot) = parent.rotation else {
-        panic!("{}: a tidally locked body cannot be an equatorial reference plane", parent.id);
+        panic!(
+            "{}: a tidally locked body cannot be an equatorial reference plane",
+            parent.id
+        );
     };
     let [x, y, z] = Spin::from(rot).equatorial_basis();
     let map = |v: DVec3| x * v.x + y * v.y + z * v.z;
@@ -192,13 +223,21 @@ fn to_ecliptic((position, velocity): (DVec3, DVec3), parent: &BodySpec) -> (DVec
 }
 
 /// r, v: the locked body relative to its parent body at t = 0.
-fn locked_rotation(spec: &LockedRotationSpec, orbit: &EllipticElements, r: DVec3, v: DVec3) -> Spin {
+fn locked_rotation(
+    spec: &LockedRotationSpec,
+    orbit: &EllipticElements,
+    r: DVec3,
+    v: DVec3,
+) -> Spin {
     let normal = r.cross(v).normalize();
     let ob = spec.obliquity_to_orbit_radians;
     let mut axis = normal;
     if ob > 0.0 {
         let toward_north = DVec3::Z - normal * DVec3::Z.dot(normal);
-        assert!(toward_north.length() > 1e-12, "locked rotation: tilt direction undefined for an orbit in the ecliptic");
+        assert!(
+            toward_north.length() > 1e-12,
+            "locked rotation: tilt direction undefined for an orbit in the ecliptic"
+        );
         axis = normal * ob.cos() + toward_north.normalize() * ob.sin();
     }
     let obliquity = axis.z.clamp(-1.0, 1.0).acos();
@@ -208,7 +247,10 @@ fn locked_rotation(spec: &LockedRotationSpec, orbit: &EllipticElements, r: DVec3
     let quadrature = axis.cross(node);
     let to_parent = -r;
     let mean = orbit.mean_anomaly_radians;
-    let nu = true_anomaly(solve_kepler_elliptic(mean, orbit.eccentricity), orbit.eccentricity);
+    let nu = true_anomaly(
+        solve_kepler_elliptic(mean, orbit.eccentricity),
+        orbit.eccentricity,
+    );
     let centre = (nu - mean).sin().atan2((nu - mean).cos());
     Spin {
         period_seconds: spec.period_seconds,
@@ -225,7 +267,9 @@ struct Placed {
 }
 
 fn subtree_mass(node: &BodySpec) -> f64 {
-    node.children.iter().fold(node.mass_kg, |sum, child| sum + subtree_mass(child))
+    node.children
+        .iter()
+        .fold(node.mass_kg, |sum, child| sum + subtree_mass(child))
 }
 
 /// Bodies as the orbit lab's `buildSystem`: Jacobi elements placed subtree by subtree, then
@@ -240,7 +284,11 @@ pub fn build_system(spec: &SystemSpec) -> BuiltSystem {
         /// Every body of the subtree, relative to the subtree barycentre.
         fn place(&mut self, node: &BodySpec, parent_index: Option<usize>) -> Vec<Placed> {
             assert_body_spec(node, parent_index.is_none());
-            assert!(self.ids.insert(node.id.clone()), "duplicate body id {}", node.id);
+            assert!(
+                self.ids.insert(node.id.clone()),
+                "duplicate body id {}",
+                node.id
+            );
             let index = self.bodies.len();
             self.bodies.push(CelestialBody {
                 index,
@@ -261,14 +309,20 @@ pub fn build_system(spec: &SystemSpec) -> BuiltSystem {
                     },
                 },
                 j2: node.gravity_field.map_or(0.0, |f| f.j2),
-                j2_reference_radius_meters: node.gravity_field.map_or(0.0, |f| f.reference_radius_meters),
+                j2_reference_radius_meters: node
+                    .gravity_field
+                    .map_or(0.0, |f| f.reference_radius_meters),
                 parent_index,
                 orbit_period_seconds: None,
                 periapsis_fraction: None,
                 sphere_of_influence_meters: None,
             });
 
-            let mut placed = vec![Placed { index, position: DVec3::ZERO, velocity: DVec3::ZERO }];
+            let mut placed = vec![Placed {
+                index,
+                position: DVec3::ZERO,
+                velocity: DVec3::ZERO,
+            }];
             let mut inner_mass = node.mass_kg;
             let mut inner_position = DVec3::ZERO;
             let mut inner_velocity = DVec3::ZERO;
@@ -276,7 +330,10 @@ pub fn build_system(spec: &SystemSpec) -> BuiltSystem {
             for child in &node.children {
                 let child_placed = self.place(child, Some(index));
                 let child_mass = subtree_mass(child);
-                let orbit = child.orbit.as_ref().unwrap_or_else(|| panic!("{}: missing orbit", child.id));
+                let orbit = child
+                    .orbit
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("{}: missing orbit", child.id));
                 let gm = GRAVITATIONAL_CONSTANT * (inner_mass + child_mass);
                 let relative = state_from_elements(orbit, gm);
                 let (rel_position, rel_velocity) = match child.orbit_plane {
@@ -288,9 +345,11 @@ pub fn build_system(spec: &SystemSpec) -> BuiltSystem {
                 let child_velocity = inner_velocity + rel_velocity;
                 let first = &child_placed[0];
                 let body = &mut self.bodies[first.index];
-                body.orbit_period_seconds = Some(orbital_period_seconds(orbit.semi_major_axis_meters, gm));
+                body.orbit_period_seconds =
+                    Some(orbital_period_seconds(orbit.semi_major_axis_meters, gm));
                 body.periapsis_fraction = Some(1.0 - orbit.eccentricity);
-                body.sphere_of_influence_meters = Some(orbit.semi_major_axis_meters * (child_mass / inner_mass).powf(0.4));
+                body.sphere_of_influence_meters =
+                    Some(orbit.semi_major_axis_meters * (child_mass / inner_mass).powf(0.4));
                 if let RotationSpec::Locked(locked) = &child.rotation {
                     // This node sits at the origin of the frame the child is placed in.
                     body.rotation = locked_rotation(
@@ -306,8 +365,10 @@ pub fn build_system(spec: &SystemSpec) -> BuiltSystem {
                     velocity: child_velocity + p.velocity,
                 }));
                 let total = inner_mass + child_mass;
-                inner_position = (inner_position * inner_mass + child_position * child_mass) * (1.0 / total);
-                inner_velocity = (inner_velocity * inner_mass + child_velocity * child_mass) * (1.0 / total);
+                inner_position =
+                    (inner_position * inner_mass + child_position * child_mass) * (1.0 / total);
+                inner_velocity =
+                    (inner_velocity * inner_mass + child_velocity * child_mass) * (1.0 / total);
                 inner_mass = total;
             }
 
@@ -319,7 +380,10 @@ pub fn build_system(spec: &SystemSpec) -> BuiltSystem {
         }
     }
 
-    let mut builder = Builder { bodies: Vec::new(), ids: HashSet::new() };
+    let mut builder = Builder {
+        bodies: Vec::new(),
+        ids: HashSet::new(),
+    };
     let placed = builder.place(&spec.root, None);
     let mut positions = vec![DVec3::NAN; builder.bodies.len()];
     let mut velocities = vec![DVec3::NAN; builder.bodies.len()];
@@ -330,5 +394,10 @@ pub fn build_system(spec: &SystemSpec) -> BuiltSystem {
     for body in &builder.bodies {
         body.rotation.assert_valid();
     }
-    BuiltSystem { name: spec.name.clone(), bodies: builder.bodies, positions, velocities }
+    BuiltSystem {
+        name: spec.name.clone(),
+        bodies: builder.bodies,
+        positions,
+        velocities,
+    }
 }

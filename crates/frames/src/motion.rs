@@ -35,8 +35,18 @@ impl Motion {
     };
 
     /// A motion with every field finite and a unit rotation; anything else panics.
-    pub fn new(translation: DVec3, velocity: DVec3, rotation: DQuat, angular_velocity: DVec3) -> Self {
-        let motion = Self { translation, velocity, rotation, angular_velocity };
+    pub fn new(
+        translation: DVec3,
+        velocity: DVec3,
+        rotation: DQuat,
+        angular_velocity: DVec3,
+    ) -> Self {
+        let motion = Self {
+            translation,
+            velocity,
+            rotation,
+            angular_velocity,
+        };
         motion.assert_valid();
         motion
     }
@@ -48,10 +58,16 @@ impl Motion {
 
     pub fn assert_valid(&self) {
         assert!(
-            self.translation.is_finite() && self.velocity.is_finite() && self.angular_velocity.is_finite(),
+            self.translation.is_finite()
+                && self.velocity.is_finite()
+                && self.angular_velocity.is_finite(),
             "motion not finite: {self:?}"
         );
-        assert!(self.rotation.is_finite(), "rotation not finite: {:?}", self.rotation);
+        assert!(
+            self.rotation.is_finite(),
+            "rotation not finite: {:?}",
+            self.rotation
+        );
         assert!(
             (self.rotation.length() - 1.0).abs() < UNIT_TOLERANCE,
             "rotation not unit: |q| = {}",
@@ -72,7 +88,9 @@ impl Motion {
         let turned = self.rotation * s.position;
         State {
             position: turned + self.translation,
-            velocity: self.rotation * s.velocity + self.angular_velocity.cross(turned) + self.velocity,
+            velocity: self.rotation * s.velocity
+                + self.angular_velocity.cross(turned)
+                + self.velocity,
         }
     }
 

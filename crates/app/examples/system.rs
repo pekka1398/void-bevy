@@ -23,11 +23,17 @@ const WARPS: [f64; 8] = [1.0, 10.0, 100.0, 1e3, 1e4, 1e5, 1e6, 1e7];
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window { title: "void · system view".into(), ..default() }),
+            primary_window: Some(Window {
+                title: "void · system view".into(),
+                ..default()
+            }),
             ..default()
         }))
         .insert_resource(ClearColor(Color::BLACK))
-        .insert_resource(GlobalAmbientLight { brightness: 30.0, ..default() })
+        .insert_resource(GlobalAmbientLight {
+            brightness: 30.0,
+            ..default()
+        })
         .add_systems(Startup, setup)
         .add_systems(Update, (controls, advance, place, labels).chain())
         .run();
@@ -76,7 +82,11 @@ struct View {
 impl View {
     fn frame(&self, sim: &Sim) -> FrameId {
         let target = &sim.targets[self.target];
-        if self.corotate { target.surface } else { target.inertial }
+        if self.corotate {
+            target.surface
+        } else {
+            target.inertial
+        }
     }
 
     /// Camera position in the view frame.
@@ -102,9 +112,15 @@ fn spawn_label(commands: &mut Commands, anchor: Entity, name: &str) {
     commands.spawn((
         Label(anchor),
         Text::new(format!("+ {name}")),
-        TextFont { font_size: FontSize::Px(12.0), ..default() },
+        TextFont {
+            font_size: FontSize::Px(12.0),
+            ..default()
+        },
         TextColor(Color::srgb(0.7, 0.75, 0.8)),
-        Node { position_type: PositionType::Absolute, ..default() },
+        Node {
+            position_type: PositionType::Absolute,
+            ..default()
+        },
         Visibility::Hidden,
     ));
 }
@@ -116,20 +132,40 @@ struct Sunlight;
 type SunlightOnly = (With<Sunlight>, Without<Camera>, Without<Anchor>);
 
 fn color(hex: &str) -> Color {
-    Srgba::hex(hex).unwrap_or_else(|e| panic!("color {hex}: {e:?}")).into()
+    Srgba::hex(hex)
+        .unwrap_or_else(|e| panic!("color {hex}: {e:?}"))
+        .into()
 }
 
-fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     let system = build_system(&SystemSpec::from_json(SYSTEM));
     let step_seconds = suggested_step_seconds(&system.bodies, 256.0);
-    let mut ephemeris = Ephemeris::new(&system, EphemerisOptions { step_seconds, chunk_steps: 2048 });
+    let mut ephemeris = Ephemeris::new(
+        &system,
+        EphemerisOptions {
+            step_seconds,
+            chunk_steps: 2048,
+        },
+    );
     ephemeris.extend_to(step_seconds);
     let mut tree = FrameTree::new();
 
     let sphere = meshes.add(Sphere::new(1.0).mesh().uv(96, 48));
     let marker = meshes.add(Sphere::new(1.0).mesh().uv(16, 8));
-    let meridian = materials.add(StandardMaterial { base_color: Color::srgb(1.0, 0.2, 0.2), unlit: true, ..default() });
-    let pole = materials.add(StandardMaterial { base_color: Color::srgb(0.3, 0.6, 1.0), unlit: true, ..default() });
+    let meridian = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.2, 0.2),
+        unlit: true,
+        ..default()
+    });
+    let pole = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.3, 0.6, 1.0),
+        unlit: true,
+        ..default()
+    });
 
     let mut targets = Vec::new();
     let mut sun = None;
@@ -152,31 +188,60 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
                 Mesh3d(sphere.clone()),
                 MeshMaterial3d(material),
                 Transform::from_scale(Vec3::splat(radius)),
-                Anchor { frame: surface, position: DVec3::ZERO, orientation: DQuat::IDENTITY, radius: body.radius_meters },
+                Anchor {
+                    frame: surface,
+                    position: DVec3::ZERO,
+                    orientation: DQuat::IDENTITY,
+                    radius: body.radius_meters,
+                },
             ))
             .with_children(|body| {
                 // In the unit sphere's space: prime meridian on the equator (+x), north pole (+z).
-                body.spawn((Mesh3d(marker.clone()), MeshMaterial3d(meridian.clone()),
-                    Transform::from_xyz(1.0, 0.0, 0.0).with_scale(Vec3::splat(0.03))));
-                body.spawn((Mesh3d(marker.clone()), MeshMaterial3d(pole.clone()),
-                    Transform::from_xyz(0.0, 0.0, 1.0).with_scale(Vec3::splat(0.03))));
+                body.spawn((
+                    Mesh3d(marker.clone()),
+                    MeshMaterial3d(meridian.clone()),
+                    Transform::from_xyz(1.0, 0.0, 0.0).with_scale(Vec3::splat(0.03)),
+                ));
+                body.spawn((
+                    Mesh3d(marker.clone()),
+                    MeshMaterial3d(pole.clone()),
+                    Transform::from_xyz(0.0, 0.0, 1.0).with_scale(Vec3::splat(0.03)),
+                ));
             })
             .id();
         spawn_label(&mut commands, anchor, &body.name);
-        targets.push(Target { name: body.name.clone(), inertial, surface, radius: body.radius_meters });
+        targets.push(Target {
+            name: body.name.clone(),
+            inertial,
+            surface,
+            radius: body.radius_meters,
+        });
     }
 
     // The probe: fixed on the home planet's surface, z up, x east.
-    let home = system.bodies.iter().find(|b| b.id == HOME).unwrap_or_else(|| panic!("no body {HOME}"));
+    let home = system
+        .bodies
+        .iter()
+        .find(|b| b.id == HOME)
+        .unwrap_or_else(|| panic!("no body {HOME}"));
     let home_surface = targets[home.index].surface;
     let (lat, lon) = (PROBE_LATITUDE.to_radians(), PROBE_LONGITUDE.to_radians());
     let up = DVec3::new(lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin());
     let east = DVec3::Z.cross(up).normalize();
     let north = up.cross(east);
     let turn = DQuat::from_mat3(&glam::DMat3::from_cols(east, north, up));
-    let probe = tree.add_fixed(home_surface, Motion::fixed(up * (home.radius_meters + PROBE_SIZE / 2.0), turn));
-    let probe_material = materials.add(StandardMaterial { base_color: Color::srgb(0.9, 0.9, 0.95), ..default() });
-    let accent = materials.add(StandardMaterial { base_color: Color::srgb(1.0, 0.55, 0.1), ..default() });
+    let probe = tree.add_fixed(
+        home_surface,
+        Motion::fixed(up * (home.radius_meters + PROBE_SIZE / 2.0), turn),
+    );
+    let probe_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.9, 0.9, 0.95),
+        ..default()
+    });
+    let accent = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.55, 0.1),
+        ..default()
+    });
     let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let anchor = commands
         .spawn((
@@ -184,31 +249,60 @@ fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials
             Mesh3d(cube.clone()),
             MeshMaterial3d(probe_material),
             Transform::from_scale(Vec3::splat(PROBE_SIZE as f32)),
-            Anchor { frame: probe, position: DVec3::ZERO, orientation: DQuat::IDENTITY, radius: PROBE_SIZE * 0.87 },
+            Anchor {
+                frame: probe,
+                position: DVec3::ZERO,
+                orientation: DQuat::IDENTITY,
+                radius: PROBE_SIZE * 0.87,
+            },
         ))
         .with_children(|p| {
             // A 1 m cube 1 m beyond the east face: any wobble shows against the big one.
-            p.spawn((Mesh3d(cube), MeshMaterial3d(accent), Transform::from_xyz(0.65, 0.0, 0.0).with_scale(Vec3::splat(0.1))));
+            p.spawn((
+                Mesh3d(cube),
+                MeshMaterial3d(accent),
+                Transform::from_xyz(0.65, 0.0, 0.0).with_scale(Vec3::splat(0.1)),
+            ));
         })
         .id();
     spawn_label(&mut commands, anchor, "probe");
-    targets.push(Target { name: "probe".into(), inertial: probe, surface: probe, radius: PROBE_SIZE * 0.87 });
+    targets.push(Target {
+        name: "probe".into(),
+        inertial: probe,
+        surface: probe,
+        radius: PROBE_SIZE * 0.87,
+    });
 
     commands.spawn((
         Camera3d::default(),
-        Projection::Perspective(PerspectiveProjection { far: 1e15, ..default() }),
+        Projection::Perspective(PerspectiveProjection {
+            far: 1e15,
+            ..default()
+        }),
         Transform::default(),
     ));
     commands.spawn((
         Sunlight,
-        DirectionalLight { illuminance: light_consts::lux::AMBIENT_DAYLIGHT, shadow_maps_enabled: false, ..default() },
+        DirectionalLight {
+            illuminance: light_consts::lux::AMBIENT_DAYLIGHT,
+            shadow_maps_enabled: false,
+            ..default()
+        },
         Transform::default(),
     ));
     commands.spawn((
         Hud,
         Text::new(""),
-        TextFont { font_size: FontSize::Px(14.0), ..default() },
-        Node { position_type: PositionType::Absolute, top: px(10), left: px(10), ..default() },
+        TextFont {
+            font_size: FontSize::Px(14.0),
+            ..default()
+        },
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(10),
+            left: px(10),
+            ..default()
+        },
     ));
 
     let start = StartView::from_args();
@@ -255,7 +349,9 @@ impl StartView {
         let mut args = std::env::args().skip(1);
         let number = |flag: &str, value: Option<String>| -> f64 {
             let value = value.unwrap_or_else(|| panic!("{flag} needs a value"));
-            value.parse().unwrap_or_else(|e| panic!("{flag} {value}: {e}"))
+            value
+                .parse()
+                .unwrap_or_else(|e| panic!("{flag} {value}: {e}"))
         };
         while let Some(flag) = args.next() {
             match flag.as_str() {
@@ -265,7 +361,11 @@ impl StartView {
                 "--pitch" => start.pitch = Some(number("--pitch", args.next())),
                 "--warp" => {
                     let index = number("--warp", args.next()) as usize;
-                    assert!(index < WARPS.len(), "--warp {index}: at most {}", WARPS.len() - 1);
+                    assert!(
+                        index < WARPS.len(),
+                        "--warp {index}: at most {}",
+                        WARPS.len() - 1
+                    );
                     start.warp = index;
                 }
                 "--inertial" => start.inertial = true,
@@ -286,7 +386,11 @@ fn controls(
 ) {
     if keys.just_pressed(KeyCode::Tab) {
         let count = sim.targets.len();
-        let step = if keys.pressed(KeyCode::ShiftLeft) { count - 1 } else { 1 };
+        let step = if keys.pressed(KeyCode::ShiftLeft) {
+            count - 1
+        } else {
+            1
+        };
         view.target = (view.target + step) % count;
         let target = &sim.targets[view.target];
         view.distance = target.radius * 4.0;
@@ -305,7 +409,8 @@ fn controls(
     }
     if buttons.pressed(MouseButton::Left) {
         view.yaw -= f64::from(motion.delta.x) * 0.005;
-        view.pitch = (view.pitch + f64::from(motion.delta.y) * 0.005).clamp(-FRAC_PI_2 + 0.01, FRAC_PI_2 - 0.01);
+        view.pitch = (view.pitch + f64::from(motion.delta.y) * 0.005)
+            .clamp(-FRAC_PI_2 + 0.01, FRAC_PI_2 - 0.01);
     }
     let lines = match scroll.unit {
         MouseScrollUnit::Line => f64::from(scroll.delta.y),
@@ -355,7 +460,11 @@ fn place(
     }
 
     let (camera_transform, projection) = &mut *camera;
-    let up = if view.pitch.abs() > 1.5 { DVec3::X } else { DVec3::Z };
+    let up = if view.pitch.abs() > 1.5 {
+        DVec3::X
+    } else {
+        DVec3::Z
+    };
     **camera_transform = Transform::default().looking_to((-eye).as_vec3(), up.as_vec3());
     if let Projection::Perspective(perspective) = &mut **projection {
         perspective.near = (nearest_surface * 0.5).clamp(0.05, 1e7) as f32;
@@ -379,7 +488,11 @@ fn place(
         WARPS[sim.warp],
         if sim.paused { " (paused)" } else { "" },
         target.name,
-        if view.corotate { "turning with it" } else { "inertial" },
+        if view.corotate {
+            "turning with it"
+        } else {
+            "inertial"
+        },
         distance(view.distance),
         distance(view.distance - target.radius),
         distance((nearest_surface * 0.5).clamp(0.05, 1e7)),
@@ -396,7 +509,6 @@ fn distance(m: f64) -> String {
         format!("{m:.2} m")
     }
 }
-
 
 /// Moves each label to its anchor's place on screen; the "+" marks the anchor itself.
 fn labels(

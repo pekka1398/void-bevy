@@ -15,6 +15,7 @@ serde = { version = "1", features = ["derive"] }
 # float_roundtrip: the default parser can be an ulp off, which the golden checks see.
 serde_json = { version = "1", features = ["float_roundtrip"] }
 void-frames = { path = "crates/frames" }
+void-orbit = { path = "crates/orbit" }
 
 # Bevy is slow unoptimised; our own crates stay quick to rebuild.
 [profile.dev]

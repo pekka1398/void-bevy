@@ -52,24 +52,42 @@ impl FrameTree {
     pub const ROOT: FrameId = FrameId(0);
 
     pub fn new() -> Self {
-        Self { nodes: vec![Node { parent: None, depth: 0, kind: Kind::Root }] }
+        Self {
+            nodes: vec![Node {
+                parent: None,
+                depth: 0,
+                kind: Kind::Root,
+            }],
+        }
     }
 
     fn add(&mut self, parent: FrameId, kind: Kind) -> FrameId {
         let depth = self.node(parent).depth + 1;
         let id = FrameId(u32::try_from(self.nodes.len()).expect("frame count exceeds u32"));
-        self.nodes.push(Node { parent: Some(parent), depth, kind });
+        self.nodes.push(Node {
+            parent: Some(parent),
+            depth,
+            kind,
+        });
         id
     }
 
     fn node(&self, id: FrameId) -> &Node {
-        self.nodes.get(id.0 as usize).unwrap_or_else(|| panic!("{id:?} is not in this tree"))
+        self.nodes
+            .get(id.0 as usize)
+            .unwrap_or_else(|| panic!("{id:?} is not in this tree"))
     }
 
     /// A body's inertial and surface frames, in that order.
     pub fn add_body(&mut self, body: BodyId, spin: Spin) -> (FrameId, FrameId) {
         spin.assert_valid();
-        let inertial = self.add(Self::ROOT, Kind::BodyInertial { body, axes: spin.equatorial_axes() });
+        let inertial = self.add(
+            Self::ROOT,
+            Kind::BodyInertial {
+                body,
+                axes: spin.equatorial_axes(),
+            },
+        );
         let surface = self.add(inertial, Kind::BodySurface { spin });
         (inertial, surface)
     }
@@ -87,7 +105,10 @@ impl FrameTree {
     pub fn set_free(&mut self, id: FrameId, t: f64, motion: Motion) {
         assert!(t.is_finite(), "free frame time {t}");
         motion.assert_valid();
-        let node = self.nodes.get_mut(id.0 as usize).unwrap_or_else(|| panic!("{id:?} is not in this tree"));
+        let node = self
+            .nodes
+            .get_mut(id.0 as usize)
+            .unwrap_or_else(|| panic!("{id:?} is not in this tree"));
         match &mut node.kind {
             Kind::Free(slot) => *slot = Some((t, motion)),
             other => panic!("{id:?} is not a free frame: {other:?}"),
@@ -101,7 +122,11 @@ impl FrameTree {
     /// The frames at time t.
     pub fn at<'a, B: BodyStates>(&'a self, t: f64, bodies: &'a B) -> Snapshot<'a, B> {
         assert!(t.is_finite(), "snapshot time {t}");
-        Snapshot { tree: self, bodies, t }
+        Snapshot {
+            tree: self,
+            bodies,
+            t,
+        }
     }
 }
 
@@ -134,7 +159,11 @@ impl<B: BodyStates> Snapshot<'_, B> {
             Kind::Fixed(motion) => *motion,
             Kind::Free(None) => panic!("free {id:?} used before it was written"),
             Kind::Free(Some((written, motion))) => {
-                assert!(*written == self.t, "free {id:?} written at t = {written}, used at t = {}", self.t);
+                assert!(
+                    *written == self.t,
+                    "free {id:?} written at t = {written}, used at t = {}",
+                    self.t
+                );
                 *motion
             }
         }
@@ -145,7 +174,11 @@ impl<B: BodyStates> Snapshot<'_, B> {
         let mut motion = Motion::IDENTITY;
         while id != ancestor {
             motion = motion.then(&self.motion_to_parent(id));
-            id = self.tree.node(id).parent.unwrap_or_else(|| panic!("{ancestor:?} is not an ancestor"));
+            id = self
+                .tree
+                .node(id)
+                .parent
+                .unwrap_or_else(|| panic!("{ancestor:?} is not an ancestor"));
         }
         motion
     }
@@ -160,8 +193,14 @@ impl<B: BodyStates> Snapshot<'_, B> {
             b = tree.node(b).parent.expect("depth above zero has a parent");
         }
         while a != b {
-            a = tree.node(a).parent.expect("frames in one tree meet at the root");
-            b = tree.node(b).parent.expect("frames in one tree meet at the root");
+            a = tree
+                .node(a)
+                .parent
+                .expect("frames in one tree meet at the root");
+            b = tree
+                .node(b)
+                .parent
+                .expect("frames in one tree meet at the root");
         }
         a
     }
@@ -170,13 +209,19 @@ impl<B: BodyStates> Snapshot<'_, B> {
     /// only, so the error is set by the distances below it, never by the root's.
     pub fn transform(&self, from: FrameId, to: FrameId) -> Transform {
         let meet = self.common_ancestor(from, to);
-        Transform { up: self.to_ancestor(from, meet), down: self.to_ancestor(to, meet) }
+        Transform {
+            up: self.to_ancestor(from, meet),
+            down: self.to_ancestor(to, meet),
+        }
     }
 
     /// As `transform`, but always through the root. For checks that measure what the
     /// common ancestor saves.
     pub fn transform_via_root(&self, from: FrameId, to: FrameId) -> Transform {
-        Transform { up: self.to_ancestor(from, FrameTree::ROOT), down: self.to_ancestor(to, FrameTree::ROOT) }
+        Transform {
+            up: self.to_ancestor(from, FrameTree::ROOT),
+            down: self.to_ancestor(to, FrameTree::ROOT),
+        }
     }
 }
 

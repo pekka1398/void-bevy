@@ -4,7 +4,7 @@ VOID 的 Bevy 移植 lab。Rust cargo workspace，每個功能一個 crate：`ca
 
 ```sh
 cd lab/void-bevy
-cargo run -p void-app      # 工具鏈檢查：一個打光的方塊
+cargo run -p void-app --example system   # Sol 系統與地表探測器
 cargo test                 # 全部 crate 的檢查
 ```
 
@@ -12,15 +12,15 @@ Bevy 固定在 0.19.1（需要 Rust 1.95 以上）。API 以 `vendor/bevy` 的�
 
 ## crate
 
-- `app`：目前只是開窗與 GPU 檢查。
+- `app`（`void-app`）：Bevy 遊戲本體，會隨各 crate 的移植逐步長大；`cargo run -p void-app` 目前只是開窗與 GPU 檢查。各 lab 的視覺驗收是它的 example（`crates/app/examples/`），用 `cargo run -p void-app --example NAME` 執行。
 - `frames`（`void-frames`）：樹狀座標系，不依賴 Bevy。設計與檢查結果見 [docs/frames.md](docs/frames.md)；對照資料由 `golden/frames.ts` 從 orbit lab 產生。
-- `orbit`（`void-orbit`）：orbit lab 的 Kepler、`buildSystem` 和 N 體星曆（Yoshida 8 階、Kahan、quintic Hermite），`Ephemeris` 實作 `frames` 的 `BodyStates`。見 [docs/orbit.md](docs/orbit.md)。
+- `orbit`（`void-orbit`）：整個 orbit lab 的力學：Kepler、`buildSystem`、N 體星曆（Yoshida 8 階、Kahan、quintic Hermite，實作 `frames` 的 `BodyStates`）、船的傳播器（Dopri5、J2、推力、撞擊）、拱點、dominance、飛行計畫。見 [docs/orbit.md](docs/orbit.md)。
 
-- `system-view`（`void-system-view`）：用 Rust 星曆畫 Sol 系統，所有物體經 `frames` 轉成相對相機的 f32。驗收重點是 Aurelia 地表上 10 m 的探測器（probe）：Aurelia 離根節點 1 AU、以 30 km/s 運動，從幾公尺外看探測器仍要完全靜止，旁邊 1 m 的橘色方塊也不能晃動。
+- example `system`：用 Rust 星曆畫 Sol 系統，所有物體經 `frames` 轉成相對相機的 f32。驗收重點是 Aurelia 地表上 10 m 的探測器（probe）：Aurelia 離根節點 1 AU、以 30 km/s 運動，從幾公尺外看探測器仍要完全靜止，旁邊 1 m 的橘色方塊也不能晃動。
 
   ```sh
-  cargo run -p void-system-view            # 從探測器旁邊開始
-  cargo run -p void-system-view -- --focus aurelia --distance 2.2e7 --inertial
+  cargo run -p void-app --example system            # 從探測器旁邊開始
+  cargo run -p void-app --example system -- --focus aurelia --distance 2.2e7 --inertial
   ```
 
   - 操作：Tab / Shift+Tab 切換焦點，左鍵拖曳環繞，滾輪縮放（依高度縮放），C 切換「隨目標轉動 / 慣性」，`,` `.` 調整時間加速（1–1e7 倍），Space 暫停。

@@ -7,3 +7,6 @@ publish = false
 
 [dependencies]
 bevy.workspace = true
+glam.workspace = true
+void-frames.workspace = true
+void-orbit.workspace = true
