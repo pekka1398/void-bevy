@@ -1,0 +1,16 @@
+[package]
+name = "void-scenery"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+glam.workspace = true
+libm.workspace = true
+void-math.workspace = true
+void-terrain.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true

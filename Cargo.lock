@@ -5494,6 +5494,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-scenery"
+version = "0.0.0"
+dependencies = [
+ "glam 0.32.1",
+ "libm",
+ "serde",
+ "serde_json",
+ "void-math",
+ "void-terrain",
+]
+
+[[package]]
 name = "void-terrain"
 version = "0.0.0"
 dependencies = [
