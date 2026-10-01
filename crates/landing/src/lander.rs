@@ -53,6 +53,8 @@ pub struct LanderControl {
     pub rotation: Option<DQuat>,
     /// Angular steering about the craft's local pitch, roll and yaw axes.
     pub turn: Option<DVec3>,
+    /// Planned orbital burn direction (a Frenet law); only valid for a freely flying rocket.
+    pub orbital_attitude: Option<AttitudeLaw>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
