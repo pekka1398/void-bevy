@@ -28,6 +28,6 @@ pub use propagator::{
 };
 pub use system::{
     BodySpec, BuiltSystem, CelestialBody, GRAVITATIONAL_CONSTANT, GravityField, LockedRotationSpec,
-    OrbitPlane, RotationSpec, SpinSpec, SystemSpec, build_system,
+    OrbitPlane, RotationSpec, SpinSpec, SystemSpec, body_orientation, build_system,
 };
 pub use trajectory::Trajectory;

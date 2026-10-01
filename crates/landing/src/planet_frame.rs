@@ -1,0 +1,151 @@
+//! The planet's rotating, body-fixed frame as a frame to do physics in, as
+//! `lab/landing/src/physics/PlanetFrame.ts`.
+
+use glam::DVec3;
+use void_frames::{BodyId, BodyStates};
+use void_orbit::{CelestialBody, Ephemeris, body_orientation};
+
+/// A position and velocity in one frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameState {
+    pub position: DVec3,
+    pub velocity: DVec3,
+}
+
+/// A frame to do contact physics in: `ContactWorld` kicks every body by this acceleration (gravity
+/// and the frame's own terms); Rapier's gravity is off. `PlanetFrame` (body-fixed, rotating) is
+/// one; a free-falling frame is another.
+pub trait ContactFrame {
+    /// Acceleration of a free particle at frame position r and velocity v at time t, contacts
+    /// excluded. The ephemeris covers t.
+    fn acceleration(&self, ephemeris: &Ephemeris, t: f64, r: DVec3, v: DVec3) -> DVec3;
+    /// The frame's own angular velocity in its axes, rad/s (zero for a frame that does not turn).
+    fn spin(&self) -> DVec3;
+}
+
+/// The planet's rotating, body-fixed frame (z the spin axis, x the prime meridian, origin at the
+/// planet's centre). The ground is at rest here; a moving object feels, besides gravity, the
+/// fictitious accelerations of the rotation (constant spin, so no Euler term):
+/// centrifugal −ω × (ω × r) and Coriolis −2 ω × v; and, because the origin falls freely with the
+/// planet, only the tidal part of other bodies' gravity.
+#[derive(Clone, Debug)]
+pub struct PlanetFrame {
+    pub body: CelestialBody,
+    /// Spin rate about body-fixed +z, rad/s.
+    pub omega: f64,
+}
+
+fn dot(a: DVec3, b: DVec3) -> f64 {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+/// Body axes to ecliptic: a.x X + a.y Y + a.z Z with the axes as columns, in the lab's order.
+fn to_ecliptic(axes: &[DVec3; 3], a: DVec3) -> DVec3 {
+    DVec3::new(
+        a.x * axes[0].x + a.y * axes[1].x + a.z * axes[2].x,
+        a.x * axes[0].y + a.y * axes[1].y + a.z * axes[2].y,
+        a.x * axes[0].z + a.y * axes[1].z + a.z * axes[2].z,
+    )
+}
+
+impl PlanetFrame {
+    pub fn new(ephemeris: &Ephemeris, body_index: usize) -> Self {
+        let body = ephemeris
+            .bodies()
+            .get(body_index)
+            .unwrap_or_else(|| panic!("planet frame: body {body_index}"))
+            .clone();
+        let omega = 2.0 * std::f64::consts::PI / body.rotation.period_seconds;
+        Self { body, omega }
+    }
+
+    /// Barycentric inertial state to body-fixed: r = Rᵀ (p − c), v = Rᵀ (u − c′) − ω × r.
+    pub fn to_body_fixed(&self, ephemeris: &Ephemeris, t: f64, inertial: FrameState) -> FrameState {
+        let axes = body_orientation(&self.body.rotation, t);
+        let (cp, cv) = ephemeris.body_state(BodyId(self.body.index), t);
+        let (dp, du) = (inertial.position - cp, inertial.velocity - cv);
+        let r = DVec3::new(dot(dp, axes[0]), dot(dp, axes[1]), dot(dp, axes[2]));
+        let u = DVec3::new(dot(du, axes[0]), dot(du, axes[1]), dot(du, axes[2]));
+        let w = self.omega;
+        FrameState {
+            position: r,
+            velocity: DVec3::new(u.x + w * r.y, u.y - w * r.x, u.z),
+        }
+    }
+
+    /// Body-fixed state to barycentric inertial: p = c + R r, u = c′ + R (v + ω × r).
+    pub fn to_inertial(&self, ephemeris: &Ephemeris, t: f64, local: FrameState) -> FrameState {
+        let axes = body_orientation(&self.body.rotation, t);
+        let (cp, cv) = ephemeris.body_state(BodyId(self.body.index), t);
+        let (r, w) = (local.position, self.omega);
+        let v = DVec3::new(
+            local.velocity.x - w * r.y,
+            local.velocity.y + w * r.x,
+            local.velocity.z,
+        );
+        let (p, q) = (to_ecliptic(&axes, r), to_ecliptic(&axes, v));
+        FrameState {
+            position: cp + p,
+            velocity: cv + q,
+        }
+    }
+}
+
+impl ContactFrame for PlanetFrame {
+    fn acceleration(&self, ephemeris: &Ephemeris, t: f64, r: DVec3, v: DVec3) -> DVec3 {
+        let b = &self.body;
+        let r2 = r.x * r.x + r.y * r.y + r.z * r.z;
+        let rl = r2.sqrt();
+        // Own gravity: point mass plus J2 about +z (the vessel propagator's law).
+        let s = -b.gm / (r2 * rl);
+        let (mut ax, mut ay, mut az) = (r.x * s, r.y * s, r.z * s);
+        if b.j2 != 0.0 {
+            let c = 1.5 * b.j2 * b.gm * b.j2_reference_radius_meters.powi(2);
+            let f = c / (r2 * r2 * rl);
+            let radial = f * ((5.0 * r.z * r.z) / r2 - 1.0);
+            ax += radial * r.x;
+            ay += radial * r.y;
+            az += radial * r.z - 2.0 * f * r.z;
+        }
+        // Other bodies: their pull here minus their pull on the planet's centre.
+        let bodies = ephemeris.bodies();
+        if bodies.len() > 1 {
+            let axes = body_orientation(&b.rotation, t);
+            let mut positions = vec![DVec3::ZERO; bodies.len()];
+            ephemeris.positions_at(t, &mut positions);
+            let c = positions[b.index];
+            // The particle in inertial axes, relative to the planet's centre.
+            let p = to_ecliptic(&axes, r);
+            let (mut tx, mut ty, mut tz) = (0.0, 0.0, 0.0);
+            for (k, o) in bodies.iter().enumerate() {
+                if k == b.index {
+                    continue;
+                }
+                let (ox, oy, oz) = (
+                    positions[k].x - c.x,
+                    positions[k].y - c.y,
+                    positions[k].z - c.z,
+                );
+                let (dx, dy, dz) = (ox - p.x, oy - p.y, oz - p.z);
+                let d2 = dx * dx + dy * dy + dz * dz;
+                let o2 = ox * ox + oy * oy + oz * oz;
+                let (sd, so) = (o.gm / (d2 * d2.sqrt()), o.gm / (o2 * o2.sqrt()));
+                tx += dx * sd - ox * so;
+                ty += dy * sd - oy * so;
+                tz += dz * sd - oz * so;
+            }
+            ax += tx * axes[0].x + ty * axes[0].y + tz * axes[0].z;
+            ay += tx * axes[1].x + ty * axes[1].y + tz * axes[1].z;
+            az += tx * axes[2].x + ty * axes[2].y + tz * axes[2].z;
+        }
+        // Centrifugal ω² (x, y, 0) and Coriolis −2 ω × v with ω = (0, 0, ω).
+        let w = self.omega;
+        ax += w * w * r.x + 2.0 * w * v.y;
+        ay += w * w * r.y - 2.0 * w * v.x;
+        DVec3::new(ax, ay, az)
+    }
+
+    fn spin(&self) -> DVec3 {
+        DVec3::new(0.0, 0.0, self.omega)
+    }
+}

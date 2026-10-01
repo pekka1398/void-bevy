@@ -1,7 +1,6 @@
 //! The cube sphere and its tiles, as `lab/lod/src/lod/CubeSphere.ts`, `TileKey.ts` and
 //! `TileSearch.ts`. Directions are body-fixed; distances are physical meters.
 
-use std::collections::BTreeMap;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use glam::DVec3;
@@ -236,7 +235,8 @@ pub fn tiles_around(
     let smallest = FRAC_PI_2 * radius_meters / f64::from(1_u32 << level) / 1.5;
     let extent = reach_meters + smallest;
     let steps = ((2.0 * extent) / (smallest / 2.0)).ceil().max(1.0) as u32;
-    let mut found = BTreeMap::new();
+    // In scan order, as the lab's Map: callers that add colliders per tile keep its order.
+    let mut found = crate::ordered::OrderedMap::new();
     for a in 0..=steps {
         for b in 0..=steps {
             let s = (-extent + 2.0 * extent * f64::from(a) / f64::from(steps)) / radius_meters;
@@ -245,5 +245,5 @@ pub fn tiles_around(
             found.insert(key.code(), key);
         }
     }
-    found.into_values().collect()
+    found.values().copied().collect()
 }

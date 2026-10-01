@@ -92,15 +92,14 @@ fn geometry_matches_the_lod_lab() {
         );
     }
     for c in g["tilesAround"].as_array().unwrap() {
-        let mut ours = tiles_around(
+        let ours = tiles_around(
             v3(&c["point"]),
             f(&c["reach"]),
             u(&c["level"]) as u32,
             6_371_000.0,
         );
-        let mut lab: Vec<TileKey> = c["keys"].as_array().unwrap().iter().map(key).collect();
-        ours.sort();
-        lab.sort();
+        let lab: Vec<TileKey> = c["keys"].as_array().unwrap().iter().map(key).collect();
+        // In the lab's scan order: colliders are added per tile in this order.
         assert_eq!(ours, lab, "tiles around {}", c["point"]);
     }
     println!(
