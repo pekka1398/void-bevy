@@ -268,3 +268,41 @@ pub fn level_for_tile_size(radius_meters: f64, tile_size_meters: f64) -> u32 {
     let face_span = PI / 2.0 * radius_meters;
     (face_span / tile_size_meters).log2().floor().max(0.0) as u32
 }
+
+/// The LOD quadtree's options for a landing planet, as `TerrainView.ts`'s `landingLodOptions`. Its
+/// finest level is the collision level. Within reach of any observer, every tile and its neighbours
+/// are at that level, so no drawn edge there is stitched to a coarser tile and the drawn triangles
+/// are the ones Rapier collides with.
+pub fn landing_lod_options(
+    terrain: &Terrain,
+    contact: &crate::contact_world::ContactWorldOptions,
+) -> void_lod::PlanetLodOptions {
+    let max_level = contact.tile_level;
+    // Widest tile at the finest level; the tangent warp keeps tiles within 1.5× of the face-centre width.
+    let widest = PI / 2.0 * terrain.radius_meters / f64::from(1_u32 << max_level) * 1.5;
+    // A finest-level tile's parent splits within this distance: the collision keep radius, one
+    // neighbouring tile beyond it, its parent's half width, and the reach above the terrain band.
+    let finest_split = contact.tile_keep_meters + 2.0 * widest + contact.tile_reach_meters;
+    let split_distance_ratios = (0..max_level)
+        .map(|level| {
+            if level < 3 {
+                f64::INFINITY
+            } else {
+                finest_split * f64::from(1_u32 << (max_level - 1 - level)) / terrain.radius_meters
+            }
+        })
+        .collect();
+    void_lod::PlanetLodOptions {
+        radius_meters: terrain.radius_meters,
+        min_surface_height_meters: 0.0,
+        max_surface_height_meters: terrain.max_height_meters,
+        occluder_radius_meters: terrain.radius_meters,
+        lod_surface_band_meters: terrain.max_height_meters,
+        resolution: contact.tile_resolution,
+        max_level,
+        split_distance_ratios,
+        // The LOD lab's defaults.
+        retain_frames: 90,
+        max_cached_tiles: 2_500,
+    }
+}

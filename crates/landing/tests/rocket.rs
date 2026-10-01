@@ -175,7 +175,7 @@ fn staging_keeps_both_parts() {
         w.world.impulse_joints.len()
     );
     assert!(
-        joined && w.world.impulse_joints.len() == 0 && same && jump < 1e-8 && momentum_jump < 0.1
+        joined && w.world.impulse_joints.is_empty() && same && jump < 1e-8 && momentum_jump < 0.1
     );
 }
 
