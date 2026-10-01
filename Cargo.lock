@@ -5199,6 +5199,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-frames"
+version = "0.0.0"
+dependencies = [
+ "glam",
+ "serde_json",
+]
+
+[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
