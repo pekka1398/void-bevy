@@ -1,7 +1,9 @@
-//! The LOD quadtree on a smooth sphere (no terrain yet), with the LOD lab's landing preset and its
-//! camera controls. Every tile is its own anchor: its f64 body-fixed origin minus the f64 camera
-//! position becomes the f32 translation, so vertices stay small however far the tile is from the
-//! planet centre. Tiles are coloured by level and built in the background.
+//! The LOD quadtree with the LOD lab's landing preset and camera controls, on scenery's layered
+//! terrain (`--terrain layered`, the default) or a smooth sphere coloured by tile level
+//! (`--terrain sphere`). Every tile is its own anchor: its f64 body-fixed origin minus the f64
+//! camera position becomes the f32 translation, so vertices stay small however far the tile is
+//! from the planet centre. Tiles are built in the background. No sea or atmosphere is drawn yet:
+//! the layered planet's sea floor shows as dark basins.
 
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_3};
@@ -22,6 +24,7 @@ use void_lod::{
     FACE_EDGES, LodCamera, LodView, PlanetLod, PlanetLodOptions, SurfaceSample, TileMeshData,
     TileMeshOptions, build_tile_indices, build_tile_mesh, selected_neighbor, stitch_edges,
 };
+use void_terrain::{DEFAULT_LAYERED, LayeredOptions, Terrain, TerrainConfig};
 
 const PRESETS: &str = include_str!("../../lod/presets/planets.json");
 /// The lab's 60° vertical field of view.
@@ -69,6 +72,8 @@ fn main() {
 #[derive(Resource)]
 struct Planet {
     lod: PlanetLod,
+    /// None draws the smooth sphere.
+    terrain: Option<Arc<Terrain>>,
     /// The preset's camera split scale, level cap and minimum observer cell pixels.
     camera_settings: (f64, u32, f64),
     /// Building in the background, by tile code.
@@ -188,13 +193,27 @@ fn setup(
     let presets: Value = serde_json::from_str(PRESETS).expect("presets/planets.json");
     let p = &presets["landing"];
     let f = |v: &Value| v.as_f64().unwrap_or_else(|| panic!("preset value {v}"));
+    let terrain = match terrain_argument().as_str() {
+        "layered" => Some(Arc::new(Terrain::from_config(&TerrainConfig::Layered(
+            LayeredOptions {
+                radius_meters: f(&p["radiusMeters"]),
+                ..DEFAULT_LAYERED
+            },
+        )))),
+        "sphere" => None,
+        other => panic!("--terrain {other}: layered or sphere"),
+    };
+    // The declared height range is the terrain's; the sphere keeps the preset's, so culling and
+    // LOD match the lab. The LOD band covers the whole range, as the landing preset's does.
+    let max_height = terrain
+        .as_ref()
+        .map_or(f(&p["maxSurfaceHeightMeters"]), |t| t.max_height_meters);
     let options = PlanetLodOptions {
         radius_meters: f(&p["radiusMeters"]),
-        // A smooth sphere, but the declared terrain range stays, so culling and LOD match the lab.
         min_surface_height_meters: f(&p["minSurfaceHeightMeters"]),
-        max_surface_height_meters: f(&p["maxSurfaceHeightMeters"]),
+        max_surface_height_meters: max_height,
         occluder_radius_meters: f(&p["occluderRadiusMeters"]),
-        lod_surface_band_meters: f(&p["lodSurfaceBandMeters"]),
+        lod_surface_band_meters: max_height,
         resolution: f(&p["tileResolution"]) as usize,
         max_level: f(&p["maxLevel"]) as u32,
         // The lab writes Infinity, which JSON stores as null.
@@ -222,6 +241,7 @@ fn setup(
     });
     commands.insert_resource(Planet {
         lod: PlanetLod::new(options),
+        terrain,
         camera_settings,
         building: HashMap::new(),
         drawn: HashMap::new(),
@@ -365,7 +385,8 @@ fn controls(
     // Probe: arrows move it over the ground at a speed set by its height, PageUp/PageDown climb.
     let radius = planet.lod.options.radius_meters;
     let dt = f64::from(time.delta_secs());
-    let mut altitude = view.probe.length() - radius;
+    // Heights are above the ground, so the probe follows the terrain as it moves.
+    let mut altitude = view.probe.length() - radius - planet.ground(view.probe);
     let speed = (altitude.max(200.0) * 0.5).min(2e6);
     let up = view.probe.normalize();
     let east = DVec3::Y.cross(up).normalize();
@@ -387,7 +408,8 @@ fn controls(
     if keys.pressed(KeyCode::PageDown) {
         altitude = (altitude - speed * dt).max(2.0);
     }
-    view.probe = (up + step * (speed * dt / radius)).normalize() * (radius + altitude);
+    let direction = (up + step * (speed * dt / radius)).normalize();
+    view.probe = direction * (radius + planet.ground(direction) + altitude);
 }
 
 /// Accept tiles whose background build has finished.
@@ -450,13 +472,19 @@ fn select_and_build(mut planet: ResMut<Planet>, view: Res<View>, window: Single<
         }
         planet.lod.pin_build(request.key);
         let key = request.key;
+        let terrain = planet.terrain.clone();
         let task = AsyncComputeTaskPool::get().spawn(async move {
-            let color = level_color(key.level);
-            let sphere = |_direction: DVec3, _cell: f64| SurfaceSample {
-                height_meters: 0.0,
-                color,
-            };
-            build_tile_mesh(key, &sphere, options)
+            match terrain {
+                Some(terrain) => build_tile_mesh(key, &*terrain, options),
+                None => {
+                    let color = level_color(key.level);
+                    let sphere = |_direction: DVec3, _cell: f64| SurfaceSample {
+                        height_meters: 0.0,
+                        color,
+                    };
+                    build_tile_mesh(key, &sphere, options)
+                }
+            }
         });
         planet.building.insert(code, task);
     }
@@ -562,7 +590,7 @@ fn draw(
     }
 
     // The probe: sized by its distance from the camera, so it stays a few pixels across.
-    let probe_altitude = view.probe.length() - radius;
+    let probe_altitude = view.probe.length() - radius - planet.ground(view.probe);
     let probe_size = ((view.probe - eye).length() * 0.006) as f32;
     **probe = anchor(view.probe, eye).with_scale(Vec3::splat(probe_size));
 
@@ -580,7 +608,7 @@ fn draw(
         }
         Err(_) => **label_visibility = Visibility::Hidden,
     }
-    let camera_altitude = eye.length() - radius;
+    let camera_altitude = eye.length() - radius - planet.ground(eye);
     if let Projection::Perspective(p) = &mut **projection {
         p.near = (camera_altitude * 0.3).clamp(0.5, 1e6) as f32;
     }
@@ -625,5 +653,24 @@ fn meters(m: f64) -> String {
         format!("{:.1} km", m / 1e3)
     } else {
         format!("{m:.0} m")
+    }
+}
+
+/// `--terrain NAME`, layered by default.
+fn terrain_argument() -> String {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.as_slice() {
+        [] => "layered".into(),
+        [flag, name] if flag == "--terrain" => name.clone(),
+        other => panic!("unknown arguments {other:?}; use --terrain layered|sphere"),
+    }
+}
+
+impl Planet {
+    /// Ground height under a body-fixed point, 0 on the sphere.
+    fn ground(&self, point: DVec3) -> f64 {
+        self.terrain
+            .as_ref()
+            .map_or(0.0, |t| t.height(point.normalize()))
     }
 }

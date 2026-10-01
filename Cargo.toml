@@ -19,6 +19,7 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 void-frames = { path = "crates/frames" }
 void-orbit = { path = "crates/orbit" }
 void-lod = { path = "crates/lod" }
+void-terrain = { path = "crates/terrain" }
 
 # Bevy is slow unoptimised; our own crates stay quick to rebuild.
 [profile.dev]

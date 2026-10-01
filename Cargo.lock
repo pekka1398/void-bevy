@@ -5201,6 +5201,7 @@ dependencies = [
  "void-frames",
  "void-lod",
  "void-orbit",
+ "void-terrain",
 ]
 
 [[package]]
@@ -5228,6 +5229,17 @@ dependencies = [
  "serde",
  "serde_json",
  "void-frames",
+]
+
+[[package]]
+name = "void-terrain"
+version = "0.0.0"
+dependencies = [
+ "glam",
+ "libm",
+ "serde",
+ "serde_json",
+ "void-lod",
 ]
 
 [[package]]
