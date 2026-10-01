@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 glam.workspace = true
-libm.workspace = true
+void-math.workspace = true
 serde.workspace = true
 void-lod.workspace = true
 

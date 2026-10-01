@@ -6,7 +6,7 @@ use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use glam::DVec3;
 
-use crate::math::{atan, length, tan};
+use void_math::{atan, length, tan};
 
 /// Cube face index: 0 +X, 1 −X, 2 +Y, 3 −Y, 4 +Z, 5 −Z.
 pub type CubeFace = u8;

@@ -8,7 +8,8 @@ pub mod noise;
 
 use glam::DVec3;
 use serde::Deserialize;
-use void_lod::{SurfaceSample, SurfaceSampler, hypot};
+use void_lod::{SurfaceSample, SurfaceSampler};
+use void_math::hypot;
 
 pub use hills::{Hills, HillsOptions};
 pub use layered::{DEFAULT_LAYERED, Layered, LayeredOptions, MAX_HEIGHT, SEA_LEVEL};
@@ -99,8 +100,8 @@ pub fn lattice_directions(count: usize) -> Vec<DVec3> {
             let z = 1.0 - 2.0 * (i as f64 + 0.5) / count as f64;
             let r = (1.0 - z * z).sqrt();
             DVec3::new(
-                libm::cos(golden * i as f64) * r,
-                libm::sin(golden * i as f64) * r,
+                void_math::cos(golden * i as f64) * r,
+                void_math::sin(golden * i as f64) * r,
                 z,
             )
         })

@@ -1,3 +1,8 @@
+//! Math shared by the physics crates, matching V8 where the labs depend on the last digits:
+//! `hypot` as V8's `Math.hypot`, and fdlibm's `tan`, `acos`, `asin`, `atan`, `exp`, which V8 also
+//! uses. V8's `sin` and `cos` are neither fdlibm nor the system's (each differs on 1–3% of inputs),
+//! so code using them agrees with the labs to an ulp, not bit for bit.
+
 use glam::DVec3;
 
 /// Euclidean norm as V8's `Math.hypot`: every value divided by the largest, squares summed with
@@ -35,6 +40,8 @@ pub fn length(v: DVec3) -> f64 {
     hypot([v.x, v.y, v.z])
 }
 
-// fdlibm, as V8's Math functions: the system libm behind std rounds some inputs differently,
-// and selection compares tile priorities that differ in the last digits.
-pub use libm::{acos, asin, atan, tan};
+// fdlibm, as V8's Math functions; the system libm behind std rounds some inputs differently.
+pub use libm::{acos, asin, atan, exp, tan};
+
+// fdlibm as well, but V8 differs from these: see the crate note.
+pub use libm::{cos, pow, sin};

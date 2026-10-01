@@ -4,7 +4,6 @@
 
 mod adjacency;
 mod cube;
-mod math;
 mod mesh;
 mod ordered;
 mod planet_lod;
@@ -17,7 +16,6 @@ pub use cube::{
     CUBE_FACES, CubeFace, FACE_FRAMES, FaceFrame, MAX_CODED_LEVEL, TileKey, UvBounds,
     cube_to_sphere, face_frame, sphere_to_cube, tile_code_of, tile_containing, tiles_around,
 };
-pub use math::{hypot, length};
 pub use mesh::{
     SurfaceSample, SurfaceSampler, TileMeshData, TileMeshOptions, build_tile_indices,
     build_tile_mesh, cell_meters, stitch_edges,
@@ -27,3 +25,4 @@ pub use planet_lod::{
     HOLMAN_SPLIT_DISTANCE_RATIOS, LodCamera, LodCollapse, LodNode, LodSelection, LodView,
     PlanetLod, PlanetLodOptions, TileRequest,
 };
+pub use void_math::{hypot, length};

@@ -10,7 +10,7 @@ use crate::adjacency::{
     FACE_EDGES, FaceEdge, edge_reversed_on_neighbor, neighbor_key, same_edge_on_neighbor,
 };
 use crate::cube::{TileKey, cube_to_sphere};
-use crate::math::{hypot, length};
+use void_math::{hypot, length};
 
 /// Rendered surface above the reference radius, and its display colour (linear 0–1).
 #[derive(Clone, Copy, Debug, PartialEq)]

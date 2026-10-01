@@ -8,9 +8,9 @@ use glam::DVec3;
 
 use crate::adjacency::{FACE_EDGES, selected_neighbor};
 use crate::cube::{CUBE_FACES, MAX_CODED_LEVEL, TileKey, cube_to_sphere, face_frame};
-use crate::math::{acos, asin, hypot, length, tan};
 use crate::mesh::{TileMeshData, cell_meters};
 use crate::ordered::OrderedMap;
+use void_math::{acos, asin, hypot, length, tan};
 
 /// Priority offset that queues culled children of split tiles after every visible request.
 const CULLED_PREFETCH_PENALTY: f64 = 1e15;

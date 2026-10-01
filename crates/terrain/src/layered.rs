@@ -14,7 +14,7 @@
 
 use glam::DVec3;
 use serde::Deserialize;
-use void_lod::hypot;
+use void_math::hypot;
 
 use crate::noise::{fbm, noise, noise_with_gradient, smoothstep};
 
@@ -180,9 +180,9 @@ fn ground_cover(
     belt: f64,
     resolved: &impl Fn(f64) -> f64,
 ) -> [f64; 3] {
-    let latitude = libm::asin(d.z.clamp(-1.0, 1.0));
+    let latitude = void_math::asin(d.z.clamp(-1.0, 1.0));
     let tropics = (latitude.abs() - 0.44) / 0.14;
-    let subtropics = libm::exp(-(tropics * tropics));
+    let subtropics = void_math::exp(-(tropics * tropics));
     let wetness = 0.55 + 0.9 * fbm(qx * 2.5 + 311.0, qy * 2.5, qz * 2.5, 4)
         - 0.55 * subtropics
         - 0.2 * belt

@@ -5217,8 +5217,16 @@ name = "void-lod"
 version = "0.0.0"
 dependencies = [
  "glam",
- "libm",
  "serde_json",
+ "void-math",
+]
+
+[[package]]
+name = "void-math"
+version = "0.0.0"
+dependencies = [
+ "glam",
+ "libm",
 ]
 
 [[package]]
@@ -5232,14 +5240,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-rotation"
+version = "0.0.0"
+dependencies = [
+ "glam",
+ "serde_json",
+ "void-math",
+]
+
+[[package]]
 name = "void-terrain"
 version = "0.0.0"
 dependencies = [
  "glam",
- "libm",
  "serde",
  "serde_json",
  "void-lod",
+ "void-math",
 ]
 
 [[package]]
