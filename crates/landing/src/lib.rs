@@ -2,13 +2,22 @@
 //! uses the orbit crate's inertial propagator above the terrain band; near the ground, bodies are
 //! handed to Rapier in the planet-fixed frame.
 
+mod coast;
 mod contact_world;
+mod lander;
 mod planet_frame;
 mod planets;
 
+pub use coast::{
+    CoastPrediction, EncounterPairState, EncounterPhysicsGate, EncounterRanges, predict_coast,
+};
 pub use contact_world::{
     BodyShape, ContactBodySpec, ContactWorld, ContactWorldOptions, ExtraAcceleration, Piece,
     PieceMass, SimpleShape, TileCollider, surface_indices,
+};
+pub use lander::{
+    Lander, LanderControl, LanderMode, LanderOptions, LanderSpec, ModeChange, STANDARD_GRAVITY,
+    rotate, surface_direction, upright_at,
 };
 pub use planet_frame::{ContactFrame, FrameState, PlanetFrame};
 pub use planets::{
