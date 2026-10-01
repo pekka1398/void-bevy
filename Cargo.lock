@@ -5197,7 +5197,9 @@ version = "0.0.0"
 dependencies = [
  "bevy",
  "glam",
+ "serde_json",
  "void-frames",
+ "void-lod",
  "void-orbit",
 ]
 
@@ -5206,6 +5208,15 @@ name = "void-frames"
 version = "0.0.0"
 dependencies = [
  "glam",
+ "serde_json",
+]
+
+[[package]]
+name = "void-lod"
+version = "0.0.0"
+dependencies = [
+ "glam",
+ "libm",
  "serde_json",
 ]
 
