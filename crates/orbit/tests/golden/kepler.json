@@ -1,0 +1,95 @@
+{
+ "gm": 398600441800000,
+ "cases": [
+  {
+   "elements": {
+    "semiMajorAxisMeters": 149600000000,
+    "eccentricity": 0.0167,
+    "inclinationRadians": 0,
+    "longitudeOfAscendingNodeRadians": 0,
+    "argumentOfPeriapsisRadians": 1.796,
+    "meanAnomalyRadians": 6.24
+   },
+   "eccentricAnomaly": 6.239266796631691,
+   "position": [
+    -26414961864.132904,
+    144713036044.15442,
+    0
+   ],
+   "velocity": [
+    -51.62667385581928,
+    -9.462716826569983,
+    0
+   ],
+   "osculating": {
+    "semiMajorAxisMeters": 149599999999.9999,
+    "eccentricity": 0.01669999999999951,
+    "inclinationRadians": 0,
+    "periapsisRadiusMeters": 147101679999.99997,
+    "apoapsisRadiusMeters": 152098319999.99982,
+    "periodSeconds": 18209933959.92716,
+    "specificEnergy": -1332.2207279411773
+   }
+  },
+  {
+   "elements": {
+    "semiMajorAxisMeters": 384400000,
+    "eccentricity": 0.0549,
+    "inclinationRadians": 0.0898,
+    "longitudeOfAscendingNodeRadians": 2.18,
+    "argumentOfPeriapsisRadians": 5.55,
+    "meanAnomalyRadians": -40.1
+   },
+   "eccentricAnomaly": 3.8467149785716406,
+   "position": [
+    208127661.66293696,
+    -342132765.74155486,
+    2258891.0994256474
+   ],
+   "velocity": [
+    812.6394351340871,
+    534.480009251418,
+    -87.5467414144328
+   ],
+   "osculating": {
+    "semiMajorAxisMeters": 384399999.9999999,
+    "eccentricity": 0.05490000000000004,
+    "inclinationRadians": 0.08980000000000177,
+    "periapsisRadiusMeters": 363296440.00000006,
+    "apoapsisRadiusMeters": 405503560.00000006,
+    "periodSeconds": 2371843.604625463,
+    "specificEnergy": -518470.9180541104
+   }
+  },
+  {
+   "elements": {
+    "semiMajorAxisMeters": 22000000,
+    "eccentricity": 0.93,
+    "inclinationRadians": 2.9,
+    "longitudeOfAscendingNodeRadians": -1,
+    "argumentOfPeriapsisRadians": 0.3,
+    "meanAnomalyRadians": 0.02
+   },
+   "eccentricAnomaly": 0.2508653786591118,
+   "position": [
+    -1653462.8104488538,
+    -1323258.5290972,
+    519003.8326117598
+   ],
+   "velocity": [
+    -17306.211122624398,
+    6362.139188137033,
+    2741.308314001527
+   ],
+   "osculating": {
+    "semiMajorAxisMeters": 22000000.00000003,
+    "eccentricity": 0.93,
+    "inclinationRadians": 2.8999999999999995,
+    "periapsisRadiusMeters": 1539999.9999999993,
+    "apoapsisRadiusMeters": 42460000.000000015,
+    "periodSeconds": 32474.68907971538,
+    "specificEnergy": -9059100.949999988
+   }
+  }
+ ]
+}

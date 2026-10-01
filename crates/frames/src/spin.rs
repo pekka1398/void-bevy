@@ -39,10 +39,16 @@ impl Spin {
     /// Non-rotating equatorial axes (the body's ECI), as `equatorialAxes` in BodyRotation.ts:
     /// z is the spin axis, x the node of the equator on the ecliptic, (-sin lon, cos lon, 0).
     pub fn equatorial_axes(&self) -> DQuat {
+        let [x, y, z] = self.equatorial_basis();
+        DQuat::from_mat3(&DMat3::from_cols(x, y, z)).normalize()
+    }
+
+    /// The same axes as ecliptic vectors, for mapping without a quaternion's rounding.
+    pub fn equatorial_basis(&self) -> [DVec3; 3] {
         let pole = self.axis();
         let lon = self.pole_longitude_radians;
         let x = DVec3::new(-lon.sin(), lon.cos(), 0.0);
-        DQuat::from_mat3(&DMat3::from_cols(x, pole.cross(x), pole)).normalize()
+        [x, pole.cross(x), pole]
     }
 
     /// Angle of the prime meridian from the node at time t.

@@ -14,3 +14,18 @@ Bevy 固定在 0.19.1（需要 Rust 1.95 以上）。API 以 `vendor/bevy` 的�
 
 - `app`：目前只是開窗與 GPU 檢查。
 - `frames`（`void-frames`）：樹狀座標系，不依賴 Bevy。設計與檢查結果見 [docs/frames.md](docs/frames.md)；對照資料由 `golden/frames.ts` 從 orbit lab 產生。
+- `orbit`（`void-orbit`）：orbit lab 的 Kepler、`buildSystem` 和 N 體星曆（Yoshida 8 階、Kahan、quintic Hermite），`Ephemeris` 實作 `frames` 的 `BodyStates`。見 [docs/orbit.md](docs/orbit.md)。
+
+- `system-view`（`void-system-view`）：用 Rust 星曆畫 Sol 系統，所有物體經 `frames` 轉成相對相機的 f32。驗收重點是 Aurelia 地表上 10 m 的探測器（probe）：Aurelia 離根節點 1 AU、以 30 km/s 運動，從幾公尺外看探測器仍要完全靜止，旁邊 1 m 的橘色方塊也不能晃動。
+
+  ```sh
+  cargo run -p void-system-view            # 從探測器旁邊開始
+  cargo run -p void-system-view -- --focus aurelia --distance 2.2e7 --inertial
+  ```
+
+  - 操作：Tab / Shift+Tab 切換焦點，左鍵拖曳環繞，滾輪縮放（依高度縮放），C 切換「隨目標轉動 / 慣性」，`,` `.` 調整時間加速（1–1e7 倍），Space 暫停。
+  - 啟動參數：`--focus NAME --distance M --yaw RAD --pitch RAD --warp 0..7 --inertial`。
+  - 天體是真實比例的普通球體，沒有地形 LOD。球面網格最多比真實半徑低約 3 km，所以探測器看起來可能浮在多面體表面上，或陷進去。另外在慣性模式下貼近地面時，行星網格的頂點（f32、6e6 m 量級）可能有約 0.5 m 的抖動。這些是暫時用整顆球網格造成的限制，正是之後地形 tile 要各自掛 anchor 的原因，與 frames 本身無關。
+  - 紅點是本初子午線與赤道的交點，藍點是北極；天體標籤是螢幕空間文字。
+
+對照資料要重新產生時，從 repo 根目錄執行 `npx tsx lab/void-bevy/golden/<name>.ts`。serde_json 開了 `float_roundtrip`：預設的解析器可能差一個 ulp，golden 檢查看得出來。

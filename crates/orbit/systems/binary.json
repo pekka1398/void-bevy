@@ -1,0 +1,178 @@
+{
+ "name": "Astris binary",
+ "root": {
+  "id": "astris",
+  "name": "Astris",
+  "massKg": 2.0878935e+30,
+  "radiusMeters": 765270000.0000001,
+  "color": "#ffd986",
+  "rotation": {
+   "periodSeconds": 2073600,
+   "obliquityRadians": 0.06981317007977318,
+   "poleLongitudeRadians": 0,
+   "angleAtEpochRadians": 0
+  },
+  "children": [
+   {
+    "id": "lyric",
+    "name": "Lyric",
+    "massKg": 1.5510066e+30,
+    "radiusMeters": 556560000,
+    "color": "#ff8c78",
+    "rotation": {
+     "periodSeconds": 2678400,
+     "obliquityRadians": 0.10471975511965978,
+     "poleLongitudeRadians": 0,
+     "angleAtEpochRadians": 0
+    },
+    "orbit": {
+     "semiMajorAxisMeters": 17951744484,
+     "eccentricity": 0.05,
+     "inclinationRadians": 0.006981317007977318,
+     "longitudeOfAscendingNodeRadians": 0,
+     "argumentOfPeriapsisRadians": 0.5235987755982988,
+     "meanAnomalyRadians": 0
+    },
+    "orbitPlane": "ecliptic",
+    "children": []
+   },
+   {
+    "id": "cinder-wake",
+    "name": "Cinder Wake",
+    "massKg": 4.1e+23,
+    "radiusMeters": 2900000,
+    "color": "#d0653c",
+    "rotation": {
+     "periodSeconds": 255600,
+     "obliquityRadians": 0.03490658503988659,
+     "poleLongitudeRadians": 0,
+     "angleAtEpochRadians": 0
+    },
+    "orbit": {
+     "semiMajorAxisMeters": 77790892764,
+     "eccentricity": 0.03,
+     "inclinationRadians": 0.020943951023931952,
+     "longitudeOfAscendingNodeRadians": 0.6981317007977318,
+     "argumentOfPeriapsisRadians": 0.17453292519943295,
+     "meanAnomalyRadians": 1.5009831567151235
+    },
+    "orbitPlane": "ecliptic",
+    "children": []
+   },
+   {
+    "id": "aurelia-veil",
+    "name": "Aurelia Veil",
+    "massKg": 5.9722e+24,
+    "radiusMeters": 6371000,
+    "color": "#2f86d8",
+    "rotation": {
+     "periodSeconds": 93600,
+     "obliquityRadians": 0.33161255787892263,
+     "poleLongitudeRadians": 0.6981317007977318,
+     "angleAtEpochRadians": 0
+    },
+    "orbit": {
+     "semiMajorAxisMeters": 122670253974,
+     "eccentricity": 0.02,
+     "inclinationRadians": 0.013962634015954637,
+     "longitudeOfAscendingNodeRadians": 2.0943951023931953,
+     "argumentOfPeriapsisRadians": 1.2217304763960306,
+     "meanAnomalyRadians": 0.34033920413889424
+    },
+    "orbitPlane": "ecliptic",
+    "children": [
+     {
+      "id": "lumen",
+      "name": "Lumen",
+      "massKg": 6.1e+22,
+      "radiusMeters": 1650000,
+      "color": "#c4c0b6",
+      "rotation": {
+       "kind": "locked",
+       "periodSeconds": 1586986.5599999998,
+       "obliquityToOrbitRadians": 0
+      },
+      "orbit": {
+       "semiMajorAxisMeters": 290000000,
+       "eccentricity": 0.04,
+       "inclinationRadians": 0.08028514559173916,
+       "longitudeOfAscendingNodeRadians": 1.3962634015954636,
+       "argumentOfPeriapsisRadians": 3.490658503988659,
+       "meanAnomalyRadians": 0.20943951023931956
+      },
+      "orbitPlane": "ecliptic",
+      "children": []
+     }
+    ]
+   },
+   {
+    "id": "velvet-crown",
+    "name": "Velvet Crown",
+    "massKg": 1.2e+27,
+    "radiusMeters": 63000000,
+    "color": "#9770ff",
+    "rotation": {
+     "periodSeconds": 39600,
+     "obliquityRadians": 0.20943951023931956,
+     "poleLongitudeRadians": 5.235987755982989,
+     "angleAtEpochRadians": 0
+    },
+    "orbit": {
+     "semiMajorAxisMeters": 400922293476,
+     "eccentricity": 0.035,
+     "inclinationRadians": 0.027925268031909273,
+     "longitudeOfAscendingNodeRadians": 3.490658503988659,
+     "argumentOfPeriapsisRadians": 2.6179938779914944,
+     "meanAnomalyRadians": 4.249876728606193
+    },
+    "orbitPlane": "ecliptic",
+    "children": [
+     {
+      "id": "crown-i",
+      "name": "Crown I",
+      "massKg": 5.5e+22,
+      "radiusMeters": 1600000,
+      "color": "#d9c7a0",
+      "rotation": {
+       "kind": "locked",
+       "periodSeconds": 263263.392,
+       "obliquityToOrbitRadians": 0
+      },
+      "orbit": {
+       "semiMajorAxisMeters": 520000000,
+       "eccentricity": 0.006,
+       "inclinationRadians": 0.005235987755982988,
+       "longitudeOfAscendingNodeRadians": 0.17453292519943295,
+       "argumentOfPeriapsisRadians": 0.8726646259971648,
+       "meanAnomalyRadians": 1.7453292519943295
+      },
+      "orbitPlane": "ecliptic",
+      "children": []
+     },
+     {
+      "id": "crown-ii",
+      "name": "Crown II",
+      "massKg": 1.1e+23,
+      "radiusMeters": 2300000,
+      "color": "#8fa7c2",
+      "rotation": {
+       "kind": "locked",
+       "periodSeconds": 639824.832,
+       "obliquityToOrbitRadians": 0
+      },
+      "orbit": {
+       "semiMajorAxisMeters": 940000000,
+       "eccentricity": 0.011,
+       "inclinationRadians": 0.012217304763960306,
+       "longitudeOfAscendingNodeRadians": 2.9670597283903604,
+       "argumentOfPeriapsisRadians": 4.1887902047863905,
+       "meanAnomalyRadians": 5.235987755982989
+      },
+      "orbitPlane": "ecliptic",
+      "children": []
+     }
+    ]
+   }
+  ]
+ }
+}
