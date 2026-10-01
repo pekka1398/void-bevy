@@ -5,25 +5,19 @@
 //! from the planet centre. Tiles are built in the background. No sea or atmosphere is drawn yet:
 //! the layered planet's sea floor shows as dark basins.
 
-use std::collections::{HashMap, HashSet};
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_3};
 use std::sync::Arc;
 
-use bevy::asset::RenderAssetUsages;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
-use bevy::mesh::Indices;
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
-use bevy::render::render_resource::{PrimitiveTopology, WgpuFeatures};
+use bevy::render::render_resource::WgpuFeatures;
 use bevy::render::settings::WgpuSettings;
-use bevy::tasks::{AsyncComputeTaskPool, Task, futures::check_ready};
 use glam::DVec3;
 use serde_json::Value;
-use void_lod::{
-    FACE_EDGES, LodCamera, LodView, PlanetLod, PlanetLodOptions, SurfaceSample, TileMeshData,
-    TileMeshOptions, build_tile_indices, build_tile_mesh, selected_neighbor, stitch_edges,
-};
+use void_app::tiles::{Tile, TileField, anchor};
+use void_lod::{LodCamera, LodView, PlanetLodOptions};
 use void_terrain::{DEFAULT_LAYERED, LayeredOptions, Terrain, TerrainConfig};
 
 const PRESETS: &str = include_str!("../../lod/presets/planets.json");
@@ -71,20 +65,9 @@ fn main() {
 
 #[derive(Resource)]
 struct Planet {
-    lod: PlanetLod,
-    /// None draws the smooth sphere.
-    terrain: Option<Arc<Terrain>>,
+    field: TileField,
     /// The preset's camera split scale, level cap and minimum observer cell pixels.
     camera_settings: (f64, u32, f64),
-    /// Building in the background, by tile code.
-    building: HashMap<u64, Task<TileMeshData>>,
-    /// Drawn tiles: entity and the coarse neighbours its seams are stitched to.
-    drawn: HashMap<u64, (Entity, [Option<u64>; 4])>,
-    indices: Vec<u32>,
-    material: Handle<StandardMaterial>,
-    last_render: Vec<u64>,
-    last_requests: usize,
-    last_select_ms: f64,
 }
 
 #[derive(Resource)]
@@ -181,6 +164,9 @@ struct Hud;
 #[derive(Component)]
 struct Probe;
 
+/// Tile transforms, kept apart from the camera's and the probe's.
+type TileOnly = (With<Tile>, Without<Camera>, Without<Probe>);
+
 /// The probe's name on screen, so it can be found from any distance.
 #[derive(Component)]
 struct ProbeLabel;
@@ -233,24 +219,14 @@ fn setup(
         f(&c["minObserverCellPixels"]),
     );
     let radius = options.radius_meters;
-    let (indices, grid_count) = build_tile_indices(options.resolution);
     let material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         perceptual_roughness: 0.9,
         ..default()
     });
     commands.insert_resource(Planet {
-        lod: PlanetLod::new(options),
-        terrain,
+        field: TileField::new(options, terrain, material),
         camera_settings,
-        building: HashMap::new(),
-        drawn: HashMap::new(),
-        // Skirts are left out: seams are stitched, as the lab draws by default.
-        indices: indices[..grid_count].to_vec(),
-        material,
-        last_render: Vec::new(),
-        last_requests: 0,
-        last_select_ms: 0.0,
     });
 
     // The lab's start: camera along the preset's direction, the probe off its sightline.
@@ -383,7 +359,7 @@ fn controls(
     }
 
     // Probe: arrows move it over the ground at a speed set by its height, PageUp/PageDown climb.
-    let radius = planet.lod.options.radius_meters;
+    let radius = planet.field.lod.options.radius_meters;
     let dt = f64::from(time.delta_secs());
     // Heights are above the ground, so the probe follows the terrain as it moves.
     let mut altitude = view.probe.length() - radius - planet.ground(view.probe);
@@ -412,26 +388,8 @@ fn controls(
     view.probe = direction * (radius + planet.ground(direction) + altitude);
 }
 
-/// Accept tiles whose background build has finished.
 fn finish_builds(mut planet: ResMut<Planet>) {
-    let mut done = Vec::new();
-    for (code, task) in &mut planet.building {
-        if let Some(tile) = check_ready(task) {
-            done.push((*code, tile));
-        }
-    }
-    for (code, tile) in done {
-        planet.building.remove(&code);
-        let key = tile.key;
-        planet.lod.accept_tile(Arc::new(tile));
-        planet.lod.unpin_build(key);
-    }
-}
-
-/// A level's colour: hue around the wheel, so neighbouring levels differ.
-fn level_color(level: u32) -> [f32; 3] {
-    let c: Srgba = Color::hsl((level as f32 * 47.0) % 360.0, 0.55, 0.55).into();
-    [c.red, c.green, c.blue]
+    planet.field.finish_builds();
 }
 
 fn select_and_build(mut planet: ResMut<Planet>, view: Res<View>, window: Single<&Window>) {
@@ -444,76 +402,13 @@ fn select_and_build(mut planet: ResMut<Planet>, view: Res<View>, window: Single<
         focal_pixels,
         min_observer_cell_pixels: min_pixels,
     });
-    let selection = planet.lod.select(&LodView {
+    planet.field.select(&LodView {
         observer_positions: vec![view.probe],
         camera,
         distance_scale: 1.0,
         horizon_culling: view.horizon_culling,
     });
-    planet.last_select_ms = selection.select_seconds * 1e3;
-    planet.last_requests = selection.requests.len();
-    planet.last_render = selection.render;
-
-    // Start the most urgent builds, two per core.
-    let mut requests = selection.requests;
-    requests.sort_by(|a, b| b.priority.total_cmp(&a.priority));
-    let slots = std::thread::available_parallelism().map_or(4, |n| n.get()) * 2;
-    let options = TileMeshOptions {
-        radius_meters: planet.lod.options.radius_meters,
-        resolution: planet.lod.options.resolution,
-    };
-    for request in requests {
-        if planet.building.len() >= slots {
-            break;
-        }
-        let code = request.key.code();
-        if planet.building.contains_key(&code) {
-            continue;
-        }
-        planet.lod.pin_build(request.key);
-        let key = request.key;
-        let terrain = planet.terrain.clone();
-        let task = AsyncComputeTaskPool::get().spawn(async move {
-            match terrain {
-                Some(terrain) => build_tile_mesh(key, &*terrain, options),
-                None => {
-                    let color = level_color(key.level);
-                    let sphere = |_direction: DVec3, _cell: f64| SurfaceSample {
-                        height_meters: 0.0,
-                        color,
-                    };
-                    build_tile_mesh(key, &sphere, options)
-                }
-            }
-        });
-        planet.building.insert(code, task);
-    }
 }
-
-fn tile_mesh(
-    data: &TileMeshData,
-    coarse: [Option<&TileMeshData>; 4],
-    n: usize,
-    indices: &[u32],
-) -> Mesh {
-    let (positions, normals, _) = stitch_edges(data, coarse, n);
-    let count = n * n;
-    let colors: Vec<[f32; 4]> = data.colors[..count]
-        .iter()
-        .map(|c| [c[0], c[1], c[2], 1.0])
-        .collect();
-    Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions[..count].to_vec())
-    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals[..count].to_vec())
-    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
-    .with_inserted_indices(Indices::U32(indices.to_vec()))
-}
-
-/// Tiles and objects are placed relative to the camera, which stays at the origin.
-type Placed = (Without<Camera>, Without<Probe>);
 
 #[allow(clippy::too_many_arguments)]
 fn draw(
@@ -521,73 +416,18 @@ fn draw(
     mut planet: ResMut<Planet>,
     view: Res<View>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut tiles: Query<&mut Transform, Placed>,
+    mut tiles: Query<&mut Transform, TileOnly>,
     mut camera: Single<(&Camera, &mut Transform, &mut Projection)>,
     mut label: Single<(&mut Node, &mut Visibility), With<ProbeLabel>>,
     mut probe: Single<&mut Transform, (With<Probe>, Without<Camera>)>,
     mut hud: Single<&mut Text, With<Hud>>,
 ) {
     let planet = &mut *planet;
-    let n = planet.lod.options.resolution;
-    let radius = planet.lod.options.radius_meters;
+    let radius = planet.field.lod.options.radius_meters;
     let (eye, forward, up) = view.camera.pose();
-    let selected: HashSet<u64> = planet.last_render.iter().copied().collect();
-
-    // Tiles that left the selection, or whose stitched seams changed, are dropped and redrawn.
-    let mut wanted: HashMap<u64, [Option<u64>; 4]> = HashMap::new();
-    for &code in &planet.last_render {
-        let key = planet
-            .lod
-            .node(code)
-            .expect("a selected tile has a node")
-            .key;
-        let seams = FACE_EDGES.map(|edge| {
-            selected_neighbor(key, edge, |c| selected.contains(&c)).filter(|&nb| {
-                planet
-                    .lod
-                    .node(nb)
-                    .is_some_and(|node| node.key.level + 1 == key.level)
-            })
-        });
-        wanted.insert(code, seams);
-    }
-    planet.drawn.retain(|code, (entity, seams)| {
-        let keep = wanted.get(code) == Some(seams);
-        if !keep {
-            commands.entity(*entity).despawn();
-        }
-        keep
-    });
-    let mut levels = (u32::MAX, 0);
-    for (&code, &seams) in &wanted {
-        let node = planet.lod.node(code).expect("selected");
-        levels = (levels.0.min(node.key.level), levels.1.max(node.key.level));
-        let data = node.data.as_ref().expect("a selected tile has a mesh");
-        if let Some((entity, _)) = planet.drawn.get(&code) {
-            if let Ok(mut transform) = tiles.get_mut(*entity) {
-                *transform = anchor(data.origin, eye);
-            }
-            continue;
-        }
-        let coarse = seams.map(|s| {
-            s.map(|c| {
-                planet
-                    .lod
-                    .node(c)
-                    .and_then(|n| n.data.as_deref())
-                    .expect("a drawn neighbour has a mesh")
-            })
-        });
-        let mesh = meshes.add(tile_mesh(data, coarse, n, &planet.indices));
-        let entity = commands
-            .spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(planet.material.clone()),
-                anchor(data.origin, eye),
-            ))
-            .id();
-        planet.drawn.insert(code, (entity, seams));
-    }
+    planet
+        .field
+        .draw(&mut commands, &mut meshes, &mut tiles, eye);
 
     // The probe: sized by its distance from the camera, so it stays a few pixels across.
     let probe_altitude = view.probe.length() - radius - planet.ground(view.probe);
@@ -619,13 +459,13 @@ fn draw(
          camera LOD {} (V)   horizon culling {} (H)   wireframe (B)   probe min cell {} (, .)\n\
          left drag pan | right drag orbit | Shift+left drag turn | wheel zoom | P camera over the probe\n\
          arrows move the probe | PageUp/PageDown probe height",
-        wanted.len(),
-        levels.0.min(levels.1),
-        levels.1,
-        planet.last_requests,
-        planet.building.len(),
-        planet.lod.cached_tile_count(),
-        planet.last_select_ms,
+        planet.field.drawn_count(),
+        planet.field.levels.0,
+        planet.field.levels.1,
+        planet.field.last_requests,
+        planet.field.building_count(),
+        planet.field.lod.cached_tile_count(),
+        planet.field.last_select_ms,
         meters(camera_altitude),
         meters(probe_altitude),
         on(view.camera_lod),
@@ -636,12 +476,6 @@ fn draw(
             "off".into()
         },
     );
-}
-
-/// A tile or object at a body-fixed f64 position, relative to the camera: the f64 subtraction
-/// happens before anything becomes f32.
-fn anchor(position: DVec3, camera: DVec3) -> Transform {
-    Transform::from_translation((position - camera).as_vec3())
 }
 
 fn on(flag: bool) -> &'static str {
@@ -669,7 +503,8 @@ fn terrain_argument() -> String {
 impl Planet {
     /// Ground height under a body-fixed point, 0 on the sphere.
     fn ground(&self, point: DVec3) -> f64 {
-        self.terrain
+        self.field
+            .terrain
             .as_ref()
             .map_or(0.0, |t| t.height(point.normalize()))
     }

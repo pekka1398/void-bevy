@@ -5428,6 +5428,7 @@ dependencies = [
  "glam 0.32.1",
  "serde_json",
  "void-frames",
+ "void-landing",
  "void-lod",
  "void-orbit",
  "void-terrain",
