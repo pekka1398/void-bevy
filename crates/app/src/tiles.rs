@@ -6,10 +6,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use bevy::asset::RenderAssetUsages;
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::ecs::query::QueryFilter;
-use bevy::mesh::Indices;
+use bevy::mesh::{Indices, MeshVertexAttribute};
 use bevy::prelude::*;
-use bevy::render::render_resource::PrimitiveTopology;
+use bevy::render::render_resource::{PrimitiveTopology, VertexFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures::check_ready};
 use glam::DVec3;
 use void_lod::{
@@ -17,6 +18,10 @@ use void_lod::{
     TileMeshOptions, build_tile_indices, build_tile_mesh, selected_neighbor, stitch_edges,
 };
 use void_terrain::Terrain;
+
+/// Each vertex's surface height above the reference radius, metres (lab/lod's `height` attribute).
+pub const ATTRIBUTE_HEIGHT: MeshVertexAttribute =
+    MeshVertexAttribute::new("Height", 917_330_201, VertexFormat::Float32);
 
 /// Marks a terrain tile entity.
 #[derive(Component)]
@@ -34,8 +39,8 @@ pub fn level_color(level: u32) -> [f32; 3] {
     [c.red, c.green, c.blue]
 }
 
-/// The quadtree, its background builds and its drawn tiles.
-pub struct TileField {
+/// The quadtree, its background builds and its drawn tiles, drawn with material `M`.
+pub struct TileField<M: Material = StandardMaterial> {
     pub lod: PlanetLod,
     /// None draws a smooth sphere coloured by tile level.
     pub terrain: Option<Arc<Terrain>>,
@@ -43,19 +48,22 @@ pub struct TileField {
     /// Drawn tiles: entity and the coarse neighbours its seams are stitched to.
     drawn: HashMap<u64, (Entity, [Option<u64>; 4])>,
     indices: Vec<u32>,
-    material: Handle<StandardMaterial>,
+    material: Handle<M>,
     render: Vec<u64>,
     pub last_requests: usize,
     pub last_select_ms: f64,
     /// Finest and coarsest drawn level.
     pub levels: (u32, u32),
+    /// Leave tiles out of Bevy's frustum culling, for a material that moves vertices beyond the
+    /// mesh's bounds (the sea is raised in the vertex shader).
+    pub no_frustum_culling: bool,
 }
 
-impl TileField {
+impl<M: Material> TileField<M> {
     pub fn new(
         options: PlanetLodOptions,
         terrain: Option<Arc<Terrain>>,
-        material: Handle<StandardMaterial>,
+        material: Handle<M>,
     ) -> Self {
         let (indices, grid) = build_tile_indices(options.resolution);
         Self {
@@ -70,6 +78,7 @@ impl TileField {
             last_requests: 0,
             last_select_ms: 0.0,
             levels: (0, 0),
+            no_frustum_culling: false,
         }
     }
 
@@ -202,6 +211,9 @@ impl TileField {
                     anchor(data.origin, eye),
                 ))
                 .id();
+            if self.no_frustum_culling {
+                commands.entity(entity).insert(NoFrustumCulling);
+            }
             self.drawn.insert(code, (entity, seams));
         }
         self.levels = (levels.0.min(levels.1), levels.1);
@@ -214,7 +226,7 @@ fn tile_mesh(
     n: usize,
     indices: &[u32],
 ) -> Mesh {
-    let (positions, normals, _) = stitch_edges(data, coarse, n);
+    let (positions, normals, heights) = stitch_edges(data, coarse, n);
     let count = n * n;
     let colors: Vec<[f32; 4]> = data.colors[..count]
         .iter()
@@ -227,5 +239,6 @@ fn tile_mesh(
     .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions[..count].to_vec())
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals[..count].to_vec())
     .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
+    .with_inserted_attribute(ATTRIBUTE_HEIGHT, heights[..count].to_vec())
     .with_inserted_indices(Indices::U32(indices.to_vec()))
 }
