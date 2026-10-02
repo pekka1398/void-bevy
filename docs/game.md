@@ -21,7 +21,9 @@ cargo test -p void-app --test flight                    # lab/flight 的接線�
 
 - 繪圖座標系是行星的本體座標，相機在原點（TS 是黃道慣性座標，tile 與火箭再轉進去）。地形 tile 和火箭零件本來就是本體座標，不用轉；天體與地圖每幀從黃道轉入。兩者等價，所以 lab 的「本體座標轉 render 座標」檢查改為檢查火箭姿態在空間中的方向。
 - HUD 暫時是純文字（UI 之後再做）。lab 中可點的 ALT/AGL、SURFACE/ORBIT、PATH 改成按鍵 K、L、G。
-- dev 面板（大氣、雲、海、星空的開關與曝光）、lab-log、線框與 tile 邊界、碰撞線還沒移植。
+- dev 面板的大氣、雲、海、星空開關與曝光沒有移植（HUD 與面板維持純文字）。
+- lab 的除錯開關改成按鍵：F2 地形網格邊（白）、F3 tile 邊界（紅）、F4 碰撞體（綠：火箭的碰撞形狀，以及每個 Rapier 地形碰撞體自己的三角形邊，從碰撞體讀回）、F5 畫地形（關掉做效能量測，LOD 與建 tile 照常）。疊加線的顏色先除以曝光，經過空氣 pass 的曝光與色調映射後接近原色。
+- lab-log：debug build 寫入 `lab/void-bevy/lab-log/flight.jsonl`（已被 .gitignore 排除），欄位順序與 lab 相同（`wall` 在前）。事件：`session`、每秒一次的 `flight-sample`（時間、模式、相機、地圖權重、co-rotation、tile 數與快取、主執行緒各階段耗時）、`focus`、`reset`、`path-frame`、`terrain-visibility`。lab 的 GPU 繪圖統計（draw call、三角形數、renderer 複本大小）沒有對應，`drawMs` 是 draw system 的 CPU 時間。
 - 火箭和其他天體用 Bevy 的 StandardMaterial 與一盞平行光（1000 lux，在 Bevy 預設曝光下對應 scenery 的太陽照度 1），不經過大氣衰減，所以黃昏時火箭比地面亮。lab 也是一樣的簡化。
 
 ## 檢查（`tests/flight.rs`）

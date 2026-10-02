@@ -11,7 +11,8 @@ glam.workspace = true
 void-frames.workspace = true
 void-orbit.workspace = true
 void-lod.workspace = true
-serde_json.workspace = true
+# Session log lines keep the lab's field order ("wall" first).
+serde_json = { workspace = true, features = ["preserve_order"] }
 void-terrain.workspace = true
 void-landing.workspace = true
 void-scenery.workspace = true

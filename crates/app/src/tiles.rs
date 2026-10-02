@@ -9,6 +9,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::ecs::query::QueryFilter;
 use bevy::mesh::{Indices, MeshVertexAttribute};
+use bevy::pbr::wireframe::{Wireframe, WireframeColor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{PrimitiveTopology, VertexFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures::check_ready};
@@ -57,6 +58,10 @@ pub struct TileField<M: Material = StandardMaterial> {
     /// Leave tiles out of Bevy's frustum culling, for a material that moves vertices beyond the
     /// mesh's bounds (the sea is raised in the vertex shader).
     pub no_frustum_culling: bool,
+    /// Draw every tile's triangle edges (Bevy's wireframe; needs `WireframePlugin`).
+    wireframe: bool,
+    /// Their colour; white by default.
+    pub wireframe_color: Color,
 }
 
 impl<M: Material> TileField<M> {
@@ -79,7 +84,51 @@ impl<M: Material> TileField<M> {
             last_select_ms: 0.0,
             levels: (0, 0),
             no_frustum_culling: false,
+            wireframe: false,
+            wireframe_color: Color::WHITE,
         }
+    }
+
+    pub fn wireframe(&self) -> bool {
+        self.wireframe
+    }
+
+    /// Triangle edges on every drawn tile, as the LOD lab's mesh-edge overlay.
+    pub fn set_wireframe(&mut self, commands: &mut Commands, on: bool) {
+        self.wireframe = on;
+        for (entity, _) in self.drawn.values() {
+            if on {
+                commands.entity(*entity).insert((
+                    Wireframe,
+                    WireframeColor {
+                        color: self.wireframe_color,
+                    },
+                ));
+            } else {
+                commands
+                    .entity(*entity)
+                    .remove::<(Wireframe, WireframeColor)>();
+            }
+        }
+    }
+
+    /// Every drawn tile's four edges as polylines relative to the camera at `eye` (the LOD lab's
+    /// red tile boundaries), along the tile's own grid vertices.
+    pub fn boundaries(&self, eye: DVec3) -> Vec<Vec<Vec3>> {
+        let n = self.lod.options.resolution;
+        let mut lines = Vec::with_capacity(self.drawn.len() * 4);
+        for code in self.drawn.keys() {
+            let Some(data) = self.lod.node(*code).and_then(|node| node.data.as_ref()) else {
+                continue;
+            };
+            let offset = (data.origin - eye).as_vec3();
+            let at = |i: usize, j: usize| Vec3::from_array(data.positions[j * n + i]) + offset;
+            lines.push((0..n).map(|i| at(i, 0)).collect());
+            lines.push((0..n).map(|i| at(i, n - 1)).collect());
+            lines.push((0..n).map(|j| at(0, j)).collect());
+            lines.push((0..n).map(|j| at(n - 1, j)).collect());
+        }
+        lines
     }
 
     pub fn drawn_count(&self) -> usize {
@@ -217,6 +266,14 @@ impl<M: Material> TileField<M> {
                 .id();
             if self.no_frustum_culling {
                 commands.entity(entity).insert(NoFrustumCulling);
+            }
+            if self.wireframe {
+                commands.entity(entity).insert((
+                    Wireframe,
+                    WireframeColor {
+                        color: self.wireframe_color,
+                    },
+                ));
             }
             self.drawn.insert(code, (entity, seams));
         }

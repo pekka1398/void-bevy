@@ -4,6 +4,10 @@ use bevy::prelude::*;
 use glam::{DQuat, DVec3};
 use void_landing::{BodyShape, Piece, SimpleShape};
 
+/// One piece of a part drawn from its collider (for the collider overlay).
+#[derive(Component)]
+pub struct ColliderShape;
+
 /// Bevy meshes for a compound collider: cylinders, cones and boxes on Y, as Rapier's.
 pub fn spawn_shape(
     parent: &mut ChildSpawnerCommands,
@@ -42,6 +46,7 @@ pub fn spawn_shape(
         };
         let rotation = piece.rotation.unwrap_or(DQuat::IDENTITY).as_quat();
         parent.spawn((
+            ColliderShape,
             Mesh3d(mesh),
             MeshMaterial3d(material.clone()),
             Transform::from_translation(piece.position.as_vec3()).with_rotation(rotation),

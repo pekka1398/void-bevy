@@ -316,6 +316,20 @@ impl<F: ContactFrame> ContactWorld<F> {
         self.tiles.values()
     }
 
+    /// A terrain collider's own triangles, read back from Rapier: vertices relative to the tile
+    /// origin, and the triangles' vertex indices.
+    pub fn terrain_collider_mesh(&self, tile: &TileCollider) -> (Vec<[f32; 3]>, Vec<[u32; 3]>) {
+        let collider = &self.world.colliders[tile.collider];
+        let mesh = collider
+            .shape()
+            .as_trimesh()
+            .expect("contact world: a terrain collider is a triangle mesh");
+        (
+            mesh.vertices().iter().map(|v| [v.x, v.y, v.z]).collect(),
+            mesh.indices().to_vec(),
+        )
+    }
+
     pub fn body_handles(&self) -> impl Iterator<Item = RigidBodyHandle> + '_ {
         self.bodies.iter().map(|(h, _)| *h)
     }

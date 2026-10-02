@@ -18,21 +18,30 @@ use bevy::camera::Hdr;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
+use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::pbr::wireframe::{Wireframe, WireframeColor, WireframePlugin};
 use bevy::prelude::*;
+use bevy::render::RenderPlugin;
 use bevy::render::render_resource::TextureUsages;
+use bevy::render::render_resource::WgpuFeatures;
+use bevy::render::settings::WgpuSettings;
 use bevy::render::view::Msaa;
 use glam::{DMat3, DQuat, DVec3};
+use serde_json::json;
+use std::collections::HashMap;
+use std::time::Instant;
 use void_app::air::{AirSettings, AirTextures, noise_volume_image, weather_image};
 use void_app::flight::{
     GamePlanet, PARTS, PHYSICS_MAX_RATE, TIME_RATES, distance_text, game_planet_by_id,
     mission_time, rate_text, vessel_axes, warp_limit,
 };
+use void_app::lab_log::LabLog;
 use void_app::map::{
     MapMarker, PATH_COLOR, PLAN_COLOR, color, draw_map_lines, label_click, place_map_labels,
     spawn_map_labels,
 };
 use void_app::navball::{Navball, NavballLabel, draw_navball, spawn_navball};
-use void_app::parts::spawn_shape;
+use void_app::parts::{ColliderShape, spawn_shape};
 use void_app::scenery::{
     GroundMaterial, GroundUniforms, SceneryPlugin, StarMaterial, star_mesh, table_image,
     update_ground,
@@ -74,20 +83,44 @@ const PREDICTION_HORIZON_SECONDS: f64 = 6000.0;
 const THROTTLE_RATE_PERCENT_PER_SECOND: f64 = 50.0;
 const VESSEL_DISTANCE: f64 = 45.0;
 const FOV_DEGREES: f32 = 58.0;
+/// scenery's exposure (10^0.8), applied in the air pass to everything drawn.
+const EXPOSURE: f32 = 6.309_573;
+
+/// An overlay colour that comes out of the air pass's exposure and tone mapping about as given.
+fn overlay(color: Color) -> Color {
+    let c = color.to_linear();
+    Color::linear_rgba(
+        c.red / EXPOSURE,
+        c.green / EXPOSURE,
+        c.blue / EXPOSURE,
+        c.alpha,
+    )
+}
+
 /// The plan is integrated this many steps a frame.
 const PLAN_STEPS_PER_FRAME: u64 = 1500;
 
 fn main() {
     App::new()
         .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "VOID".into(),
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "VOID".into(),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(RenderPlugin {
+                    render_creation: WgpuSettings {
+                        features: WgpuFeatures::POLYGON_MODE_LINE,
+                        ..default()
+                    }
+                    .into(),
                     ..default()
                 }),
-                ..default()
-            }),
             SceneryPlugin,
+            WireframePlugin::default(),
         ))
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(GlobalAmbientLight {
@@ -103,10 +136,12 @@ fn main() {
                 simulate,
                 terrain,
                 draw,
+                overlays,
                 scenery,
                 labels,
                 instruments,
                 hud,
+                log_sample,
             )
                 .chain(),
         )
@@ -157,6 +192,11 @@ struct Game {
     path: MapPath,
     started: std::time::Instant,
     help: bool,
+    /// The lab's dev panel switches: mesh edges, tile boundaries, colliders, terrain drawing.
+    debug: DebugView,
+    /// The labs' session log (debug builds).
+    log: Option<LabLog>,
+    timings: Timings,
     /// lab/sas's stability assist on the steering torque; T toggles it. A maneuver burn steers
     /// itself, and SAS locks afresh after it.
     sas: StabilityAssist,
@@ -299,12 +339,27 @@ impl Game {
         self.set_time_rate(TIME_RATES[next]);
     }
 
+    fn log(&mut self, event: serde_json::Value) {
+        if let Some(log) = self.log.as_mut() {
+            log.write(event);
+        }
+    }
+
+    fn focus_name(&self) -> String {
+        match self.focus {
+            Focus::Vessel => "vessel".into(),
+            Focus::Body(i) => self.bodies[i].name.clone(),
+        }
+    }
+
     fn set_focus(&mut self, next: Focus) {
         self.focus = next;
         self.camera.distance = match next {
             Focus::Vessel => VESSEL_DISTANCE,
             Focus::Body(i) => self.bodies[i].radius_meters * 4.0,
         };
+        let (focus, distance, t) = (self.focus_name(), self.camera.distance, self.rocket.time());
+        self.log(json!({ "event": "focus", "focus": focus, "distance": distance, "simTime": t }));
     }
 
     fn stage(&mut self) {
@@ -345,6 +400,7 @@ impl Game {
         self.plan_message.clear();
         self.executing = false;
         self.warp_to_maneuver = false;
+        self.log(json!({ "event": "reset" }));
     }
 
     // --- The maneuver plan, as the TS game's panel ------------------------------------------
@@ -654,6 +710,48 @@ impl Game {
 #[derive(Resource)]
 struct Ground(TileField<GroundMaterial>);
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct DebugView {
+    /// White triangle edges of the drawn terrain.
+    wire: bool,
+    /// Red tile boundaries.
+    bounds: bool,
+    /// Green colliders: Rapier's terrain triangles and the rocket's collider shapes.
+    colliders: bool,
+    /// Draw the terrain (off for profiling: LOD selection and builds keep running).
+    terrain: bool,
+}
+
+/// Main-thread timings since the last log sample, ms: (sum, max).
+#[derive(Default)]
+struct Timings {
+    frames: u32,
+    frame: (f64, f64),
+    physics: (f64, f64),
+    lod: (f64, f64),
+    select: (f64, f64),
+    draw: (f64, f64),
+    collider: (f64, f64),
+    last_sample: Option<Instant>,
+}
+
+impl Timings {
+    fn add(phase: &mut (f64, f64), ms: f64) {
+        phase.0 += ms;
+        phase.1 = phase.1.max(ms);
+    }
+}
+
+/// Green edges of the terrain triangles each loaded Rapier collider holds, by tile origin.
+#[derive(Resource)]
+struct ColliderLines {
+    lines: HashMap<[u64; 3], Entity>,
+    material: Handle<StandardMaterial>,
+}
+
+#[derive(Component)]
+struct ColliderLine;
+
 /// scenery's shading: the ground material's uniforms and the star field's material.
 #[derive(Resource)]
 struct Scenery {
@@ -712,6 +810,7 @@ fn setup(
     );
 
     // scenery's atmosphere tables and cloud noise, and the ground and sea shader on the tiles.
+    let scenery_started = Instant::now();
     let params = earth_like_atmosphere(planet.planet.terrain.radius_meters);
     let transmittance = build_transmittance_table(&params);
     let multiple = build_multiple_scattering_table(&params, &transmittance, 64, 20);
@@ -769,7 +868,18 @@ fn setup(
     );
     // The sea is raised in the vertex shader, beyond the tiles' bounds.
     field.no_frustum_culling = true;
+    field.wireframe_color = overlay(Color::WHITE);
+    let scenery_build_ms = scenery_started.elapsed().as_secs_f64() * 1e3;
+    let lod_options = field.lod.options.clone();
     commands.insert_resource(Ground(field));
+    commands.insert_resource(ColliderLines {
+        lines: HashMap::new(),
+        material: materials.add(StandardMaterial {
+            base_color: overlay(Color::srgb_u8(0x3d, 0xff, 0x6e)),
+            unlit: true,
+            ..default()
+        }),
+    });
     // The star catalogue is inertial (ecliptic axes), even while the planet spins.
     let (star_positions, star_colors) = generate_stars(&DEFAULT_STARS);
     let stars = star_materials.add(StarMaterial { brightness: 0.08 });
@@ -868,7 +978,7 @@ fn setup(
     air.clouds_enabled = f32::from(u8::from(planet.atmosphere));
     air.sea_level = planet.sea_level as f32;
     // scenery's initial exposure and ACES.
-    air.exposure = 10f32.powf(0.8);
+    air.exposure = EXPOSURE;
     air.tone_mapping = 0.0;
     // In the solar system the real Sun is drawn as a body; a lone planet uses the sky's disc.
     let star = bodies.iter().position(|b| b.parent_index.is_none());
@@ -947,7 +1057,7 @@ fn setup(
     ));
 
     let dominance = DominanceTree::new(&bodies);
-    commands.insert_resource(Game {
+    let mut game = Game {
         orbits: MapOrbits::new(&bodies),
         path: MapPath::new(),
         planet,
@@ -975,6 +1085,12 @@ fn setup(
         velocities: vec![DVec3::ZERO; n],
         started: std::time::Instant::now(),
         help: false,
+        debug: DebugView {
+            terrain: true,
+            ..default()
+        },
+        log: LabLog::open("flight"),
+        timings: Timings::default(),
         sas: StabilityAssist::new(STEERING_TORQUE, SAS_TUNING),
         sas_suspended: false,
         plan: None,
@@ -991,7 +1107,25 @@ fn setup(
         navigation: home,
         spin: (home, 0.0),
         bodies,
+    };
+    let session = json!({
+        "event": "session",
+        "planet": planet_id,
+        "terrain": format!("{:?}", game.planet.terrain_id).to_lowercase(),
+        "lod": {
+            "radiusMeters": lod_options.radius_meters,
+            "maxLevel": lod_options.max_level,
+            "resolution": lod_options.resolution,
+            "maxCachedTiles": lod_options.max_cached_tiles,
+        },
+        "scenery": {
+            "seaLevel": game.planet.sea_level,
+            "atmosphere": game.planet.atmosphere,
+            "tablesBuildMs": scenery_build_ms,
+        },
     });
+    game.log(session);
+    commands.insert_resource(game);
 }
 
 fn axis(keys: &ButtonInput<KeyCode>, positive: KeyCode, negative: KeyCode) -> f64 {
@@ -1027,6 +1161,23 @@ fn controls(
             PathFrameKind::Inertial => PathFrameKind::Surface,
             PathFrameKind::Surface => PathFrameKind::Inertial,
         };
+        let (frame, t) = (path_frame_name(game.path_frame), game.rocket.time());
+        game.log(json!({ "event": "path-frame", "pathFrame": frame, "simTime": t }));
+    }
+    // The lab's dev panel switches.
+    if keys.just_pressed(KeyCode::F2) {
+        game.debug.wire = !game.debug.wire;
+    }
+    if keys.just_pressed(KeyCode::F3) {
+        game.debug.bounds = !game.debug.bounds;
+    }
+    if keys.just_pressed(KeyCode::F4) {
+        game.debug.colliders = !game.debug.colliders;
+    }
+    if keys.just_pressed(KeyCode::F5) {
+        game.debug.terrain = !game.debug.terrain;
+        let (visible, t) = (game.debug.terrain, game.rocket.time());
+        game.log(json!({ "event": "terrain-visibility", "visible": visible, "simTime": t }));
     }
     if keys.just_pressed(KeyCode::KeyK) {
         game.altitude_agl = !game.altitude_agl;
@@ -1198,6 +1349,9 @@ fn simulate(time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<G
         }
         game.time_rate = if limit > PHYSICS_MAX_RATE { limit } else { 1.0 };
     }
+    Timings::add(&mut game.timings.frame, time.delta_secs_f64() * 1e3);
+    game.timings.frames += 1;
+    let physics_started = Instant::now();
     if !game.paused {
         let mut dt = wall * game.time_rate;
         if let Some(burn) = next_burn {
@@ -1250,6 +1404,10 @@ fn simulate(time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<G
             }
         }
     }
+    Timings::add(
+        &mut game.timings.physics,
+        physics_started.elapsed().as_secs_f64() * 1e3,
+    );
     // A burn starts when its time comes (or is dropped when it has no Δv); it ends at its end
     // time, and the plan continues from the state it left.
     let t = game.rocket.time();
@@ -1364,7 +1522,8 @@ fn update_prediction(game: &mut Game) {
 /// lab/lod's observers: every live part, plus the camera, which also alone decides horizon
 /// culling. The camera splits with the same table, stopping one level above the collision level;
 /// the rocket's own detail stops where its cells would be under 2 px on screen.
-fn terrain(game: Res<Game>, mut ground: ResMut<Ground>, window: Single<&Window>) {
+fn terrain(mut game: ResMut<Game>, mut ground: ResMut<Ground>, window: Single<&Window>) {
+    let started = Instant::now();
     let observers = game
         .live_parts()
         .into_iter()
@@ -1386,6 +1545,8 @@ fn terrain(game: Res<Game>, mut ground: ResMut<Ground>, window: Single<&Window>)
         distance_scale: 1.0,
         horizon_culling: true,
     });
+    Timings::add(&mut game.timings.lod, started.elapsed().as_secs_f64() * 1e3);
+    Timings::add(&mut game.timings.select, ground.0.last_select_ms);
 }
 
 type CameraOnly = (
@@ -1416,6 +1577,7 @@ fn draw(
 ) {
     let game = &mut *game;
     let Some(state) = game.state else { return };
+    let started = Instant::now();
 
     // Camera at the origin, looking at the focus, up as the view state says.
     let (camera_transform, projection) = &mut *camera;
@@ -1518,6 +1680,205 @@ fn draw(
     game.orbits = orbits;
     game.path = path;
     game.plan_path = plan_path;
+    Timings::add(
+        &mut game.timings.draw,
+        started.elapsed().as_secs_f64() * 1e3,
+    );
+}
+
+fn path_frame_name(kind: PathFrameKind) -> &'static str {
+    match kind {
+        PathFrameKind::Inertial => "inertial",
+        PathFrameKind::Surface => "surface",
+    }
+}
+
+/// The lab's debug overlays: white mesh edges, red tile boundaries, the terrain hidden for
+/// profiling, and in green the rocket's collider shapes and each Rapier terrain collider's
+/// triangle edges (read back from the colliders themselves).
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn overlays(
+    mut commands: Commands,
+    mut game: ResMut<Game>,
+    mut ground: ResMut<Ground>,
+    mut lines: ResMut<ColliderLines>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut tiles: Query<&mut Visibility, (With<Tile>, Without<ColliderLine>)>,
+    shapes: Query<(Entity, Has<Wireframe>), With<ColliderShape>>,
+    mut collider_lines: Query<
+        (&mut Transform, &mut Visibility),
+        (With<ColliderLine>, Without<Tile>),
+    >,
+    mut gizmos: Gizmos,
+) {
+    let debug = game.debug;
+    if ground.0.wireframe() != debug.wire {
+        ground.0.set_wireframe(&mut commands, debug.wire);
+    }
+    let visible = if debug.terrain {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut v in &mut tiles {
+        v.set_if_neq(visible);
+    }
+    let eye = game.body_fixed(game.eye);
+    if debug.bounds {
+        let red = overlay(Color::srgb(1.0, 0.2, 0.2));
+        for line in ground.0.boundaries(eye) {
+            gizmos.linestrip(line, red);
+        }
+    }
+    let green = overlay(Color::srgb_u8(0x3d, 0xff, 0x6e));
+    for (entity, wired) in &shapes {
+        if wired != debug.colliders {
+            if debug.colliders {
+                commands
+                    .entity(entity)
+                    .insert((Wireframe, WireframeColor { color: green }));
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<(Wireframe, WireframeColor)>();
+            }
+        }
+    }
+
+    let started = Instant::now();
+    let key = |o: DVec3| [o.x.to_bits(), o.y.to_bits(), o.z.to_bits()];
+    let mut live: HashMap<[u64; 3], DVec3> = HashMap::new();
+    let mut new = Vec::new();
+    for world in game.rocket.contact_worlds() {
+        for tile in world.terrain_colliders() {
+            let k = key(tile.origin);
+            live.insert(k, tile.origin);
+            if debug.colliders && !lines.lines.contains_key(&k) {
+                new.push((k, world.terrain_collider_mesh(tile)));
+            }
+        }
+    }
+    lines.lines.retain(|k, entity| {
+        let keep = live.contains_key(k);
+        if !keep {
+            commands.entity(*entity).despawn();
+        }
+        keep
+    });
+    for (k, (vertices, triangles)) in new {
+        let mesh = Mesh::new(PrimitiveTopology::LineList, Default::default())
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vertices)
+            .with_inserted_indices(Indices::U32(unique_edges(&triangles)));
+        let entity = commands
+            .spawn((
+                ColliderLine,
+                Mesh3d(meshes.add(mesh)),
+                MeshMaterial3d(lines.material.clone()),
+                Transform::from_translation((live[&k] - eye).as_vec3()),
+            ))
+            .id();
+        lines.lines.insert(k, entity);
+    }
+    let line_visibility = if debug.colliders {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for (k, entity) in &lines.lines {
+        if let Ok((mut transform, mut v)) = collider_lines.get_mut(*entity) {
+            transform.translation = (live[k] - eye).as_vec3();
+            v.set_if_neq(line_visibility);
+        }
+    }
+    Timings::add(
+        &mut game.timings.collider,
+        started.elapsed().as_secs_f64() * 1e3,
+    );
+}
+
+/// Each triangle edge once, as line-list indices.
+fn unique_edges(triangles: &[[u32; 3]]) -> Vec<u32> {
+    let mut seen = std::collections::HashSet::new();
+    let mut edges = Vec::new();
+    for [a, b, c] in triangles {
+        for (p, q) in [(*a, *b), (*b, *c), (*c, *a)] {
+            let edge = (p.min(q), p.max(q));
+            if seen.insert(edge) {
+                edges.extend([edge.0, edge.1]);
+            }
+        }
+    }
+    edges
+}
+
+/// The lab's once-a-second `flight-sample`: time, mode, camera, terrain and main-thread timings.
+fn log_sample(mut game: ResMut<Game>, ground: Res<Ground>, window: Single<&Window>) {
+    let game = &mut *game;
+    if game.log.is_none() {
+        return;
+    }
+    let now = Instant::now();
+    let due = game
+        .timings
+        .last_sample
+        .is_none_or(|last| now.duration_since(last).as_secs_f64() >= 1.0);
+    let Some(state) = game.state else { return };
+    if !due {
+        return;
+    }
+    let t = &game.timings;
+    let frames = f64::from(t.frames.max(1));
+    let phase = |p: (f64, f64)| json!({ "mean": p.0 / frames, "max": p.1 });
+    let altitude = (game.focus == Focus::Vessel).then(|| {
+        (game.upper.position - game.positions[game.reference]).length()
+            - game.bodies[game.reference].radius_meters
+    });
+    let sample = json!({
+        "event": "flight-sample",
+        "simTime": game.rocket.time(),
+        "timeRate": game.time_rate,
+        "mode": format!("{:?}", game.rocket.mode()).to_lowercase(),
+        "stage": game.stage,
+        "focus": game.focus_name(),
+        "distance": game.camera.distance,
+        "mapWeight": state.map_weight,
+        "corotation": state.corotation,
+        "cameraSpin": { "body": game.spin.0, "weight": game.spin.1 },
+        "pathFrame": path_frame_name(game.path_frame),
+        "altitude": altitude,
+        "terrainVisible": game.debug.terrain,
+        "scenery": {
+            "atmosphere": game.planet.atmosphere,
+            "clouds": game.planet.atmosphere,
+            "ocean": game.planet.ocean,
+            "width": window.physical_width(),
+            "height": window.physical_height(),
+        },
+        "tiles": ground.0.drawn_count(),
+        "requests": ground.0.last_requests,
+        "queued": ground.0.building_count(),
+        "tileStats": {
+            "cached": ground.0.lod.cached_tile_count(),
+            "cacheBytes": ground.0.lod.cached_mesh_bytes(),
+        },
+        "perf": {
+            "frames": t.frames,
+            "frameMs": phase(t.frame),
+            "physicsMs": phase(t.physics),
+            "lodMs": phase(t.lod),
+            "selectMs": phase(t.select),
+            "colliderMs": phase(t.collider),
+            "drawMs": phase(t.draw),
+        },
+    });
+    game.timings = Timings {
+        last_sample: Some(now),
+        ..Timings::default()
+    };
+    if let Some(log) = game.log.as_mut() {
+        log.write(sample);
+        log.flush();
+    }
 }
 
 /// scenery's shaders in the body-fixed frame: the camera and the Sun for the air pass and the
@@ -1750,6 +2111,7 @@ fn hud(game: Res<Game>, ground: Res<Ground>, mut text: Single<&mut Text, With<Hu
         "\nF1: keys\n"
     };
     let plan = game.plan_text();
+    let on = |b: bool| if b { "on" } else { "off" };
     let focus = match game.focus {
         Focus::Vessel => format!("vessel (reference {})", game.bodies[game.reference].name),
         Focus::Body(i) => game.bodies[i].name.clone(),
@@ -1763,6 +2125,7 @@ fn hud(game: Res<Game>, ground: Res<Ground>, mut text: Single<&mut Text, With<Hu
          focus   {focus}\n\
          camera  {} | map {:.0}% | up {:.0}% | co-rotate {:.0}% {}\n\
          tiles   {} drawn, L{}-L{}, {} building\n\
+         debug   F2 mesh edges {} | F3 tile boundaries {} | F4 colliders {} | F5 terrain {}{}\n\
          planet  {}{help}",
         mission_time(rocket.time()),
         rate_text(game.time_rate),
@@ -1783,6 +2146,15 @@ fn hud(game: Res<Game>, ground: Res<Ground>, mut text: Single<&mut Text, With<Hu
         ground.0.levels.0,
         ground.0.levels.1,
         ground.0.building_count(),
+        on(game.debug.wire),
+        on(game.debug.bounds),
+        on(game.debug.colliders),
+        on(game.debug.terrain),
+        if game.log.is_some() {
+            " | log lab-log/flight.jsonl"
+        } else {
+            ""
+        },
         // The default font has no middle dot or superscripts.
         game.planet.planet.label.replace('·', "|").replace('²', "2"),
     );
