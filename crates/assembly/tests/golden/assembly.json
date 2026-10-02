@@ -1,0 +1,347 @@
+[
+  {
+    "craft": {
+      "version": 1,
+      "name": "Two-stage test rocket",
+      "parts": [
+        {
+          "id": "p1",
+          "definitionId": "pod",
+          "fuelKg": 0,
+          "stage": null,
+          "attachment": null
+        },
+        {
+          "id": "p2",
+          "definitionId": "tank-small",
+          "fuelKg": 700,
+          "stage": null,
+          "attachment": {
+            "parentId": "p1",
+            "parentNodeId": "bottom",
+            "nodeId": "top"
+          }
+        },
+        {
+          "id": "p3",
+          "definitionId": "engine-small",
+          "fuelKg": 0,
+          "stage": 1,
+          "attachment": {
+            "parentId": "p2",
+            "parentNodeId": "bottom",
+            "nodeId": "top"
+          }
+        },
+        {
+          "id": "p4",
+          "definitionId": "decoupler",
+          "fuelKg": 0,
+          "stage": 1,
+          "attachment": {
+            "parentId": "p3",
+            "parentNodeId": "bottom",
+            "nodeId": "top"
+          }
+        },
+        {
+          "id": "p5",
+          "definitionId": "tank-large",
+          "fuelKg": 2800,
+          "stage": null,
+          "attachment": {
+            "parentId": "p4",
+            "parentNodeId": "bottom",
+            "nodeId": "top"
+          }
+        },
+        {
+          "id": "p6",
+          "definitionId": "engine-large",
+          "fuelKg": 0,
+          "stage": 0,
+          "attachment": {
+            "parentId": "p5",
+            "parentNodeId": "bottom",
+            "nodeId": "top"
+          }
+        }
+      ]
+    },
+    "rootId": "p1",
+    "connections": [
+      {
+        "a": "p1",
+        "nodeA": "bottom",
+        "b": "p2",
+        "nodeB": "top"
+      },
+      {
+        "a": "p2",
+        "nodeA": "bottom",
+        "b": "p3",
+        "nodeB": "top"
+      },
+      {
+        "a": "p3",
+        "nodeA": "bottom",
+        "b": "p4",
+        "nodeB": "top"
+      },
+      {
+        "a": "p4",
+        "nodeA": "bottom",
+        "b": "p5",
+        "nodeB": "top"
+      },
+      {
+        "a": "p5",
+        "nodeA": "bottom",
+        "b": "p6",
+        "nodeB": "top"
+      }
+    ],
+    "summary": {
+      "dryMassKg": 1090,
+      "fuelKg": 3500,
+      "massKg": 4590,
+      "center": [
+        0,
+        -4.427995642701525,
+        0
+      ]
+    },
+    "parts": [
+      {
+        "id": "p1",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inertia": [
+          0.3109895833333334,
+          0.1953125,
+          0.3109895833333334
+        ]
+      },
+      {
+        "id": "p2",
+        "position": [
+          0,
+          -1.6,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inertia": [
+          0.3109895833333334,
+          0.1953125,
+          0.3109895833333334
+        ]
+      },
+      {
+        "id": "p3",
+        "position": [
+          0,
+          -2.8500000000000005,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inertia": [
+          0.16515625,
+          0.1953125,
+          0.16515625
+        ]
+      },
+      {
+        "id": "p4",
+        "position": [
+          0,
+          -3.4500000000000006,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inertia": [
+          0.10515625,
+          0.1953125,
+          0.10515625
+        ]
+      },
+      {
+        "id": "p5",
+        "position": [
+          0,
+          -5.4,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inertia": [
+          1.17765625,
+          0.1953125,
+          1.17765625
+        ]
+      },
+      {
+        "id": "p6",
+        "position": [
+          0,
+          -7.8,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inertia": [
+          0.21765625,
+          0.1953125,
+          0.21765625
+        ]
+      }
+    ],
+    "free": [
+      {
+        "partId": "p6",
+        "nodeId": "bottom",
+        "position": [
+          0,
+          -8.4,
+          0
+        ]
+      }
+    ],
+    "fuelSources": {
+      "p3": [
+        "p2"
+      ],
+      "p6": [
+        "p5"
+      ]
+    }
+  },
+  {
+    "craft": {
+      "version": 1,
+      "name": "Untitled rocket",
+      "parts": [
+        {
+          "id": "p1",
+          "definitionId": "pod",
+          "fuelKg": 0,
+          "stage": null,
+          "attachment": null
+        },
+        {
+          "id": "p2",
+          "definitionId": "tank-small",
+          "fuelKg": 700,
+          "stage": null,
+          "attachment": {
+            "parentId": "p1",
+            "parentNodeId": "bottom",
+            "nodeId": "bottom"
+          }
+        }
+      ]
+    },
+    "rootId": "p1",
+    "connections": [
+      {
+        "a": "p1",
+        "nodeA": "bottom",
+        "b": "p2",
+        "nodeB": "bottom"
+      }
+    ],
+    "summary": {
+      "dryMassKg": 420,
+      "fuelKg": 700,
+      "massKg": 1120,
+      "center": [
+        0,
+        -1.1714285714285715,
+        0
+      ]
+    },
+    "parts": [
+      {
+        "id": "p1",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inertia": [
+          0.3109895833333334,
+          0.1953125,
+          0.3109895833333334
+        ]
+      },
+      {
+        "id": "p2",
+        "position": [
+          0,
+          -1.6,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "inertia": [
+          0.3109895833333334,
+          0.1953125,
+          0.3109895833333334
+        ]
+      }
+    ],
+    "free": [
+      {
+        "partId": "p2",
+        "nodeId": "top",
+        "position": [
+          0,
+          -2.4000000000000004,
+          0
+        ]
+      }
+    ],
+    "fuelSources": {}
+  }
+]

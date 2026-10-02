@@ -29,6 +29,7 @@ void-scenery = { path = "crates/scenery" }
 void-sas = { path = "crates/sas" }
 void-navball = { path = "crates/navball" }
 void-view = { path = "crates/view" }
+void-assembly = { path = "crates/assembly" }
 
 # Bevy is slow unoptimised; our own crates stay quick to rebuild.
 [profile.dev]

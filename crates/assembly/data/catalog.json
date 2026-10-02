@@ -1,0 +1,288 @@
+[
+  {
+    "id": "pod",
+    "name": "指令艙",
+    "category": "command",
+    "description": "飛行器的根零件與控制來源",
+    "dryMassKg": 300,
+    "height": 1.6,
+    "radius": 0.625,
+    "shape": "cone",
+    "color": "#e5e9ec",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.8,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "command"
+      }
+    ]
+  },
+  {
+    "id": "tank-small",
+    "name": "短燃料箱",
+    "category": "tank",
+    "description": "700 kg 推進劑 · 適合上面級",
+    "dryMassKg": 120,
+    "height": 1.6,
+    "radius": 0.625,
+    "shape": "cylinder",
+    "color": "#cbd4dc",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.8,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1
+      },
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.8,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "tank",
+        "capacityKg": 700
+      }
+    ]
+  },
+  {
+    "id": "tank-large",
+    "name": "長燃料箱",
+    "category": "tank",
+    "description": "2,800 kg 推進劑 · 適合助推級",
+    "dryMassKg": 300,
+    "height": 3.6,
+    "radius": 0.625,
+    "shape": "cylinder",
+    "color": "#cbd4dc",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          1.8,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1
+      },
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -1.8,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "tank",
+        "capacityKg": 2800
+      }
+    ]
+  },
+  {
+    "id": "engine-small",
+    "name": "上面級引擎",
+    "category": "engine",
+    "description": "30 kN · 真空 Isp 340 s",
+    "dryMassKg": 80,
+    "height": 0.9,
+    "radius": 0.625,
+    "shape": "cylinder",
+    "color": "#677887",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.45,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1
+      },
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.45,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "engine",
+        "thrustNewtons": 30000,
+        "ispSeconds": 340,
+        "direction": [
+          0,
+          1,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "id": "engine-large",
+    "name": "助推級引擎",
+    "category": "engine",
+    "description": "90 kN · 真空 Isp 310 s",
+    "dryMassKg": 240,
+    "height": 1.2,
+    "radius": 0.625,
+    "shape": "cylinder",
+    "color": "#677887",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.6,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1
+      },
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.6,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "engine",
+        "thrustNewtons": 90000,
+        "ispSeconds": 310,
+        "direction": [
+          0,
+          1,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "id": "decoupler",
+    "name": "堆疊分離器",
+    "category": "decoupler",
+    "description": "斷開 top 接點 · 阻擋跨級供油",
+    "dryMassKg": 50,
+    "height": 0.3,
+    "radius": 0.625,
+    "shape": "cylinder",
+    "color": "#d7aa58",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.15,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1
+      },
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.15,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "decoupler",
+        "nodeId": "top",
+        "impulseNs": 100
+      }
+    ]
+  }
+]

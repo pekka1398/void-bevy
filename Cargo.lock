@@ -5443,6 +5443,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-assembly"
+version = "0.0.0"
+dependencies = [
+ "glam 0.32.1",
+ "rapier3d",
+ "serde",
+ "serde_json",
+ "void-math",
+]
+
+[[package]]
+name = "void-assembly-lab"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "glam 0.32.1",
+ "serde",
+ "serde_json",
+ "void-assembly",
+]
+
+[[package]]
 name = "void-frames"
 version = "0.0.0"
 dependencies = [
