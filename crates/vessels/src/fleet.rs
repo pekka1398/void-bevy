@@ -11,8 +11,8 @@ use void_landing::{
     EncounterPhysicsGate, EncounterRanges, FrameState, Piece, PieceMass, PlanetFrame, SimpleShape,
 };
 use void_orbit::{
-    AdvanceOutcome, Control, Ephemeris, ForceControl, PropagationRun, Tolerances, VesselPropagator,
-    VesselState, body_orientation,
+    AdvanceOutcome, Control, EphemerisSource, ForceControl, PropagationRun, Tolerances,
+    VesselPropagator, VesselState, body_orientation,
 };
 use void_rotation::{Mat3, rotation_step};
 use void_sas::{SAS_TUNING, SasPhase, StabilityAssist};
@@ -143,7 +143,7 @@ enum SceneFrame {
     Ground(Box<PlanetFrame>),
 }
 impl ContactFrame for SceneFrame {
-    fn acceleration(&self, e: &Ephemeris, t: f64, r: DVec3, v: DVec3) -> DVec3 {
+    fn acceleration(&self, e: &dyn EphemerisSource, t: f64, r: DVec3, v: DVec3) -> DVec3 {
         match self {
             Self::Bubble(f) => f.acceleration(e, t, r, v),
             Self::Ground(f) => f.acceleration(e, t, r, v),
@@ -188,7 +188,7 @@ struct Sas {
 }
 /// Fleet owns the part graph. Every connected vessel has exactly one physics owner.
 pub struct Fleet {
-    pub ephemeris: Ephemeris,
+    pub ephemeris: Box<dyn EphemerisSource>,
     pub options: FleetOptions,
     pub events: Vec<FleetEvent>,
     propagator: VesselPropagator,
@@ -222,7 +222,7 @@ fn quat64(q: rapier3d::math::Rotation) -> DQuat {
 }
 impl Fleet {
     pub fn new(
-        mut ephemeris: Ephemeris,
+        mut ephemeris: impl EphemerisSource + 'static,
         time: f64,
         grounds: Vec<GroundSpec>,
         options: FleetOptions,
@@ -270,7 +270,7 @@ impl Fleet {
         let propagator = VesselPropagator::new(&ephemeris, options.tolerances);
         ephemeris.extend_to(time + options.step_seconds);
         Self {
-            ephemeris,
+            ephemeris: Box::new(ephemeris),
             options,
             events: vec![],
             propagator,

@@ -11,7 +11,7 @@ use void_landing::{
     ContactWorldOptions, FrameState, LandingPlanet, PlanetFrame, aurelia, level_for_tile_size,
     pebble, planet_ephemeris,
 };
-use void_orbit::{AdvanceOutcome, Ephemeris, PropagationRun, VesselPropagator, VesselState};
+use void_orbit::{AdvanceOutcome, EphemerisSource, PropagationRun, VesselPropagator, VesselState};
 use void_vessels::*;
 
 fn check(name: &str, ok: bool, detail: String) {
@@ -30,7 +30,7 @@ fn sol_fleet() -> (Fleet, usize) {
 
 /// A 400 km circular orbit in the ecliptic plane about Aurelia, offset in radial / along-track /
 /// normal axes (m) with a velocity change in the same axes (m/s).
-fn leo(e: &Ephemeris, aurelia: usize, offset: DVec3, dv: DVec3) -> FrameState {
+fn leo(e: &dyn EphemerisSource, aurelia: usize, offset: DVec3, dv: DVec3) -> FrameState {
     let (c, v) = e.body_state(BodyId(aurelia), 0.0);
     let body = &e.bodies()[aurelia];
     let r = body.radius_meters + 400_000.0;
@@ -47,7 +47,7 @@ struct Reference {
     run: PropagationRun,
 }
 impl Reference {
-    fn new(e: &Ephemeris, s: FrameState, t0: f64) -> Self {
+    fn new(e: &dyn EphemerisSource, s: FrameState, t0: f64) -> Self {
         Self {
             propagator: VesselPropagator::new(e, FleetOptions::default().tolerances),
             run: PropagationRun::new(VesselState {
@@ -58,7 +58,7 @@ impl Reference {
             }),
         }
     }
-    fn at(&mut self, e: &mut Ephemeris, t: f64) -> FrameState {
+    fn at(&mut self, e: &mut dyn EphemerisSource, t: f64) -> FrameState {
         let outcome = self
             .propagator
             .advance(e, &mut self.run, t, 1_000_000, None, None);

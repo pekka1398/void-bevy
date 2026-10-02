@@ -2,8 +2,8 @@
 //! `lab/landing/src/physics/PlanetFrame.ts`.
 
 use glam::DVec3;
-use void_frames::{BodyId, BodyStates};
-use void_orbit::{CelestialBody, Ephemeris, body_orientation};
+use void_frames::BodyId;
+use void_orbit::{CelestialBody, EphemerisSource, body_orientation};
 
 /// A position and velocity in one frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -18,7 +18,7 @@ pub struct FrameState {
 pub trait ContactFrame {
     /// Acceleration of a free particle at frame position r and velocity v at time t, contacts
     /// excluded. The ephemeris covers t.
-    fn acceleration(&self, ephemeris: &Ephemeris, t: f64, r: DVec3, v: DVec3) -> DVec3;
+    fn acceleration(&self, ephemeris: &dyn EphemerisSource, t: f64, r: DVec3, v: DVec3) -> DVec3;
     /// The frame's own angular velocity in its axes, rad/s (zero for a frame that does not turn).
     fn spin(&self) -> DVec3;
 }
@@ -49,7 +49,7 @@ fn to_ecliptic(axes: &[DVec3; 3], a: DVec3) -> DVec3 {
 }
 
 impl PlanetFrame {
-    pub fn new(ephemeris: &Ephemeris, body_index: usize) -> Self {
+    pub fn new(ephemeris: &dyn EphemerisSource, body_index: usize) -> Self {
         let body = ephemeris
             .bodies()
             .get(body_index)
@@ -60,7 +60,12 @@ impl PlanetFrame {
     }
 
     /// Barycentric inertial state to body-fixed: r = Rᵀ (p − c), v = Rᵀ (u − c′) − ω × r.
-    pub fn to_body_fixed(&self, ephemeris: &Ephemeris, t: f64, inertial: FrameState) -> FrameState {
+    pub fn to_body_fixed(
+        &self,
+        ephemeris: &dyn EphemerisSource,
+        t: f64,
+        inertial: FrameState,
+    ) -> FrameState {
         let axes = body_orientation(&self.body.rotation, t);
         let (cp, cv) = ephemeris.body_state(BodyId(self.body.index), t);
         let (dp, du) = (inertial.position - cp, inertial.velocity - cv);
@@ -74,7 +79,12 @@ impl PlanetFrame {
     }
 
     /// Body-fixed state to barycentric inertial: p = c + R r, u = c′ + R (v + ω × r).
-    pub fn to_inertial(&self, ephemeris: &Ephemeris, t: f64, local: FrameState) -> FrameState {
+    pub fn to_inertial(
+        &self,
+        ephemeris: &dyn EphemerisSource,
+        t: f64,
+        local: FrameState,
+    ) -> FrameState {
         let axes = body_orientation(&self.body.rotation, t);
         let (cp, cv) = ephemeris.body_state(BodyId(self.body.index), t);
         let (r, w) = (local.position, self.omega);
@@ -92,7 +102,7 @@ impl PlanetFrame {
 }
 
 impl ContactFrame for PlanetFrame {
-    fn acceleration(&self, ephemeris: &Ephemeris, t: f64, r: DVec3, v: DVec3) -> DVec3 {
+    fn acceleration(&self, ephemeris: &dyn EphemerisSource, t: f64, r: DVec3, v: DVec3) -> DVec3 {
         let b = &self.body;
         let r2 = r.x * r.x + r.y * r.y + r.z * r.z;
         let rl = r2.sqrt();

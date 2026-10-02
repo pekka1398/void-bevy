@@ -2,7 +2,7 @@ use glam::DVec3;
 use std::cell::RefCell;
 use void_landing::{ContactFrame, FrameState};
 use void_orbit::{
-    AdvanceOutcome, Ephemeris, PropagationRun, Tolerances, VesselPropagator, VesselState,
+    AdvanceOutcome, EphemerisSource, PropagationRun, Tolerances, VesselPropagator, VesselState,
 };
 
 /// Nonrotating contact frame following a coasting orbit. The contact owner prepares
@@ -14,7 +14,7 @@ pub struct FreeFallFrame {
 }
 impl FreeFallFrame {
     pub fn new(
-        ephemeris: &Ephemeris,
+        ephemeris: &dyn EphemerisSource,
         tolerances: Tolerances,
         time: f64,
         anchor: FrameState,
@@ -37,13 +37,13 @@ impl FreeFallFrame {
     }
     /// Query a current or future origin, propagating it on demand as in the TS lab.
     /// The mutable ephemeris is explicit because propagation extends its history.
-    pub fn origin_at(&mut self, ephemeris: &mut Ephemeris, time: f64) -> FrameState {
+    pub fn origin_at(&mut self, ephemeris: &mut dyn EphemerisSource, time: f64) -> FrameState {
         self.advance_origin(ephemeris, time);
         self.origin(time)
     }
     pub fn to_inertial_at(
         &mut self,
-        ephemeris: &mut Ephemeris,
+        ephemeris: &mut dyn EphemerisSource,
         time: f64,
         local: FrameState,
     ) -> FrameState {
@@ -52,14 +52,14 @@ impl FreeFallFrame {
     }
     pub fn from_inertial_at(
         &mut self,
-        ephemeris: &mut Ephemeris,
+        ephemeris: &mut dyn EphemerisSource,
         time: f64,
         inertial: FrameState,
     ) -> FrameState {
         self.origin_at(ephemeris, time);
         self.from_inertial(time, inertial)
     }
-    pub fn advance_origin(&mut self, ephemeris: &mut Ephemeris, time: f64) {
+    pub fn advance_origin(&mut self, ephemeris: &mut dyn EphemerisSource, time: f64) {
         assert!(time >= self.run.time, "free fall: time reversed");
         if time == self.run.time {
             return;
@@ -106,7 +106,7 @@ impl FreeFallFrame {
     }
 }
 impl ContactFrame for FreeFallFrame {
-    fn acceleration(&self, ephemeris: &Ephemeris, t: f64, r: DVec3, _: DVec3) -> DVec3 {
+    fn acceleration(&self, ephemeris: &dyn EphemerisSource, t: f64, r: DVec3, _: DVec3) -> DVec3 {
         let o = self.origin(t).position;
         let mut p = self.propagator.borrow_mut();
         let g0 = p.gravity_at(ephemeris, t, o);

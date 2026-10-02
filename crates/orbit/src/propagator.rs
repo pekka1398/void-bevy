@@ -5,7 +5,7 @@ use std::f64::consts::TAU;
 use glam::DVec3;
 
 use crate::dopri5::Dopri5;
-use crate::ephemeris::Ephemeris;
+use crate::ephemeris::EphemerisSource;
 use crate::trajectory::Trajectory;
 
 /// Per-step absolute error bounds. Mass needs none: its derivative is constant per leg.
@@ -253,7 +253,7 @@ struct Field {
 
 impl Field {
     /// Requires `positions` at t; includes the ephemeris origin's translational inertial term.
-    fn gravity(&self, ephemeris: &Ephemeris, t: f64, x: f64, yy: f64, z: f64) -> DVec3 {
+    fn gravity(&self, ephemeris: &dyn EphemerisSource, t: f64, x: f64, yy: f64, z: f64) -> DVec3 {
         let (mut ax, mut ay, mut az) = (0.0, 0.0, 0.0);
         for (i, p) in self.positions.iter().enumerate() {
             let (dx, dyy, dz) = (p.x - x, p.y - yy, p.z - z);
@@ -278,7 +278,13 @@ impl Field {
         DVec3::new(ax - origin.x, ay - origin.y, az - origin.z)
     }
 
-    fn evaluate(&mut self, ephemeris: &Ephemeris, t: f64, y: &[f64; DIM], dy: &mut [f64; DIM]) {
+    fn evaluate(
+        &mut self,
+        ephemeris: &dyn EphemerisSource,
+        t: f64,
+        y: &[f64; DIM],
+        dy: &mut [f64; DIM],
+    ) {
         let relative = matches!(
             self.control,
             Some(Control::Thrust(ThrustControl {
@@ -372,7 +378,12 @@ impl Field {
     }
 
     /// The body whose surface contains the point at t.
-    fn body_containing(&mut self, ephemeris: &Ephemeris, t: f64, p: DVec3) -> Option<usize> {
+    fn body_containing(
+        &mut self,
+        ephemeris: &dyn EphemerisSource,
+        t: f64,
+        p: DVec3,
+    ) -> Option<usize> {
         ephemeris.positions_at(t, &mut self.positions);
         self.positions
             .iter()
@@ -392,7 +403,7 @@ pub struct VesselPropagator {
 }
 
 impl VesselPropagator {
-    pub fn new(ephemeris: &Ephemeris, tolerances: Tolerances) -> Self {
+    pub fn new(ephemeris: &dyn EphemerisSource, tolerances: Tolerances) -> Self {
         assert!(
             tolerances.position_meters > 0.0 && tolerances.velocity_meters_per_second > 0.0,
             "vessel propagator: tolerances {tolerances:?}"
@@ -430,7 +441,7 @@ impl VesselPropagator {
     /// Unit thrust direction the law gives for a state at t.
     pub fn thrust_direction(
         &mut self,
-        ephemeris: &Ephemeris,
+        ephemeris: &dyn EphemerisSource,
         law: &AttitudeLaw,
         t: f64,
         position: DVec3,
@@ -449,7 +460,12 @@ impl VesselPropagator {
 
     /// Acceleration in the ephemeris frame at t: every body's point mass plus its J2, minus the
     /// coordinate origin's acceleration, as `advance` integrates. The ephemeris must cover t.
-    pub fn gravity_at(&mut self, ephemeris: &Ephemeris, t: f64, position: DVec3) -> DVec3 {
+    pub fn gravity_at(
+        &mut self,
+        ephemeris: &dyn EphemerisSource,
+        t: f64,
+        position: DVec3,
+    ) -> DVec3 {
         ephemeris.positions_at(t, &mut self.field.positions);
         self.field
             .gravity(ephemeris, t, position.x, position.y, position.z)
@@ -459,7 +475,7 @@ impl VesselPropagator {
     /// a surface impact or after `max_steps` accepted steps. Every accepted step end goes to `sink`.
     pub fn advance(
         &mut self,
-        ephemeris: &mut Ephemeris,
+        ephemeris: &mut dyn EphemerisSource,
         run: &mut PropagationRun,
         t_end: f64,
         max_steps: u64,
@@ -597,7 +613,7 @@ impl VesselPropagator {
     #[allow(clippy::too_many_arguments)]
     fn scan_for_impact(
         &mut self,
-        ephemeris: &Ephemeris,
+        ephemeris: &dyn EphemerisSource,
         t0: f64,
         y0: &[f64; DIM],
         dy0: &[f64; DIM],
@@ -631,7 +647,7 @@ impl VesselPropagator {
     /// the authority.
     fn resolve_impact(
         &mut self,
-        ephemeris: &Ephemeris,
+        ephemeris: &dyn EphemerisSource,
         run: &mut PropagationRun,
         body: usize,
         accepted_step: f64,

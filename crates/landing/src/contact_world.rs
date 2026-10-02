@@ -25,7 +25,7 @@ use rapier3d::math::{Rotation, Vector};
 use rapier3d::prelude::*;
 use void_lod::{OrderedMap, TileMeshOptions, build_tile_indices, build_tile_mesh, tiles_around};
 use void_math::hypot;
-use void_orbit::Ephemeris;
+use void_orbit::EphemerisSource;
 use void_rotation::{Mat3, fictitious_torque, rotation_step};
 use void_terrain::Terrain;
 
@@ -276,7 +276,7 @@ impl<F: ContactFrame> ContactWorld<F> {
         options: ContactWorldOptions,
         time: f64,
         origin: DVec3,
-        ephemeris: &mut Ephemeris,
+        ephemeris: &mut dyn EphemerisSource,
     ) -> Self {
         assert!(
             options.step_seconds > 0.0
@@ -373,7 +373,7 @@ impl<F: ContactFrame> ContactWorld<F> {
     /// before now (thrust already running), for the half-step velocity.
     pub fn add_body(
         &mut self,
-        ephemeris: &Ephemeris,
+        ephemeris: &dyn EphemerisSource,
         spec: &ContactBodySpec,
         state: FrameState,
         rotation: DQuat,
@@ -505,7 +505,7 @@ impl<F: ContactFrame> ContactWorld<F> {
     /// ground reads 0, not a dt / 2. A sleeping body is at rest in the frame.
     pub fn state(
         &self,
-        ephemeris: &Ephemeris,
+        ephemeris: &dyn EphemerisSource,
         handle: RigidBodyHandle,
         extra: DVec3,
     ) -> FrameState {
@@ -661,7 +661,7 @@ impl<F: ContactFrame> ContactWorld<F> {
     /// On-rails time: move the clock without stepping Rapier. Only for a world whose bodies are all
     /// asleep: at rest in the body-fixed frame, they stay where they are while the planet turns them
     /// through space.
-    pub fn idle_to(&mut self, ephemeris: &mut Ephemeris, time: f64) {
+    pub fn idle_to(&mut self, ephemeris: &mut dyn EphemerisSource, time: f64) {
         assert!(
             self.asleep(),
             "contact world: a body is awake; only resting worlds go on rails"
@@ -675,7 +675,11 @@ impl<F: ContactFrame> ContactWorld<F> {
         self.time = time;
     }
 
-    pub fn step(&mut self, ephemeris: &mut Ephemeris, mut extra: Option<ExtraAcceleration<'_>>) {
+    pub fn step(
+        &mut self,
+        ephemeris: &mut dyn EphemerisSource,
+        mut extra: Option<ExtraAcceleration<'_>>,
+    ) {
         let dt = self.options.step_seconds;
         ephemeris.extend_to(self.time + dt);
         let ephemeris = &*ephemeris;

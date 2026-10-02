@@ -190,8 +190,8 @@ impl Ephemeris {
     }
 
     /// Acceleration of this coordinate origin, subtracted by the vessel propagator. A plain
-    /// barycentric ephemeris is inertial; lab/multiscale's FrameEphemeris is not, and will make
-    /// this a trait when it is ported.
+    /// barycentric ephemeris is inertial; FrameEphemeris supplies the moving-origin term
+    /// through EphemerisSource.
     pub fn frame_acceleration_at(&self, _t: f64) -> DVec3 {
         DVec3::ZERO
     }
@@ -363,5 +363,95 @@ impl BodyStates for Ephemeris {
         );
         let (basis, left, right) = self.bracket(t);
         Self::interpolate(&basis, left, right, body.0, true)
+    }
+}
+
+/// Source of body states in inertial axes, optionally with an accelerating origin.
+pub trait EphemerisSource: BodyStates {
+    fn bodies(&self) -> &[CelestialBody];
+    fn step_seconds(&self) -> f64;
+    fn start_time(&self) -> f64;
+    fn end_time(&self) -> f64;
+    fn retained_bytes(&self) -> usize;
+    fn extend_to(&mut self, t: f64);
+    fn forget_before(&mut self, t: f64);
+    fn states_at(&self, t: f64, positions: &mut [DVec3], velocities: Option<&mut [DVec3]>);
+    fn positions_at(&self, t: f64, positions: &mut [DVec3]);
+    fn body_position(&self, body: usize, t: f64) -> DVec3;
+    fn frame_acceleration_at(&self, t: f64) -> DVec3;
+}
+impl EphemerisSource for Ephemeris {
+    fn bodies(&self) -> &[CelestialBody] {
+        Ephemeris::bodies(self)
+    }
+    fn step_seconds(&self) -> f64 {
+        Ephemeris::step_seconds(self)
+    }
+    fn start_time(&self) -> f64 {
+        Ephemeris::start_time(self)
+    }
+    fn end_time(&self) -> f64 {
+        Ephemeris::end_time(self)
+    }
+    fn retained_bytes(&self) -> usize {
+        Ephemeris::retained_bytes(self)
+    }
+    fn extend_to(&mut self, t: f64) {
+        Ephemeris::extend_to(self, t)
+    }
+    fn forget_before(&mut self, t: f64) {
+        Ephemeris::forget_before(self, t)
+    }
+    fn states_at(&self, t: f64, positions: &mut [DVec3], velocities: Option<&mut [DVec3]>) {
+        Ephemeris::states_at(self, t, positions, velocities)
+    }
+    fn positions_at(&self, t: f64, positions: &mut [DVec3]) {
+        Ephemeris::positions_at(self, t, positions)
+    }
+    fn body_position(&self, body: usize, t: f64) -> DVec3 {
+        Ephemeris::body_position(self, body, t)
+    }
+    fn frame_acceleration_at(&self, t: f64) -> DVec3 {
+        Ephemeris::frame_acceleration_at(self, t)
+    }
+}
+impl BodyStates for Box<dyn EphemerisSource> {
+    fn body_state(&self, body: BodyId, t: f64) -> (DVec3, DVec3) {
+        (**self).body_state(body, t)
+    }
+}
+impl EphemerisSource for Box<dyn EphemerisSource> {
+    fn bodies(&self) -> &[CelestialBody] {
+        (**self).bodies()
+    }
+    fn step_seconds(&self) -> f64 {
+        (**self).step_seconds()
+    }
+    fn start_time(&self) -> f64 {
+        (**self).start_time()
+    }
+    fn end_time(&self) -> f64 {
+        (**self).end_time()
+    }
+    fn retained_bytes(&self) -> usize {
+        (**self).retained_bytes()
+    }
+    fn extend_to(&mut self, t: f64) {
+        (**self).extend_to(t)
+    }
+    fn forget_before(&mut self, t: f64) {
+        (**self).forget_before(t)
+    }
+    fn states_at(&self, t: f64, positions: &mut [DVec3], velocities: Option<&mut [DVec3]>) {
+        (**self).states_at(t, positions, velocities)
+    }
+    fn positions_at(&self, t: f64, positions: &mut [DVec3]) {
+        (**self).positions_at(t, positions)
+    }
+    fn body_position(&self, body: usize, t: f64) -> DVec3 {
+        (**self).body_position(body, t)
+    }
+    fn frame_acceleration_at(&self, t: f64) -> DVec3 {
+        (**self).frame_acceleration_at(t)
     }
 }
