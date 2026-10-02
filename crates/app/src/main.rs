@@ -18,7 +18,6 @@ use bevy::camera::Hdr;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
-use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::pbr::wireframe::{Wireframe, WireframeColor, WireframePlugin};
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
@@ -28,7 +27,6 @@ use bevy::render::settings::WgpuSettings;
 use bevy::render::view::Msaa;
 use glam::{DMat3, DQuat, DVec3};
 use serde_json::json;
-use std::collections::HashMap;
 use std::time::Instant;
 use void_app::aero_field::RocketAir;
 use void_app::air::{AirSettings, AirTextures, noise_volume_image, weather_image};
@@ -43,6 +41,7 @@ use void_app::map::{
     spawn_map_labels,
 };
 use void_app::navball::{Navball, NavballLabel, draw_navball, spawn_navball};
+use void_app::overlay::{ColliderLine, ColliderLines, DebugView};
 use void_app::parts::{ColliderShape, spawn_shape};
 use void_app::scenery::{
     GroundMaterial, GroundUniforms, SceneryPlugin, StarMaterial, star_mesh, table_image,
@@ -778,18 +777,6 @@ impl Game {
 #[derive(Resource)]
 struct Ground(TileField<GroundMaterial>);
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct DebugView {
-    /// White triangle edges of the drawn terrain.
-    wire: bool,
-    /// Red tile boundaries.
-    bounds: bool,
-    /// Green colliders: Rapier's terrain triangles and the rocket's collider shapes.
-    colliders: bool,
-    /// Draw the terrain (off for profiling: LOD selection and builds keep running).
-    terrain: bool,
-}
-
 /// Main-thread timings since the last log sample, ms: (sum, max).
 #[derive(Default)]
 struct Timings {
@@ -811,15 +798,6 @@ impl Timings {
 }
 
 /// Green edges of the terrain triangles each loaded Rapier collider holds, by tile origin.
-#[derive(Resource)]
-struct ColliderLines {
-    lines: HashMap<[u64; 3], Entity>,
-    material: Handle<StandardMaterial>,
-}
-
-#[derive(Component)]
-struct ColliderLine;
-
 /// scenery's shading: the ground material's uniforms and the star field's material.
 #[derive(Resource)]
 struct Scenery {
@@ -909,10 +887,7 @@ fn new_game(planet_id: &str, terrain: Option<&str>) -> Game {
         velocities: vec![DVec3::ZERO; n],
         started: std::time::Instant::now(),
         help: false,
-        debug: DebugView {
-            terrain: true,
-            ..default()
-        },
+        debug: DebugView::default(),
         log: LabLog::open("flight"),
         timings: Timings::default(),
         sas: StabilityAssist::new(STEERING_TORQUE, SAS_TUNING),
@@ -1034,14 +1009,11 @@ fn setup(
     let scenery_build_ms = scenery_started.elapsed().as_secs_f64() * 1e3;
     let lod_options = field.lod.options.clone();
     commands.insert_resource(Ground(field));
-    commands.insert_resource(ColliderLines {
-        lines: HashMap::new(),
-        material: materials.add(StandardMaterial {
-            base_color: overlay(Color::srgb_u8(0x3d, 0xff, 0x6e)),
-            unlit: true,
-            ..default()
-        }),
-    });
+    commands.insert_resource(ColliderLines::new(materials.add(StandardMaterial {
+        base_color: overlay(Color::srgb_u8(0x3d, 0xff, 0x6e)),
+        unlit: true,
+        ..default()
+    })));
     // The star catalogue is inertial (ecliptic axes), even while the planet spins.
     let (star_positions, star_colors) = generate_stars(&DEFAULT_STARS);
     let stars = star_materials.add(StarMaterial { brightness: 0.08 });
@@ -2022,69 +1994,18 @@ fn overlays(
     }
 
     let started = Instant::now();
-    let key = |o: DVec3| [o.x.to_bits(), o.y.to_bits(), o.z.to_bits()];
-    let mut live: HashMap<[u64; 3], DVec3> = HashMap::new();
-    let mut new = Vec::new();
-    for world in game.rocket.contact_worlds() {
-        for tile in world.terrain_colliders() {
-            let k = key(tile.origin);
-            live.insert(k, tile.origin);
-            if debug.colliders && !lines.lines.contains_key(&k) {
-                new.push((k, world.terrain_collider_mesh(tile)));
-            }
-        }
-    }
-    lines.lines.retain(|k, entity| {
-        let keep = live.contains_key(k);
-        if !keep {
-            commands.entity(*entity).despawn();
-        }
-        keep
-    });
-    for (k, (vertices, triangles)) in new {
-        let mesh = Mesh::new(PrimitiveTopology::LineList, Default::default())
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vertices)
-            .with_inserted_indices(Indices::U32(unique_edges(&triangles)));
-        let entity = commands
-            .spawn((
-                ColliderLine,
-                Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(lines.material.clone()),
-                Transform::from_translation((live[&k] - eye).as_vec3()),
-            ))
-            .id();
-        lines.lines.insert(k, entity);
-    }
-    let line_visibility = if debug.colliders {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
-    for (k, entity) in &lines.lines {
-        if let Ok((mut transform, mut v)) = collider_lines.get_mut(*entity) {
-            transform.translation = (live[k] - eye).as_vec3();
-            v.set_if_neq(line_visibility);
-        }
-    }
+    lines.sync(
+        &mut commands,
+        &mut meshes,
+        &mut collider_lines,
+        &game.rocket.contact_worlds(),
+        eye,
+        debug.colliders,
+    );
     Timings::add(
         &mut game.timings.collider,
         started.elapsed().as_secs_f64() * 1e3,
     );
-}
-
-/// Each triangle edge once, as line-list indices.
-fn unique_edges(triangles: &[[u32; 3]]) -> Vec<u32> {
-    let mut seen = std::collections::HashSet::new();
-    let mut edges = Vec::new();
-    for [a, b, c] in triangles {
-        for (p, q) in [(*a, *b), (*b, *c), (*c, *a)] {
-            let edge = (p.min(q), p.max(q));
-            if seen.insert(edge) {
-                edges.extend([edge.0, edge.1]);
-            }
-        }
-    }
-    edges
 }
 
 /// The lab's once-a-second `flight-sample`: time, mode, camera, terrain and main-thread timings.
@@ -2496,6 +2417,140 @@ mod tests {
                 each_mark(mark(game, frame));
             }
         }
+    }
+
+    /// Where the stack is, as an orbit about the home planet: this is what "reached orbit" means.
+    fn orbit_of(game: &Game) -> void_orbit::OsculatingOrbit {
+        let state = game.part_inertial(RocketPart::Upper);
+        let n = game.bodies.len();
+        let (mut positions, mut velocities) = (vec![DVec3::ZERO; n], vec![DVec3::ZERO; n]);
+        game.ephemeris
+            .states_at(game.rocket.time(), &mut positions, Some(&mut velocities));
+        void_orbit::osculating_orbit(
+            state.position - positions[game.home],
+            state.velocity - velocities[game.home],
+            game.bodies[game.home].gm,
+        )
+    }
+
+    /// A gravity turn written as frames: climb straight up for `vertical` seconds, then tip the nose
+    /// over with a pitch pulse every `interval` seconds until `pitches` of them have gone in, and
+    /// hold the throttle open through staging to orbit.
+    fn gravity_turn(
+        vertical: f64,
+        interval: f64,
+        pulse_frames: usize,
+        pitches: usize,
+    ) -> Vec<Input> {
+        let mut frames = Vec::new();
+        let mut assist = Input::new(1.0 / 60.0);
+        assist.press(Key::T);
+        frames.push(assist);
+        for _ in 0..180 {
+            let mut f = Input::new(1.0 / 60.0);
+            f.hold(Key::Shift);
+            frames.push(f);
+        }
+        let mut ignite = Input::new(1.0 / 60.0);
+        ignite.press(Key::Space);
+        frames.push(ignite);
+        let total = 700 * 60;
+        let start = (vertical * 60.0) as usize;
+        let every = (interval * 60.0) as usize;
+        for i in 0..total {
+            let mut f = Input::new(1.0 / 60.0);
+            if i >= start {
+                let since = i - start;
+                if since / every < pitches && since % every < pulse_frames {
+                    f.hold(Key::W);
+                }
+            }
+            frames.push(f);
+        }
+        frames
+    }
+
+    /// Fly a gravity turn and report the best orbit it ever held, which is at upper-stage burnout
+    /// rather than at the end of a fixed window: after the fuel is gone a suborbital stack is on its
+    /// way back down, and measuring there says nothing about how close it came.
+    fn fly_to_burnout(frames: &[Input], trace: bool) -> (Game, void_orbit::OsculatingOrbit) {
+        let mut game = new_game("aurelia", Some("layered"));
+        let mut staged = false;
+        let mut best = orbit_of(&game);
+        let radius = game.planet.planet.terrain.radius_meters;
+        for (i, input) in frames.iter().enumerate() {
+            let mut input = *input;
+            // Stage the moment the booster runs dry, which is what a pilot does.
+            if !staged && game.stage == 1 && game.rocket.part_fuel_kg(RocketPart::Booster) <= 0.0 {
+                input.press(Key::Space);
+                staged = true;
+            }
+            step(&mut game, &input);
+            let o = orbit_of(&game);
+            if o.periapsis_radius_meters > best.periapsis_radius_meters {
+                best = o;
+            }
+            if trace && i.is_multiple_of(30 * 60) {
+                let state = game.rocket.body_fixed_state(&game.ephemeris);
+                let up = state.position.normalize();
+                let nose = game.rocket.part_orientation(RocketPart::Upper) * DVec3::Y;
+                println!(
+                    "  T+{:6.1} s stage {} alt {:8.0} m speed {:7.0} m/s pitch {:5.1} deg fuel {:6.0}+{:6.0} kg periapsis {:9.0} km apoapsis {:9.0} km",
+                    game.rocket.time(),
+                    game.stage,
+                    state.position.length() - radius,
+                    state.velocity.length(),
+                    nose.dot(up).clamp(-1.0, 1.0).acos().to_degrees(),
+                    game.rocket.part_fuel_kg(RocketPart::Upper),
+                    game.rocket.part_fuel_kg(RocketPart::Booster),
+                    (o.periapsis_radius_meters - radius) / 1e3,
+                    (o.apoapsis_radius_meters - radius) / 1e3,
+                );
+            }
+        }
+        (game, best)
+    }
+
+    #[test]
+    #[ignore = "a diagnostic, run by hand"]
+    fn trace_one_gravity_turn() {
+        let frames = gravity_turn(40.0, 8.0, 20, 16);
+        let (game, best) = fly_to_burnout(&frames, true);
+        let radius = game.planet.planet.terrain.radius_meters;
+        println!(
+            "best orbit held: periapsis {:.0} km, apoapsis {:.0} km, e {:.3}",
+            (best.periapsis_radius_meters - radius) / 1e3,
+            (best.apoapsis_radius_meters - radius) / 1e3,
+            best.eccentricity
+        );
+    }
+
+    #[test]
+    #[ignore = "a parameter search, run by hand when the rocket or the air changes"]
+    fn tune_the_gravity_turn() {
+        let mut best = (f64::NEG_INFINITY, (0.0, 0.0, 0, 0));
+        for vertical in [45.0, 60.0, 75.0] {
+            for interval in [14.0, 20.0, 28.0] {
+                for pulse in [30, 45, 60] {
+                    for pitches in [5, 7, 9] {
+                        let frames = gravity_turn(vertical, interval, pulse, pitches);
+                        let (game, o) = fly_to_burnout(&frames, false);
+                        let radius = game.planet.planet.terrain.radius_meters;
+                        let score = (o.periapsis_radius_meters - radius).min(300e3);
+                        if score > best.0 {
+                            best = (score, (vertical, interval, pulse, pitches));
+                            println!(
+                                "vertical {vertical:4.0} interval {interval:3.0} pulse {pulse:3} pitches {pitches:3}: periapsis {:9.1} km apoapsis {:9.1} km e {:.3}",
+                                (o.periapsis_radius_meters - radius) / 1e3,
+                                (o.apoapsis_radius_meters - radius) / 1e3,
+                                o.eccentricity
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        println!("best: {:?} with periapsis {:.1} km", best.1, best.0 / 1e3);
     }
 
     fn scratch(name: &str) -> std::path::PathBuf {

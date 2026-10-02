@@ -5,6 +5,7 @@ pub mod input;
 pub mod lab_log;
 pub mod map;
 pub mod navball;
+pub mod overlay;
 pub mod parts;
 pub mod scenery;
 pub mod session;

@@ -6,17 +6,26 @@
 //!
 //! Space: ignite the booster, then separate and ignite the upper stage | Shift / Ctrl: throttle ·
 //! W / S pitch, A / D yaw, Q / E roll | drag to orbit the camera, wheel to zoom | 1 / 2 / 3: time
-//! rate 1×, 5×, 20× | P: pause | R: reset | B: wireframe.
+//! rate 1×, 5×, 20× | P: pause | R: reset.
+//!
+//! The acceptance overlays are the main game's keys, so what is being looked at is the same thing
+//! in both: F2 terrain wireframe (B as well, which is what this scene used to use), F3 tile
+//! boundaries, F4 colliders — the triangles Rapier is actually standing the rocket on, read back
+//! out of it, plus the parts' own collider shapes — and F5 to stop drawing the terrain so the
+//! colliders can be seen on their own. C switches the camera between turning with the ground and
+//! staying put in inertial axes, which is the difference the landing lab's page had and this one
+//! did not.
 
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
-use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
+use bevy::pbr::wireframe::{Wireframe, WireframeColor, WireframeConfig, WireframePlugin};
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
 use bevy::render::render_resource::WgpuFeatures;
 use bevy::render::settings::WgpuSettings;
 use glam::DVec3;
 use void_app::aero_field::RocketAir;
-use void_app::parts::spawn_shape;
+use void_app::overlay::{ColliderLine, ColliderLines, DebugView};
+use void_app::parts::{ColliderShape, spawn_shape};
 use void_app::tiles::{Tile, TileField, anchor};
 use void_landing::{
     CoastPrediction, DemoRocket, LanderControl, LandingPlanet, PartJointRocket, PhysicsMode,
@@ -57,8 +66,9 @@ fn main() {
             brightness: 1500.0,
             ..default()
         })
+        .insert_resource(DebugView::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, (controls, physics, terrain, draw).chain())
+        .add_systems(Update, (controls, physics, terrain, draw, overlays).chain())
         .run();
 }
 
@@ -78,6 +88,11 @@ struct Sim {
     prediction: Option<CoastPrediction>,
     prediction_at: f64,
     control: LanderControl,
+    /// Smoothed main-thread cost, ms: the whole frame as Bevy measures it, and the physics advance
+    /// inside it. An exponential average over about a second, so the numbers can be read while they
+    /// move. This is a profiling entry point, not a benchmark: it says which half the time is in.
+    frame_ms: f64,
+    physics_ms: f64,
 }
 
 #[derive(Resource)]
@@ -89,6 +104,13 @@ struct Orbit {
     azimuth: f64,
     elevation: f64,
     max_distance: f64,
+    /// Whether the camera turns with the ground under it or holds still in inertial axes. The scene
+    /// is drawn body-fixed either way, so holding still means turning the other way at the
+    /// planet's own rate — which is what makes a launch look like a launch from orbit.
+    inertial: bool,
+    /// Where the camera ended up this frame, in body-fixed metres: the overlays are drawn relative
+    /// to it, as the tiles and the rocket are.
+    eye: DVec3,
 }
 
 #[derive(Component)]
@@ -101,10 +123,12 @@ struct Flame(RocketPart);
 #[derive(Component)]
 struct Hud;
 
-/// Rocket, flame and camera transforms, kept apart from the tiles'.
-type NotTile = (Without<Tile>, Without<Camera>);
+/// Rocket, flame and camera transforms, kept apart from the tiles' and the collider lines'.
+type NotTile = (Without<Tile>, Without<Camera>, Without<ColliderLine>);
 type FlameOnly = (Without<Part>, Without<Tile>, Without<Camera>);
 type CameraOnly = (With<Camera>, Without<Tile>);
+/// The collision-terrain line meshes, kept apart from the drawn tiles'.
+type LinesOnly = (With<ColliderLine>, Without<Tile>);
 
 fn planet_argument() -> String {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -210,7 +234,15 @@ fn setup(
         azimuth: 0.4,
         elevation: 0.3,
         max_distance,
+        inertial: false,
+        eye: DVec3::ZERO,
     });
+    // Green, as the game's: the terrain is near-white and the hulls are pale grey.
+    commands.insert_resource(ColliderLines::new(materials.add(StandardMaterial {
+        base_color: Color::srgb_u8(0x3d, 0xff, 0x6e),
+        unlit: true,
+        ..default()
+    })));
     commands.insert_resource(Sim {
         planet,
         ephemeris,
@@ -225,6 +257,8 @@ fn setup(
         prediction: None,
         prediction_at: f64::NEG_INFINITY,
         control: LanderControl::default(),
+        frame_ms: 0.0,
+        physics_ms: 0.0,
     });
     commands.spawn((
         Camera3d::default(),
@@ -273,8 +307,9 @@ fn controls(
     mut sim: ResMut<Sim>,
     mut orbit: ResMut<Orbit>,
     mut wireframe: ResMut<WireframeConfig>,
+    mut debug: ResMut<DebugView>,
 ) {
-    let sim = &mut *sim;
+    let (sim, debug) = (&mut *sim, &mut *debug);
     if keys.just_pressed(KeyCode::Space) {
         if sim.stage == 0 {
             sim.stage = 1;
@@ -298,8 +333,23 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyP) {
         sim.paused = !sim.paused;
     }
-    if keys.just_pressed(KeyCode::KeyB) {
-        wireframe.global = !wireframe.global;
+    // The main game's dev-panel switches, on the same keys. B is kept because this scene has always
+    // had it, and it is the same switch as F2 rather than a second one that can disagree with it.
+    if keys.any_just_pressed([KeyCode::F2, KeyCode::KeyB]) {
+        debug.wire = !debug.wire;
+        wireframe.global = debug.wire;
+    }
+    if keys.just_pressed(KeyCode::F3) {
+        debug.bounds = !debug.bounds;
+    }
+    if keys.just_pressed(KeyCode::F4) {
+        debug.colliders = !debug.colliders;
+    }
+    if keys.just_pressed(KeyCode::F5) {
+        debug.terrain = !debug.terrain;
+    }
+    if keys.just_pressed(KeyCode::KeyC) {
+        orbit.inertial = !orbit.inertial;
     }
     for (key, rate) in [
         (KeyCode::Digit1, 1.0),
@@ -346,6 +396,10 @@ fn controls(
 
 fn physics(time: Res<Time>, mut sim: ResMut<Sim>) {
     let sim = &mut *sim;
+    // A twentieth each frame, which settles in about a second at 60 Hz.
+    let smooth = |average: &mut f64, sample: f64| *average += (sample - *average) * 0.05;
+    smooth(&mut sim.frame_ms, f64::from(time.delta_secs()) * 1e3);
+    let started = std::time::Instant::now();
     if sim.paused {
         return;
     }
@@ -381,6 +435,7 @@ fn physics(time: Res<Time>, mut sim: ResMut<Sim>) {
             600.0,
         ));
     }
+    smooth(&mut sim.physics_ms, started.elapsed().as_secs_f64() * 1e3);
 }
 
 fn live_parts(sim: &Sim) -> Vec<RocketPart> {
@@ -409,7 +464,7 @@ fn terrain(sim: Res<Sim>, mut field: ResMut<Terrain>) {
 fn draw(
     mut commands: Commands,
     sim: Res<Sim>,
-    orbit: Res<Orbit>,
+    mut orbit: ResMut<Orbit>,
     mut field: ResMut<Terrain>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut tiles: Query<&mut Transform, With<Tile>>,
@@ -417,6 +472,7 @@ fn draw(
     mut flames: Query<(&Flame, &mut Transform, &mut Visibility), FlameOnly>,
     mut camera: Single<(&mut Transform, &mut Projection), CameraOnly>,
     mut hud: Single<&mut Text, With<Hud>>,
+    debug: Res<DebugView>,
     mut gizmos: Gizmos,
 ) {
     let eph = &sim.ephemeris;
@@ -426,7 +482,14 @@ fn draw(
     let up = centre.normalize();
     let east = DVec3::Z.cross(up).try_normalize().unwrap_or(DVec3::X);
     let north = up.cross(east);
-    let (d, az, el) = (orbit.distance, orbit.azimuth, orbit.elevation);
+    // In inertial mode the camera gives back the rotation the body-fixed frame is applying to it, so
+    // it stands still against the stars while the ground slides underneath.
+    let az = if orbit.inertial {
+        orbit.azimuth - rocket.frame.omega * rocket.time()
+    } else {
+        orbit.azimuth
+    };
+    let (d, el) = (orbit.distance, orbit.elevation);
     let eye = centre
         + up * (el.sin() * d)
         + east * (el.cos() * az.cos() * d)
@@ -437,6 +500,7 @@ fn draw(
         p.near = (d * 0.001).max(0.1) as f32;
     }
 
+    orbit.eye = eye;
     field.0.draw(&mut commands, &mut meshes, &mut tiles, eye);
 
     for (part, mut transform, mut visibility) in &mut parts {
@@ -507,7 +571,10 @@ fn draw(
          tilt {:.2}° from local vertical   contact {}\n\
          upper {} | {:.0} kg fuel | {:.0} m/s   booster {} | {:.0} kg fuel | {:.0} m/s\n\
          {} contact world(s), {} collision tiles   terrain: {} tiles drawn (L{}-L{}), {} building   crashes {}\n\
-         Space stage | Shift/Ctrl throttle | W/S pitch | A/D yaw | Q/E roll | drag orbit | wheel zoom | 1/2/3 rate | P pause | R reset | B wireframe",
+         camera {}   overlays: {}   hand-offs: {}\n\
+         frame {:.2} ms   physics {:.2} ms\n\
+         Space stage | Shift/Ctrl throttle | W/S pitch | A/D yaw | Q/E roll | drag orbit | wheel zoom | 1/2/3 rate | P pause | R reset\n\
+         F2 wireframe (B) | F3 tile bounds | F4 colliders | F5 terrain | C camera frame",
         sim.planet.label.replace('·', "|"),
         rocket.time(),
         sim.rate,
@@ -544,6 +611,56 @@ fn draw(
         field.0.levels.1,
         field.0.building_count(),
         rocket.crashes.len(),
+        if orbit.inertial {
+            "inertial (C: turn with the ground)"
+        } else {
+            "turning with the ground (C: inertial)"
+        },
+        {
+            let on: Vec<&str> = [
+                (debug.wire, "wireframe"),
+                (debug.bounds, "tile bounds"),
+                (debug.colliders, "colliders"),
+            ]
+            .into_iter()
+            .filter(|(on, _)| *on)
+            .map(|(_, name)| name)
+            .chain((!debug.terrain).then_some("terrain hidden"))
+            .collect();
+            if on.is_empty() {
+                "none".into()
+            } else {
+                on.join(", ")
+            }
+        },
+        sim.frame_ms,
+        sim.physics_ms,
+        // The last few flight/contact crossings, which is the seam an acceptance pass is watching:
+        // one that fires twice in a second is the band being crossed and recrossed.
+        {
+            let recent: Vec<String> = rocket
+                .mode_changes
+                .iter()
+                .rev()
+                .take(3)
+                .map(|c| {
+                    format!(
+                        "T+{:.1} {}",
+                        c.time,
+                        match c.to {
+                            PhysicsMode::Flight => "to flight",
+                            PhysicsMode::Contact => "to contact",
+                            PhysicsMode::Destroyed => "destroyed",
+                        }
+                    )
+                })
+                .collect();
+            if recent.is_empty() {
+                "none".into()
+            } else {
+                recent.join(" · ")
+            }
+        },
     );
 }
 
@@ -553,4 +670,60 @@ fn meters(m: f64) -> String {
     } else {
         format!("{m:.1} m")
     }
+}
+
+/// The acceptance overlays, on the game's keys: tile boundaries, the collision terrain read back
+/// out of Rapier, and the parts' own collider shapes. The collision terrain is drawn from Rapier's
+/// own triangles rather than rebuilt from the terrain function, so a drawn tile that does not match
+/// the collided one shows as two sets of lines instead of being hidden by one source drawn twice.
+#[allow(clippy::too_many_arguments)]
+fn overlays(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    orbit: Res<Orbit>,
+    debug: Res<DebugView>,
+    field: Res<Terrain>,
+    mut lines: ResMut<ColliderLines>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut tiles: Query<&mut Visibility, (With<Tile>, Without<ColliderLine>)>,
+    shapes: Query<(Entity, Has<Wireframe>), With<ColliderShape>>,
+    mut collider_lines: Query<(&mut Transform, &mut Visibility), LinesOnly>,
+    mut gizmos: Gizmos,
+) {
+    let eye = orbit.eye;
+    let visible = if debug.terrain {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut v in &mut tiles {
+        v.set_if_neq(visible);
+    }
+    if debug.bounds {
+        for line in field.0.boundaries(eye) {
+            gizmos.linestrip(line, Color::srgb(1.0, 0.2, 0.2));
+        }
+    }
+    let green = Color::srgb_u8(0x3d, 0xff, 0x6e);
+    for (entity, wired) in &shapes {
+        if wired != debug.colliders {
+            if debug.colliders {
+                commands
+                    .entity(entity)
+                    .insert((Wireframe, WireframeColor { color: green }));
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<(Wireframe, WireframeColor)>();
+            }
+        }
+    }
+    lines.sync(
+        &mut commands,
+        &mut meshes,
+        &mut collider_lines,
+        &sim.rocket.contact_worlds(),
+        eye,
+        debug.colliders,
+    );
 }
