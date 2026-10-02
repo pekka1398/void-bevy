@@ -181,6 +181,13 @@ impl fmt::Display for Key {
 /// went down this frame. Both are needed — the throttle creeps while shift is held, while staging
 /// happens once per press — and both are recorded, rather than derived on replay from the previous
 /// frame, because a frame dropped on the way to the file would otherwise turn a hold into a press.
+/// A resolved map-label click, independent of cursor position and window size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusTarget {
+    Vessel,
+    Body(usize),
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Input {
     /// Simulated seconds this frame covers, already clamped by whoever produced it.
@@ -192,6 +199,7 @@ pub struct Input {
     pub scroll_pixels: f64,
     pub mouse_held: bool,
     pub mouse_pressed: bool,
+    pub focus: Option<FocusTarget>,
 }
 
 impl Input {
@@ -246,6 +254,8 @@ impl Input {
             && self.drag == (0.0, 0.0)
             && self.scroll_pixels == 0.0
             && !self.mouse_held
+            && !self.mouse_pressed
+            && self.focus.is_none()
     }
 }
 

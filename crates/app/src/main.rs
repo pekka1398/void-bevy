@@ -34,7 +34,7 @@ use void_app::flight::{
     GamePlanet, PARTS, PHYSICS_MAX_RATE, TIME_RATES, distance_text, game_planet_by_id,
     mission_time, rate_text, vessel_axes, warp_limit,
 };
-use void_app::input::{Input, Key};
+use void_app::input::{FocusTarget, Input, Key};
 use void_app::lab_log::LabLog;
 use void_app::map::{
     MapMarker, PATH_COLOR, PLAN_COLOR, color, draw_map_lines, label_click, place_map_labels,
@@ -136,7 +136,6 @@ fn main() {
             Update,
             (
                 read_input,
-                controls,
                 simulate,
                 terrain,
                 draw,
@@ -250,6 +249,7 @@ struct Game {
     path_frame: PathFrameKind,
     focus: Focus,
     camera: OrbitCamera,
+    dragging: bool,
     state: Option<ViewState>,
     positions: Vec<DVec3>,
     velocities: Vec<DVec3>,
@@ -882,6 +882,7 @@ fn new_game(planet_id: &str, terrain: Option<&str>) -> Game {
         path_frame: PathFrameKind::Inertial,
         focus: Focus::Vessel,
         camera,
+        dragging: false,
         state: None,
         positions: vec![DVec3::ZERO; n],
         velocities: vec![DVec3::ZERO; n],
@@ -1259,12 +1260,15 @@ const KEYS: [(Key, &[KeyCode]); 42] = [
 
 /// This frame's pilot input, read once from the window so that every system downstream of it reads
 /// data instead of the keyboard — which is what lets a recording stand in for the keyboard.
+#[allow(clippy::too_many_arguments)]
 fn read_input(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
+    markers: Query<(&Interaction, &MapMarker)>,
+    game: Res<Game>,
     mut pilot: ResMut<Pilot>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -1279,6 +1283,11 @@ fn read_input(
                 return;
             }
             None => {
+                assert_eq!(
+                    replay.compared,
+                    replay.session.marks.len(),
+                    "replay: not every mark was checked"
+                );
                 println!(
                     "replay: {} frames, {:.1} simulated seconds, {} marks compared, worst {:.3e} m and {:.3e} m/s",
                     replay.session.frames.len(),
@@ -1304,7 +1313,20 @@ fn read_input(
     }
     let any = [MouseButton::Left, MouseButton::Right, MouseButton::Middle];
     input.mouse_held = buttons.any_pressed(any);
-    input.mouse_pressed = buttons.any_just_pressed(any);
+    let (over_label, clicked) =
+        label_click(&markers, &buttons, game.state.map_or(0.0, |s| s.map_weight));
+    input.mouse_pressed = buttons.any_just_pressed(any) && !over_label;
+    input.focus = match clicked {
+        Some(LabelKind::Vessel) => Some(FocusTarget::Vessel),
+        Some(LabelKind::Body(i)) => Some(FocusTarget::Body(i)),
+        Some(LabelKind::Star) => Some(FocusTarget::Body(
+            game.bodies
+                .iter()
+                .position(|b| b.parent_index.is_none())
+                .expect("a star"),
+        )),
+        Some(LabelKind::Apsis) | None => None,
+    };
     input.drag = (motion.delta.x as f64, motion.delta.y as f64);
     input.scroll_pixels = match scroll.unit {
         MouseScrollUnit::Line => -f64::from(scroll.delta.y) * 100.0,
@@ -1334,9 +1356,7 @@ fn mark(game: &Game, frame: usize) -> Mark {
     }
 }
 
-/// Everything the pilot's keys do to the game, as a function of the game and the input. It is
-/// separate from the window's own `controls` because this half is the game and the other half is
-/// the mouse pointing at things on screen, which a session neither records nor needs.
+/// Keyboard actions, applied after the pointer actions of the same frame.
 fn apply_keys(game: &mut Game, keys: &Input) {
     let shift = keys.held(Key::Shift);
     if keys.just_pressed(Key::Space) {
@@ -1401,34 +1421,25 @@ fn apply_keys(game: &mut Game, keys: &Input) {
         game.set_focus(order[(current + step) % order.len()]);
     }
 }
-fn controls(
-    pilot: Res<Pilot>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    markers: Query<(&Interaction, &MapMarker)>,
-    mut game: ResMut<Game>,
-    mut dragging: Local<bool>,
-) {
-    let game = &mut *game;
-    let keys = &pilot.input;
-    let map_weight = game.state.map_or(0.0, |s| s.map_weight);
-    let (over_label, clicked) = label_click(&markers, &buttons, map_weight);
-    match clicked {
-        Some(LabelKind::Vessel) => game.set_focus(Focus::Vessel),
-        Some(LabelKind::Body(i)) => game.set_focus(Focus::Body(i)),
-        Some(LabelKind::Star) => {
-            let star = game.bodies.iter().position(|b| b.parent_index.is_none());
-            game.set_focus(Focus::Body(star.expect("a star")));
-        }
-        Some(LabelKind::Apsis) | None => {}
+fn apply_pointer(game: &mut Game, keys: &Input) {
+    if let Some(target) = keys.focus {
+        game.set_focus(match target {
+            FocusTarget::Vessel => Focus::Vessel,
+            FocusTarget::Body(i) => {
+                assert!(i < game.bodies.len(), "input: unknown body {i}");
+                Focus::Body(i)
+            }
+        });
     }
-    if keys.mouse_pressed && !over_label {
-        *dragging = true;
+
+    if keys.mouse_pressed {
+        game.dragging = true;
     }
     if !keys.mouse_held {
-        *dragging = false;
+        game.dragging = false;
     }
     if let Some(state) = game.state {
-        if *dragging && keys.drag != (0.0, 0.0) {
+        if game.dragging && keys.drag != (0.0, 0.0) {
             game.camera.drag(keys.drag.0, keys.drag.1, state.up);
         }
         if keys.scroll_pixels != 0.0 {
@@ -1516,13 +1527,19 @@ fn maneuver_keys(keys: &Input, game: &mut Game) {
 
 fn simulate(mut pilot: ResMut<Pilot>, mut game: ResMut<Game>) {
     let pilot = &mut *pilot;
-    step(&mut game, &pilot.input);
-    pilot.frame += 1;
-    if !pilot.frame.is_multiple_of(FRAMES_PER_MARK) {
+    if pilot
+        .replay
+        .as_ref()
+        .is_some_and(|r| pilot.frame >= r.session.frames.len())
+    {
         return;
     }
+    step(&mut game, &pilot.input);
+    pilot.frame += 1;
     let here = mark(&game, pilot.frame);
-    if let Some(recorder) = &mut pilot.recorder {
+    if let Some(recorder) = &mut pilot.recorder
+        && pilot.frame.is_multiple_of(FRAMES_PER_MARK)
+    {
         recorder.mark(&here);
     }
     // On replay, every mark the recording left at this frame must still be where it was. A gap is
@@ -1539,7 +1556,9 @@ fn simulate(mut pilot: ResMut<Pilot>, mut game: ResMut<Game>) {
             replay.compared += 1;
             replay.worst = (replay.worst.0.max(dp), replay.worst.1.max(dv));
             assert!(
-                was.stage == here.stage && (was.mass_kg - here.mass_kg).abs() < 1e-9,
+                was.stage == here.stage
+                    && (was.mass_kg - here.mass_kg).abs() < 1e-9
+                    && (was.sim_time - here.sim_time).abs() < 1e-9,
                 "replay: frame {} flew stage {} at {:.3} kg, the recording had stage {} at {:.3} kg",
                 here.frame,
                 here.stage,
@@ -1568,6 +1587,7 @@ const REPLAY_VELOCITY_METERS_PER_SECOND: f64 = 1e-6;
 /// else. The window calls it with what the keyboard said; a recording calls it with what the
 /// keyboard said when the session was flown, which is why those two agree.
 fn step(game: &mut Game, keys: &Input) {
+    apply_pointer(game, keys);
     apply_keys(game, keys);
     let wall = keys.seconds;
     let delta = keys.axis(Key::Shift, Key::Control);
@@ -2637,6 +2657,95 @@ mod tests {
         );
         assert!(worst.0 == 0.0 && worst.1 == 0.0, "the replay must be exact");
         std::fs::remove_file(&path).expect("remove the scratch recording");
+    }
+
+    #[test]
+    fn replay_system_checks_nonperiodic_marks_and_stops_at_the_last_frame() {
+        let input = Input::new(0.01);
+        let mut expected = new_game("aurelia", Some("layered"));
+        step(&mut expected, &input);
+        let session = Session {
+            header: Header {
+                planet: "aurelia".into(),
+                terrain: "layered".into(),
+                version: void_app::session::VERSION,
+            },
+            frames: vec![input],
+            marks: vec![mark(&expected, 1)],
+        };
+        let mut app = App::new();
+        app.insert_resource(new_game("aurelia", Some("layered")))
+            .insert_resource(Pilot {
+                input,
+                replay: Some(Replay {
+                    session,
+                    next: 1,
+                    compared: 0,
+                    worst: (0.0, 0.0),
+                }),
+                ..default()
+            })
+            .add_systems(Update, simulate);
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<Pilot>()
+                .replay
+                .as_ref()
+                .unwrap()
+                .compared,
+            1
+        );
+        let before = mark(app.world().resource::<Game>(), 1);
+        app.update();
+        assert_eq!(app.world().resource::<Pilot>().frame, 1);
+        assert_eq!(mark(app.world().resource::<Game>(), 1), before);
+    }
+
+    #[test]
+    fn replayed_pointer_inputs_preserve_camera_and_label_drag_blocking() {
+        let mut frames = vec![Input::new(0.01)];
+        let mut pointer = Input::new(0.01);
+        pointer.mouse_held = true;
+        pointer.mouse_pressed = true;
+        pointer.drag = (30.0, -12.0);
+        pointer.scroll_pixels = -100.0;
+        frames.push(pointer);
+        pointer.mouse_pressed = false;
+        pointer.scroll_pixels = 0.0;
+        frames.push(pointer);
+        frames.push(Input::new(0.01));
+        let mut label = pointer;
+        label.focus = Some(FocusTarget::Body(0));
+        frames.push(label);
+        let mut first = new_game("aurelia", Some("layered"));
+        let mut second = new_game("aurelia", Some("layered"));
+        step(&mut first, &frames[0]);
+        let direction = first.camera.direction;
+        step(&mut first, &frames[1]);
+        assert_ne!(first.camera.direction, direction);
+        for input in &frames[2..] {
+            step(&mut first, input);
+        }
+        for input in &frames {
+            step(&mut second, input);
+        }
+        assert_eq!(first.camera.direction, second.camera.direction);
+        assert_eq!(first.camera.distance, second.camera.distance);
+        assert_eq!(first.focus, second.focus);
+        assert!(!first.dragging, "a label click cannot start a drag");
+    }
+
+    #[test]
+    fn recorded_focus_clicks_reach_the_game_without_window_input() {
+        let mut game = new_game("aurelia", Some("layered"));
+        let mut input = Input::new(0.0);
+        input.focus = Some(FocusTarget::Body(game.home));
+        step(&mut game, &input);
+        assert_eq!(game.focus, Focus::Body(game.home));
+        input.focus = Some(FocusTarget::Vessel);
+        step(&mut game, &input);
+        assert_eq!(game.focus, Focus::Vessel);
     }
 
     #[test]

@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::input::{Input, Key};
+use crate::input::{FocusTarget, Input, Key};
 
 /// What the session was flown against. A recording made on another planet is not a recording of
 /// this one, so replay refuses it rather than producing a confusing divergence.
@@ -29,7 +29,7 @@ use crate::input::{Input, Key};
 pub struct Header {
     pub planet: String,
     pub terrain: String,
-    /// The game's own build, so a recording from an older one is not silently trusted.
+    /// Session format version; this does not identify the physics build.
     pub version: u32,
 }
 
@@ -106,7 +106,20 @@ impl Session {
                     );
                     frames.push(f);
                 }
-                Line::Mark(m) => marks.push(m),
+                Line::Mark(m) => {
+                    assert!(header.is_some(), "session: mark before header");
+                    assert!(
+                        m.frame > 0 && m.frame <= frames.len(),
+                        "session: mark refers to an unrecorded frame"
+                    );
+                    assert!(
+                        marks
+                            .last()
+                            .is_none_or(|previous: &Mark| previous.frame < m.frame),
+                        "session: marks must be strictly ordered"
+                    );
+                    marks.push(m);
+                }
             }
         }
         Self {
@@ -116,7 +129,7 @@ impl Session {
         }
     }
 
-    /// Total simulated seconds, which is not the wall time it took to fly.
+    /// Total frame durations before time acceleration, pause and warp limits.
     pub fn seconds(&self) -> f64 {
         self.frames.iter().map(|f| f.seconds).sum()
     }
@@ -150,10 +163,20 @@ fn parse(line: &str) -> Line {
                 .as_str()
                 .unwrap_or_else(|| panic!("session: no terrain in {line}"))
                 .into(),
-            version: number("version") as u32,
+            version: u32::try_from(
+                value["version"]
+                    .as_u64()
+                    .expect("session: version must be an unsigned integer"),
+            )
+            .expect("session: version overflow"),
         }),
         Some("frame") => {
-            let mut input = Input::new(number("seconds"));
+            let seconds = number("seconds");
+            assert!(
+                seconds.is_finite() && seconds >= 0.0,
+                "session: invalid frame duration"
+            );
+            let mut input = Input::new(seconds);
             let keys = |key: &str| -> Vec<Key> {
                 match &value[key] {
                     Value::Null => Vec::new(),
@@ -182,17 +205,44 @@ fn parse(line: &str) -> Line {
             if value.get("scroll").is_some() {
                 input.scroll_pixels = number("scroll");
             }
-            input.mouse_held = value["mouseHeld"].as_bool().unwrap_or(false);
-            input.mouse_pressed = value["mousePressed"].as_bool().unwrap_or(false);
+            let boolean = |key: &str| {
+                value.get(key).is_some_and(|v| {
+                    v.as_bool()
+                        .unwrap_or_else(|| panic!("session: {key} must be a boolean"))
+                })
+            };
+            input.mouse_held = boolean("mouseHeld");
+            input.mouse_pressed = boolean("mousePressed");
+            input.focus = value.get("focus").map(|target| match target {
+                Value::String(name) if name == "vessel" => FocusTarget::Vessel,
+                _ => FocusTarget::Body(
+                    usize::try_from(
+                        target
+                            .as_u64()
+                            .expect("session: focus must be vessel or a body index"),
+                    )
+                    .expect("session: body index overflow"),
+                ),
+            });
             Line::Frame(input)
         }
         Some("mark") => Line::Mark(Mark {
-            frame: number("frame") as usize,
+            frame: usize::try_from(
+                value["frame"]
+                    .as_u64()
+                    .expect("session: frame must be an unsigned integer"),
+            )
+            .expect("session: frame overflow"),
             sim_time: number("simTime"),
             position: triple("position"),
             velocity: triple("velocity"),
             mass_kg: number("massKg"),
-            stage: number("stage") as u8,
+            stage: u8::try_from(
+                value["stage"]
+                    .as_u64()
+                    .expect("session: stage must be an unsigned integer"),
+            )
+            .expect("session: stage overflow"),
         }),
         other => panic!("session: a line is {other:?}, not a header, frame or mark: {line}"),
     }
@@ -267,6 +317,15 @@ impl Recorder {
         if input.mouse_pressed {
             fields.insert("mousePressed".into(), json!(true));
         }
+        if let Some(target) = input.focus {
+            fields.insert(
+                "focus".into(),
+                match target {
+                    FocusTarget::Vessel => json!("vessel"),
+                    FocusTarget::Body(i) => json!(i),
+                },
+            );
+        }
         self.line(Value::Object(fields));
     }
 
@@ -324,6 +383,7 @@ mod tests {
         steering.drag = (3.0, -4.0);
         steering.scroll_pixels = 120.0;
         steering.mouse_held = true;
+        steering.focus = Some(FocusTarget::Body(2));
         frames.push(steering);
         idle.seconds = 0.05;
         frames.push(idle);
@@ -355,6 +415,21 @@ mod tests {
         assert!(read.frames[1].held(Key::Space) && read.frames[1].just_pressed(Key::Space));
         assert!(read.frames[1].held(Key::Shift) && !read.frames[1].just_pressed(Key::Shift));
         std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn malformed_frames_and_indices_are_rejected() {
+        for line in [
+            r#"{"kind":"frame","seconds":-1}"#,
+            r#"{"kind":"frame","seconds":0.01,"mouseHeld":"yes"}"#,
+            r#"{"kind":"frame","seconds":0.01,"focus":-1}"#,
+            r#"{"kind":"mark","frame":1.5,"simTime":0,"position":[0,0,0],"velocity":[0,0,0],"massKg":1,"stage":0}"#,
+        ] {
+            assert!(
+                std::panic::catch_unwind(|| parse(line)).is_err(),
+                "accepted {line}"
+            );
+        }
     }
 
     #[test]
