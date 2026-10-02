@@ -5602,6 +5602,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-vessels"
+version = "0.0.0"
+dependencies = [
+ "glam 0.32.1",
+ "rapier3d",
+ "serde_json",
+ "void-assembly",
+ "void-frames",
+ "void-landing",
+ "void-orbit",
+ "void-rotation",
+ "void-sas",
+ "void-terrain",
+]
+
+[[package]]
+name = "void-vessels-lab"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "glam 0.32.1",
+ "void-assembly",
+ "void-assembly-lab",
+ "void-frames",
+ "void-landing",
+ "void-orbit",
+ "void-vessels",
+]
+
+[[package]]
 name = "void-view"
 version = "0.0.0"
 dependencies = [

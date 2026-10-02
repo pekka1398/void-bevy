@@ -1,5 +1,4 @@
 //! Independent assembly editor and local test flight. No dependency on void-app.
-mod parts;
 use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
@@ -8,8 +7,8 @@ use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use bevy::text::{EditableText, TextCursorStyle};
 use glam::DVec3;
-use parts::{Flame, PartMesh, RenderAssets, SceneLines};
 use void_assembly::*;
+use void_assembly_lab::parts::{Flame, PartMesh, RenderAssets, SceneLines};
 
 fn main() {
     let mut args = std::env::args().skip(1);

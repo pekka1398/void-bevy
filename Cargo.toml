@@ -30,6 +30,7 @@ void-sas = { path = "crates/sas" }
 void-navball = { path = "crates/navball" }
 void-view = { path = "crates/view" }
 void-assembly = { path = "crates/assembly" }
+void-vessels = { path = "crates/vessels" }
 void-aero = { path = "crates/aero" }
 void-multiscale = { path = "crates/multiscale" }
 
