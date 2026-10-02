@@ -4,14 +4,11 @@
 //! WASD QE turn the vessel about its own axes (pitch, yaw, roll) as lab/flight steers. `[` `]`
 //! latitude, J L velocity heading, I K velocity pitch, `-` `=` speed (log), R back to the start.
 
-use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::ui::Val2;
 use glam::DVec3;
+use void_app::navball::{Navball, NavballLabel, draw_navball, spawn_navball};
 use void_navball::{
-    MARKER_MIN_SPEED, NavballInput, NavballPainter, NavballReadout, heading_pitch, horizon_axes,
-    navball_basis,
+    MARKER_MIN_SPEED, NavballInput, NavballReadout, heading_pitch, horizon_axes, navball_basis,
 };
 
 // A planet with its pole on +z and its prime meridian on +x; the vessel stands at longitude 0 and
@@ -20,8 +17,6 @@ const POLE: DVec3 = DVec3::Z;
 const PRIME_MERIDIAN: DVec3 = DVec3::X;
 const TURN_DEGREES_PER_SECOND: f64 = 45.0;
 const DEG: f64 = std::f64::consts::PI / 180.0;
-/// Labels per ball: twelve headings and four pitches at most.
-const LABELS: usize = 16;
 
 fn main() {
     App::new()
@@ -142,13 +137,6 @@ impl Lab {
 }
 
 #[derive(Component)]
-struct Ball {
-    painter: NavballPainter,
-    image: Handle<Image>,
-    labels: Vec<Entity>,
-}
-
-#[derive(Component)]
 struct Readout;
 
 fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, window: Single<&Window>) {
@@ -180,18 +168,6 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, window: Sing
         })
         .id();
     for (diameter, caption) in [(320.0, "320 px"), (150.0, "150 px, as in lab/flight")] {
-        let painter = NavballPainter::new(diameter, ratio);
-        let image = images.add(Image::new_fill(
-            Extent3d {
-                width: painter.size as u32,
-                height: painter.size as u32,
-                depth_or_array_layers: 1,
-            },
-            TextureDimension::D2,
-            &[0, 0, 0, 0],
-            TextureFormat::Rgba8UnormSrgb,
-            RenderAssetUsages::default(),
-        ));
         let figure = commands
             .spawn(Node {
                 flex_direction: FlexDirection::Column,
@@ -200,42 +176,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, window: Sing
                 ..default()
             })
             .id();
-        let ball_node = commands
-            .spawn((
-                ImageNode::new(image.clone()),
-                Node {
-                    width: px(diameter),
-                    height: px(diameter),
-                    ..default()
-                },
-            ))
-            .id();
-        let labels: Vec<Entity> = (0..LABELS)
-            .map(|_| {
-                commands
-                    .spawn((
-                        Text::new(""),
-                        font(10.0).with_font_weight(FontWeight::SEMIBOLD),
-                        TextShadow {
-                            offset: Vec2::ONE,
-                            color: Color::srgba(0.0, 0.0, 0.0, 170.0 / 255.0),
-                        },
-                        Node {
-                            position_type: PositionType::Absolute,
-                            ..default()
-                        },
-                        UiTransform::from_translation(Val2::percent(-50, -50)),
-                        Visibility::Hidden,
-                        ChildOf(ball_node),
-                    ))
-                    .id()
-            })
-            .collect();
-        commands.entity(ball_node).insert(Ball {
-            painter,
-            image,
-            labels,
-        });
+        let ball_node = spawn_navball(&mut commands, &mut images, diameter, ratio);
         let caption = commands
             .spawn((
                 Text::new(caption),
@@ -282,35 +223,16 @@ fn controls(keys: Res<ButtonInput<KeyCode>>, time: Res<Time>, mut lab: ResMut<La
 
 fn draw(
     lab: Res<Lab>,
-    mut balls: Query<&mut Ball>,
+    mut balls: Query<&mut Navball>,
     mut images: ResMut<Assets<Image>>,
-    mut texts: Query<(&mut Text, &mut Node, &mut TextColor, &mut Visibility), Without<Readout>>,
-    mut readout: Single<&mut Text, With<Readout>>,
+    mut labels: Query<(&mut Text, &mut Node, &mut TextColor, &mut Visibility), With<NavballLabel>>,
+    mut readout: Single<&mut Text, (With<Readout>, Without<NavballLabel>)>,
 ) {
     let velocity = lab.horizon(lab.velocity_heading, lab.velocity_pitch) * lab.speed();
     let input = lab.input(velocity);
     let mut reading: Option<NavballReadout> = None;
     for mut ball in &mut balls {
-        let ball = &mut *ball;
-        reading = Some(ball.painter.draw(&input));
-        if let Some(mut image) = images.get_mut(&ball.image) {
-            image.data = Some(ball.painter.rgba.clone());
-        }
-        for (k, &entity) in ball.labels.iter().enumerate() {
-            let Ok((mut text, mut node, mut color, mut visibility)) = texts.get_mut(entity) else {
-                continue;
-            };
-            match ball.painter.labels.get(k) {
-                Some(label) => {
-                    text.0.clone_from(&label.text);
-                    node.left = px(label.x as f32);
-                    node.top = px(label.y as f32);
-                    color.0 = Color::srgba(1.0, 1.0, 1.0, label.alpha as f32);
-                    *visibility = Visibility::Inherited;
-                }
-                None => *visibility = Visibility::Hidden,
-            }
-        }
+        reading = Some(draw_navball(&mut ball, &input, &mut images, &mut labels));
     }
     let Some(r) = reading else { return };
     readout.0 = format!(

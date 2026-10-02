@@ -19,19 +19,23 @@ use bevy::prelude::*;
 use glam::DVec3;
 use void_app::flight::{
     GamePlanet, PARTS, PHYSICS_MAX_RATE, TIME_RATES, distance_text, game_planet_by_id,
-    mission_time, rate_text, warp_limit,
+    mission_time, rate_text, vessel_axes, warp_limit,
 };
 use void_app::map::{
     MapMarker, PATH_COLOR, color, draw_map_lines, label_click, place_map_labels, spawn_map_labels,
 };
+use void_app::navball::{Navball, NavballLabel, draw_navball, spawn_navball};
 use void_app::parts::spawn_shape;
 use void_app::tiles::{Tile, TileField};
 use void_landing::{
-    CoastPrediction, DemoRocket, FrameState, LanderControl, PartJointRocket, PhysicsMode,
-    RocketPart, demo_rocket, landing_lod_options, planet_ephemeris, predict_coast,
+    AttitudeSample, CoastPrediction, DemoRocket, FrameState, LanderControl, PartJointRocket,
+    PhysicsMode, RocketPart, STEERING_TORQUE, demo_rocket, landing_lod_options, planet_ephemeris,
+    predict_coast,
 };
 use void_lod::{LodCamera, LodView};
+use void_navball::NavballInput;
 use void_orbit::{CelestialBody, DominanceTree, Ephemeris, body_orientation, osculating_orbit};
+use void_sas::{SAS_TUNING, StabilityAssist};
 use void_view::{
     FocusGeometry, FocusKind, LabelKind, MapFrame, MapOrbits, MapPath, OrbitCamera, PathFrameKind,
     PlottingFrame, ViewMode, ViewState, camera_spin, map_labels, view_state,
@@ -63,7 +67,7 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (controls, simulate, terrain, draw, labels, hud).chain(),
+            (controls, simulate, terrain, draw, labels, instruments, hud).chain(),
         )
         .run();
 }
@@ -112,6 +116,8 @@ struct Game {
     path: MapPath,
     started: std::time::Instant,
     help: bool,
+    /// lab/sas's stability assist on the steering torque; T toggles it.
+    sas: StabilityAssist,
     // This frame's geometry: the camera (ecliptic, barycentric), the render axes (the planet's
     // body-fixed axes), the upper stage, the focus, its reference body, the dominant body.
     eye: DVec3,
@@ -258,6 +264,7 @@ impl Game {
         self.prediction_generation += 1;
         self.focus = Focus::Vessel;
         self.camera.distance = VESSEL_DISTANCE;
+        self.sas.set_enabled(false);
     }
 
     /// The focus's geometry, position and reference body.
@@ -334,10 +341,15 @@ struct Sun;
 #[derive(Component)]
 struct Hud;
 
+#[derive(Component)]
+struct NavballHeading;
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    window: Single<&Window>,
 ) {
     let planet_id = argument("--planet").unwrap_or_else(|| "aurelia".into());
     let planet = game_planet_by_id(&planet_id, argument("--terrain").as_deref());
@@ -462,6 +474,34 @@ fn setup(
         },
         Transform::default(),
     ));
+    // lab/navball's ball, bottom centre, with the nose's heading and pitch under it.
+    let ball = spawn_navball(
+        &mut commands,
+        &mut images,
+        150.0,
+        window.scale_factor() as f64,
+    );
+    let heading = commands
+        .spawn((
+            NavballHeading,
+            Text::new(""),
+            TextFont {
+                font_size: FontSize::Px(13.0),
+                ..default()
+            },
+        ))
+        .id();
+    commands
+        .spawn(Node {
+            position_type: PositionType::Absolute,
+            bottom: px(10),
+            width: percent(100),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: px(4),
+            ..default()
+        })
+        .add_children(&[ball, heading]);
     commands.spawn((
         Hud,
         Text::new(""),
@@ -506,6 +546,7 @@ fn setup(
         velocities: vec![DVec3::ZERO; n],
         started: std::time::Instant::now(),
         help: false,
+        sas: StabilityAssist::new(STEERING_TORQUE, SAS_TUNING),
         eye: DVec3::ZERO,
         axes: [DVec3::X, DVec3::Y, DVec3::Z],
         upper: start,
@@ -535,6 +576,9 @@ fn controls(
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
     if keys.just_pressed(KeyCode::Space) {
         game.stage();
+    }
+    if keys.just_pressed(KeyCode::KeyT) {
+        game.sas.toggle();
     }
     if keys.just_pressed(KeyCode::KeyX) {
         game.throttle_percent = 0.0;
@@ -638,17 +682,28 @@ fn simulate(time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<G
         if game.time_rate > PHYSICS_MAX_RATE {
             game.rocket.advance_on_rails(&mut game.ephemeris, dt);
         } else {
-            let control = LanderControl {
+            let pilot = DVec3::new(
+                axis(&keys, KeyCode::KeyS, KeyCode::KeyW),
+                axis(&keys, KeyCode::KeyE, KeyCode::KeyQ),
+                axis(&keys, KeyCode::KeyD, KeyCode::KeyA),
+            );
+            let mut control = LanderControl {
                 throttle: game.engine_throttle(),
                 up: 1.0,
-                turn: Some(DVec3::new(
-                    axis(&keys, KeyCode::KeyS, KeyCode::KeyW),
-                    axis(&keys, KeyCode::KeyE, KeyCode::KeyQ),
-                    axis(&keys, KeyCode::KeyD, KeyCode::KeyA),
-                )),
                 ..Default::default()
             };
-            game.rocket.advance(&mut game.ephemeris, dt, &control, None);
+            if game.sas.enabled() {
+                // lab/sas's stability assist, every physics step on the attitude at its start.
+                let sas = &mut game.sas;
+                let mut steer = |s: AttitudeSample, dt: f64| {
+                    sas.command(s.rotation, s.angular_velocity, &s.inertia_local, pilot, dt)
+                };
+                game.rocket
+                    .advance(&mut game.ephemeris, dt, &control, Some(&mut steer));
+            } else {
+                control.turn = Some(pilot);
+                game.rocket.advance(&mut game.ephemeris, dt, &control, None);
+            }
         }
     }
     // A booster lost while attached leaves the upper stage flying on its own.
@@ -890,6 +945,46 @@ fn labels(
     );
 }
 
+/// The navball, drawn in the ecliptic around the dominant body's local vertical and north; its
+/// markers follow SURFACE / ORBIT.
+#[allow(clippy::type_complexity)]
+fn instruments(
+    game: Res<Game>,
+    mut balls: Query<&mut Navball>,
+    mut images: ResMut<Assets<Image>>,
+    mut labels: Query<(&mut Text, &mut Node, &mut TextColor, &mut Visibility), With<NavballLabel>>,
+    mut heading: Single<&mut Text, (With<NavballHeading>, Without<NavballLabel>)>,
+) {
+    let t = game.rocket.time();
+    let axes = game.axes;
+    let to_ecliptic = |v: DVec3| axes[0] * v.x + axes[1] * v.y + axes[2] * v.z;
+    let (nose, top) = vessel_axes(game.rocket.part_orientation(RocketPart::Upper));
+    let body = &game.bodies[game.navigation];
+    let velocity = if game.speed_surface {
+        to_ecliptic(game.rocket.body_fixed_state(&game.ephemeris).velocity)
+    } else {
+        game.upper.velocity - game.velocities[game.navigation]
+    };
+    let input = NavballInput {
+        // Rapier's f32 attitude: renormalise so the ball's unit checks hold.
+        nose: to_ecliptic(nose).normalize(),
+        top: to_ecliptic(top).normalize(),
+        up: (game.upper.position - game.positions[game.navigation]).normalize(),
+        pole: body.rotation.axis(),
+        prime_meridian: body_orientation(&body.rotation, t)[0],
+        velocity,
+    };
+    for mut ball in &mut balls {
+        let reading = draw_navball(&mut ball, &input, &mut images, &mut labels);
+        heading.0 = format!(
+            "HDG {:03} | {}{:.0} deg",
+            reading.heading.round() as i64 % 360,
+            if reading.pitch >= 0.0 { "+" } else { "" },
+            reading.pitch
+        );
+    }
+}
+
 fn hud(game: Res<Game>, ground: Res<Ground>, mut text: Single<&mut Text, With<Hud>>) {
     let Some(state) = game.state else { return };
     let rocket = &game.rocket;
@@ -1001,7 +1096,7 @@ fn hud(game: Res<Game>, ground: Res<Ground>, mut text: Single<&mut Text, With<Hu
     };
     let help = if game.help {
         "\nSpace: ignite booster, then separate and ignite the upper stage\n\
-         Shift/Ctrl: throttle | X: cut | W/S pitch | A/D yaw | Q/E roll\n\
+         Shift/Ctrl: throttle | X: cut | W/S pitch | A/D yaw | Q/E roll | T: SAS\n\
          , . time rate | P pause | R reset\n\
          drag: orbit camera | wheel: zoom out into the map\n\
          Tab or a label: focus | G: path frame | K: AGL/ALT | L: SURFACE/ORBIT | F1: keys\n"
@@ -1015,7 +1110,7 @@ fn hud(game: Res<Game>, ground: Res<Ground>, mut text: Single<&mut Text, With<Hu
     text.0 = format!(
         "{}  {}{}\n{rates}\n{note}{blocked}\n\n\
          STAGES | {:?}\n{stages}  {hint}\n\n\
-         THR {:>3.0}%  {engine}\n\
+         THR {:>3.0}%  {engine}   SAS {}\n\
          {altitude}\n\
          {speed}\n{orbit}\n\
          focus   {focus}\n\
@@ -1027,6 +1122,11 @@ fn hud(game: Res<Game>, ground: Res<Ground>, mut text: Single<&mut Text, With<Hu
         if game.paused { "  PAUSED" } else { "" },
         rocket.mode(),
         game.throttle_percent,
+        if game.sas.enabled() {
+            format!("ON ({})", game.sas.phase().label())
+        } else {
+            "off (T)".into()
+        },
         distance_text(game.camera.distance),
         state.map_weight * 100.0,
         state.up_weight * 100.0,

@@ -11,7 +11,7 @@ cargo test -p void-app --test flight                    # lab/flight 的接線�
 ## 分步
 
 1. **飛行核心（完成）**：Sol 系統中的 Aurelia、scenery 的分層地形（發射點在緯度 0.3、經度 0.5 rad 的陸地上）、兩節火箭（地面附近 Rapier、飛行中軌道傳播）、分離、時間加速與 on-rails、lab/view 的單一視圖（從發射台拉遠到地圖）、地圖上的軌道、滑行預測、Pe/Ap 與標籤。
-2. 儀表：navball、SAS（T）、HUD 數字整理。
+2. **儀表（完成）**：lab/navball 的球（150 px，下方中央，標記跟著 SURFACE／ORBIT），lab/sas 的 SAS（T，每個物理步呼叫一次）。
 3. scenery：地面與海的著色、大氣、雲、星空，跟著行星轉。
 4. 地圖：飛行計畫的路徑與機動面板。
 
