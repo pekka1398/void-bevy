@@ -418,3 +418,56 @@ fn floating_origin_move() {
     );
     assert!(dp < 1e-3 && dv < 1e-9);
 }
+
+#[test]
+fn body_overlay_reads_live_collider_shape_and_local_transform() {
+    let Env {
+        mut ephemeris,
+        frame,
+        terrain,
+    } = plain_pebble();
+    let at = ground(&terrain, DVec3::X, 50.0);
+    let mut world = ContactWorld::new(frame, Some(terrain), options(), 0.0, at, &mut ephemeris);
+    let body = world.add_body(
+        &ephemeris,
+        &spec(
+            SimpleShape::Box {
+                half_extents: DVec3::ONE,
+            },
+            500.0,
+            0.6,
+            0.2,
+        ),
+        FrameState {
+            position: at,
+            velocity: DVec3::ZERO,
+        },
+        DQuat::IDENTITY,
+        DVec3::ZERO,
+    );
+    let handle = world.body(body).colliders()[0];
+    // Alter native geometry without changing the authored body specification. An overlay generated
+    // from the authored shape would miss this deliberate mismatch.
+    world.world.colliders[handle].set_shape(rapier3d::prelude::SharedShape::cuboid(2.0, 3.0, 4.0));
+    world.world.colliders[handle]
+        .set_translation_wrt_parent(rapier3d::math::Vector::new(5.0, 0.0, 0.0));
+    let meshes = world.body_collider_meshes(body);
+    assert_eq!(meshes.len(), 1);
+    let bounds = |axis: usize| {
+        meshes[0]
+            .vertices
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), v| {
+                (a.min(v[axis]), b.max(v[axis]))
+            })
+    };
+    assert_eq!(bounds(0), (3.0, 7.0));
+    assert_eq!(bounds(1), (-3.0, 3.0));
+    assert_eq!(bounds(2), (-4.0, 4.0));
+    assert_eq!(meshes[0].triangles.len(), 12);
+    world.recenter(at + DVec3::new(700.0, -300.0, 200.0));
+    assert_eq!(
+        world.body_collider_meshes(body)[0].vertices,
+        meshes[0].vertices
+    );
+}

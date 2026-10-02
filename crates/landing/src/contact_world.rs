@@ -16,6 +16,7 @@
 //!   or joints keep Rapier's angular solution. Frame torque and prescribed torque are applied before
 //!   solving, so constraints see them.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc::channel;
@@ -31,7 +32,7 @@ use void_terrain::Terrain;
 
 use crate::planet_frame::{ContactFrame, FrameState};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ContactWorldOptions {
     /// Fixed physics step, s.
     pub step_seconds: f64,
@@ -91,15 +92,23 @@ pub struct ContactBodySpec {
     pub lock_rotations: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct TileCollider {
     pub collider: ColliderHandle,
     /// Body-fixed tile origin.
     pub origin: DVec3,
 }
 
-/// What `ContactWorld` keeps per body beside Rapier.
+/// One live Rapier collider, triangulated in its rigid body's local axes for observation.
 #[derive(Clone, Debug)]
+pub struct BodyColliderMesh {
+    pub id: String,
+    pub vertices: Vec<[f32; 3]>,
+    pub triangles: Vec<[u32; 3]>,
+}
+
+/// What `ContactWorld` keeps per body beside Rapier.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct BodyRecord {
     /// Body origin in the frame, f64; Rapier's translation is this minus the floating origin.
     position: DVec3,
@@ -377,6 +386,40 @@ impl<F: ContactFrame> ContactWorld<F> {
 
     pub fn body(&self, handle: RigidBodyHandle) -> &RigidBody {
         &self.world.bodies[handle]
+    }
+
+    /// Read the shapes attached to the body, including each collider's local transform.
+    /// Curved shapes are triangulated for display; their collision solver remains analytic.
+    pub fn body_collider_meshes(&self, handle: RigidBodyHandle) -> Vec<BodyColliderMesh> {
+        self.body(handle)
+            .colliders()
+            .iter()
+            .map(|h| {
+                let collider = &self.world.colliders[*h];
+                use rapier3d::parry::shape::TypedShape;
+                let (vertices, triangles) = match collider.shape().as_typed_shape() {
+                    TypedShape::Cuboid(s) => s.to_trimesh(),
+                    TypedShape::Ball(s) => s.to_trimesh(16, 8),
+                    TypedShape::Cylinder(s) => s.to_trimesh(24),
+                    TypedShape::Cone(s) => s.to_trimesh(24),
+                    other => panic!("contact overlay: unsupported collider {other:?}"),
+                };
+                let pose = collider
+                    .position_wrt_parent()
+                    .expect("body collider has a parent");
+                BodyColliderMesh {
+                    id: format!("{h:?}"),
+                    vertices: vertices
+                        .into_iter()
+                        .map(|v| {
+                            let v = pose * v;
+                            [v.x, v.y, v.z]
+                        })
+                        .collect(),
+                    triangles,
+                }
+            })
+            .collect()
     }
 
     /// Add a body. `extra_before`: acceleration beyond gravity and the frame's over the half step
@@ -1001,4 +1044,123 @@ pub fn surface_indices(resolution: usize) -> Vec<[u32; 3]> {
         .chunks(3)
         .map(|t| [t[0], t[1], t[2]])
         .collect()
+}
+
+/// The logical frame and terrain are supplied by the owner; the native physics cache is stored
+/// as one versioned unit so its arena handles never escape into the game's persistent IDs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContactWorldCheckpoint {
+    physics_abi: String,
+    physics: Vec<u8>,
+    options: ContactWorldOptions,
+    time: f64,
+    origin: DVec3,
+    tile_loads: u64,
+    tile_unloads: u64,
+    recenters: u64,
+    bodies: Vec<(RigidBodyHandle, BodyRecord)>,
+    tiles: Vec<(u64, TileCollider)>,
+}
+impl<F: ContactFrame> ContactWorld<F> {
+    pub fn checkpoint(&self) -> ContactWorldCheckpoint {
+        ContactWorldCheckpoint {
+            physics_abi: "rapier3d-0.35.1/f32/v1".into(),
+            physics: bincode::serialize(&self.world)
+                .expect("contact checkpoint: serialize physics"),
+            options: self.options,
+            time: self.time,
+            origin: self.origin,
+            tile_loads: self.tile_loads,
+            tile_unloads: self.tile_unloads,
+            recenters: self.recenters,
+            bodies: self.bodies.clone(),
+            tiles: self
+                .tiles
+                .keys()
+                .map(|key| (key, *self.tiles.get(key).unwrap()))
+                .collect(),
+        }
+    }
+    pub fn from_checkpoint(
+        frame: F,
+        terrain: Option<Arc<Terrain>>,
+        saved: ContactWorldCheckpoint,
+    ) -> Self {
+        assert_eq!(
+            saved.physics_abi, "rapier3d-0.35.1/f32/v1",
+            "contact checkpoint: incompatible native cache"
+        );
+        assert!(
+            saved.time.is_finite() && saved.origin.is_finite(),
+            "contact checkpoint: invalid clock/origin"
+        );
+        assert!(
+            saved.options.step_seconds.is_finite() && saved.options.step_seconds > 0.0,
+            "contact checkpoint: invalid step"
+        );
+        let world: PhysicsWorld = bincode::deserialize(&saved.physics)
+            .expect("contact checkpoint: invalid physics cache");
+        assert_eq!(
+            world.gravity,
+            Vector::ZERO,
+            "contact checkpoint: native gravity must be disabled"
+        );
+        assert_eq!(
+            world.integration_parameters.dt, saved.options.step_seconds as f32,
+            "contact checkpoint: inconsistent native timestep"
+        );
+        if let Some(terrain) = &terrain {
+            assert_eq!(
+                terrain.radius_meters,
+                frame
+                    .terrain_body()
+                    .expect("contact checkpoint: missing ground frame")
+                    .radius_meters,
+                "contact checkpoint: terrain/body mismatch"
+            );
+        } else {
+            assert!(
+                saved.tiles.is_empty(),
+                "contact checkpoint: terrain tiles without terrain"
+            );
+        }
+        let mut seen = std::collections::HashSet::new();
+        for (handle, record) in &saved.bodies {
+            assert!(
+                seen.insert(*handle) && world.bodies.get(*handle).is_some(),
+                "contact checkpoint: missing/duplicate body"
+            );
+            assert!(
+                record.position.is_finite()
+                    && record.turn_rotation.is_finite()
+                    && record.turn_angular_velocity.is_finite()
+                    && record.solver_delta.is_finite(),
+                "contact checkpoint: invalid body record"
+            );
+        }
+        let mut tiles = OrderedMap::new();
+        for (key, tile) in saved.tiles {
+            assert!(
+                !tiles.contains_key(key)
+                    && world.colliders.get(tile.collider).is_some()
+                    && tile.origin.is_finite(),
+                "contact checkpoint: invalid terrain tile"
+            );
+            tiles.insert(key, tile);
+        }
+        Self {
+            world,
+            frame,
+            terrain,
+            options: saved.options,
+            time: saved.time,
+            origin: saved.origin,
+            tile_loads: saved.tile_loads,
+            tile_unloads: saved.tile_unloads,
+            recenters: saved.recenters,
+            bodies: saved.bodies,
+            tiles,
+        }
+    }
 }

@@ -46,7 +46,7 @@ impl InitialWorld {
             launch_site: site,
         }
     }
-    pub fn build(&self) -> FleetFlight {
+    pub fn planet(&self) -> LandingPlanet {
         assert!(
             self.launch_site.is_finite(),
             "session: non-finite launch site"
@@ -57,15 +57,22 @@ impl InitialWorld {
                 "session: invalid air density"
             );
         }
-        let planet = LandingPlanet {
+        LandingPlanet {
             label: self.label.clone(),
             system: self.system.clone(),
             body_id: self.body_id.clone(),
             terrain_config: self.terrain.clone(),
             terrain: Arc::new(Terrain::from_config(&self.terrain)),
             air_density_scale: self.air_density_scale,
-        };
-        FleetFlight::new(planet, &self.craft, self.launch_site, self.air_enabled)
+        }
+    }
+    pub fn build(&self) -> FleetFlight {
+        FleetFlight::new(
+            self.planet(),
+            &self.craft,
+            self.launch_site,
+            self.air_enabled,
+        )
     }
 }
 
@@ -245,6 +252,8 @@ pub struct Recording {
     pub model_version: u32,
     pub catalog: serde_json::Value,
     pub initial: InitialWorld,
+    #[serde(default)]
+    pub base: Option<crate::checkpoint::FlightCheckpoint>,
     pub entries: Vec<Entry>,
     pub marks: Vec<Mark>,
 }
@@ -264,6 +273,13 @@ impl Recording {
             "session: catalog changed"
         );
         assert!(!self.marks.is_empty(), "session: missing state marks");
+        if let Some(base) = &self.base {
+            assert_eq!(
+                serde_json::to_value(&base.initial).unwrap(),
+                serde_json::to_value(&self.initial).unwrap(),
+                "session: checkpoint and recording describe different worlds"
+            );
+        }
         let mut previous = None;
         for mark in &self.marks {
             assert!(
@@ -341,6 +357,7 @@ impl FlightSession {
             model_version: MODEL_VERSION,
             catalog: serde_json::to_value(catalog()).unwrap(),
             initial,
+            base: None,
             entries: vec![],
             marks: vec![Mark {
                 after_actions: 0,
@@ -387,7 +404,10 @@ impl FlightSession {
     }
     pub fn from_recording(recording: Recording) -> Self {
         recording.validate();
-        let mut sim = recording.initial.build();
+        let mut sim = recording
+            .base
+            .as_ref()
+            .map_or_else(|| recording.initial.build(), |base| base.restore());
         let mut marks = recording.marks.iter().peekable();
         for index in 0..=recording.entries.len() {
             if index > 0 {
@@ -412,6 +432,29 @@ impl FlightSession {
     pub fn load(path: impl AsRef<Path>) -> Self {
         Self::from_recording(Recording::read(path))
     }
+    pub fn save_checkpoint(&self, path: impl AsRef<Path>) {
+        crate::checkpoint::FlightCheckpoint::capture(&self.sim, self.recording.initial.clone())
+            .write(path);
+    }
+    pub fn load_checkpoint(path: impl AsRef<Path>) -> Self {
+        Self::from_checkpoint(crate::checkpoint::FlightCheckpoint::read(path))
+    }
+    pub fn from_checkpoint(base: crate::checkpoint::FlightCheckpoint) -> Self {
+        let sim = base.restore();
+        let recording = Recording {
+            format_version: FORMAT_VERSION,
+            model_version: MODEL_VERSION,
+            catalog: serde_json::to_value(catalog()).unwrap(),
+            initial: base.initial.clone(),
+            base: Some(base),
+            entries: vec![],
+            marks: vec![Mark {
+                after_actions: 0,
+                state: world_mark(&sim),
+            }],
+        };
+        Self { sim, recording }
+    }
 }
 
 /// Incremental playback for a window. A frame ends at its recorded Advance action, never at
@@ -424,7 +467,11 @@ pub struct Playback {
 impl Playback {
     pub fn new(recording: Recording) -> (Self, FlightSession) {
         recording.validate();
-        let session = FlightSession::new(recording.initial.clone());
+        let session = if let Some(base) = &recording.base {
+            FlightSession::from_checkpoint(base.clone())
+        } else {
+            FlightSession::new(recording.initial.clone())
+        };
         let mut playback = Self {
             recording,
             cursor: 0,

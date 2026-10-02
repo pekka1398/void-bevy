@@ -6,6 +6,8 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+bincode = "=1.3.3"
+serde.workspace = true
 glam.workspace = true
 rapier3d.workspace = true
 void-frames.workspace = true

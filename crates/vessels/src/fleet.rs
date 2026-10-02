@@ -4,6 +4,7 @@ use crate::{
 };
 use glam::{DMat3, DQuat, DVec3};
 use rapier3d::prelude::RigidBodyHandle;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use void_assembly::{
@@ -23,7 +24,7 @@ use void_terrain::Terrain;
 
 type Poses = Vec<(String, PartPose)>;
 type SceneGroup = (Option<usize>, Vec<String>, Vec<(u64, usize)>);
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct FleetOptions {
     pub step_seconds: f64,
     pub tolerances: Tolerances,
@@ -111,7 +112,16 @@ pub struct SceneSnapshot {
     pub asleep: bool,
     pub recenters: u64,
 }
-#[derive(Clone, Copy, Debug, Default)]
+
+/// Actual live collision geometry. Packed orbital ships have no Rapier collider to display.
+#[derive(Clone, Debug)]
+pub struct VesselColliderMesh {
+    pub vessel: String,
+    pub position: DVec3,
+    pub rotation: DQuat,
+    pub mesh: void_landing::BodyColliderMesh,
+}
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct VesselControl {
     pub throttle: f64,
     pub turn: DVec3,
@@ -171,7 +181,7 @@ struct Scene {
     ground: Option<usize>,
     members: Vec<String>,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 enum Owner {
     Orbit {
         run: Box<PropagationRun>,
@@ -184,7 +194,7 @@ enum Owner {
         push: DVec3,
     },
 }
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Vessel {
     id: String,
     name: String,
@@ -192,6 +202,7 @@ struct Vessel {
     poses: Poses,
     owner: Owner,
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Sas {
     assist: StabilityAssist,
     ground: Option<usize>,
@@ -875,6 +886,39 @@ impl Fleet {
             .find(|t| format!("{:?}", t.collider) == tile)
             .expect("tile not loaded");
         s.world.terrain_collider_mesh(t)
+    }
+
+    pub fn vessel_collider_meshes(&self) -> Vec<VesselColliderMesh> {
+        self.order
+            .iter()
+            .flat_map(|id| {
+                let vessel = self.vessel(id);
+                let Owner::Scene { scene, body, .. } = vessel.owner else {
+                    return Vec::new();
+                };
+                let world = &self.scenes[&scene].world;
+                let position = self
+                    .to_inertial(
+                        scene,
+                        FrameState {
+                            position: world.position(body),
+                            velocity: DVec3::ZERO,
+                        },
+                    )
+                    .position;
+                let rotation = self.axes(scene) * quat64(*world.body(body).rotation());
+                world
+                    .body_collider_meshes(body)
+                    .into_iter()
+                    .map(|mesh| VesselColliderMesh {
+                        vessel: id.clone(),
+                        position,
+                        rotation,
+                        mesh,
+                    })
+                    .collect()
+            })
+            .collect()
     }
     fn new_scene(&mut self, ground: Option<usize>, ids: &[String]) -> u64 {
         let mut c = FrameState {
@@ -1898,3 +1942,7 @@ impl Fleet {
         done
     }
 }
+
+#[path = "checkpoint.rs"]
+mod checkpoint;
+pub use checkpoint::FleetCheckpoint;

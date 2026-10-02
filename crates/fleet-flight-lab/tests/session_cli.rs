@@ -81,3 +81,63 @@ fn saved_fleet_verifies_in_a_fresh_process_and_changed_inputs_fail() {
     assert!(String::from_utf8_lossy(&result.stderr).contains("world diverged"));
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn direct_world_save_loads_in_a_fresh_process_without_the_input_journal() {
+    let planet = void_landing::earth_size();
+    let craft = demo_craft();
+    let mut session =
+        FlightSession::new(InitialWorld::new(&planet, &craft, flat_site(&planet), true));
+    session.execute(Action::LaunchOrbit {
+        craft: craft.clone(),
+        offset: DVec3::ZERO,
+    });
+    session.execute(Action::LaunchOrbit {
+        craft,
+        offset: DVec3::Y * 30.0,
+    });
+    session.execute(Action::Select {
+        vessel: "v2".into(),
+    });
+    session.execute(Action::Sas { enabled: true });
+    session.execute(Action::Stage);
+    session.execute(Action::Control {
+        throttle: 0.2,
+        turn: DVec3::ZERO,
+    });
+    session.execute(Action::Advance {
+        seconds: 0.213,
+        rails: false,
+    });
+    let path =
+        std::env::temp_dir().join(format!("void-direct-save-cli-{}.json", std::process::id()));
+    session.save_checkpoint(&path);
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert!(
+        value.get("entries").is_none(),
+        "direct save must not contain an input history"
+    );
+    let result = Command::new(env!("CARGO_BIN_EXE_void-fleet-flight-lab"))
+        .arg("--verify-save")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stdout).contains("Verified Fleet world save"));
+    let mut restored = FlightSession::load_checkpoint(&path);
+    for live in [&mut session, &mut restored] {
+        live.execute(Action::Advance {
+            seconds: 0.43,
+            rails: false,
+        });
+    }
+    assert_eq!(
+        void_fleet_flight::session::world_mark(session.sim()),
+        void_fleet_flight::session::world_mark(restored.sim())
+    );
+    std::fs::remove_file(path).unwrap();
+}

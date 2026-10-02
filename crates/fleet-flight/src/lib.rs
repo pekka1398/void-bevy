@@ -1,5 +1,6 @@
 //! First integration boundary for assembly/Fleet flight. No Bevy and no fixed two-stage rocket.
 mod air;
+pub mod checkpoint;
 pub mod session;
 pub use air::FleetAir;
 use glam::{DQuat, DVec3};

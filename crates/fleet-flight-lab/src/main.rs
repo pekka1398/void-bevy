@@ -80,6 +80,16 @@ fn argument(name: &str) -> Option<String> {
         .map(|i| args.get(i + 1).expect("argument needs a value").clone())
 }
 fn main() {
+    if let Some(path) = argument("--verify-save") {
+        let session = FlightSession::load_checkpoint(&path);
+        println!(
+            "Verified Fleet world save: T+{:.6} s, {} vessels, selected {}",
+            session.sim().fleet.time(),
+            session.sim().fleet.vessel_ids().len(),
+            session.sim().selected
+        );
+        return;
+    }
     if let Some(path) = argument("--verify") {
         let mut profile = void_diagnostics::Profiler::new();
         let started = std::time::Instant::now();
@@ -113,7 +123,7 @@ fn main() {
     );
     let session = argument("--load").map_or_else(
         || FlightSession::new(InitialWorld::new(&planet.planet, &craft, site, air)),
-        FlightSession::load,
+        FlightSession::load_checkpoint,
     );
     let craft = session.recording_initial().craft.clone();
     let mut lab = new_lab(session, craft);
@@ -269,11 +279,11 @@ fn controls(
         return;
     }
     if keys.just_pressed(KeyCode::F6) {
-        lab.session.save(&lab.save_path);
+        lab.session.save_checkpoint(&lab.save_path);
         lab.notice = format!("Saved {}", lab.save_path.display());
     }
     if keys.just_pressed(KeyCode::F7) {
-        lab.session = FlightSession::load(&lab.save_path);
+        lab.session = FlightSession::load_checkpoint(&lab.save_path);
         lab.craft = lab.session.recording_initial().craft.clone();
         lab.dirty = true;
         lab.prediction = None;
@@ -668,6 +678,28 @@ fn draw(
         .collect::<HashSet<_>>();
     lab.collision.retain(|key, _| live.contains(key));
     if lab.colliders {
+        for collider in f.vessel_collider_meshes() {
+            let origin = frame
+                .to_body_fixed(
+                    &f.ephemeris,
+                    f.time(),
+                    FrameState {
+                        position: collider.position,
+                        velocity: DVec3::ZERO,
+                    },
+                )
+                .position;
+            let rotation = q.conjugate() * collider.rotation;
+            let vertices = &collider.mesh.vertices;
+            let indices = unique_edges(&collider.mesh.triangles);
+            for edge in indices.as_chunks::<2>().0 {
+                let point = |i: u32| {
+                    (origin - eye + rotation * Vec3::from_array(vertices[i as usize]).as_dvec3())
+                        .as_vec3()
+                };
+                gizmos.line(point(edge[0]), point(edge[1]), Color::srgb(0.2, 1.0, 0.4));
+            }
+        }
         for tile in terrain_tiles {
             let key = (tile.scene, tile.tile.clone());
             let vertices = lab.collision.entry(key).or_insert_with(|| {
@@ -705,7 +737,7 @@ fn draw(
     }
     let p = f.thrust(&lab.session.sim().selected);
     **hud = Text::new(format!(
-        "ASSEMBLY / FLEET FLIGHT INTEGRATION\n{} | {:?} | {} | {}x\nT+{:.2}s AGL {:.1}m surface {:.1}m/s mass {:.1}kg\nthrottle {:.0}% force {:.1}kN flow {:.2}kg/s SAS {:?}\n{} vessels | ground {} bubble {} | collision tiles {}\nP pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS\nTab vessel | N nearby ground craft | O orbital craft | R reset\n, . warp | C vacuum prediction (600s snapshot)\nF2 wire | F3 boundaries | F4 collision terrain | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
+        "ASSEMBLY / FLEET FLIGHT INTEGRATION\n{} | {:?} | {} | {}x\nT+{:.2}s AGL {:.1}m surface {:.1}m/s mass {:.1}kg\nthrottle {:.0}% force {:.1}kN flow {:.2}kg/s SAS {:?}\n{} vessels | ground {} bubble {} | collision tiles {}\nP pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS\nTab vessel | N nearby ground craft | O orbital craft | R reset\n, . warp | C vacuum prediction (600s snapshot)\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
         lab.session.sim().selected,
         selected.mode,
         if lab.paused { "paused" } else { "running" },

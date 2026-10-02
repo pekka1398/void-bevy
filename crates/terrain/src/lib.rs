@@ -36,18 +36,24 @@ pub struct Terrain {
     pub radius_meters: f64,
     pub max_height_meters: f64,
     kind: Kind,
+    config: TerrainConfig,
 }
 
 impl Terrain {
+    pub fn config(&self) -> &TerrainConfig {
+        &self.config
+    }
     pub fn from_config(config: &TerrainConfig) -> Self {
         match config {
             TerrainConfig::Hills(o) => Self {
+                config: config.clone(),
                 name: o.name.clone(),
                 radius_meters: o.radius_meters,
                 max_height_meters: o.max_height_meters,
                 kind: Kind::Hills(Hills::new(o)),
             },
             TerrainConfig::Layered(o) => Self {
+                config: config.clone(),
                 name: "Scenery layered terrain".into(),
                 radius_meters: o.radius_meters,
                 max_height_meters: MAX_HEIGHT,
