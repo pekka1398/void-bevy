@@ -1,7 +1,4 @@
-//! Portable, deterministic Fleet command journals. Reconstruct the whole live world, including
-//! solver history, from explicit inputs instead of serializing Rapier handles or trusting a craft
-//! export as a world save. Loading costs the recorded simulation time; snapshot compaction is a
-//! separate optimization. Checkpoints include complete observed world marks and reject divergence.
+//! Portable, deterministic Fleet command journals, optionally starting from a direct world checkpoint.
 use crate::FleetFlight;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
@@ -19,7 +16,7 @@ use void_vessels::VesselControl;
 
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 1;
+pub const MODEL_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -89,6 +86,25 @@ pub enum Action {
     Sas {
         enabled: bool,
     },
+    AddManeuver {
+        spec: void_orbit::ManeuverSpec,
+    },
+    EditManeuver {
+        index: usize,
+        spec: void_orbit::ManeuverSpec,
+    },
+    RemoveManeuver {
+        index: usize,
+    },
+    SelectManeuver {
+        index: usize,
+    },
+    PlaceManeuverAtApsis {
+        index: usize,
+        apsis: void_orbit::ApsisKind,
+    },
+    ExecuteManeuver,
+    AbortManeuver,
     Stage,
     LaunchGround {
         craft: Craft,
@@ -136,6 +152,40 @@ impl Action {
                 sim.sas(*enabled);
                 Outcome::Applied
             }
+            Self::AddManeuver { spec } => match sim.add_maneuver(&sim.selected.clone(), *spec) {
+                Ok(()) => Outcome::Applied,
+                Err(e) => Outcome::Refused(e),
+            },
+            Self::EditManeuver { index, spec } => {
+                match sim.edit_maneuver(&sim.selected.clone(), *index, *spec) {
+                    Ok(()) => Outcome::Applied,
+                    Err(e) => Outcome::Refused(e),
+                }
+            }
+            Self::RemoveManeuver { index } => {
+                match sim.remove_maneuver(&sim.selected.clone(), *index) {
+                    Ok(()) => Outcome::Applied,
+                    Err(e) => Outcome::Refused(e),
+                }
+            }
+            Self::SelectManeuver { index } => {
+                sim.select_maneuver(&sim.selected.clone(), *index);
+                Outcome::Applied
+            }
+            Self::PlaceManeuverAtApsis { index, apsis } => {
+                match sim.place_maneuver_at_apsis(&sim.selected.clone(), *index, *apsis) {
+                    Ok(()) => Outcome::Applied,
+                    Err(e) => Outcome::Refused(e),
+                }
+            }
+            Self::ExecuteManeuver => match sim.execute_maneuver(&sim.selected.clone()) {
+                Ok(()) => Outcome::Applied,
+                Err(e) => Outcome::Refused(e),
+            },
+            Self::AbortManeuver => {
+                sim.abort_maneuver(&sim.selected.clone());
+                Outcome::Applied
+            }
             Self::Stage => Outcome::Staged(sim.stage()),
             Self::LaunchGround { craft, site } => {
                 let id = sim.fleet.launch_landed(craft, sim.home, *site);
@@ -164,6 +214,7 @@ impl Action {
             } => {
                 let id = sim.fleet.join(part_a, node_a, part_b, node_b);
                 sim.select(&id);
+                sim.update_plans();
                 Outcome::Spawned(id)
             }
         }
@@ -211,6 +262,7 @@ pub fn world_mark(sim: &FleetFlight) -> serde_json::Value {
             "scene": s.scene, "position": s.position, "velocity": s.velocity,
             "rotation": s.rotation, "angularVelocity": s.angular_velocity, "mass": s.mass_kg,
             "parts": parts, "control": { "throttle":c.throttle, "turn":c.turn },
+            "guidance": sim.fleet.guidance(id),
             "sasPhase": format!("{:?}",sim.fleet.sas_phase(id)), "sasTarget":sim.fleet.sas_target(id) })
     }).collect();
     let scenes: Vec<_> = sim.fleet.scene_snapshots().iter().map(|s| {
@@ -236,7 +288,7 @@ pub fn world_mark(sim: &FleetFlight) -> serde_json::Value {
         .collect();
     json!({ "time":sim.fleet.time(), "pending":sim.fleet.pending_seconds(),
         "selected":sim.selected, "ships":ships, "scenes":scenes,
-        "connections":connections, "bodies":bodies })
+        "connections":connections, "bodies":bodies, "plans":sim.plan_checkpoints() })
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

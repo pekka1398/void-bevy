@@ -53,6 +53,7 @@ pub struct FleetCheckpoint {
     lit: Vec<String>,
     staged: Vec<String>,
     sas: BTreeMap<String, Sas>,
+    guidance: BTreeMap<String, GuidedBurn>,
     scenes: Vec<SavedScene>,
     active_pairs: Vec<(String, String)>,
 }
@@ -74,7 +75,7 @@ impl Fleet {
         let mut staged: Vec<_> = self.staged.iter().cloned().collect();
         staged.sort();
         FleetCheckpoint {
-            version: 1,
+            version: 2,
             options: self.options,
             time: self.time,
             pending: self.pending,
@@ -124,6 +125,7 @@ impl Fleet {
                     members: scene.members.clone(),
                 })
                 .collect(),
+            guidance: self.guidance.clone(),
             active_pairs: self.gate.active_pairs(),
         }
     }
@@ -132,7 +134,7 @@ impl Fleet {
         saved: FleetCheckpoint,
         environment: Option<Arc<dyn FleetEnvironment>>,
     ) -> Self {
-        assert_eq!(saved.version, 1, "fleet checkpoint: unsupported version");
+        assert_eq!(saved.version, 2, "fleet checkpoint: unsupported version");
         assert!(
             saved.time.is_finite()
                 && saved.pending.is_finite()
@@ -194,6 +196,7 @@ impl Fleet {
         fleet.lit = saved.lit.into_iter().collect();
         fleet.staged = saved.staged.into_iter().collect();
         fleet.sas = saved.sas.into_iter().collect();
+        fleet.guidance = saved.guidance;
         fleet.pending = saved.pending;
         fleet.next_vessel = saved.next_vessel;
         fleet.next_scene = saved.next_scene;
@@ -330,6 +333,30 @@ impl Fleet {
                 self.parts.contains_key(part),
                 "fleet checkpoint: unknown staged/lit part"
             );
+        }
+        for (id, g) in &self.guidance {
+            let vessel = self.vessel(id);
+            assert!(
+                g.start_time.is_finite() && g.end_time.is_finite() && g.end_time > g.start_time,
+                "fleet checkpoint: invalid guidance times"
+            );
+            assert!(
+                g.force.is_finite() && g.force.length() > 0.0 && g.flow.is_finite() && g.flow > 0.0,
+                "fleet checkpoint: invalid guidance engine"
+            );
+            Control::Thrust(void_orbit::ThrustControl {
+                thrust_newtons: g.force.length(),
+                exhaust_velocity: g.force.length() / g.flow,
+                minimum_mass_kg: 1.0,
+                attitude: g.attitude,
+            })
+            .assert_valid(self.ephemeris.bodies().len());
+            if g.status == GuidanceStatus::Armed {
+                assert!(
+                    matches!(vessel.owner, Owner::Orbit { .. }) && self.time < g.end_time,
+                    "fleet checkpoint: guidance on a nonorbital or completed vessel"
+                );
+            }
         }
         for id in self.sas.keys() {
             assert!(

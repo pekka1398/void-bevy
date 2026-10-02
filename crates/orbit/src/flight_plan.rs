@@ -12,7 +12,7 @@ use crate::propagator::{
 };
 use crate::trajectory::Trajectory;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReferenceMode {
     /// Whoever edits the plan keeps the reference on the body whose sphere of influence holds
     /// the planned trajectory at ignition.
@@ -21,7 +21,7 @@ pub enum ReferenceMode {
 }
 
 /// A planned burn: Δv components along the Frenet axes relative to `reference_body`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ManeuverSpec {
     pub start_time: f64,
     pub reference_body: usize,
@@ -34,7 +34,7 @@ pub struct ManeuverSpec {
     pub radial: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlanEngine {
     pub thrust_newtons: f64,
     pub exhaust_velocity: f64,
@@ -42,7 +42,7 @@ pub struct PlanEngine {
 }
 
 /// A maneuver made concrete: full thrust from `start_time` until the Δv is spent.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BurnSchedule {
     pub start_time: f64,
     pub end_time: f64,
@@ -81,6 +81,9 @@ pub struct FlightPlan {
     run: Option<PropagationRun>,
 }
 
+mod checkpoint;
+pub use checkpoint::FlightPlanCheckpoint;
+
 fn checked_coast(value: f64) -> f64 {
     assert!(
         value > 0.0 && value.is_finite(),
@@ -98,8 +101,11 @@ impl FlightPlan {
     ) -> Self {
         assert!(
             engine.thrust_newtons > 0.0
+                && engine.thrust_newtons.is_finite()
                 && engine.exhaust_velocity > 0.0
-                && engine.dry_mass_kg > 0.0,
+                && engine.exhaust_velocity.is_finite()
+                && engine.dry_mass_kg > 0.0
+                && engine.dry_mass_kg.is_finite(),
             "flight plan: engine {engine:?}"
         );
         Self {
@@ -116,6 +122,21 @@ impl FlightPlan {
             anchor: None,
             run: None,
         }
+    }
+
+    /// Recheck future burns against the current staged propulsion without losing completion history.
+    pub fn set_engine(&mut self, engine: PlanEngine) {
+        assert!(
+            engine.thrust_newtons.is_finite()
+                && engine.thrust_newtons > 0.0
+                && engine.exhaust_velocity.is_finite()
+                && engine.exhaust_velocity > 0.0
+                && engine.dry_mass_kg.is_finite()
+                && engine.dry_mass_kg > 0.0,
+            "flight plan: invalid engine"
+        );
+        self.engine = engine;
+        self.restart();
     }
 
     pub fn count(&self) -> usize {

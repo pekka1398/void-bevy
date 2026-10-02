@@ -82,7 +82,8 @@ impl Control {
         }
     }
 
-    fn assert_valid(&self, body_count: usize) {
+    /// Validate a control before installing it in a simulation owner.
+    pub fn assert_valid(&self, body_count: usize) {
         match self {
             Control::Thrust(c) => c.assert_valid(body_count),
             Control::Force(c) => {

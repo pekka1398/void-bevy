@@ -13,7 +13,7 @@
 | 空氣施力 | Fleet 原本完全沒有 AirSource／AirField 接線 | 新增可選 FleetEnvironment；新核心提供各零件阻力，Orbit 每個 Dopri stage 評估、接觸世界逐步評估，bubble 與 ground 都有施力；rails 也保留空氣 |
 | 噴嘴氣壓 | assembly catalog 的 Engine 只有真空 thrust／Isp，沒有出口面積 | 第一輪在 FleetAir 用顯式 engine ID → nozzle area 表，large 0.12 m²、small 0.15 m²；壓力降低引擎力、真空質量流率保持不變。未修改既有 catalog／golden；未評為正式零件資料模型定案 |
 | 滑行預測 | predict_coast 原本只接受具體 Ephemeris，但 Fleet 持有 EphemerisSource | 改為接受既有 trait，可共用預測；與主遊戲一樣畫真空滑行。lab 的 C 是當下 600 s 預測快照，非持續刷新 |
-| 有限燃燒機動 | FlightPlan／apsides 已改接 EphemerisSource；FleetFlight 能以 live staged engine／fuel group 建 plan；Fleet 尚無 Frenet 機動執行入口 | 已補 live PlanEngine／new_plan 接口，min mass 以第一個 fuel-group flameout 為界，避免將後續不同 Isp／推力當成常數。尚未接逐船保存／執行。需先釐清逐船計畫、有效引擎組合、minimum mass／供油變化、SAS 暫停／恢復及分離／合併時的計畫歸屬，不能只把 PlanEngine 的常數換成 Fleet.thrust |
+| 有限燃燒機動 | FlightPlan 與 Fleet staged engine 已可共用 | 已接逐船計畫、編輯／apsis／參考天體、第一個機動的理想軌道導引、存檔／重播；第一 fuel-group flameout 為規劃上限。手動控制、分級、進入 contact physics 明確中止，切船不取消 |
 | 撞擊毀損 | PartJointRocket 有 Crash，Fleet 沒有等價船／零件毀損政策 | 尚未接。這也是主遊戲替換前需要保留或明確重設的行為 |
 | navball／map／scenery | renderer 部分可共用，但主遊戲 Game 持有大量固定上級／兩級假設 | 第一輪只共用地形 tile 與零件資產；沒有完整 navball／多天體 map／scenery 外觀 |
 | 錄放 | 現有 session 格式只記兩級火箭的 mark，Game／step 在 app binary | 已提供 Fleet Action journal、逐船／零件／owner 完整 mark、增量視窗 playback 與獨立程序 headless verify；相機與純視覺操作尚未列入 Fleet 紀錄 |
@@ -107,3 +107,17 @@ cargo run -p void-app --example legacy_flight
 獨立場景與主遊戲材料／儀表／map 的 headless Bevy 初始化檢查通過，含 Aurelia → Luna 世界替換；不建立 WindowPlugin 或 renderer。主遊戲 binary 另有獨立程序 --verify-save／--verify 檢查。GPU 畫面仍留給使用者驗收。逐船機動計畫保存／執行與撞擊毀損尚未完成，A／B 持續進行。
 
 共享 runtime／主程式第一階段改接後 workspace 全 target：244 passed、0 failed、3 ignored；workspace Clippy（-D warnings）與 fmt 通過。機動執行／毀損等剩餘項目仍需完成，不能把這個測試結果當作 A／B 完成。
+
+## 逐船機動與保存
+
+main 和 Fleet integration lab 使用同一組操作：M 新增機動，`[`／`]` 選取，方向鍵調 prograde／normal，PageUp／Down 調 radial，Home／End 調開始秒數（Shift 放大步幅）；Y／U 將燃燒中心放在下一次近／遠拱點，V 選參考天體或 Auto，Delete 刪除。B 執行第一個機動，Escape 中止。橙色線為機動預測；所有編輯與執行均寫入 Action journal。
+
+計畫屬於 vessel ID，包含每個 ManeuverSpec、選取機動、已完成數、預測軌跡／積分記憶、執行狀態與中止原因。切船後原船繼續燃燒，直接存檔在燃燒前與中途都保存 Fleet guidance 的起止時間、方向 law 和 engine group rating；載入繼續而不重新點火。完成時移除第一個機動、保留後續機動，後續須再按 B。Auto 在執行前以預測的點火位置選 dominant body。
+
+這是與 orbit FlightPlan 相同的**理想軌道導引**：方向 law 在每個 Dopri stage 求值，顯示姿態跟隨推力方向，沒有有限轉向時間／RCS 模型。任意 craft 使用合力的本體軸，不假設 +Y 是推力軸；不平衡力矩、無控制零件、無已分級引擎／供油、跨第一個 fuel-group flameout、contact owner 都明確拒絕。啟用時停止原 SAS hold，避免舊姿態目標與導引衝突；結束後可重新啟用 SAS。分級、手動控制或 orbital→contact 交接中止導引並記錄原因，不用此模式強制旋轉接觸剛體。
+
+Fleet 在軌道積分 leg 內切開燃燒起止時刻，因此另一艘地面船造成全世界 1/60 s 固定更新時，0.007 s 等非整步點火時間仍按指定時長耗油。預測是固定 engine 的真空計畫；實際大氣阻力與噴嘴壓力仍由 Fleet environment 求值，低空不保證達到預測 Δv，重心也會隨耗油移動。ground/bubble 出入的行為需由使用者之後視窗驗收。
+
+模型版本提高到 2、Fleet native checkpoint schema 提高到 2，舊版本明確拒絕，目前沒有跨版本遷移。headless 檢查涵蓋非整步燃燒與獨立軌道速度對照、armed／running 直接存讀後逐步完整狀態一致、切船保留機動、手動／分級／contact 中止、計畫與 journal replay，以及主程式按鍵接線（無 WindowPlugin／renderer）。
+
+逐船機動這批 workspace 全 target 回歸：253 passed、0 failed、3 ignored；workspace Clippy（-D warnings）及 fmt 通過。整體 A／B 仍有 ab-progress.md 列出的缺口，尚未宣稱全部完成。

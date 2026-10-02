@@ -36,6 +36,8 @@ struct Lab {
     last_view_time: f64,
     orbits: void_view::MapOrbits,
     path: void_view::MapPath,
+    plan_path: void_view::MapPath,
+    plan_vessel: String,
     prediction_at: f64,
     prediction_generation: u64,
     session: FlightSession,
@@ -306,6 +308,8 @@ fn new_lab(session: FlightSession, craft: Craft) -> Lab {
         last_view_time: 0.0,
         orbits,
         path: void_view::MapPath::new(),
+        plan_path: void_view::MapPath::new(),
+        plan_vessel: String::new(),
         prediction_at: f64::NEG_INFINITY,
         prediction_generation: 0,
         session,
@@ -518,16 +522,15 @@ fn controls(
     }
     lab.pointer_over_label = over_label;
     if !window.focused {
-        let throttle = lab
-            .session
-            .sim()
-            .fleet
-            .control(&lab.session.sim().selected)
-            .throttle;
-        lab.session.execute(Action::Control {
-            throttle,
-            turn: DVec3::ZERO,
-        });
+        if lab.playback.is_none() {
+            let control = lab.session.sim().fleet.control(&lab.session.sim().selected);
+            if control.turn != DVec3::ZERO {
+                lab.session.execute(Action::Control {
+                    throttle: control.throttle,
+                    turn: DVec3::ZERO,
+                });
+            }
+        }
         return;
     }
     if lab.playback.is_some() {
@@ -600,10 +603,12 @@ fn controls(
             .expect("selected vessel");
         let mut c = lab.session.sim().fleet.control(&old);
         c.turn = DVec3::ZERO;
-        lab.session.execute(Action::Control {
-            throttle: c.throttle,
-            turn: c.turn,
-        });
+        if c.turn != lab.session.sim().fleet.control(&old).turn {
+            lab.session.execute(Action::Control {
+                throttle: c.throttle,
+                turn: c.turn,
+            });
+        }
         lab.session.execute(Action::Select {
             vessel: ids[(i + 1) % ids.len()].clone(),
         });
@@ -687,8 +692,169 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyC) {
         lab.prediction = Some(lab.session.predict(600.0));
     }
+    plan_controls(lab, &keys);
     view_controls(lab, &keys, &buttons, &motion, &scroll);
 }
+fn plan_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
+    use void_orbit::{ManeuverSpec, ReferenceMode};
+    let id = lab.session.sim().selected.clone();
+    let run = |lab: &mut Lab, action: Action| match lab.session.execute(action) {
+        Outcome::Applied => lab.notice.clear(),
+        Outcome::Refused(reason) => lab.notice = reason,
+        other => panic!("unexpected maneuver outcome {other:?}"),
+    };
+    if keys.just_pressed(KeyCode::KeyM) {
+        let sim = lab.session.sim();
+        let fleet = &sim.fleet;
+        let ship = fleet.snapshot(&id);
+        let mut positions = vec![DVec3::ZERO; fleet.ephemeris.bodies().len()];
+        fleet.ephemeris.positions_at(fleet.time(), &mut positions);
+        let reference = void_orbit::DominanceTree::new(fleet.ephemeris.bodies())
+            .dominant(&positions, ship.position);
+        let start_time = sim
+            .plans
+            .get(&id)
+            .and_then(|p| p.plan.burns().last())
+            .map_or(fleet.time() + 60.0, |b| b.end_time + 60.0);
+        run(
+            lab,
+            Action::AddManeuver {
+                spec: ManeuverSpec {
+                    start_time,
+                    reference_body: reference,
+                    reference_mode: ReferenceMode::Auto,
+                    prograde: 100.0,
+                    normal: 0.0,
+                    radial: 0.0,
+                },
+            },
+        );
+    }
+    let Some(p) = lab.session.sim().plans.get(&id) else {
+        return;
+    };
+    if p.plan.count() == 0 {
+        return;
+    }
+    let selected = p.selected;
+    let count = p.plan.count();
+    let mut spec = p.plan.maneuver(selected);
+    if keys.just_pressed(KeyCode::BracketLeft) {
+        run(
+            lab,
+            Action::SelectManeuver {
+                index: selected.saturating_sub(1),
+            },
+        );
+    }
+    if keys.just_pressed(KeyCode::BracketRight) {
+        run(
+            lab,
+            Action::SelectManeuver {
+                index: (selected + 1).min(count - 1),
+            },
+        );
+    }
+    let step = if keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+        10.0
+    } else {
+        1.0
+    };
+    let prograde = axis(keys, KeyCode::ArrowUp, KeyCode::ArrowDown) * step;
+    let normal = axis(keys, KeyCode::ArrowRight, KeyCode::ArrowLeft) * step;
+    let radial = axis(keys, KeyCode::PageUp, KeyCode::PageDown) * step;
+    let seconds = axis(keys, KeyCode::End, KeyCode::Home) * step;
+    if prograde != 0.0 || normal != 0.0 || radial != 0.0 || seconds != 0.0 {
+        spec.prograde += prograde;
+        spec.normal += normal;
+        spec.radial += radial;
+        spec.start_time += seconds;
+        run(
+            lab,
+            Action::EditManeuver {
+                index: selected,
+                spec,
+            },
+        );
+    }
+    if keys.just_pressed(KeyCode::KeyV) {
+        if spec.reference_mode == ReferenceMode::Auto {
+            spec.reference_mode = ReferenceMode::Fixed;
+        } else if spec.reference_body + 1 < lab.session.sim().fleet.ephemeris.bodies().len() {
+            spec.reference_body += 1;
+        } else {
+            spec.reference_mode = ReferenceMode::Auto;
+            spec.reference_body = lab.session.sim().home;
+        }
+        run(
+            lab,
+            Action::EditManeuver {
+                index: selected,
+                spec,
+            },
+        );
+    }
+    if keys.just_pressed(KeyCode::Delete) {
+        run(lab, Action::RemoveManeuver { index: selected });
+    }
+    if keys.just_pressed(KeyCode::KeyY) {
+        run(
+            lab,
+            Action::PlaceManeuverAtApsis {
+                index: selected,
+                apsis: void_orbit::ApsisKind::Periapsis,
+            },
+        );
+    }
+    if keys.just_pressed(KeyCode::KeyU) {
+        run(
+            lab,
+            Action::PlaceManeuverAtApsis {
+                index: selected,
+                apsis: void_orbit::ApsisKind::Apoapsis,
+            },
+        );
+    }
+    if keys.just_pressed(KeyCode::KeyB) {
+        run(lab, Action::ExecuteManeuver);
+    }
+    if keys.just_pressed(KeyCode::Escape) {
+        run(lab, Action::AbortManeuver);
+    }
+}
+fn plan_description(lab: &Lab) -> String {
+    let sim = lab.session.sim();
+    let Some(p) = sim.plans.get(&sim.selected) else {
+        return "M add maneuver | B execute first | Esc abort".into();
+    };
+    let mut text = format!(
+        "Plan: {} maneuvers, {} completed | {}",
+        p.plan.count(),
+        p.plan.completed_count,
+        p.message
+    );
+    if p.plan.count() > 0 {
+        let spec = p.plan.maneuver(p.selected);
+        let status = match p.plan.status(p.selected) {
+            Ok(burn) => format!("burn {:.2}s", burn.end_time - burn.start_time),
+            Err(reason) => format!("unavailable: {reason}"),
+        };
+        text.push_str(&format!(
+            "\n[{}] T+{:.2}s Δv {:+.1}/{:+.1}/{:+.1}m/s {:?} {} | {}",
+            p.selected + 1,
+            spec.start_time,
+            spec.prograde,
+            spec.normal,
+            spec.radial,
+            spec.reference_mode,
+            sim.fleet.ephemeris.bodies()[spec.reference_body].name,
+            status
+        ));
+    }
+    text.push_str("\nM add | [] select | arrows prograde/normal | PgUp/Dn radial | Home/End time | Y/U apsis | V reference | Del remove | B execute first | Esc abort");
+    text
+}
+
 fn view_controls(
     lab: &mut Lab,
     keys: &ButtonInput<KeyCode>,
@@ -1157,10 +1323,31 @@ fn draw(
             }
         }
     }
-    if let Some(prediction) = &lab.prediction {
+    if let Some(prediction) = &lab.prediction
+        && !lab.main_game
+    {
         gizmos.linestrip(
             prediction.points.iter().map(|(_, p)| (*p - eye).as_vec3()),
             Color::srgb(0.2, 0.9, 1.0),
+        );
+    }
+    if !lab.main_game
+        && let Some(plan) = lab.session.sim().plans.get(&lab.session.sim().selected)
+    {
+        let trajectory = &plan.plan.trajectory;
+        gizmos.linestrip(
+            (0..trajectory.count()).map(|i| {
+                let local = frame.to_body_fixed(
+                    &f.ephemeris,
+                    f.time(),
+                    FrameState {
+                        position: trajectory.position(i),
+                        velocity: trajectory.velocity(i),
+                    },
+                );
+                (local.position - eye).as_vec3()
+            }),
+            Color::srgb(1.0, 0.6, 0.15),
         );
     }
     let p = f.thrust(&lab.session.sim().selected);
@@ -1231,7 +1418,7 @@ fn draw(
         (orbital.periapsis_radius_meters - body.radius_meters) / 1000.0,
         (orbital.apoapsis_radius_meters - body.radius_meters) / 1000.0,
         f.vessel_ids().len(),
-        lab.notice,
+        format_args!("{}\n{}", lab.notice, plan_description(lab)),
     ));
     if let Some((profile, _)) = &mut lab.profile {
         profile.span("draw_lod_overlays", started, std::time::Instant::now());
@@ -1315,6 +1502,90 @@ mod tests {
                 .uniforms
                 .bottom_radius,
             planet.planet.terrain.radius_meters as f32
+        );
+    }
+
+    #[test]
+    fn maneuver_keys_arm_a_plan_and_switch_ship_without_aborting_it() {
+        let mut app = initialized_scene(true);
+        let id = {
+            let mut lab = app.world_mut().non_send_mut::<Lab>();
+            let craft = lab.craft.clone();
+            let Outcome::Spawned(id) = lab.session.execute(Action::LaunchOrbit {
+                craft,
+                offset: DVec3::ZERO,
+            }) else {
+                panic!("launch")
+            };
+            lab.session.execute(Action::Select { vessel: id.clone() });
+            lab.session.execute(Action::Stage);
+            id
+        };
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(AccumulatedMouseMotion::default())
+            .insert_resource(AccumulatedMouseScroll::default())
+            .add_systems(Update, controls.before(draw));
+        for key in [KeyCode::KeyM, KeyCode::KeyB, KeyCode::Tab] {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.reset_all();
+            keys.press(key);
+            app.update();
+        }
+        let lab = app.world().non_send::<Lab>();
+        assert_ne!(lab.session.sim().selected, id);
+        assert!(lab.session.sim().plans[&id].executing);
+        assert_eq!(
+            lab.session.sim().fleet.guidance(&id).unwrap().status,
+            void_vessels::GuidanceStatus::Armed
+        );
+    }
+
+    #[test]
+    fn unfocused_window_does_not_inject_control_changes_into_replay() {
+        let mut app = initialized_scene(false);
+        let initial = app
+            .world()
+            .non_send::<Lab>()
+            .session
+            .recording_initial()
+            .clone();
+        let mut flown = FlightSession::new(initial);
+        flown.execute(Action::Control {
+            throttle: 0.0,
+            turn: DVec3::X * 0.25,
+        });
+        flown.execute(Action::Advance {
+            seconds: 0.113,
+            rails: false,
+        });
+        flown.mark();
+        flown.execute(Action::Advance {
+            seconds: 0.113,
+            rails: false,
+        });
+        let (mut replay, mut session) = Playback::new(flown.recording());
+        assert!(replay.next_frame(&mut session));
+        let before = void_fleet_flight::session::world_mark(session.sim());
+        {
+            let mut lab = app.world_mut().non_send_mut::<Lab>();
+            lab.session = session;
+            lab.playback = Some(replay);
+        }
+        app.world_mut()
+            .query::<&mut Window>()
+            .single_mut(app.world_mut())
+            .unwrap()
+            .focused = false;
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(AccumulatedMouseMotion::default())
+            .insert_resource(AccumulatedMouseScroll::default())
+            .add_systems(Update, controls.before(draw));
+        app.update();
+        assert_eq!(
+            before,
+            void_fleet_flight::session::world_mark(app.world().non_send::<Lab>().session.sim())
         );
     }
 }
@@ -1696,6 +1967,21 @@ fn draw_map(
     } else {
         lab.path.hide();
     }
+    if lab.plan_vessel != lab.session.sim().selected {
+        lab.plan_path = void_view::MapPath::new();
+        lab.plan_vessel = lab.session.sim().selected.clone();
+    }
+    if let Some(p) = lab.session.sim().plans.get(&lab.plan_vessel) {
+        lab.plan_path.update(
+            &fleet.ephemeris,
+            &p.plan.trajectory,
+            p.plan.generation,
+            &frame,
+            true,
+        );
+    } else {
+        lab.plan_path.hide();
+    }
     let home_frame = PlanetFrame::new(&fleet.ephemeris, home);
     let eye_inertial = home_frame
         .to_inertial(
@@ -1716,7 +2002,10 @@ fn draw_map(
         &mut gizmos,
         bodies,
         &lab.orbits,
-        &[(&lab.path, crate::map::color(crate::map::PATH_COLOR))],
+        &[
+            (&lab.path, crate::map::color(crate::map::PATH_COLOR)),
+            (&lab.plan_path, Color::srgb(1.0, 0.6, 0.15)),
+        ],
         &frame,
         view.map_weight as f32,
         &render,

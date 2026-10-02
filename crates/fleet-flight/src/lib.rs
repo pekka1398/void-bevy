@@ -1,6 +1,7 @@
 //! First integration boundary for assembly/Fleet flight. No Bevy and no fixed two-stage rocket.
 mod air;
 pub mod checkpoint;
+pub mod plans;
 pub mod session;
 pub use air::FleetAir;
 use glam::{DQuat, DVec3};
@@ -18,6 +19,7 @@ pub struct FleetFlight {
     pub home: usize,
     pub selected: String,
     pub launch_site: DVec3,
+    pub plans: std::collections::BTreeMap<String, plans::VesselPlan>,
 }
 impl FleetFlight {
     pub fn new(planet: LandingPlanet, craft: &Craft, site: DVec3, air: bool) -> Self {
@@ -52,6 +54,7 @@ impl FleetFlight {
             home,
             selected,
             launch_site: site,
+            plans: std::collections::BTreeMap::new(),
         }
     }
     pub fn select(&mut self, id: &str) {
@@ -60,10 +63,12 @@ impl FleetFlight {
     }
     pub fn control(&mut self, control: VesselControl) {
         self.fleet.set_control(&self.selected, control);
+        self.update_plans();
     }
     pub fn stage(&mut self) -> Vec<String> {
         let children = self.fleet.stage(&self.selected);
         self.fleet.advance(0.0);
+        self.update_plans();
         children
     }
     pub fn sas(&mut self, enabled: bool) {
@@ -78,6 +83,7 @@ impl FleetFlight {
             Ok(self.fleet.advance_on_rails(seconds))
         } else {
             self.fleet.advance(seconds);
+            self.update_plans();
             Ok(true)
         }
     }

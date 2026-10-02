@@ -4,7 +4,7 @@ use crate::ephemeris::EphemerisSource;
 use crate::system::CelestialBody;
 use crate::trajectory::Trajectory;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ApsisKind {
     Periapsis,
     Apoapsis,

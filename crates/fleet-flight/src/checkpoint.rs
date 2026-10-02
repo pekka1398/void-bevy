@@ -21,6 +21,7 @@ pub struct FlightCheckpoint {
     pub initial: InitialWorld,
     fleet: FleetCheckpoint,
     selected: String,
+    plans: std::collections::BTreeMap<String, crate::plans::SavedVesselPlan>,
     ephemeris_end: f64,
     mark: serde_json::Value,
 }
@@ -41,6 +42,7 @@ impl FlightCheckpoint {
             initial,
             fleet: sim.fleet.checkpoint(),
             selected: sim.selected.clone(),
+            plans: sim.plan_checkpoints(),
             ephemeris_end: sim.fleet.ephemeris.end_time(),
             mark: world_mark(sim),
         }
@@ -76,13 +78,15 @@ impl FlightCheckpoint {
             )) as Arc<dyn void_vessels::FleetEnvironment>
         });
         let fleet = Fleet::from_checkpoint(ephemeris, self.fleet.clone(), environment);
-        let sim = FleetFlight {
+        let mut sim = FleetFlight {
             fleet,
             planet,
             home,
             selected: self.selected.clone(),
             launch_site: self.initial.launch_site,
+            plans: std::collections::BTreeMap::new(),
         };
+        sim.restore_plans(self.plans.clone());
         assert_eq!(
             world_mark(&sim),
             self.mark,

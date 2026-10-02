@@ -22,6 +22,9 @@ use void_rotation::{Mat3, rotation_step};
 use void_sas::{SAS_TUNING, SasPhase, StabilityAssist};
 use void_terrain::Terrain;
 
+mod guidance;
+pub use guidance::{GuidanceStatus, GuidedBurn};
+
 type Poses = Vec<(String, PartPose)>;
 type SceneGroup = (Option<usize>, Vec<String>, Vec<(u64, usize)>);
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -220,6 +223,7 @@ pub struct Fleet {
     vessels: BTreeMap<String, Vessel>,
     order: Vec<String>,
     controls: HashMap<String, VesselControl>,
+    guidance: BTreeMap<String, GuidedBurn>,
     lit: HashSet<String>,
     staged: HashSet<String>,
     sas: HashMap<String, Sas>,
@@ -303,6 +307,7 @@ impl Fleet {
             vessels: BTreeMap::new(),
             order: vec![],
             controls: HashMap::new(),
+            guidance: BTreeMap::new(),
             lit: HashSet::new(),
             staged: HashSet::new(),
             sas: HashMap::new(),
@@ -420,23 +425,28 @@ impl Fleet {
                 .any(|m| matches!(m, Module::Command))
         })
     }
-    fn vacuum_propulsion_of(&self, v: &Vessel) -> Propulsion {
-        let parts: Vec<_> = v.poses.iter().map(|(id, _)| &self.parts[id]).collect();
-        propulsion(
-            &parts,
-            &v.poses,
-            &self.connections,
-            &self.lit,
-            self.controls[&v.id].throttle,
-            self.centred(&v.poses).1,
-        )
-    }
     fn propulsion_with_environment(
         &self,
         v: &Vessel,
         sample: Option<&EnvironmentSample>,
     ) -> Propulsion {
-        let mut p = self.vacuum_propulsion_of(v);
+        self.propulsion_at(v, sample, self.time)
+    }
+    fn propulsion_at(
+        &self,
+        v: &Vessel,
+        sample: Option<&EnvironmentSample>,
+        time: f64,
+    ) -> Propulsion {
+        let parts: Vec<_> = v.poses.iter().map(|(id, _)| &self.parts[id]).collect();
+        let mut p = propulsion(
+            &parts,
+            &v.poses,
+            &self.connections,
+            &self.lit,
+            self.effective_throttle(&v.id, time),
+            self.centred(&v.poses).1,
+        );
         if let Some(sample) = sample {
             p.force = DVec3::ZERO;
             p.torque = DVec3::ZERO;
@@ -497,6 +507,7 @@ impl Fleet {
             "fleet: no command part"
         );
         self.vessel(id);
+        self.cancel_guidance(id, "manual control");
         self.controls.insert(id.into(), c);
     }
     pub fn set_sas(&mut self, id: &str, on: bool) {
@@ -1046,6 +1057,7 @@ impl Fleet {
         v.owner = Owner::Scene { scene, body, push };
     }
     fn move_to(&mut self, id: &str, scene: u64) {
+        self.cancel_guidance(id, "entered contact physics");
         let snap = self.snapshot(id);
         let mut v = self.vessels.remove(id).unwrap();
         let from = self.mode(&v);
@@ -1259,6 +1271,7 @@ impl Fleet {
         s
     }
     pub fn stage(&mut self, id: &str) -> Vec<String> {
+        self.cancel_guidance(id, "staging");
         let Some(next) = self.stages_left(id).first().copied() else {
             return vec![];
         };
@@ -1526,6 +1539,7 @@ impl Fleet {
         self.gate.remove_vessel(&b);
         self.controls.remove(&b);
         self.sas.remove(&b);
+        self.guidance.remove(&b);
         self.event(&b, Some(self.scene_mode(scene)), None, Some(scene));
         self.connections.push(Connection {
             a: part_a.into(),
@@ -1599,30 +1613,100 @@ impl Fleet {
                 panic!("expected orbit")
             };
             let t = run.time;
+            if self
+                .guidance
+                .get(id)
+                .is_some_and(|g| g.status == GuidanceStatus::Armed && t >= g.end_time)
+            {
+                self.guidance.get_mut(id).unwrap().status = GuidanceStatus::Completed;
+                self.controls.get_mut(id).unwrap().throttle = 0.0;
+            }
             if t + 1e-12 >= end {
                 break;
             }
             let q = *rotation;
             let w = *angular_velocity;
             let environment = self.environment_sample(&v, t);
-            let p = self.propulsion_with_environment(&v, environment.as_ref());
+            let guide = self
+                .guidance
+                .get(id)
+                .filter(|g| g.status == GuidanceStatus::Armed)
+                .cloned();
+            if let Some(g) = &guide {
+                if t >= g.end_time {
+                    self.guidance.get_mut(id).unwrap().status = GuidanceStatus::Completed;
+                    self.controls.get_mut(id).unwrap().throttle = 0.0;
+                } else {
+                    let rating = self.full_rating_of(&v);
+                    if (rating.force - g.force).length() > 1e-8
+                        || (rating.flow_kg_per_second - g.flow).abs() > 1e-10
+                        || rating.torque.length() > 1e-6
+                    {
+                        self.cancel_guidance(id, "active propulsion group changed");
+                    }
+                }
+            }
+            let guide = self
+                .guidance
+                .get(id)
+                .filter(|g| g.status == GuidanceStatus::Armed)
+                .cloned();
+            let p = self.propulsion_at(&v, environment.as_ref(), t);
             let burning = p.flow_kg_per_second > 0.0;
-            let turning = w != DVec3::ZERO
-                || p.torque != DVec3::ZERO
-                || self.controls[id].turn != DVec3::ZERO
-                || self.sas.contains_key(id);
+            let turning = !(burning && guide.is_some())
+                && (w != DVec3::ZERO
+                    || p.torque != DVec3::ZERO
+                    || self.controls[id].turn != DVec3::ZERO
+                    || self.sas.contains_key(id));
             let mut leg = if self.environment.is_some() {
                 end.min(t + self.options.flight_chunk_seconds)
             } else {
                 end
             };
+            if let Some(g) = &guide {
+                leg = leg.min(if t < g.start_time {
+                    g.start_time
+                } else {
+                    g.end_time
+                });
+            }
             if burning && turning {
                 leg = leg.min(t + self.options.step_seconds);
             }
             if burning {
                 leg = leg.min(t + p.seconds_to_flameout);
             }
-            let control = if burning {
+            let control = if burning
+                && let Some(g) = &guide
+                && p.force.length() > 0.0
+            {
+                let direction = self.propagator.thrust_direction(
+                    &self.ephemeris,
+                    &g.attitude,
+                    t,
+                    run.state().position,
+                    run.state().velocity,
+                );
+                let aligned =
+                    (DQuat::from_rotation_arc(q * p.force.normalize(), direction) * q).normalize();
+                let Owner::Orbit {
+                    rotation,
+                    angular_velocity,
+                    ..
+                } = &mut v.owner
+                else {
+                    unreachable!()
+                };
+                *rotation = aligned;
+                *angular_velocity = DVec3::ZERO;
+                Some(Control::Thrust(void_orbit::ThrustControl {
+                    thrust_newtons: p.force.length(),
+                    exhaust_velocity: p.force.length() / p.flow_kg_per_second,
+                    minimum_mass_kg: self.mass(&v.poses)
+                        - p.groups.iter().map(|g| g.fuel_kg).sum::<f64>(),
+                    attitude: g.attitude,
+                }))
+            } else if burning {
                 Some(Control::Force(ForceControl {
                     force: q * p.force,
                     mass_flow_kg_per_second: p.flow_kg_per_second,
@@ -1646,7 +1730,7 @@ impl Fleet {
                 let mass = self.mass(&v.poses);
                 let (poses, c) = self.centred(&v.poses);
                 v.poses = poses;
-                let Owner::Orbit { run, .. } = &mut v.owner else {
+                let Owner::Orbit { run, rotation, .. } = &mut v.owner else {
                     unreachable!()
                 };
                 assert!(
@@ -1655,8 +1739,12 @@ impl Fleet {
                 );
                 run.y[6] = mass;
                 if c != DVec3::ZERO {
-                    let d = q * c;
-                    let u = w.cross(d);
+                    let d = *rotation * c;
+                    let u = if guide.is_some() {
+                        DVec3::ZERO
+                    } else {
+                        w.cross(d)
+                    };
                     for (i, value) in d.to_array().iter().enumerate() {
                         run.y[i] += value;
                     }
@@ -1664,6 +1752,35 @@ impl Fleet {
                         run.y[i + 3] += value;
                     }
                     **run = run.restarted();
+                }
+            }
+            if burning
+                && p.force.length() > 0.0
+                && let Some(g) = &guide
+            {
+                let Owner::Orbit {
+                    run,
+                    rotation,
+                    angular_velocity,
+                } = &mut v.owner
+                else {
+                    unreachable!()
+                };
+                let state = run.state();
+                let direction = self.propagator.thrust_direction(
+                    &self.ephemeris,
+                    &g.attitude,
+                    leg,
+                    state.position,
+                    state.velocity,
+                );
+                *rotation = (DQuat::from_rotation_arc(*rotation * p.force.normalize(), direction)
+                    * *rotation)
+                    .normalize();
+                *angular_velocity = DVec3::ZERO;
+                if leg == g.end_time {
+                    self.guidance.get_mut(id).unwrap().status = GuidanceStatus::Completed;
+                    self.controls.get_mut(id).unwrap().throttle = 0.0;
                 }
             }
             if turning {
@@ -1846,6 +1963,13 @@ impl Fleet {
         }
     }
     pub fn rails_blocker(&self) -> Option<String> {
+        if self
+            .guidance
+            .values()
+            .any(|g| g.status == GuidanceStatus::Armed)
+        {
+            return Some("scheduled maneuver: use physics time".into());
+        }
         for id in &self.order {
             if self.propulsion_of(self.vessel(id)).flow_kg_per_second > 0.0 {
                 return Some(format!("engine firing on {id}"));
