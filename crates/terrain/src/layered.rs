@@ -13,7 +13,7 @@
 //! as a mipmap would.
 
 use glam::DVec3;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use void_math::hypot;
 
 use crate::noise::{fbm, noise, noise_with_gradient, smoothstep};
@@ -27,7 +27,7 @@ const HILL_SHORTEST: f64 = 8.0;
 const MOUNTAIN_LONGEST: f64 = 220_000.0;
 const MOUNTAIN_SHORTEST: f64 = 1_500.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LayeredOptions {
     pub radius_meters: f64,

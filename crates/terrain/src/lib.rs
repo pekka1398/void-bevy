@@ -7,7 +7,7 @@ mod layered;
 pub mod noise;
 
 use glam::DVec3;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use void_lod::{SurfaceSample, SurfaceSampler};
 use void_math::hypot;
 
@@ -16,7 +16,7 @@ pub use layered::{DEFAULT_LAYERED, Layered, LayeredOptions, MAX_HEIGHT, SEA_LEVE
 
 /// Plain data that builds a terrain, as landing's `TerrainConfig` (the same JSON):
 /// `{"kind": "hills", "options": {...}}` or `{"kind": "layered", "options": {...}}`.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "kind", content = "options", rename_all = "lowercase")]
 pub enum TerrainConfig {
     Hills(HillsOptions),

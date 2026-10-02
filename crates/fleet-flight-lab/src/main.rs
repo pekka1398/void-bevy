@@ -14,14 +14,21 @@ use void_app::{
 };
 use void_assembly::{Craft, Module, demo_craft, import_craft};
 use void_assembly_lab::parts::RenderAssets;
-use void_fleet_flight::FleetFlight;
+use void_fleet_flight::session::{
+    Action, FlightSession, InitialWorld, Outcome, Playback, Recording,
+};
 use void_landing::{FrameState, PlanetFrame, demo_rocket, landing_lod_options};
 use void_lod::{LodCamera, LodView};
-use void_vessels::{VesselControl, nearby_site};
+use void_vessels::nearby_site;
 
 const RATES: [f64; 6] = [1.0, 2.0, 4.0, 20.0, 100.0, 1000.0];
 struct Lab {
-    sim: FleetFlight,
+    session: FlightSession,
+    save_path: std::path::PathBuf,
+    record_path: Option<std::path::PathBuf>,
+    frames: usize,
+    playback: Option<Playback>,
+    profile: Option<(void_diagnostics::Profiler, std::path::PathBuf)>,
     craft: Craft,
     paused: bool,
     rate: usize,
@@ -40,7 +47,22 @@ struct Lab {
     prediction: Option<void_landing::CoastPrediction>,
 }
 #[derive(Resource)]
-struct Ground(TileField);
+struct Ground(TileField, Handle<StandardMaterial>);
+impl Drop for Lab {
+    fn drop(&mut self) {
+        if !std::thread::panicking()
+            && let Some((profile, path)) = &self.profile
+        {
+            profile.write(path);
+        }
+        if !std::thread::panicking()
+            && let Some(path) = self.record_path.take()
+        {
+            self.session.save(&path);
+            eprintln!("Fleet recording saved: {}", path.display());
+        }
+    }
+}
 #[derive(Component)]
 struct LabCamera;
 #[derive(Component)]
@@ -58,6 +80,22 @@ fn argument(name: &str) -> Option<String> {
         .map(|i| args.get(i + 1).expect("argument needs a value").clone())
 }
 fn main() {
+    if let Some(path) = argument("--verify") {
+        let mut profile = void_diagnostics::Profiler::new();
+        let started = std::time::Instant::now();
+        let session = FlightSession::load(&path);
+        profile.span("headless_verify", started, std::time::Instant::now());
+        if let Some(output) = argument("--profile") {
+            profile.write(output);
+        }
+        println!(
+            "Verified Fleet session: T+{:.6} s, {} vessels, selected {}",
+            session.sim().fleet.time(),
+            session.sim().fleet.vessel_ids().len(),
+            session.sim().selected
+        );
+        return;
+    }
     let id = argument("--planet").unwrap_or("aurelia".into());
     let planet = game_planet_by_id(&id, argument("--terrain").as_deref());
     let craft = argument("--craft").map_or_else(demo_craft, |path| {
@@ -68,7 +106,30 @@ fn main() {
         .unwrap_or_else(|| demo_rocket(&planet.planet.terrain).launch_site.normalize());
     let air =
         planet.planet.air_density_scale.is_some() && !std::env::args().any(|a| a == "--vacuum");
-    let sim = FleetFlight::new(planet.planet, &craft, site, air);
+    let replay_path = argument("--replay");
+    assert!(
+        replay_path.is_none() || (argument("--load").is_none() && argument("--record").is_none()),
+        "--replay cannot be combined with --load or --record"
+    );
+    let session = argument("--load").map_or_else(
+        || FlightSession::new(InitialWorld::new(&planet.planet, &craft, site, air)),
+        FlightSession::load,
+    );
+    let craft = session.recording_initial().craft.clone();
+    let mut lab = new_lab(session, craft);
+    if let Some(path) = replay_path {
+        let (playback, session) = Playback::new(Recording::read(path));
+        lab.session = session;
+        lab.craft = lab.session.recording_initial().craft.clone();
+        lab.playback = Some(playback);
+        lab.paused = false;
+    }
+    lab.save_path = argument("--save")
+        .unwrap_or("lab-log/fleet-save.json".into())
+        .into();
+    lab.record_path = argument("--record").map(Into::into);
+    lab.profile =
+        argument("--profile").map(|path| (void_diagnostics::Profiler::new(), path.into()));
     App::new()
         .add_plugins((
             DefaultPlugins
@@ -94,14 +155,22 @@ fn main() {
             brightness: 100.0,
             ..default()
         })
-        .insert_non_send(new_lab(sim, craft))
+        .insert_non_send(lab)
         .add_systems(Startup, setup)
-        .add_systems(Update, (controls, simulate, draw).chain())
+        .add_systems(
+            Update,
+            (begin_profile_frame, controls, simulate, draw).chain(),
+        )
         .run();
 }
-fn new_lab(sim: FleetFlight, craft: Craft) -> Lab {
+fn new_lab(session: FlightSession, craft: Craft) -> Lab {
     Lab {
-        sim,
+        session,
+        save_path: "lab-log/fleet-save.json".into(),
+        record_path: None,
+        frames: 0,
+        playback: None,
+        profile: None,
         craft,
         paused: true,
         rate: 0,
@@ -128,17 +197,20 @@ fn setup(
 ) {
     let assets = RenderAssets::new(&mut meshes, &mut materials);
     commands.insert_resource(assets);
-    let demo = demo_rocket(&lab.sim.planet.terrain);
+    let demo = demo_rocket(&lab.session.sim().planet.terrain);
     let material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.32, 0.42, 0.28),
         perceptual_roughness: 1.0,
         ..default()
     });
-    commands.insert_resource(Ground(TileField::new(
-        landing_lod_options(&lab.sim.planet.terrain, &demo.options.contact),
-        Some(lab.sim.planet.terrain.clone()),
+    commands.insert_resource(Ground(
+        TileField::new(
+            landing_lod_options(&lab.session.sim().planet.terrain, &demo.options.contact),
+            Some(lab.session.sim().planet.terrain.clone()),
+            material.clone(),
+        ),
         material,
-    )));
+    ));
     commands.spawn((Camera3d::default(), Transform::default(), LabCamera));
     commands.spawn((
         DirectionalLight {
@@ -177,19 +249,59 @@ fn controls(
 ) {
     let lab = &mut *lab;
     if !window.focused {
-        lab.sim.control(VesselControl {
+        let throttle = lab
+            .session
+            .sim()
+            .fleet
+            .control(&lab.session.sim().selected)
+            .throttle;
+        lab.session.execute(Action::Control {
+            throttle,
             turn: DVec3::ZERO,
-            ..lab.sim.fleet.control(&lab.sim.selected)
         });
         return;
+    }
+    if lab.playback.is_some() {
+        if keys.just_pressed(KeyCode::KeyP) {
+            lab.paused = !lab.paused;
+        }
+        view_controls(lab, &keys, &buttons, &motion, &scroll);
+        return;
+    }
+    if keys.just_pressed(KeyCode::F6) {
+        lab.session.save(&lab.save_path);
+        lab.notice = format!("Saved {}", lab.save_path.display());
+    }
+    if keys.just_pressed(KeyCode::F7) {
+        lab.session = FlightSession::load(&lab.save_path);
+        lab.craft = lab.session.recording_initial().craft.clone();
+        lab.dirty = true;
+        lab.prediction = None;
+        lab.paused = true;
+        lab.rate = 0;
+        lab.notice = format!("Loaded {}", lab.save_path.display());
+    }
+    if keys.just_pressed(KeyCode::F8) {
+        if let Some(path) = lab.record_path.take() {
+            lab.session.save(&path);
+            lab.notice = format!("Recording finished: {}", path.display());
+        } else {
+            lab.notice = "No recording active; start with --record <file>".into();
+        }
+    }
+    if keys.just_pressed(KeyCode::F9) {
+        if let Some((profile, path)) = lab.profile.take() {
+            profile.write(&path);
+            lab.notice = format!("CPU profile finished: {}", path.display());
+        } else {
+            lab.notice = "No CPU profile active; start with --profile <file>".into();
+        }
     }
     if keys.just_pressed(KeyCode::KeyP) {
         lab.paused = !lab.paused;
     }
     if keys.just_pressed(KeyCode::KeyR) {
-        let air = lab.sim.planet.air_density_scale.is_some()
-            && !std::env::args().any(|a| a == "--vacuum");
-        lab.sim = FleetFlight::new(lab.sim.planet.clone(), &lab.craft, lab.sim.launch_site, air);
+        lab.session = FlightSession::new(lab.session.recording_initial().clone());
         lab.dirty = true;
         lab.prediction = None;
         lab.paused = true;
@@ -198,45 +310,57 @@ fn controls(
         lab.notice.clear();
     }
     if keys.just_pressed(KeyCode::Tab) {
-        let old = lab.sim.selected.clone();
-        let ids = lab.sim.fleet.vessel_ids();
+        let old = lab.session.sim().selected.clone();
+        let ids = lab.session.sim().fleet.vessel_ids();
         let i = ids
             .iter()
             .position(|id| *id == old)
             .expect("selected vessel");
-        let mut c = lab.sim.fleet.control(&old);
+        let mut c = lab.session.sim().fleet.control(&old);
         c.turn = DVec3::ZERO;
-        lab.sim.fleet.set_control(&old, c);
-        lab.sim.select(&ids[(i + 1) % ids.len()]);
+        lab.session.execute(Action::Control {
+            throttle: c.throttle,
+            turn: c.turn,
+        });
+        lab.session.execute(Action::Select {
+            vessel: ids[(i + 1) % ids.len()].clone(),
+        });
         lab.prediction = None;
     }
     if keys.just_pressed(KeyCode::KeyO) {
-        let id = lab.sim.launch_orbital(&lab.craft, DVec3::ZERO);
-        lab.sim.select(&id);
+        let Outcome::Spawned(id) = lab.session.execute(Action::LaunchOrbit {
+            craft: lab.craft.clone(),
+            offset: DVec3::ZERO,
+        }) else {
+            unreachable!()
+        };
+        lab.session.execute(Action::Select { vessel: id });
         lab.distance = 40.0;
     }
     if keys.just_pressed(KeyCode::KeyN) {
         lab.spawned += 1;
         let site = nearby_site(
-            lab.sim.launch_site,
+            lab.session.sim().launch_site,
             30.0 * lab.spawned as f64,
-            lab.sim.planet.terrain.radius_meters,
+            lab.session.sim().planet.terrain.radius_meters,
         );
-        lab.sim.fleet.launch_landed(&lab.craft, lab.sim.home, site);
-        lab.sim.fleet.advance(0.0);
+        lab.session.execute(Action::LaunchGround {
+            craft: lab.craft.clone(),
+            site,
+        });
     }
-    let id = lab.sim.selected.clone();
-    let commanded = lab.sim.fleet.part_snapshots(&id).iter().any(|p| {
+    let id = lab.session.sim().selected.clone();
+    let commanded = lab.session.sim().fleet.part_snapshots(&id).iter().any(|p| {
         p.definition
             .modules
             .iter()
             .any(|m| matches!(m, Module::Command))
     });
     if keys.just_pressed(KeyCode::KeyT) && commanded {
-        lab.sim
-            .sas(lab.sim.fleet.sas_phase(&id) == void_vessels::SasPhase::Off);
+        let enabled = lab.session.sim().fleet.sas_phase(&id) == void_vessels::SasPhase::Off;
+        lab.session.execute(Action::Sas { enabled });
     }
-    let mut c = lab.sim.fleet.control(&id);
+    let mut c = lab.session.sim().fleet.control(&id);
     let dt = time.delta_secs_f64().min(0.05);
     let throttle_axis = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) as i32
         - keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]) as i32;
@@ -253,9 +377,15 @@ fn controls(
     } else {
         DVec3::ZERO
     };
-    lab.sim.control(c);
+    let previous = lab.session.sim().fleet.control(&id);
+    if previous.throttle != c.throttle || previous.turn != c.turn {
+        lab.session.execute(Action::Control {
+            throttle: c.throttle,
+            turn: c.turn,
+        });
+    }
     if keys.just_pressed(KeyCode::Space) {
-        lab.sim.stage();
+        lab.session.execute(Action::Stage);
         lab.prediction = None;
     }
     if keys.just_pressed(KeyCode::Period) {
@@ -267,8 +397,17 @@ fn controls(
         lab.notice.clear();
     }
     if keys.just_pressed(KeyCode::KeyC) {
-        lab.prediction = Some(lab.sim.predict(600.0));
+        lab.prediction = Some(lab.session.predict(600.0));
     }
+    view_controls(lab, &keys, &buttons, &motion, &scroll);
+}
+fn view_controls(
+    lab: &mut Lab,
+    keys: &ButtonInput<KeyCode>,
+    buttons: &ButtonInput<MouseButton>,
+    motion: &AccumulatedMouseMotion,
+    scroll: &AccumulatedMouseScroll,
+) {
     if keys.just_pressed(KeyCode::F2) {
         lab.wire = !lab.wire;
     }
@@ -287,24 +426,52 @@ fn controls(
     }
     lab.distance = (lab.distance * (-f64::from(scroll.delta.y) * 0.12).exp()).clamp(2.0, 2e8);
 }
+
+fn begin_profile_frame(time: Res<Time>, mut lab: NonSendMut<Lab>) {
+    if let Some((profile, _)) = &mut lab.profile {
+        profile.sample("frame_interval", time.delta_secs_f64() * 1000.0);
+    }
+}
 fn simulate(time: Res<Time>, window: Single<&Window>, mut lab: NonSendMut<Lab>) {
+    let started = std::time::Instant::now();
+    simulate_inner(&time, &window, &mut lab);
+    if let Some((profile, _)) = &mut lab.profile {
+        profile.span("simulation", started, std::time::Instant::now());
+    }
+}
+fn simulate_inner(time: &Time, window: &Window, lab: &mut Lab) {
     if lab.paused || !window.focused {
         return;
     }
+    if let Some(mut playback) = lab.playback.take() {
+        if playback.next_frame(&mut lab.session) {
+            lab.playback = Some(playback);
+        } else {
+            lab.paused = true;
+            lab.notice = "Replay complete: all world marks verified".into();
+        }
+        return;
+    }
     let rate = RATES[lab.rate];
-    match lab
-        .sim
-        .advance(time.delta_secs_f64().min(0.05) * rate, rate > 4.0)
-    {
-        Ok(true) => {}
-        Ok(false) => {
+    lab.frames += 1;
+    let outcome = lab.session.execute(Action::Advance {
+        seconds: time.delta_secs_f64().min(0.05) * rate,
+        rails: rate > 4.0,
+    });
+    if lab.frames.is_multiple_of(60) {
+        lab.session.mark();
+    }
+    match outcome {
+        Outcome::Advanced(true) => {}
+        Outcome::Advanced(false) => {
             lab.rate = 0;
             lab.notice = "Rails stopped at an encounter or ground band".into();
         }
-        Err(reason) => {
+        Outcome::Refused(reason) => {
             lab.rate = 0;
             lab.notice = format!("Warp refused: {reason}");
         }
+        other => panic!("unexpected advance outcome: {other:?}"),
     }
 }
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -320,11 +487,13 @@ fn draw(
     >,
     mut tiles: Query<&mut Transform, (With<Tile>, Without<Visual>, Without<LabCamera>)>,
     mut tile_visibility: Query<&mut Visibility, (With<Tile>, Without<Visual>)>,
+    tile_entities: Query<Entity, With<Tile>>,
     mut camera: Single<&mut Transform, With<LabCamera>>,
     mut hud: Single<&mut Text, With<Hud>>,
     window: Single<&Window>,
     mut gizmos: Gizmos,
 ) {
+    let started = std::time::Instant::now();
     let lab = &mut *lab;
     if lab.dirty {
         for (_, entities) in lab.parts.drain() {
@@ -333,13 +502,22 @@ fn draw(
             }
         }
         lab.collision.clear();
+        for entity in &tile_entities {
+            commands.entity(entity).despawn();
+        }
+        let demo = demo_rocket(&lab.session.sim().planet.terrain);
+        ground.0 = TileField::new(
+            landing_lod_options(&lab.session.sim().planet.terrain, &demo.options.contact),
+            Some(lab.session.sim().planet.terrain.clone()),
+            ground.1.clone(),
+        );
         lab.dirty = false;
     }
-    let f = &lab.sim.fleet;
-    let frame = PlanetFrame::new(&f.ephemeris, lab.sim.home);
+    let f = &lab.session.sim().fleet;
+    let frame = PlanetFrame::new(&f.ephemeris, lab.session.sim().home);
     let a = void_orbit::body_orientation(&frame.body.rotation, f.time());
     let q = glam::DQuat::from_mat3(&glam::DMat3::from_cols(a[0], a[1], a[2])).normalize();
-    let selected = f.snapshot(&lab.sim.selected);
+    let selected = f.snapshot(&lab.session.sim().selected);
     let state = frame.to_body_fixed(
         &f.ephemeris,
         f.time(),
@@ -525,27 +703,30 @@ fn draw(
             Color::srgb(0.2, 0.9, 1.0),
         );
     }
-    let p = f.thrust(&lab.sim.selected);
+    let p = f.thrust(&lab.session.sim().selected);
     **hud = Text::new(format!(
-        "ASSEMBLY / FLEET FLIGHT INTEGRATION\n{} | {:?} | {} | {}x\nT+{:.2}s AGL {:.1}m surface {:.1}m/s mass {:.1}kg\nthrottle {:.0}% force {:.1}kN flow {:.2}kg/s SAS {:?}\n{} vessels | ground {} bubble {} | collision tiles {}\nP pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS\nTab vessel | N nearby ground craft | O orbital craft | R reset\n, . warp | C vacuum prediction (600s snapshot)\nF2 wire | F3 boundaries | F4 collision terrain | F5 terrain\n{}",
-        lab.sim.selected,
+        "ASSEMBLY / FLEET FLIGHT INTEGRATION\n{} | {:?} | {} | {}x\nT+{:.2}s AGL {:.1}m surface {:.1}m/s mass {:.1}kg\nthrottle {:.0}% force {:.1}kN flow {:.2}kg/s SAS {:?}\n{} vessels | ground {} bubble {} | collision tiles {}\nP pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS\nTab vessel | N nearby ground craft | O orbital craft | R reset\n, . warp | C vacuum prediction (600s snapshot)\nF2 wire | F3 boundaries | F4 collision terrain | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
+        lab.session.sim().selected,
         selected.mode,
         if lab.paused { "paused" } else { "running" },
         RATES[lab.rate],
         f.time(),
-        f.clearance(&lab.sim.selected, lab.sim.home),
+        f.clearance(&lab.session.sim().selected, lab.session.sim().home),
         state.velocity.length(),
         selected.mass_kg,
-        f.control(&lab.sim.selected).throttle * 100.0,
+        f.control(&lab.session.sim().selected).throttle * 100.0,
         p.force.length() / 1000.0,
         p.flow_kg_per_second,
-        f.sas_phase(&lab.sim.selected),
+        f.sas_phase(&lab.session.sim().selected),
         f.vessel_ids().len(),
         f.ground_count(),
         f.bubble_count(),
         lab.collision.len(),
         lab.notice
     ));
+    if let Some((profile, _)) = &mut lab.profile {
+        profile.span("draw_lod_overlays", started, std::time::Instant::now());
+    }
 }
 
 #[cfg(test)]
@@ -556,7 +737,7 @@ mod tests {
         let planet = game_planet_by_id("pebble", None);
         let craft = demo_craft();
         let site = demo_rocket(&planet.planet.terrain).launch_site.normalize();
-        let sim = FleetFlight::new(planet.planet, &craft, site, false);
+        let sim = FlightSession::new(InitialWorld::new(&planet.planet, &craft, site, false));
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
             .insert_resource(Assets::<Mesh>::default())

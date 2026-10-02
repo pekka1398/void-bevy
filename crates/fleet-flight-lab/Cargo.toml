@@ -16,3 +16,7 @@ void-vessels.workspace = true
 void-landing.workspace = true
 void-orbit.workspace = true
 void-lod.workspace = true
+void-diagnostics = { path = "../diagnostics" }
+
+[dev-dependencies]
+serde_json.workspace = true

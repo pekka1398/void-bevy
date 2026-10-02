@@ -14,3 +14,6 @@ void-landing.workspace = true
 void-orbit.workspace = true
 void-frames.workspace = true
 
+serde.workspace = true
+serde_json.workspace = true
+void-terrain.workspace = true

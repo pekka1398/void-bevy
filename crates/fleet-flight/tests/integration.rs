@@ -212,3 +212,43 @@ fn atmospheric_coast_agrees_across_orbit_bubble_and_rails() {
         "four-times finer steps did not converge: coarse {coarse:?}, fine {fine:?}"
     );
 }
+
+#[test]
+fn fleet_plan_uses_live_staged_engine_and_trait_ephemeris_without_spending_fuel() {
+    let craft = demo_craft();
+    let mut sim = make(&craft, false);
+    assert!(sim.new_plan(&sim.selected, 60.0).is_err()); // Ground ship is not ready.
+    let vessel = sim.launch_orbital(&craft, DVec3::ZERO);
+    sim.select(&vessel);
+    assert!(sim.new_plan(&vessel, 60.0).is_err()); // Unstaged engines are not invented.
+    sim.stage();
+    sim.stage();
+    let before = sim.fleet.snapshot(&vessel);
+    let before_time = sim.fleet.time();
+    let engine = sim.plan_engine(&vessel).unwrap();
+    assert!((engine.exhaust_velocity - 340.0 * void_assembly::G0).abs() < 1e-9);
+    // Only the upper connected tank's 700 kg is reachable after separation, not the detached stage.
+    assert!((before.mass_kg - engine.dry_mass_kg - 700.0).abs() < 1e-9);
+    assert_eq!(sim.fleet.control(&vessel).throttle, 0.0);
+    let mut plan = sim.new_plan(&vessel, 60.0).unwrap();
+    plan.add(void_orbit::ManeuverSpec {
+        start_time: sim.fleet.time() + 20.0,
+        reference_body: sim.home,
+        reference_mode: void_orbit::ReferenceMode::Fixed,
+        prograde: 100.0,
+        normal: 0.0,
+        radial: 0.0,
+    });
+    let burn = *plan.status(0).as_ref().unwrap();
+    let expected = before.mass_kg * (-100.0 / engine.exhaust_velocity).exp();
+    assert!((burn.mass_after_kg - expected).abs() < 1e-9);
+    plan.extend(&mut sim.fleet.ephemeris, 100_000);
+    assert!(plan.complete());
+    assert!(
+        plan.position_at(&mut sim.fleet.ephemeris, burn.end_time)
+            .is_some()
+    );
+    assert_eq!(sim.fleet.time(), before_time);
+    assert_eq!(sim.fleet.snapshot(&vessel).mass_kg, before.mass_kg);
+    assert_eq!(sim.fleet.snapshot(&vessel).position, before.position);
+}

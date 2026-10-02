@@ -1,5 +1,6 @@
 //! First integration boundary for assembly/Fleet flight. No Bevy and no fixed two-stage rocket.
 mod air;
+pub mod session;
 pub use air::FleetAir;
 use glam::{DQuat, DVec3};
 use std::sync::Arc;
@@ -121,5 +122,49 @@ impl FleetFlight {
     }
     pub fn mode(&self) -> VesselMode {
         self.fleet.snapshot(&self.selected).mode
+    }
+    /// A plan's constant engine ends at the first fuel-group flameout. Later groups can change
+    /// effective Isp or thrust, so a single PlanEngine must not promise the whole tank inventory.
+    pub fn plan_engine(&self, vessel: &str) -> Result<void_orbit::PlanEngine, String> {
+        if self.fleet.snapshot(vessel).mode == VesselMode::Ground {
+            return Err("Reach free flight before planning a maneuver".into());
+        }
+        let p = self.fleet.full_throttle_vacuum_thrust(vessel);
+        let thrust = p.force.length();
+        if thrust == 0.0 || p.flow_kg_per_second == 0.0 {
+            return Err("No staged engine with accessible fuel".into());
+        }
+        if p.torque.length() > 1e-6 {
+            return Err(
+                "Active engines have unbalanced torque; constant-engine planning is invalid".into(),
+            );
+        }
+        let mass = self.fleet.snapshot(vessel).mass_kg;
+        Ok(void_orbit::PlanEngine {
+            thrust_newtons: thrust,
+            exhaust_velocity: thrust / p.flow_kg_per_second,
+            dry_mass_kg: mass - p.flow_kg_per_second * p.seconds_to_flameout,
+        })
+    }
+    pub fn new_plan(
+        &self,
+        vessel: &str,
+        coast_seconds: f64,
+    ) -> Result<void_orbit::FlightPlan, String> {
+        let engine = self.plan_engine(vessel)?;
+        let snapshot = self.fleet.snapshot(vessel);
+        let mut plan = void_orbit::FlightPlan::new(
+            &self.fleet.ephemeris,
+            self.fleet.options.tolerances,
+            engine,
+            coast_seconds,
+        );
+        plan.rebase(&void_orbit::PropagationRun::new(void_orbit::VesselState {
+            time: self.fleet.time(),
+            position: snapshot.position,
+            velocity: snapshot.velocity,
+            mass_kg: snapshot.mass_kg,
+        }));
+        Ok(plan)
     }
 }

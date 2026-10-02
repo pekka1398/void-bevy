@@ -335,6 +335,17 @@ impl Fleet {
     pub fn time(&self) -> f64 {
         self.time
     }
+    /// Substep time already requested but not yet integrated by the fixed-step owners.
+    pub fn pending_seconds(&self) -> f64 {
+        self.pending
+    }
+    pub fn connection_snapshots(&self) -> Vec<Connection> {
+        self.connections.clone()
+    }
+    pub fn sas_target(&self, id: &str) -> Option<DQuat> {
+        self.vessel(id);
+        self.sas.get(id).and_then(|sas| sas.assist.target())
+    }
     pub fn vessel_ids(&self) -> Vec<String> {
         self.order.clone()
     }
@@ -443,6 +454,20 @@ impl Fleet {
     }
     pub fn thrust(&self, id: &str) -> Propulsion {
         self.propulsion_of(self.vessel(id))
+    }
+    /// Read-only vacuum rating for planning. Unlike `thrust`, this asks for full throttle even
+    /// when the pilot currently coasts; it does not ignite unstaged engines or mutate controls.
+    pub fn full_throttle_vacuum_thrust(&self, id: &str) -> Propulsion {
+        let v = self.vessel(id);
+        let parts: Vec<_> = v.poses.iter().map(|(id, _)| &self.parts[id]).collect();
+        propulsion(
+            &parts,
+            &v.poses,
+            &self.connections,
+            &self.lit,
+            1.0,
+            self.centred(&v.poses).1,
+        )
     }
     pub fn fuel(&self, id: &str) -> f64 {
         self.parts[id].fuel_kg

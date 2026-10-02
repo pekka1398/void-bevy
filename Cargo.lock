@@ -5489,15 +5489,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-diagnostics"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "void-fleet-flight"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
+ "serde",
+ "serde_json",
  "void-aero",
  "void-assembly",
  "void-frames",
  "void-landing",
  "void-orbit",
+ "void-terrain",
  "void-vessels",
 ]
 
@@ -5507,9 +5517,11 @@ version = "0.0.0"
 dependencies = [
  "bevy",
  "glam 0.32.1",
+ "serde_json",
  "void-app",
  "void-assembly",
  "void-assembly-lab",
+ "void-diagnostics",
  "void-fleet-flight",
  "void-landing",
  "void-lod",
