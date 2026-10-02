@@ -28,7 +28,8 @@ use void_app::flight::{
     mission_time, rate_text, vessel_axes, warp_limit,
 };
 use void_app::map::{
-    MapMarker, PATH_COLOR, color, draw_map_lines, label_click, place_map_labels, spawn_map_labels,
+    MapMarker, PATH_COLOR, PLAN_COLOR, color, draw_map_lines, label_click, place_map_labels,
+    spawn_map_labels,
 };
 use void_app::navball::{Navball, NavballLabel, draw_navball, spawn_navball};
 use void_app::parts::spawn_shape;
@@ -44,7 +45,11 @@ use void_landing::{
 };
 use void_lod::{LodCamera, LodView};
 use void_navball::NavballInput;
-use void_orbit::{CelestialBody, DominanceTree, Ephemeris, body_orientation, osculating_orbit};
+use void_orbit::{
+    ApsisKind, AttitudeLaw, CelestialBody, Control, DominanceTree, Ephemeris, FlightPlan,
+    ManeuverSpec, PlanEngine, PropagationRun, ReferenceMode, STANDARD_GRAVITY, VesselState,
+    body_orientation, osculating_orbit,
+};
 use void_sas::{SAS_TUNING, StabilityAssist};
 use void_scenery::atmosphere::{
     TRANSMITTANCE_HEIGHT, TRANSMITTANCE_WIDTH, build_transmittance_table,
@@ -69,6 +74,8 @@ const PREDICTION_HORIZON_SECONDS: f64 = 6000.0;
 const THROTTLE_RATE_PERCENT_PER_SECOND: f64 = 50.0;
 const VESSEL_DISTANCE: f64 = 45.0;
 const FOV_DEGREES: f32 = 58.0;
+/// The plan is integrated this many steps a frame.
+const PLAN_STEPS_PER_FRAME: u64 = 1500;
 
 fn main() {
     App::new()
@@ -150,8 +157,17 @@ struct Game {
     path: MapPath,
     started: std::time::Instant,
     help: bool,
-    /// lab/sas's stability assist on the steering torque; T toggles it.
+    /// lab/sas's stability assist on the steering torque; T toggles it. A maneuver burn steers
+    /// itself, and SAS locks afresh after it.
     sas: StabilityAssist,
+    sas_suspended: bool,
+    /// The orbit crate's multi-burn plan, made after upper-stage separation in free flight.
+    plan: Option<FlightPlan>,
+    plan_path: MapPath,
+    selected: usize,
+    plan_message: String,
+    executing: bool,
+    warp_to_maneuver: bool,
     // This frame's geometry: the camera (ecliptic, barycentric), the render axes (the planet's
     // body-fixed axes), the upper stage, the focus, its reference body, the dominant body.
     eye: DVec3,
@@ -242,7 +258,11 @@ impl Game {
         warp_limit(
             &self.rocket,
             &self.ephemeris,
-            self.engine_throttle(),
+            if self.executing {
+                1.0
+            } else {
+                self.engine_throttle()
+            },
             self.bodies[self.home].radius_meters,
         )
     }
@@ -288,6 +308,9 @@ impl Game {
     }
 
     fn stage(&mut self) {
+        if self.executing {
+            return;
+        }
         match self.stage {
             0 => {
                 self.stage = 1;
@@ -316,6 +339,260 @@ impl Game {
         self.focus = Focus::Vessel;
         self.camera.distance = VESSEL_DISTANCE;
         self.sas.set_enabled(false);
+        self.sas_suspended = false;
+        self.plan = None;
+        self.selected = 0;
+        self.plan_message.clear();
+        self.executing = false;
+        self.warp_to_maneuver = false;
+    }
+
+    // --- The maneuver plan, as the TS game's panel ------------------------------------------
+
+    fn plan_ready(&self) -> bool {
+        self.rocket.separated()
+            && self.rocket.mode() == PhysicsMode::Flight
+            && self.rocket.part_mode(RocketPart::Upper) == PhysicsMode::Flight
+            && self.stage == 2
+            && self.engine_armed
+            && self.rocket.fuel_kg() > 0.0
+    }
+
+    fn plan_state(&self) -> PropagationRun {
+        let upper = self.part_inertial(RocketPart::Upper);
+        PropagationRun::new(VesselState {
+            time: self.rocket.time(),
+            position: upper.position,
+            velocity: upper.velocity,
+            mass_kg: self.rocket.mass_kg(),
+        })
+    }
+
+    /// Put every auto-reference burn on the body whose sphere of influence holds the plan at
+    /// its ignition.
+    fn resolve_plan_references(&mut self) {
+        let Some(plan) = self.plan.as_mut() else {
+            return;
+        };
+        let mut positions = vec![DVec3::ZERO; self.bodies.len()];
+        for i in 0..plan.count() {
+            let spec = plan.maneuver(i);
+            if spec.reference_mode != ReferenceMode::Auto {
+                continue;
+            }
+            let Some(at) = plan.position_at(&mut self.ephemeris, spec.start_time) else {
+                continue;
+            };
+            self.ephemeris.positions_at(spec.start_time, &mut positions);
+            let body = self.dominance.dominant(&positions, at);
+            if body != spec.reference_body {
+                plan.replace(
+                    i,
+                    ManeuverSpec {
+                        reference_body: body,
+                        ..spec
+                    },
+                );
+            }
+        }
+    }
+
+    /// Run a panel action; its error becomes the panel's message.
+    fn plan_action(&mut self, action: impl FnOnce(&mut Self) -> Result<(), String>) {
+        match action(self) {
+            Ok(()) => self.plan_message.clear(),
+            Err(message) => self.plan_message = message,
+        }
+    }
+
+    fn add_maneuver(&mut self) -> Result<(), String> {
+        if self.plan.is_none() {
+            if !self.plan_ready() {
+                return Err(
+                    "Separate the upper stage and reach free flight before planning a maneuver"
+                        .into(),
+                );
+            }
+            let mut plan = FlightPlan::new(
+                &self.ephemeris,
+                self.demo.options.tolerances,
+                PlanEngine {
+                    thrust_newtons: self.demo.upper.thrust_newtons,
+                    exhaust_velocity: self.demo.upper.specific_impulse_seconds * STANDARD_GRAVITY,
+                    dry_mass_kg: self.demo.upper.dry_mass_kg,
+                },
+                PREDICTION_HORIZON_SECONDS,
+            );
+            plan.rebase(&self.plan_state());
+            self.plan = Some(plan);
+        }
+        let t = self.rocket.time();
+        let reference = self
+            .dominance
+            .dominant(&self.positions, self.upper.position);
+        let plan = self.plan.as_mut().unwrap();
+        let after = plan.burns().last().map_or(t, |b| b.end_time);
+        self.selected = plan.add(ManeuverSpec {
+            start_time: t.max(after) + 600.0,
+            reference_body: reference,
+            reference_mode: ReferenceMode::Auto,
+            prograde: 0.0,
+            normal: 0.0,
+            radial: 0.0,
+        });
+        self.resolve_plan_references();
+        Ok(())
+    }
+
+    fn edit_maneuver(
+        &mut self,
+        change: impl FnOnce(ManeuverSpec) -> ManeuverSpec,
+    ) -> Result<(), String> {
+        if self.executing && self.selected == 0 {
+            return Err("Cannot edit a burn in progress".into());
+        }
+        let plan = self.plan.as_mut().ok_or("No maneuver plan")?;
+        let spec = plan.maneuver(self.selected);
+        plan.replace(self.selected, change(spec));
+        self.resolve_plan_references();
+        Ok(())
+    }
+
+    fn remove_maneuver(&mut self) -> Result<(), String> {
+        if self.executing && self.selected == 0 {
+            return Err("Cannot remove a burn in progress".into());
+        }
+        let plan = self.plan.as_mut().ok_or("No maneuver plan")?;
+        plan.remove(self.selected);
+        self.selected = self.selected.min(plan.count().saturating_sub(1));
+        if plan.count() == 0 {
+            self.plan = None;
+            self.warp_to_maneuver = false;
+        }
+        Ok(())
+    }
+
+    fn place_at_apsis(&mut self, kind: ApsisKind) -> Result<(), String> {
+        let t = self.rocket.time();
+        let plan = self.plan.as_mut().ok_or("No maneuver plan")?;
+        let start = plan.start_at_apsis(&mut self.ephemeris, self.selected, kind, t)?;
+        self.edit_maneuver(|spec| ManeuverSpec {
+            start_time: start,
+            ..spec
+        })
+    }
+
+    fn warp_to_burn(&mut self) -> Result<(), String> {
+        let plan = self.plan.as_ref().ok_or("No maneuver plan")?;
+        match plan.burns().first() {
+            Some(burn) if burn.start_time > self.rocket.time() + 30.0 => {
+                self.warp_to_maneuver = true;
+                self.paused = false;
+                self.throttle_percent = 0.0;
+                Ok(())
+            }
+            _ => Err("No future executable burn at least 30 s away".into()),
+        }
+    }
+
+    /// The burn flying now steers the rocket: full thrust along its Frenet direction, the upper
+    /// stage turned from +Y onto it.
+    fn maneuver_control(&self) -> LanderControl {
+        let burn = self.plan.as_ref().and_then(|p| p.burns().first().copied());
+        let Some(Control::Thrust(control)) = burn.and_then(|b| b.control) else {
+            panic!("active maneuver has no orbital burn");
+        };
+        let AttitudeLaw::Frenet {
+            reference_body,
+            tangent: a,
+            normal: b,
+            radial: c,
+        } = control.attitude
+        else {
+            panic!("active maneuver has no Frenet attitude");
+        };
+        let (cp, cv) = (
+            self.positions[reference_body],
+            self.velocities[reference_body],
+        );
+        let tangent = (self.upper.velocity - cv).normalize();
+        let normal = (self.upper.position - cp).cross(tangent).normalize();
+        let radial = tangent.cross(normal);
+        let direction = (tangent * a + normal * b + radial * c).normalize();
+        let local = DVec3::new(
+            direction.dot(self.axes[0]),
+            direction.dot(self.axes[1]),
+            direction.dot(self.axes[2]),
+        );
+        let w = 1.0 + local.y;
+        let rotation = if w < 1e-12 {
+            DQuat::from_xyzw(1.0, 0.0, 0.0, 0.0)
+        } else {
+            DQuat::from_xyzw(local.z, 0.0, -local.x, w).normalize()
+        };
+        LanderControl {
+            throttle: 1.0,
+            up: 0.0,
+            prograde: 0.0,
+            orbital_attitude: Some(control.attitude),
+            rotation: Some(rotation),
+            ..Default::default()
+        }
+    }
+
+    /// The plan panel as text.
+    fn plan_text(&self) -> String {
+        if !self.plan_ready() && self.plan.is_none() {
+            return String::new();
+        }
+        let mut out = String::from("\nMANEUVER | upper stage in flight\n");
+        match &self.plan {
+            None => {
+                out += "  N: add a maneuver\n";
+            }
+            Some(plan) => {
+                for i in 0..plan.count() {
+                    let spec = plan.maneuver(i);
+                    let dv = DVec3::new(spec.prograde, spec.normal, spec.radial).length();
+                    out += &format!(
+                        "  {}{}. T+{:.0}  dv {dv:.0} m/s  ({:+.0} / {:+.0} / {:+.0})  {}{}\n",
+                        if i == self.selected { ">" } else { " " },
+                        i + 1,
+                        spec.start_time,
+                        spec.prograde,
+                        spec.normal,
+                        spec.radial,
+                        match spec.reference_mode {
+                            ReferenceMode::Auto =>
+                                format!("auto: {}", self.bodies[spec.reference_body].name),
+                            ReferenceMode::Fixed => self.bodies[spec.reference_body].name.clone(),
+                        },
+                        if plan.status(i).is_err() {
+                            "  BLOCKED"
+                        } else {
+                            ""
+                        },
+                    );
+                }
+                if plan.count() > 0 {
+                    out += &match plan.status(self.selected) {
+                        Ok(burn) => format!(
+                            "  burn {:.0}-{:.0} s | {:.1} kg fuel{}\n",
+                            burn.start_time,
+                            burn.end_time,
+                            burn.mass_before_kg - burn.mass_after_kg,
+                            if self.executing { " | FIRING" } else { "" }
+                        ),
+                        Err(reason) => format!("  {reason}\n"),
+                    };
+                }
+            }
+        }
+        if !self.plan_message.is_empty() {
+            out += &format!("  ! {}\n", self.plan_message);
+        }
+        out += "  N add | Del remove | [ ] select | Up/Down prograde | Left/Right normal | PgUp/PgDn radial\n  Home/End start -/+60 s | Alt: x10 | Y at Pe | U at Ap | V reference | B warp to burn\n";
+        out
     }
 
     /// The focus's geometry, position and reference body.
@@ -699,6 +976,13 @@ fn setup(
         started: std::time::Instant::now(),
         help: false,
         sas: StabilityAssist::new(STEERING_TORQUE, SAS_TUNING),
+        sas_suspended: false,
+        plan: None,
+        plan_path: MapPath::new(),
+        selected: 0,
+        plan_message: String::new(),
+        executing: false,
+        warp_to_maneuver: false,
         eye: DVec3::ZERO,
         axes: [DVec3::X, DVec3::Y, DVec3::Z],
         upper: start,
@@ -762,6 +1046,7 @@ fn controls(
     if keys.just_pressed(KeyCode::F1) {
         game.help = !game.help;
     }
+    maneuver_keys(&keys, game);
     if keys.just_pressed(KeyCode::Tab) {
         let mut order = vec![Focus::Vessel];
         order.extend((0..game.bodies.len()).map(Focus::Body));
@@ -807,6 +1092,78 @@ fn controls(
     }
 }
 
+/// The maneuver panel's actions on keys (the lab's panel buttons and fields).
+fn maneuver_keys(keys: &ButtonInput<KeyCode>, game: &mut Game) {
+    let alt = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
+    let step = if alt { 10.0 } else { 1.0 };
+    if keys.just_pressed(KeyCode::KeyN) {
+        game.plan_action(Game::add_maneuver);
+    }
+    if game.plan.is_none() {
+        return;
+    }
+    if keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) {
+        game.plan_action(Game::remove_maneuver);
+    }
+    let count = game.plan.as_ref().map_or(0, |p| p.count());
+    if keys.just_pressed(KeyCode::BracketLeft) {
+        game.selected = game.selected.saturating_sub(1);
+    }
+    if keys.just_pressed(KeyCode::BracketRight) {
+        game.selected = (game.selected + 1).min(count.saturating_sub(1));
+    }
+    let edits: [(KeyCode, fn(&mut ManeuverSpec, f64), f64); 8] = [
+        (KeyCode::ArrowUp, |s, d| s.prograde += d, step),
+        (KeyCode::ArrowDown, |s, d| s.prograde -= d, step),
+        (KeyCode::ArrowRight, |s, d| s.normal += d, step),
+        (KeyCode::ArrowLeft, |s, d| s.normal -= d, step),
+        (KeyCode::PageUp, |s, d| s.radial += d, step),
+        (KeyCode::PageDown, |s, d| s.radial -= d, step),
+        (KeyCode::End, |s, d| s.start_time += d, 60.0 * step),
+        (KeyCode::Home, |s, d| s.start_time -= d, 60.0 * step),
+    ];
+    for (key, edit, amount) in edits {
+        if keys.just_pressed(key) {
+            game.plan_action(|g| {
+                g.edit_maneuver(|mut spec| {
+                    edit(&mut spec, amount);
+                    spec
+                })
+            });
+        }
+    }
+    if keys.just_pressed(KeyCode::KeyV) {
+        // Auto, then each body fixed, then auto again.
+        let n = game.bodies.len();
+        game.plan_action(|g| {
+            g.edit_maneuver(|spec| match spec.reference_mode {
+                ReferenceMode::Auto => ManeuverSpec {
+                    reference_mode: ReferenceMode::Fixed,
+                    reference_body: 0,
+                    ..spec
+                },
+                ReferenceMode::Fixed if spec.reference_body + 1 < n => ManeuverSpec {
+                    reference_body: spec.reference_body + 1,
+                    ..spec
+                },
+                ReferenceMode::Fixed => ManeuverSpec {
+                    reference_mode: ReferenceMode::Auto,
+                    ..spec
+                },
+            })
+        });
+    }
+    if keys.just_pressed(KeyCode::KeyY) {
+        game.plan_action(|g| g.place_at_apsis(ApsisKind::Periapsis));
+    }
+    if keys.just_pressed(KeyCode::KeyU) {
+        game.plan_action(|g| g.place_at_apsis(ApsisKind::Apoapsis));
+    }
+    if keys.just_pressed(KeyCode::KeyB) {
+        game.plan_action(Game::warp_to_burn);
+    }
+}
+
 fn simulate(time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
     let game = &mut *game;
     // At most 50 ms of wall time per frame: a stalled frame does not become a physics leap.
@@ -820,6 +1177,17 @@ fn simulate(time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<G
             .clamp(0.0, 100.0);
     }
     let before = game.rocket.time();
+    let next_burn = game.plan.as_ref().and_then(|p| p.burns().first().copied());
+    if game.warp_to_maneuver
+        && let Some(burn) = next_burn
+    {
+        if burn.start_time - before - 30.0 <= 0.0 {
+            game.warp_to_maneuver = false;
+            game.set_time_rate(1.0);
+        } else {
+            game.set_time_rate(TIME_RATES[TIME_RATES.len() - 1]);
+        }
+    }
     // Burning, waking on the ground or coming down lowers the rate at once, as KSP does. Falling out
     // of on-rails goes straight to 1x, so there is time to react.
     let (limit, reason) = game.warp_limit();
@@ -830,7 +1198,18 @@ fn simulate(time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<G
         game.time_rate = if limit > PHYSICS_MAX_RATE { limit } else { 1.0 };
     }
     if !game.paused {
-        let dt = wall * game.time_rate;
+        let mut dt = wall * game.time_rate;
+        if let Some(burn) = next_burn {
+            if game.warp_to_maneuver {
+                dt = dt.min((burn.start_time - before - 30.0).max(0.0));
+            }
+            if !game.executing && burn.start_time > before {
+                dt = dt.min(burn.start_time - before);
+            }
+            if game.executing {
+                dt = dt.min((burn.end_time - before).max(0.0));
+            }
+        }
         if game.time_rate > PHYSICS_MAX_RATE {
             game.rocket.advance_on_rails(&mut game.ephemeris, dt);
         } else {
@@ -844,7 +1223,19 @@ fn simulate(time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<G
                 up: 1.0,
                 ..Default::default()
             };
-            if game.sas.enabled() {
+            if game.executing {
+                game.sas_suspended = true;
+            } else if game.sas_suspended {
+                // SAS locks afresh after a burn.
+                game.sas_suspended = false;
+                if game.sas.enabled() {
+                    game.sas.set_enabled(true);
+                }
+            }
+            if game.executing {
+                let control = game.maneuver_control();
+                game.rocket.advance(&mut game.ephemeris, dt, &control, None);
+            } else if game.sas.enabled() {
                 // lab/sas's stability assist, every physics step on the attitude at its start.
                 let sas = &mut game.sas;
                 let mut steer = |s: AttitudeSample, dt: f64| {
@@ -858,6 +1249,44 @@ fn simulate(time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<G
             }
         }
     }
+    // A burn starts when its time comes (or is dropped when it has no Δv); it ends at its end
+    // time, and the plan continues from the state it left.
+    let t = game.rocket.time();
+    let due = game.plan.as_ref().and_then(|p| p.burns().first().copied());
+    if !game.executing
+        && let Some(burn) = due
+        && t >= burn.start_time - 1e-7
+    {
+        let state = game.plan_state();
+        let plan = game.plan.as_mut().unwrap();
+        plan.rebase(&state);
+        match plan.burns().first() {
+            Some(b) if b.control.is_some() => {
+                assert!(
+                    game.plan_ready(),
+                    "maneuver ignition requires a separated upper stage in free flight"
+                );
+                game.executing = true;
+                game.set_time_rate(1.0);
+                game.throttle_percent = 0.0;
+            }
+            Some(_) => {
+                plan.complete_first(&state);
+                game.selected = game.selected.saturating_sub(1);
+            }
+            None => {}
+        }
+    }
+    if game.executing
+        && let Some(burn) = game.plan.as_ref().and_then(|p| p.burns().first().copied())
+        && t >= burn.end_time - 1e-7
+    {
+        game.executing = false;
+        game.throttle_percent = 0.0;
+        let state = game.plan_state();
+        game.plan.as_mut().unwrap().complete_first(&state);
+        game.selected = game.selected.saturating_sub(1);
+    }
     // A booster lost while attached leaves the upper stage flying on its own.
     if game.stage == 1 && game.rocket.separated() {
         game.stage = 2;
@@ -866,6 +1295,11 @@ fn simulate(time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<G
     game.ephemeris
         .states_at(t, &mut game.positions, Some(&mut game.velocities));
     update_prediction(game);
+    if let Some(plan) = game.plan.as_mut()
+        && plan.count() > 0
+    {
+        plan.extend(&mut game.ephemeris, PLAN_STEPS_PER_FRAME);
+    }
 
     game.axes = body_orientation(&game.bodies[game.home].rotation, t);
     game.upper = game.part_inertial(RocketPart::Upper);
@@ -916,6 +1350,14 @@ fn update_prediction(game: &mut Game) {
         PREDICTION_HORIZON_SECONDS,
     ));
     game.prediction_generation += 1;
+    let coasting = game.plan.as_ref().is_some_and(|p| {
+        p.count() > 0 && !game.executing && p.burns().first().is_some_and(|b| t < b.start_time)
+    });
+    if coasting {
+        let state = game.plan_state();
+        game.plan.as_mut().unwrap().rebase(&state);
+        game.resolve_plan_references();
+    }
 }
 
 /// lab/lod's observers: every live part, plus the camera, which also alone decides horizon
@@ -997,10 +1439,12 @@ fn draw(
         *transform = Transform::from_translation((state.position - eye).as_vec3())
             .with_rotation(game.rocket.part_orientation(part.0).as_quat());
     }
-    let firing = if !game.paused && game.engine_armed && game.rocket.fuel_kg() > 0.0 {
-        game.throttle_percent / 100.0
-    } else {
+    let firing = if game.paused || !game.engine_armed || game.rocket.fuel_kg() <= 0.0 {
         0.0
+    } else if game.executing {
+        1.0
+    } else {
+        game.throttle_percent / 100.0
     };
     for (flame, mut transform, mut visibility) in &mut flames {
         let burning = firing > 0.0
@@ -1037,6 +1481,7 @@ fn draw(
     // Taken out while the frame borrows the game.
     let mut orbits = std::mem::replace(&mut game.orbits, MapOrbits::new(&[]));
     let mut path = std::mem::take(&mut game.path);
+    let mut plan_path = std::mem::take(&mut game.plan_path);
     let frame = game.map_frame();
     orbits.update(&bodies, &frame);
     match &game.prediction {
@@ -1049,18 +1494,29 @@ fn draw(
         ),
         None => path.hide(),
     }
+    match &game.plan {
+        Some(plan) if plan.count() > 0 => plan_path.update(
+            &game.ephemeris,
+            &plan.trajectory,
+            plan.generation,
+            &frame,
+            false,
+        ),
+        _ => plan_path.hide(),
+    }
     let render = |v: DVec3| game.render(v);
     draw_map_lines(
         &mut gizmos,
         &bodies,
         &orbits,
-        &[(&path, color(PATH_COLOR))],
+        &[(&path, color(PATH_COLOR)), (&plan_path, color(PLAN_COLOR))],
         &frame,
         state.map_weight as f32,
         &render,
     );
     game.orbits = orbits;
     game.path = path;
+    game.plan_path = plan_path;
 }
 
 /// scenery's shaders in the body-fixed frame: the camera and the Sun for the air pass and the
@@ -1287,10 +1743,12 @@ fn hud(game: Res<Game>, ground: Res<Ground>, mut text: Single<&mut Text, With<Hu
          Shift/Ctrl: throttle | X: cut | W/S pitch | A/D yaw | Q/E roll | T: SAS\n\
          , . time rate | P pause | R reset\n\
          drag: orbit camera | wheel: zoom out into the map\n\
-         Tab or a label: focus | G: path frame | K: AGL/ALT | L: SURFACE/ORBIT | F1: keys\n"
+         Tab or a label: focus | G: path frame | K: AGL/ALT | L: SURFACE/ORBIT | F1: keys\n\
+         After upper-stage separation in flight, N adds a maneuver (keys in its panel)\n"
     } else {
         "\nF1: keys\n"
     };
+    let plan = game.plan_text();
     let focus = match game.focus {
         Focus::Vessel => format!("vessel (reference {})", game.bodies[game.reference].name),
         Focus::Body(i) => game.bodies[i].name.clone(),
@@ -1300,7 +1758,7 @@ fn hud(game: Res<Game>, ground: Res<Ground>, mut text: Single<&mut Text, With<Hu
          STAGES | {:?}\n{stages}  {hint}\n\n\
          THR {:>3.0}%  {engine}   SAS {}\n\
          {altitude}\n\
-         {speed}\n{orbit}\n\
+         {speed}\n{orbit}{plan}\n\
          focus   {focus}\n\
          camera  {} | map {:.0}% | up {:.0}% | co-rotate {:.0}% {}\n\
          tiles   {} drawn, L{}-L{}, {} building\n\

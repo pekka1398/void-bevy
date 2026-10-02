@@ -13,7 +13,9 @@ cargo test -p void-app --test flight                    # lab/flight 的接線�
 1. **飛行核心（完成）**：Sol 系統中的 Aurelia、scenery 的分層地形（發射點在緯度 0.3、經度 0.5 rad 的陸地上）、兩節火箭（地面附近 Rapier、飛行中軌道傳播）、分離、時間加速與 on-rails、lab/view 的單一視圖（從發射台拉遠到地圖）、地圖上的軌道、滑行預測、Pe/Ap 與標籤。
 2. **儀表（完成）**：lab/navball 的球（150 px，下方中央，標記跟著 SURFACE／ORBIT），lab/sas 的 SAS（T，每個物理步呼叫一次）。
 3. **scenery（完成）**：tile 用 scenery 的地面與海著色器，相機上是空氣與體積雲的 post-process pass（曝光 10^0.8、ACES），星空是慣性的（黃道座標），每幀轉進行星本體座標，在有陽光的大氣中淡出。Sol 系統中太陽是地圖畫的球，大氣 pass 的太陽圓盤關閉；單獨的行星則開啟。
-4. 地圖：飛行計畫的路徑與機動面板。
+4. **機動（完成）**：上級分離並自由飛行後，可規劃 orbit crate 的多段燃燒（Frenet 座標的 Δv，固定或自動參考天體，Pe／Ap 定位，加速到燃燒前 30 s）。燃燒以上級全推力執行，期間由燃燒控制姿態、SAS 暫停，結束後 SAS 重新鎖定。滑行時每次預測都把計畫重新錨定到目前的飛行；地圖上的橘線是計畫的路徑。
+
+   lab 的面板改成按鍵（HUD 中的 MANEUVER 區）：N 新增、Del 刪除、`[` `]` 選擇、↑↓ prograde、←→ normal、PgUp／PgDn radial（每次 1 m/s，Alt 為 10）、Home／End 開始時間 ±60 s（Alt 為 600 s）、Y 定在 Pe、U 定在 Ap、V 切換參考天體（自動 → 各天體固定 → 自動）、B 加速到燃燒。
 
 ## 與 TS 的差異
 
