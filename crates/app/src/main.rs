@@ -1112,7 +1112,8 @@ fn maneuver_keys(keys: &ButtonInput<KeyCode>, game: &mut Game) {
     if keys.just_pressed(KeyCode::BracketRight) {
         game.selected = (game.selected + 1).min(count.saturating_sub(1));
     }
-    let edits: [(KeyCode, fn(&mut ManeuverSpec, f64), f64); 8] = [
+    type Edit = (KeyCode, fn(&mut ManeuverSpec, f64), f64);
+    let edits: [Edit; 8] = [
         (KeyCode::ArrowUp, |s, d| s.prograde += d, step),
         (KeyCode::ArrowDown, |s, d| s.prograde -= d, step),
         (KeyCode::ArrowRight, |s, d| s.normal += d, step),
