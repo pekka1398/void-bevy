@@ -315,6 +315,9 @@ fn on_rails() {
     // A coasting stack: on rails is the same coast as physics time; coming down, rails stop at the
     // band. The burn has to leave the stack coasting for longer than the 200 s compared below;
     // unsteered it lobs, so a rocket carrying more fuel needs a longer burn to stay up as long.
+    // Below about 90 s it comes back down inside the window, and the two sides then stop for
+    // different reasons — rails at the band, physics in contact — so the comparison is asserted to
+    // be valid before it is made, rather than reading kilometres and blaming the rails.
     let burn = LanderControl {
         throttle: 1.0,
         ..coast.clone()
@@ -328,6 +331,13 @@ fn on_rails() {
     }
     railed.advance_on_rails(&mut eph, 200.0);
     simulated.advance(&mut eph, 200.0, &coast, None);
+    assert!(
+        railed.mode() == PhysicsMode::Flight && simulated.mode() == PhysicsMode::Flight,
+        "the 200 s comparison only means anything while both sides are still coasting, but they \
+         ended as {:?} on rails and {:?} in physics: lengthen the burn",
+        railed.mode(),
+        simulated.mode()
+    );
     let gap = (railed.body_fixed_state(&eph).position - simulated.body_fixed_state(&eph).position)
         .length();
     let mut stopped = true;
