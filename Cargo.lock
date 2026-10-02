@@ -5545,6 +5545,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-view"
+version = "0.0.0"
+dependencies = [
+ "glam 0.32.1",
+ "serde_json",
+ "void-landing",
+ "void-lod",
+ "void-math",
+ "void-orbit",
+ "void-terrain",
+]
+
+[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

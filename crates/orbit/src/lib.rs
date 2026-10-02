@@ -8,6 +8,7 @@ mod flight_plan;
 mod hermite;
 mod kepler;
 mod propagator;
+mod simulation;
 mod system;
 mod trajectory;
 
@@ -25,6 +26,10 @@ pub use kepler::{
 pub use propagator::{
     AdvanceOutcome, AttitudeLaw, Control, ForceControl, Impact, PropagationRun, ThrustControl,
     Tolerances, VesselPropagator, VesselState,
+};
+pub use simulation::{
+    AdvanceReport, AttitudeMode, EngineSpec, ImpactRecord, STANDARD_GRAVITY, Simulation,
+    SimulationOptions, StartPlane, VesselStartSpec,
 };
 pub use system::{
     BodySpec, BuiltSystem, CelestialBody, GRAVITATIONAL_CONSTANT, GravityField, LockedRotationSpec,

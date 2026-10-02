@@ -1,0 +1,17 @@
+[package]
+name = "void-view"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+glam.workspace = true
+void-math.workspace = true
+void-orbit.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+void-landing.workspace = true
+void-lod.workspace = true
+void-terrain.workspace = true
