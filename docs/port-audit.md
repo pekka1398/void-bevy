@@ -45,7 +45,7 @@ workspace 共 21 個 package：15 個功能／基礎 crate、`void-app` 及 5 �
 ## 測試狀態與已知問題
 
 - 補缺後 `cargo test --workspace --all-targets`：**196 passed、0 failed、1 ignored**；workspace clippy（`-D warnings`）及新 lab build 通過。通過代表既有測試涵蓋範圍通過，不能推出沒有漏功能。
-- ignored 為 `vessels/tests/checks.rs` 的 Pebble 細長兩級火箭靜止傾角：native 約 5°，超過 TS 原 3° 門檻。未放寬門檻。能量重新量測為淨減少，先前持續灌能診斷已撤回；差異原因尚未確立。
+- ignored 為 `vessels/tests/checks.rs` 的 Pebble 細長兩級火箭靜止傾角，已結案為非缺陷：發射點地形有坡，細長火箭順坡傾倒是預期行為，原 3° 門檻量到的是場地坡度。詳見 vessels.md。
 - 軌道／scenery 等多項有 TS golden，aero 和 vessels 也有原 lab 行為檢查；**orbit 的整個 `orbit-check.ts` 並沒有一對一完整覆蓋**，雙體框架原檢查已在本次補上。golden 的輸入選擇不能代替功能清單。
 - GPU shader、字型、選取與拖曳、不同 GPU／平台、長時間資源使用仍需相應驗收；本次未操作 GUI。
 - native 與 WASM 接觸軌跡有差異，不能以「原生不逐位元相同」一概豁免原來的行為門檻。

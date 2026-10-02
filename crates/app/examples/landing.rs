@@ -48,7 +48,8 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.027, 0.063, 0.106)))
         .insert_resource(WireframeConfig {
             global: false,
-            default_color: Color::WHITE,
+            // Black, like the LOD lab's: the terrain is near-white, so white lines vanish into it.
+            default_color: Color::BLACK,
             ..default()
         })
         .insert_resource(GlobalAmbientLight {
@@ -484,17 +485,23 @@ fn draw(
     let state = rocket.body_fixed_state(eph);
     let r = state.position.length();
     let vertical = state.velocity.dot(state.position) / r;
+    // The angle between the rocket's own up and the local vertical, which is what the resting
+    // tilt check measures, and whether the contact bodies have gone to sleep at that angle.
+    let up_axis = rocket.part_orientation(RocketPart::Upper) * DVec3::Y;
+    let tilt = (up_axis.dot(state.position) / r).clamp(-1.0, 1.0).acos();
+    let worlds = rocket.contact_worlds();
+    let asleep = !worlds.is_empty() && worlds.iter().all(|w| w.asleep());
     let mode = |m: PhysicsMode| match m {
         PhysicsMode::Flight => "orbit",
         PhysicsMode::Contact => "contact",
         PhysicsMode::Destroyed => "destroyed",
     };
-    let worlds = rocket.contact_worlds();
     let tiles_loaded: usize = worlds.iter().map(|w| w.loaded_tile_count()).sum();
     hud.0 = format!(
         "{}\n\
          T+{:.1} s   rate {}x{}   stage {}   throttle {:.0}%{}\n\
          height AGL {}   coast impact {}   surface speed {:.2} m/s   vertical {:+.2} m/s\n\
+         tilt {:.2}° from local vertical   contact {}\n\
          upper {} | {:.0} kg fuel | {:.0} m/s   booster {} | {:.0} kg fuel | {:.0} m/s\n\
          {} contact world(s), {} collision tiles   terrain: {} tiles drawn (L{}-L{}), {} building   crashes {}\n\
          Space stage | Shift/Ctrl throttle | W/S pitch | A/D yaw | Q/E roll | drag orbit | wheel zoom | 1/2/3 rate | P pause | R reset | B wireframe",
@@ -519,6 +526,8 @@ fn draw(
             )),
         state.velocity.length(),
         vertical,
+        tilt.to_degrees(),
+        if asleep { "asleep" } else { "awake" },
         mode(rocket.part_mode(RocketPart::Upper)),
         rocket.part_fuel_kg(RocketPart::Upper),
         rocket.part_delta_v(RocketPart::Upper),
