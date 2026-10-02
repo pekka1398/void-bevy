@@ -4,7 +4,9 @@
 //! the map weight's opacity.
 
 use glam::DVec3;
-use void_orbit::{ApsisKind, CelestialBody, Ephemeris, Trajectory, find_apsides, osculating_orbit};
+use void_orbit::{
+    ApsisKind, CelestialBody, EphemerisSource, Trajectory, find_apsides, osculating_orbit,
+};
 
 use crate::conic::ellipse_points;
 use crate::path_frame::{
@@ -210,7 +212,7 @@ impl MapPath {
     /// apsides about the plotting frame's body are found again every `APSIS_REFRESH_MS`.
     pub fn update(
         &mut self,
-        ephemeris: &Ephemeris,
+        ephemeris: &dyn EphemerisSource,
         trajectory: &Trajectory,
         generation: u64,
         frame: &MapFrame,

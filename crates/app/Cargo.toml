@@ -6,6 +6,11 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+void-fleet-flight = { path = "../fleet-flight" }
+void-assembly.workspace = true
+void-assembly-lab = { path = "../assembly-lab" }
+void-vessels.workspace = true
+void-diagnostics = { path = "../diagnostics" }
 bevy.workspace = true
 glam.workspace = true
 void-frames.workspace = true

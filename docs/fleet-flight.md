@@ -1,6 +1,6 @@
 # Fleet 飛行整合與世界操作紀錄
 
-此工作依序調查 assembly／Fleet 承接主遊戲的缺口，建立獨立核心 `void-fleet-flight` 與 Bevy 程式 `void-fleet-flight-lab`。使用者已要求先完成 A／B，視窗驗收之後補做；`void-app` 保持使用 PartJointRocket，沒有加入 assembly 或 Fleet 依賴。
+此工作依序調查 assembly／Fleet 承接主遊戲的缺口，建立獨立核心 `void-fleet-flight` 與 Bevy 程式 `void-fleet-flight-lab`。使用者已要求先完成 A／B，視窗驗收之後補做；主遊戲現已引用 Fleet runtime 與 assembly 零件；舊固定兩級火箭移到 `void-app --example legacy_flight` 保存回歸場景。
 
 ## 調查結果
 
@@ -88,3 +88,22 @@ Native sampling 工具使用 perf `cpu-clock:u`、99 Hz、DWARF call graph，可
 直接存檔驗證涵蓋 awake ground 的 pending／SAS／燃燒、ground＋orbit＋bubble 混合所有權、睡眠後一天 rails 與續接 physics、native cache／graph 損毀拒絕，以及實際 binary 的跨程序 `--verify-save`。每個直接快照載入後再走相同命令，要求完整 mark 相等。船體疊圖另以直接修改 Rapier 形狀與 local transform 的測試，確認觀察的是實際碰撞體，並確認 recenter 不改 body-local mesh。
 
 直接 checkpoint／船體疊圖補齊後，workspace 全 target 回歸：242 passed、0 failed、3 ignored；workspace Clippy（-D warnings）與 fmt 通過。主遊戲改接仍未完成，以上只代表本批新增能力與既有檢查通過。
+
+## 主遊戲改接
+
+`void-app` 與 `void-fleet-flight-lab` 的 binary 現在只有啟動入口，兩者都使用 `crates/app/src/fleet_game.rs`。控制命令、Fleet 時鐘、任意 craft 零件、逐船 SAS／油門、直接存讀、journal 錄放、實際碰撞線與 CPU profile 共用，避免主遊戲再保留第二套物理接線。主遊戲使用同一行星設定的 ground／ocean／atmosphere／cloud／star 管線、navball 和 map；lab 保留簡單地形材料。存檔載入時重建對應地形與視覺資源。
+
+```sh
+cargo run -p void-app
+cargo run -p void-app -- --craft /path/to/void-craft.json
+cargo run -p void-app -- --load lab-log/fleet-save.json
+cargo run -p void-app -- --verify-save lab-log/fleet-save.json
+cargo run -p void-app -- --record lab-log/fleet-session.json --profile lab-log/fleet-profile.json
+cargo run -p void-app --example legacy_flight
+```
+
+主遊戲預設 assembly 的 demo craft（4590 kg），可直接用 assembly 匯出的其他 craft，並非先前固定 7620 kg 火箭的逐零件映射；原來火箭與原數值回歸保留在 legacy example。主遊戲新開世界開始運行，lab／載入世界暫停開始。Tab 切船，Shift+Tab 循環天體焦點；map 標籤可點，G 切 inertial／surface path，K／L 切高度／速度读數。時間倍率沿用主遊戲九檔與高度限制；接觸、交會、燃燒阻擋由整個 Fleet 判斷。
+
+獨立場景與主遊戲材料／儀表／map 的 headless Bevy 初始化檢查通過，含 Aurelia → Luna 世界替換；不建立 WindowPlugin 或 renderer。主遊戲 binary 另有獨立程序 --verify-save／--verify 檢查。GPU 畫面仍留給使用者驗收。逐船機動計畫保存／執行與撞擊毀損尚未完成，A／B 持續進行。
+
+共享 runtime／主程式第一階段改接後 workspace 全 target：244 passed、0 failed、3 ignored；workspace Clippy（-D warnings）與 fmt 通過。機動執行／毀損等剩餘項目仍需完成，不能把這個測試結果當作 A／B 完成。

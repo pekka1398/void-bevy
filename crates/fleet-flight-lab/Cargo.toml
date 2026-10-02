@@ -6,17 +6,12 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-bevy.workspace = true
-glam.workspace = true
-void-fleet-flight = { path = "../fleet-flight" }
 void-app = { path = "../app" }
-void-assembly.workspace = true
-void-assembly-lab = { path = "../assembly-lab" }
-void-vessels.workspace = true
-void-landing.workspace = true
-void-orbit.workspace = true
-void-lod.workspace = true
-void-diagnostics = { path = "../diagnostics" }
 
 [dev-dependencies]
+glam.workspace = true
+void-fleet-flight = { path = "../fleet-flight" }
+void-assembly.workspace = true
+void-vessels.workspace = true
+void-landing.workspace = true
 serde_json.workspace = true

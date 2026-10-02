@@ -1,5 +1,6 @@
 pub mod aero_field;
 pub mod air;
+pub mod fleet_game;
 pub mod flight;
 pub mod input;
 pub mod lab_log;
