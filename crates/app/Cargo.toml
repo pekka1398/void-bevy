@@ -23,3 +23,7 @@ void-sas.workspace = true
 void-view.workspace = true
 # The version Bevy already pulls in, for the half-float tables.
 half = "2.7"
+
+[dev-dependencies]
+# The multiscale example's world; the game itself does not use it yet.
+void-multiscale.workspace = true

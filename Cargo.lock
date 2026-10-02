@@ -5455,6 +5455,7 @@ dependencies = [
  "void-landing",
  "void-lod",
  "void-math",
+ "void-multiscale",
  "void-navball",
  "void-orbit",
  "void-rotation",
