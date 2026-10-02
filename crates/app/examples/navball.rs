@@ -129,6 +129,7 @@ impl Lab {
         if pitch == 0.0 && yaw == 0.0 && roll == 0.0 {
             return;
         }
+        // The ball's screen right, top × nose: mirrored from KSP, see `void_navball::navball_basis`.
         let right = self.top.cross(self.nose);
         // Pitch up moves the nose toward the top, yaw right toward the right; roll (E) turns the top
         // toward the left.

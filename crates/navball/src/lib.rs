@@ -121,6 +121,11 @@ pub fn navball_basis(input: &NavballInput) -> NavballBasis {
     );
     let (north, east) = horizon_axes(input.up, input.pole, input.prime_meridian);
     NavballBasis {
+        // MIRRORED FROM KSP (kept as the lab has it): top × nose makes the ball a globe seen from
+        // outside. Facing east, 60 is on the right and 120 on the left; facing north, W is on the
+        // right. KSP shows the opposite (E on the right when facing north). lab/flight's yaw keys
+        // follow this same axis, so the ball and the keys agree with each other but both are
+        // mirrored from KSP. Fixing it means changing this axis and the steering together.
         right: cross(input.top, input.nose),
         top: input.top,
         nose: input.nose,
