@@ -284,6 +284,16 @@ impl<F: ContactFrame> ContactWorld<F> {
                 && options.recenter_meters > 0.0,
             "contact world: options {options:?}"
         );
+        if let Some(terrain) = &terrain {
+            let body = frame
+                .terrain_body()
+                .expect("contact world: terrain is body-fixed; it needs a planet frame");
+            assert_eq!(
+                terrain.radius_meters, body.radius_meters,
+                "contact world: terrain radius differs from {}'s radius",
+                body.id
+            );
+        }
         let mut world = PhysicsWorld {
             gravity: Vector::ZERO,
             ..PhysicsWorld::default()

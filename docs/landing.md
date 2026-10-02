@@ -18,6 +18,7 @@
 - Rapier 的 JS `World` 對應 Rust 的 `PhysicsWorld`；JS 綁定解除的 400 m/s 限速，在 Rust 是 `normalized_max_linear_velocity = f32::MAX`。旋轉的處理照 JS 綁定：`setRotation` 會把 f32 四元數正規化，建立剛體時不會。
 - 兩節火箭在 TS 用物件身分共用同一個 `ContactWorld`；Rust 由火箭持有世界的清單，各節存索引。
 - 每步轉向（SAS）在 TS 是控制物件裡的回呼；Rust 是 `advance` 的另一個參數。
+- `ContactFrame::terrain_body()` 明確宣告地形所屬天體；`ContactWorld` 建立時拒絕非行星地表框架或半徑不一致的地形，與 TS 的檢查相同。Fleet 的地面框架轉交 PlanetFrame，FreeFallFrame 不允許地形。
 - `tiles_around` 照 TS 的掃描順序回傳（碰撞 tile 依這個順序加進 Rapier）。
 
 ## 檢查（`cargo test --release -p void-landing`）

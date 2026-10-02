@@ -15,11 +15,15 @@ pub const PLAN_COLOR: &str = "#ffca66";
 pub const VESSEL_COLOR: &str = "#7dffb0";
 const LABEL_HEIGHT: f32 = 13.0;
 
-/// A CSS hex colour; white when it does not parse.
+/// A CSS hex colour; invalid input is logged and shown in diagnostic magenta.
 pub fn color(hex: &str) -> Color {
-    Srgba::hex(hex.trim_start_matches('#'))
-        .map(Color::from)
-        .unwrap_or(Color::WHITE)
+    match Srgba::hex(hex.trim_start_matches('#')) {
+        Ok(color) => Color::from(color),
+        Err(error) => {
+            error!("invalid CSS hex colour {hex:?}: {error}; showing magenta");
+            Color::srgb(1.0, 0.0, 1.0)
+        }
+    }
 }
 
 /// A map label: what it names, its slot (0 or 1 for the apsides) and its text child.

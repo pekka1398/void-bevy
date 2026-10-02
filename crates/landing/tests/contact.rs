@@ -7,7 +7,7 @@ use std::sync::Arc;
 use glam::{DQuat, DVec3};
 use void_landing::{
     BodyShape, ContactBodySpec, ContactFrame, ContactWorld, ContactWorldOptions, FrameState,
-    PlanetFrame, SimpleShape, level_for_tile_size, pebble,
+    PlanetFrame, SimpleShape, level_for_tile_size, moon_size, pebble,
 };
 use void_orbit::{
     BodySpec, EllipticElements, Ephemeris, EphemerisOptions, GravityField, OrbitPlane,
@@ -168,6 +168,24 @@ fn ground(terrain: &Terrain, d: DVec3, lift: f64) -> DVec3 {
 
 fn clearance(terrain: &Terrain, p: DVec3) -> f64 {
     p.length() - terrain.radius_meters - terrain.height(p.normalize())
+}
+
+#[test]
+#[should_panic(expected = "contact world: terrain radius")]
+fn mismatched_terrain_radius_panics() {
+    let Env {
+        mut ephemeris,
+        frame,
+        ..
+    } = plain_pebble();
+    ContactWorld::new(
+        frame,
+        Some(moon_size().terrain),
+        options(),
+        0.0,
+        DVec3::ZERO,
+        &mut ephemeris,
+    );
 }
 
 #[test]

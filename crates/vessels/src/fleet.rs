@@ -11,8 +11,8 @@ use void_landing::{
     EncounterPhysicsGate, EncounterRanges, FrameState, Piece, PieceMass, PlanetFrame, SimpleShape,
 };
 use void_orbit::{
-    AdvanceOutcome, Control, EphemerisSource, ForceControl, PropagationRun, Tolerances,
-    VesselPropagator, VesselState, body_orientation,
+    AdvanceOutcome, CelestialBody, Control, EphemerisSource, ForceControl, PropagationRun,
+    Tolerances, VesselPropagator, VesselState, body_orientation,
 };
 use void_rotation::{Mat3, rotation_step};
 use void_sas::{SAS_TUNING, SasPhase, StabilityAssist};
@@ -143,6 +143,13 @@ enum SceneFrame {
     Ground(Box<PlanetFrame>),
 }
 impl ContactFrame for SceneFrame {
+    fn terrain_body(&self) -> Option<&CelestialBody> {
+        match self {
+            Self::Bubble(f) => f.terrain_body(),
+            Self::Ground(f) => f.terrain_body(),
+        }
+    }
+
     fn acceleration(&self, e: &dyn EphemerisSource, t: f64, r: DVec3, v: DVec3) -> DVec3 {
         match self {
             Self::Bubble(f) => f.acceleration(e, t, r, v),

@@ -2,7 +2,8 @@ use glam::DVec3;
 use std::cell::RefCell;
 use void_landing::{ContactFrame, FrameState};
 use void_orbit::{
-    AdvanceOutcome, EphemerisSource, PropagationRun, Tolerances, VesselPropagator, VesselState,
+    AdvanceOutcome, CelestialBody, EphemerisSource, PropagationRun, Tolerances, VesselPropagator,
+    VesselState,
 };
 
 /// Nonrotating contact frame following a coasting orbit. The contact owner prepares
@@ -106,6 +107,10 @@ impl FreeFallFrame {
     }
 }
 impl ContactFrame for FreeFallFrame {
+    fn terrain_body(&self) -> Option<&CelestialBody> {
+        None
+    }
+
     fn acceleration(&self, ephemeris: &dyn EphemerisSource, t: f64, r: DVec3, _: DVec3) -> DVec3 {
         let o = self.origin(t).position;
         let mut p = self.propagator.borrow_mut();

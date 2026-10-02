@@ -16,6 +16,9 @@ pub struct FrameState {
 /// and the frame's own terms); Rapier's gravity is off. `PlanetFrame` (body-fixed, rotating) is
 /// one; a free-falling frame is another.
 pub trait ContactFrame {
+    /// The body whose terrain is stationary in this frame, with the origin at its centre and
+    /// body-fixed axes. Frames that cannot host collision terrain must return None.
+    fn terrain_body(&self) -> Option<&CelestialBody>;
     /// Acceleration of a free particle at frame position r and velocity v at time t, contacts
     /// excluded. The ephemeris covers t.
     fn acceleration(&self, ephemeris: &dyn EphemerisSource, t: f64, r: DVec3, v: DVec3) -> DVec3;
@@ -102,6 +105,10 @@ impl PlanetFrame {
 }
 
 impl ContactFrame for PlanetFrame {
+    fn terrain_body(&self) -> Option<&CelestialBody> {
+        Some(&self.body)
+    }
+
     fn acceleration(&self, ephemeris: &dyn EphemerisSource, t: f64, r: DVec3, v: DVec3) -> DVec3 {
         let b = &self.body;
         let r2 = r.x * r.x + r.y * r.y + r.z * r.z;

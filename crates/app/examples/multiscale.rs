@@ -14,6 +14,7 @@ use std::collections::VecDeque;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use glam::DVec3;
+use void_app::map::color as css;
 use void_multiscale::*;
 use void_view::{OrbitCamera, ellipse_points};
 
@@ -44,16 +45,6 @@ fn main() {
 
 fn hex(rgb: u32) -> Color {
     Color::srgb_u8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
-}
-
-fn css(color: &str) -> Color {
-    let h = color.trim_start_matches('#');
-    let full: String = if h.len() == 3 {
-        h.chars().flat_map(|c| [c, c]).collect()
-    } else {
-        h.to_string()
-    };
-    Srgba::hex(full).map(Color::from).unwrap_or(Color::WHITE)
 }
 
 const PROBE_COLOR: u32 = 0x65e7c4;
