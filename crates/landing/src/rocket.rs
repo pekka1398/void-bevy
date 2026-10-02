@@ -812,11 +812,17 @@ impl PartJointRocket {
         let engine_part = self.engine_part();
         let engine = self.slot(engine_part).clone();
         let (mut burned, mut push) = (0.0, DVec3::ZERO);
-        if engine.body.is_some() {
-            let ve = engine.spec.specific_impulse_seconds * STANDARD_GRAVITY;
+        if let Some(body) = engine.body {
+            let (thrust_newtons, ve) = self.engine_output(
+                engine_part,
+                v64(self
+                    .world_ref(engine.world.expect("the engine part is in a world"))
+                    .body(body)
+                    .translation()),
+            );
             burned = engine
                 .fuel_kg
-                .min(control.throttle * engine.spec.thrust_newtons * step / ve);
+                .min(control.throttle * thrust_newtons * step / ve);
             let thrust = burned * ve / step;
             let mean_mass = engine.spec.dry_mass_kg + engine.fuel_kg - burned / 2.0;
             let direction = rotate(q64(*self.body_ref(engine_part).rotation()), DVec3::Y);
@@ -1084,8 +1090,25 @@ impl PartJointRocket {
         });
         self.propagator.set_air_source(air);
         while run.time + 1e-12 < end {
-            let thrust = engine
-                .and_then(|e| self.flight_control(e, throttle, run.time, command.orbital_attitude));
+            let thrust = engine.and_then(|e| {
+                // Where the leg starts, in the frame the air is measured in.
+                let state = run.state();
+                let local = self.frame.to_body_fixed(
+                    ephemeris,
+                    run.time,
+                    FrameState {
+                        position: state.position,
+                        velocity: state.velocity,
+                    },
+                );
+                self.flight_control(
+                    e,
+                    throttle,
+                    run.time,
+                    local.position,
+                    command.orbital_attitude,
+                )
+            });
             let start = run.time;
             if let (Some(thrust), Some(e)) = (thrust, engine) {
                 let fuel = self.slot(e).fuel_kg;
@@ -1130,6 +1153,7 @@ impl PartJointRocket {
         which: RocketPart,
         throttle: f64,
         time: f64,
+        body_fixed_position: DVec3,
         orbital_attitude: Option<AttitudeLaw>,
     ) -> Option<ThrustControl> {
         let slot = self.slot(which);
@@ -1142,12 +1166,30 @@ impl PartJointRocket {
         } else {
             self.upper_spec.dry_mass_kg + self.booster_spec.dry_mass_kg + self.upper.fuel_kg
         };
+        // Pressure is read where the leg starts and held over it, as the whole control is.
+        let (thrust_newtons, exhaust_velocity) = self.engine_output(which, body_fixed_position);
         Some(ThrustControl {
-            thrust_newtons: throttle * slot.spec.thrust_newtons,
-            exhaust_velocity: slot.spec.specific_impulse_seconds * STANDARD_GRAVITY,
+            thrust_newtons: throttle * thrust_newtons,
+            exhaust_velocity,
             minimum_mass_kg,
             attitude: orbital_attitude.unwrap_or(AttitudeLaw::Inertial { direction }),
         })
+    }
+
+    /// What the engine actually gives where it is: vacuum thrust less the ambient pressure on the
+    /// nozzle's exit, and the exhaust velocity that falls with it at the same mass flow. An
+    /// over-expanded nozzle low down would come out negative; the flow separates there instead, so
+    /// the model stops at no thrust rather than pushing the rocket backwards.
+    fn engine_output(&self, which: RocketPart, position: DVec3) -> (f64, f64) {
+        let spec = &self.slot(which).spec;
+        let vacuum = spec.thrust_newtons;
+        let ve_vacuum = spec.specific_impulse_seconds * STANDARD_GRAVITY;
+        let Some(air) = &self.air else {
+            return (vacuum, ve_vacuum);
+        };
+        let thrust = (vacuum - spec.nozzle_exit_area_m2 * air.pressure_pa(position)).max(0.0);
+        // The mass flow is the engine's own, so the exhaust velocity carries the whole loss.
+        (thrust, ve_vacuum * thrust / vacuum)
     }
 
     /// Apply band crossings (with hysteresis), then keep contact worlds local.

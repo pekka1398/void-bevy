@@ -28,8 +28,13 @@ pub const STANDARD_GRAVITY: f64 = 9.80665;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LanderSpec {
+    /// Thrust and specific impulse in vacuum, as engines are rated. Against ambient pressure the
+    /// nozzle gives F = F_vac − exit area × p, and the exhaust velocity falls with it, so both are
+    /// lower at sea level. An engine with no exit area does not vary with pressure at all, which
+    /// is what every craft did before any planet had air.
     pub thrust_newtons: f64,
     pub specific_impulse_seconds: f64,
+    pub nozzle_exit_area_m2: f64,
     pub dry_mass_kg: f64,
     pub fuel_mass_kg: f64,
     /// The hull is a box; its local +y is the thrust axis ("up").

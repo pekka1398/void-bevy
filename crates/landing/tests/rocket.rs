@@ -48,6 +48,7 @@ fn specs() -> (LanderSpec, LanderSpec, LanderSpec) {
     let upper = LanderSpec {
         thrust_newtons: 8000.0,
         specific_impulse_seconds: 330.0,
+        nozzle_exit_area_m2: 0.0,
         dry_mass_kg: 300.0,
         fuel_mass_kg: 200.0,
         half_extents: DVec3::new(1.0, 1.05, 1.0),
@@ -58,6 +59,7 @@ fn specs() -> (LanderSpec, LanderSpec, LanderSpec) {
     let booster = LanderSpec {
         thrust_newtons: 28000.0,
         specific_impulse_seconds: 280.0,
+        nozzle_exit_area_m2: 0.0,
         dry_mass_kg: 500.0,
         fuel_mass_kg: 900.0,
         half_extents: DVec3::new(1.0, 1.35, 1.0),

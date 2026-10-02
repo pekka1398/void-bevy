@@ -128,3 +128,38 @@ fn there_is_no_drag_above_the_atmosphere() {
         "7.8 km/s at 5 km is far past any real flight, so the force must be enormous"
     );
 }
+
+#[test]
+fn ambient_pressure_drives_the_nozzle() {
+    let planet = void_app::flight::game_planet_by_id("aurelia", None);
+    let demo = demo_rocket(&planet.planet.terrain);
+    let air = RocketAir::for_planet(&planet.planet, &demo).expect("Aurelia has air");
+    let radius = planet.planet.terrain.radius_meters;
+    let at = |altitude: f64| air.pressure_pa(DVec3::new(radius + altitude, 0.0, 0.0));
+    assert!(
+        (at(0.0) - 101_325.0).abs() < 1.0,
+        "sea level is one standard atmosphere, not {:.0} Pa",
+        at(0.0)
+    );
+    // ISA tabulates against geopotential altitude, and 11 km geometric is 10 981 m geopotential,
+    // so the pressure there is a little above the table's 22 632 Pa at the tropopause.
+    assert!(
+        (at(11_000.0) - 22_700.0).abs() < 20.0,
+        "{:.0} Pa at 11 km",
+        at(11_000.0)
+    );
+    assert_eq!(at(200_000.0), 0.0, "there is no air left at 200 km");
+
+    // The booster keeps 90% of its vacuum thrust at sea level, as its exit area says it should.
+    let spec = &demo.booster;
+    let sea_level = spec.thrust_newtons - spec.nozzle_exit_area_m2 * at(0.0);
+    let ratio = sea_level / spec.thrust_newtons;
+    println!(
+        "booster: {:.1} kN at sea level against {:.1} kN in vacuum ({:.1}%), Isp {:.0} s",
+        sea_level / 1e3,
+        spec.thrust_newtons / 1e3,
+        ratio * 100.0,
+        spec.specific_impulse_seconds * ratio
+    );
+    assert!((0.85..0.95).contains(&ratio));
+}

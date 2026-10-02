@@ -94,7 +94,20 @@ enum Face {
     Rear,
 }
 
+impl RocketAir {
+    /// Altitude the atmosphere is sampled at, or None where there is no air to sample.
+    fn altitude(&self, position: DVec3) -> Option<f64> {
+        let altitude = position.length() - self.sea_level_radius_meters;
+        (altitude < self.atmosphere.ceiling_meters() && altitude >= -5000.0).then_some(altitude)
+    }
+}
+
 impl AirField for RocketAir {
+    fn pressure_pa(&self, position: DVec3) -> f64 {
+        self.altitude(position)
+            .map_or(0.0, |a| self.atmosphere.sample(a).pressure_pa)
+    }
+
     fn force(
         &self,
         parts: &[RocketPart],
@@ -102,10 +115,9 @@ impl AirField for RocketAir {
         rotation: DQuat,
         _mass_kg: f64,
     ) -> DVec3 {
-        let altitude = local.position.length() - self.sea_level_radius_meters;
-        if altitude >= self.atmosphere.ceiling_meters() || altitude < -5000.0 {
+        let Some(altitude) = self.altitude(local.position) else {
             return DVec3::ZERO;
-        }
+        };
         let air = self.atmosphere.sample(altitude);
         let attached = parts.len() == 2;
         // One part alone acts about its own centre; the stack about the reference point the

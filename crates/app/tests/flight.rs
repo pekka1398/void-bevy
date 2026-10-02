@@ -160,12 +160,14 @@ fn map_path_matches_the_body_fixed_forecast() {
     let mut s = setup();
     let mut rocket = launch(&mut s);
     rocket.advance(&mut s.ephemeris, 2.0, &idle(), None);
-    // Full burn with the booster (liftoff thrust-to-weight about 2 on Aurelia), then the coast.
+    // Full burn with the booster, then the coast. Unsteered, the rocket lobs rather than climbs,
+    // so the burn is cut where the arc that follows is longest: the forecast needs points on it to
+    // compare. The heavier air-capable rocket lobs shorter than the old vacuum one did on 60 s.
     let full = LanderControl {
         throttle: 1.0,
         ..idle()
     };
-    rocket.advance(&mut s.ephemeris, 60.0, &full, None);
+    rocket.advance(&mut s.ephemeris, 40.0, &full, None);
     let state = rocket.body_fixed_state(&s.ephemeris);
     let prediction = predict_coast(
         &mut s.ephemeris,

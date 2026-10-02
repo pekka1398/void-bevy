@@ -175,6 +175,7 @@ fn launch_and_return_on_every_planet() {
         let upper = LanderSpec {
             thrust_newtons: 8000.0,
             specific_impulse_seconds: 330.0,
+            nozzle_exit_area_m2: 0.0,
             dry_mass_kg: 300.0,
             fuel_mass_kg: 200.0,
             half_extents: DVec3::new(1.0, 1.05, 1.0),
@@ -185,6 +186,7 @@ fn launch_and_return_on_every_planet() {
         let booster = LanderSpec {
             thrust_newtons: 28000.0,
             specific_impulse_seconds: 280.0,
+            nozzle_exit_area_m2: 0.0,
             dry_mass_kg: 500.0,
             fuel_mass_kg: 900.0,
             half_extents: DVec3::new(1.0, 1.35, 1.0),
@@ -310,14 +312,16 @@ fn on_rails() {
     println!("on rails: refused while a part is awake near the ground: {refused}");
     assert!(refused);
 
-    // A coasting stack: on rails is the same coast as physics time; coming down, rails stop at the band.
+    // A coasting stack: on rails is the same coast as physics time; coming down, rails stop at the
+    // band. The burn has to leave the stack coasting for longer than the 200 s compared below;
+    // unsteered it lobs, so a rocket carrying more fuel needs a longer burn to stay up as long.
     let burn = LanderControl {
         throttle: 1.0,
         ..coast.clone()
     };
     let (mut railed, mut simulated) = (make(&mut eph), make(&mut eph));
     for l in [&mut railed, &mut simulated] {
-        for _ in 0..80 * 60 {
+        for _ in 0..120 * 60 {
             l.advance(&mut eph, 1.0 / 60.0, &burn, None);
         }
         l.advance(&mut eph, 30.0, &coast, None);

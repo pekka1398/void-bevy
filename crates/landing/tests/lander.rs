@@ -24,6 +24,7 @@ fn spec() -> LanderSpec {
     LanderSpec {
         thrust_newtons: 20e3,
         specific_impulse_seconds: 300.0,
+        nozzle_exit_area_m2: 0.0,
         dry_mass_kg: 1000.0,
         fuel_mass_kg: 1000.0,
         half_extents: DVec3::new(1.5, 1.0, 1.5),

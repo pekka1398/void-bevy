@@ -42,6 +42,10 @@ pub trait AirField: Send + Sync {
         rotation: DQuat,
         mass_kg: f64,
     ) -> DVec3;
+
+    /// Ambient pressure in pascals at a body-fixed position, which an engine pushes against. Zero
+    /// outside the atmosphere.
+    fn pressure_pa(&self, position: DVec3) -> f64;
 }
 
 /// An `AirField` seen from the inertial frame the orbit propagator integrates in, for one unit of

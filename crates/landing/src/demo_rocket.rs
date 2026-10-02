@@ -113,14 +113,19 @@ pub fn booster_pieces() -> Vec<Piece> {
 pub fn demo_rocket(terrain: &Terrain) -> DemoRocket {
     let upper_shape = BodyShape::Compound(upper_pieces());
     let booster_shape = BodyShape::Compound(booster_pieces());
-    // Sized to reach low orbit on an Earth-size planet with no atmosphere, KSP-style (light tanks,
-    // strong engines): booster 120 kN, Isp 310 s, liftoff thrust-to-weight about 2 at 9.8 m/s²,
-    // 3.4 km/s; upper 20 kN, Isp 340 s, thrust-to-weight about 1.5, 5.1 km/s; 8.6 km/s in all.
+    // Sized to reach low orbit on an Earth-size planet through its air, KSP-style (light tanks,
+    // strong engines): booster 120 kN, Isp 310 s, 3.68 km/s; upper 20 kN, Isp 340 s, 5.92 km/s;
+    // 9.6 km/s in all, which flown by hand leaves room over Earth's roughly 9.4 km/s to orbit.
+    // Liftoff thrust-to-weight is 1.61, low enough not to spend the margin fighting drag down low;
+    // the upper stage lights at 1.15, which it only ever needs above the air. The tanks hold this
+    // much in the same hulls as before: the shapes are the colliders and the drawn rocket.
     let full = LanderSpec {
         thrust_newtons: 120_000.0,
         specific_impulse_seconds: 310.0,
-        dry_mass_kg: 1900.0,
-        fuel_mass_kg: 4000.0,
+        // 107.8 kN and 279 s at sea level, 90% of vacuum, as a good kerolox engine gives.
+        nozzle_exit_area_m2: 0.12,
+        dry_mass_kg: 2270.0,
+        fuel_mass_kg: 5350.0,
         // Reference point is the attached parts' centre of mass; feet are about 2 m below it.
         half_extents: DVec3::new(1.5, 2.05, 1.5),
         contact_shape: None,
@@ -130,8 +135,11 @@ pub fn demo_rocket(terrain: &Terrain) -> DemoRocket {
     let upper = LanderSpec {
         thrust_newtons: 20_000.0,
         specific_impulse_seconds: 340.0,
+        // A vacuum nozzle: at sea level it would keep only a quarter of its thrust, which is why
+        // the stage is not meant to be lit down there.
+        nozzle_exit_area_m2: 0.15,
         dry_mass_kg: 300.0,
-        fuel_mass_kg: 1100.0,
+        fuel_mass_kg: 1470.0,
         half_extents: DVec3::new(1.05, 1.15, 1.05),
         contact_shape: Some(upper_shape.clone()),
         friction: 0.8,
@@ -140,8 +148,9 @@ pub fn demo_rocket(terrain: &Terrain) -> DemoRocket {
     let booster = LanderSpec {
         thrust_newtons: full.thrust_newtons,
         specific_impulse_seconds: full.specific_impulse_seconds,
+        nozzle_exit_area_m2: full.nozzle_exit_area_m2,
         dry_mass_kg: 500.0,
-        fuel_mass_kg: 4000.0,
+        fuel_mass_kg: 5350.0,
         half_extents: DVec3::new(1.5, 1.42, 1.5),
         contact_shape: Some(booster_shape.clone()),
         friction: 0.8,
