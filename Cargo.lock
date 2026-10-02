@@ -5422,6 +5422,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "void-aero"
+version = "0.0.0"
+dependencies = [
+ "glam 0.32.1",
+ "rapier3d",
+ "serde_json",
+ "void-assembly",
+ "void-landing",
+ "void-math",
+ "void-orbit",
+]
+
+[[package]]
 name = "void-app"
 version = "0.0.0"
 dependencies = [

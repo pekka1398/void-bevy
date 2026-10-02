@@ -1,0 +1,17 @@
+[package]
+name = "void-aero"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+glam.workspace = true
+rapier3d.workspace = true
+void-assembly.workspace = true
+void-landing.workspace = true
+void-math.workspace = true
+void-orbit.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
