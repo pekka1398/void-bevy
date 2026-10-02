@@ -1,6 +1,5 @@
-//! The lab's own checks (`lab/multiscale/multiscale-check.ts`) with its thresholds. Three of its
-//! fifteen need the lab's `FrameEphemeris` and `vessels`' `Fleet` (the moving-origin ephemeris
-//! adapter and the two-ship encounter) and are not ported yet.
+//! The lab's multiscale checks with its thresholds. The moving-origin adapter is
+//! checked in ephemeris.rs; Fleet collision and merge are in multiscale-lab/tests.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 

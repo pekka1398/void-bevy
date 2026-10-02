@@ -3,9 +3,6 @@
 //! world, frames that follow a system's barycentre, and a probe coasting between systems. No
 //! Bevy.
 //!
-//! The lab's two-ship encounter (its `FrameEphemeris` and `Encounter`) runs `vessels`' `Fleet`
-//! in a moving system's frame and is not here yet.
-
 mod fixtures;
 mod split;
 mod traveller;
@@ -15,3 +12,6 @@ pub use fixtures::*;
 pub use split::*;
 pub use traveller::*;
 pub use world::*;
+
+mod ephemeris;
+pub use ephemeris::*;

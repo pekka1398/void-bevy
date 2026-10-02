@@ -5534,8 +5534,23 @@ version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
  "serde_json",
+ "void-frames",
  "void-math",
  "void-orbit",
+]
+
+[[package]]
+name = "void-multiscale-lab"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "glam 0.32.1",
+ "void-assembly-lab",
+ "void-frames",
+ "void-landing",
+ "void-multiscale",
+ "void-orbit",
+ "void-vessels",
 ]
 
 [[package]]

@@ -12,7 +12,9 @@
 
 為此 `void-orbit` 的 `HermiteBasis` 加上 `acceleration`，`yoshida8_sequence` 改為公開。
 
-還沒移植：lab 的 `FrameEphemeris` 與 `Encounter`（兩艘 assembly 船在遠方恆星系相撞、debug 合併）。它們把 `vessels` 的 `Fleet` 放進隨系統質心移動的座標系，需要 orbit 的 `Ephemeris` 能換成這種來源（lab 是繼承 `Ephemeris`）。這會動到另一個 session 正在做的 `void-vessels`，等它完成後再做。
+`FrameEphemeris` 已移植到 `ephemeris.rs`：多個 view 共用 `Rc<RefCell<CoupledWorld>>` 的歷史，輸出相對選定系統質心的天體位置／速度與原點加速度，包含所有系統的引力來源。`void-orbit::EphemerisSource` 是共用介面，VesselPropagator、ContactWorld、PlanetFrame 與 Fleet 接受此來源；一般 Ephemeris 的積分方法不變。Fleet 持有 `Box<dyn EphemerisSource>`。歷史裁剪只能由共用 world 的擁有者執行，adapter 的 `forget_before` 明確 panic。
+
+`Encounter` 位於獨立的 `void-multiscale-lab`（`src/lib.rs`），用同一個 Fleet 進行碰撞與合併。`void-multiscale` 核心不依賴 vessels／assembly，既有 void-app 範例不因這個場景引入 assembly。
 
 和 lab 的差別：錯誤一律 panic（lab 是 throw），只有 `SplitPosition::deserialize` 回傳 `Result`；天體名稱是 `Aster Star` 而不是 `Aster · Star`。
 
@@ -33,7 +35,9 @@
 
 ### lab 的檢查（`tests/checks.rs`）
 
-`multiscale-check.ts` 15 項中的 12 項，門檻相同；另外 3 項需要 `FrameEphemeris` 與 `Fleet`。印出的數字與 lab 相同：直接 N 體最大誤差 9.54e-7 m、潮汐位移 3.353 m、交接航程誤差 7.87e-3 m、76,703 天體步與 15,353 探針步、102.369 年交接。
+`multiscale-check.ts` 的原有檢查，加上 `tests/ephemeris.rs` 的移動原點檢查，以及 `multiscale-lab/tests/encounter.rs` 的雙船碰撞與合併，現在涵蓋原 TS 全部 15 項。使用原門檻；新測試另外檢查共用 world 延伸、各天體與批次查詢一致，以及合併線動量。印出的數字與 lab 相同：直接 N 體最大誤差 9.54e-7 m、潮汐位移 3.353 m、交接航程誤差 7.87e-3 m、76,703 天體步與 15,353 探針步、102.369 年交接。原點與 30,000 光年放置的碰撞在 40 s 都有 2.501620 m 分離、約 0.002671 m/s 相對速度，與 TS 輸出一致；比較門檻為位置 1e-4 m、速度 1e-5 m/s。
+
+執行：`cargo test -p void-multiscale -p void-multiscale-lab`。
 
 唯一不同是「一天步長與半天步長十年差異」：這裡 0.544 m，lab 0.564 m（門檻 1 m）。差在上面那個 ulp 的初始狀態；從 lab 的初始狀態開始，這裡也是 0.564 m。
 
@@ -49,3 +53,16 @@
 繪圖照 lab 的 `WorldView.ts`：先扣掉焦點的 split 位置，再除以相機距離的千分之一當繪圖單位，最後才轉成 f32。天體是真實半徑的球，太小時只畫標籤上的點；恆星同一像素內的行星標籤隱藏；500 AU 內畫行星的密切橢圓（`void_view::ellipse_points`）；綠色旅船是放大的定位標記，線是最近 1000 個位置的航跡。
 
 已在 VNC 上驗收：每秒 10 年執行，102.369 年從 Aster 交接到 Beryl（Δp、Δv 皆為 0），約 220 年到 Beryl 附近；行星與旅船旁的近距離視角正常。
+
+
+## 雙船碰撞 lab
+
+`cargo run -p void-multiscale-lab`：預設在 30,000 光年外，Aster 行星上空 400 km 的兩艘 pod＋tank，暫停開始。共用 assembly 的零件外觀，碰撞仍由 Fleet 的實際 contact world 處理。
+
+- P 開始／暫停，N 單步 1/60 s，F 前進 10 s，T 前進 40 s，V 切換 1×／4×，R 重設。
+- J 以實際接點合併；距離超過 0.25 m 明確拒絕。可先按 T 一次，讓船相撞後再合併。
+- O 切換 30,000 光年外／原點附近並重設。
+- 1 船旁，2 行星，3 恆星系，4 星群；拖曳環繞，滾輪縮放。小於可見尺寸的天體有定位十字。
+- HUD 顯示船的 owner、scene、質量、相對位置／速度、接點距離及 split 座標。
+
+所有繪圖座標先做 split 相減與距離縮放，再轉 f32。已通過 headless 系統存取檢查與物理測試；視窗外觀由使用者驗收，未由 agent 開啟視窗。

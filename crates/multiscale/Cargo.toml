@@ -10,3 +10,4 @@ glam.workspace = true
 serde_json.workspace = true
 void-math.workspace = true
 void-orbit.workspace = true
+void-frames.workspace = true

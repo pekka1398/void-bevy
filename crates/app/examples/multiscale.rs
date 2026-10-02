@@ -7,7 +7,7 @@
 //! 3 planet, 4 beside the probe | Up / Down pick a setting, Left / Right change it | drag: orbit,
 //! wheel: zoom, click a label to focus it.
 //!
-//! The lab's second scene, two ships colliding near a distant planet, needs the vessels port.
+//! The second scene runs separately with `cargo run -p void-multiscale-lab`.
 
 use std::collections::VecDeque;
 
