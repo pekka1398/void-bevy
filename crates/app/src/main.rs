@@ -14,9 +14,15 @@
 //! rocket's parts (body-fixed in the physics) need no turning; bodies and the map (f64 in the
 //! ecliptic) are turned by the planet's orientation each frame.
 
+use bevy::camera::Hdr;
+use bevy::camera::visibility::NoFrustumCulling;
+use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
-use glam::DVec3;
+use bevy::render::render_resource::TextureUsages;
+use bevy::render::view::Msaa;
+use glam::{DMat3, DQuat, DVec3};
+use void_app::air::{AirSettings, AirTextures, noise_volume_image, weather_image};
 use void_app::flight::{
     GamePlanet, PARTS, PHYSICS_MAX_RATE, TIME_RATES, distance_text, game_planet_by_id,
     mission_time, rate_text, vessel_axes, warp_limit,
@@ -26,6 +32,10 @@ use void_app::map::{
 };
 use void_app::navball::{Navball, NavballLabel, draw_navball, spawn_navball};
 use void_app::parts::spawn_shape;
+use void_app::scenery::{
+    GroundMaterial, GroundUniforms, SceneryPlugin, StarMaterial, star_mesh, table_image,
+    update_ground,
+};
 use void_app::tiles::{Tile, TileField};
 use void_landing::{
     AttitudeSample, CoastPrediction, DemoRocket, FrameState, LanderControl, PartJointRocket,
@@ -36,6 +46,17 @@ use void_lod::{LodCamera, LodView};
 use void_navball::NavballInput;
 use void_orbit::{CelestialBody, DominanceTree, Ephemeris, body_orientation, osculating_orbit};
 use void_sas::{SAS_TUNING, StabilityAssist};
+use void_scenery::atmosphere::{
+    TRANSMITTANCE_HEIGHT, TRANSMITTANCE_WIDTH, build_transmittance_table,
+};
+use void_scenery::clouds::{
+    DETAIL_SIZE, SHAPE_SIZE, WEATHER_HEIGHT, WEATHER_WIDTH, build_cloud_noise, build_cloud_weather,
+};
+use void_scenery::tables::{
+    IRRADIANCE_HEIGHT, IRRADIANCE_WIDTH, MULTIPLE_SCATTERING_SIZE, build_irradiance_table,
+    build_multiple_scattering_table,
+};
+use void_scenery::{DEFAULT_STARS, earth_like_atmosphere, generate_stars};
 use void_view::{
     FocusGeometry, FocusKind, LabelKind, MapFrame, MapOrbits, MapPath, OrbitCamera, PathFrameKind,
     PlottingFrame, ViewMode, ViewState, camera_spin, map_labels, view_state,
@@ -51,13 +72,16 @@ const FOV_DEGREES: f32 = 58.0;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "VOID".into(),
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "VOID".into(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
+            SceneryPlugin,
+        ))
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(GlobalAmbientLight {
             color: Color::srgb_u8(0xcb, 0xe7, 0xff),
@@ -67,7 +91,17 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (controls, simulate, terrain, draw, labels, instruments, hud).chain(),
+            (
+                controls,
+                simulate,
+                terrain,
+                draw,
+                scenery,
+                labels,
+                instruments,
+                hud,
+            )
+                .chain(),
         )
         .run();
 }
@@ -160,6 +194,23 @@ impl Game {
             d.dot(self.axes[0]),
             d.dot(self.axes[1]),
             d.dot(self.axes[2]),
+        )
+    }
+
+    /// The Sun's direction in the planet's body-fixed frame; a fixed inertial light for a lone
+    /// planet.
+    fn sun_body_fixed(&self) -> DVec3 {
+        let star = self.bodies.iter().position(|b| b.parent_index.is_none());
+        let ecliptic = match star {
+            Some(s) if s != self.home => {
+                (self.positions[s] - self.positions[self.home]).normalize()
+            }
+            _ => DVec3::X,
+        };
+        DVec3::new(
+            ecliptic.dot(self.axes[0]),
+            ecliptic.dot(self.axes[1]),
+            ecliptic.dot(self.axes[2]),
         )
     }
 
@@ -324,7 +375,18 @@ impl Game {
 }
 
 #[derive(Resource)]
-struct Ground(TileField);
+struct Ground(TileField<GroundMaterial>);
+
+/// scenery's shading: the ground material's uniforms and the star field's material.
+#[derive(Resource)]
+struct Scenery {
+    ground: Handle<GroundMaterial>,
+    uniforms: GroundUniforms,
+    stars: Handle<StarMaterial>,
+}
+
+#[derive(Component)]
+struct Sky;
 
 #[derive(Component)]
 struct BodySphere(usize);
@@ -349,6 +411,8 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    mut grounds: ResMut<Assets<GroundMaterial>>,
+    mut star_materials: ResMut<Assets<StarMaterial>>,
     window: Single<&Window>,
 ) {
     let planet_id = argument("--planet").unwrap_or_else(|| "aurelia".into());
@@ -370,16 +434,80 @@ fn setup(
         demo.launch_site,
     );
 
-    let ground = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        perceptual_roughness: 0.95,
-        ..default()
+    // scenery's atmosphere tables and cloud noise, and the ground and sea shader on the tiles.
+    let params = earth_like_atmosphere(planet.planet.terrain.radius_meters);
+    let transmittance = build_transmittance_table(&params);
+    let multiple = build_multiple_scattering_table(&params, &transmittance, 64, 20);
+    let irradiance = build_irradiance_table(&params, &transmittance, &multiple, 128, 24);
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let mut uniforms = GroundUniforms::new(
+        &params,
+        planet.sea_level,
+        planet.rock_height,
+        planet.snow_height,
+    );
+    uniforms.ocean_enabled = f32::from(u8::from(planet.ocean));
+    uniforms.atmosphere_enabled = f32::from(u8::from(planet.atmosphere));
+    let transmittance = images.add(table_image(
+        &transmittance,
+        TRANSMITTANCE_WIDTH,
+        TRANSMITTANCE_HEIGHT,
+    ));
+    let irradiance = images.add(table_image(
+        &irradiance,
+        IRRADIANCE_WIDTH,
+        IRRADIANCE_HEIGHT,
+    ));
+    let ground = grounds.add(GroundMaterial {
+        ground: uniforms,
+        transmittance: transmittance.clone(),
+        irradiance: irradiance.clone(),
     });
-    commands.insert_resource(Ground(TileField::new(
+    commands.insert_resource(AirTextures {
+        transmittance,
+        multiple: images.add(table_image(
+            &multiple,
+            MULTIPLE_SCATTERING_SIZE,
+            MULTIPLE_SCATTERING_SIZE,
+        )),
+        irradiance,
+        weather: images.add(weather_image(
+            build_cloud_weather(threads),
+            WEATHER_WIDTH,
+            WEATHER_HEIGHT,
+        )),
+        shape: images.add(noise_volume_image(
+            build_cloud_noise(SHAPE_SIZE, false),
+            SHAPE_SIZE,
+        )),
+        detail: images.add(noise_volume_image(
+            build_cloud_noise(DETAIL_SIZE, true),
+            DETAIL_SIZE,
+        )),
+    });
+    let mut field = TileField::new(
         landing_lod_options(&planet.planet.terrain, &demo.options.contact),
         Some(planet.planet.terrain.clone()),
+        ground.clone(),
+    );
+    // The sea is raised in the vertex shader, beyond the tiles' bounds.
+    field.no_frustum_culling = true;
+    commands.insert_resource(Ground(field));
+    // The star catalogue is inertial (ecliptic axes), even while the planet spins.
+    let (star_positions, star_colors) = generate_stars(&DEFAULT_STARS);
+    let stars = star_materials.add(StarMaterial { brightness: 0.08 });
+    commands.spawn((
+        Sky,
+        Mesh3d(meshes.add(star_mesh(star_positions, &star_colors))),
+        MeshMaterial3d(stars.clone()),
+        Transform::default(),
+        NoFrustumCulling,
+    ));
+    commands.insert_resource(Scenery {
         ground,
-    )));
+        uniforms,
+        stars,
+    });
 
     // Start looking at the rocket from the side, a little above the horizon.
     let start = rocket.frame.to_inertial(
@@ -458,8 +586,30 @@ fn setup(
             });
     }
 
+    let mut air = AirSettings::new(&params);
+    air.enabled = f32::from(u8::from(planet.atmosphere));
+    air.clouds_enabled = f32::from(u8::from(planet.atmosphere));
+    air.sea_level = planet.sea_level as f32;
+    // scenery's initial exposure and ACES.
+    air.exposure = 10f32.powf(0.8);
+    air.tone_mapping = 0.0;
+    // In the solar system the real Sun is drawn as a body; a lone planet uses the sky's disc.
+    let star = bodies.iter().position(|b| b.parent_index.is_none());
+    air.sun_disc_enabled = f32::from(u8::from(star == Some(home)));
     commands.spawn((
-        Camera3d::default(),
+        Camera3d {
+            // The air pass reads the scene's depth.
+            depth_texture_usages: (TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING)
+                .into(),
+            ..default()
+        },
+        air,
+        Hdr,
+        Msaa::Off,
+        // three.js's tone mapping runs at the end of the air pass instead.
+        Tonemapping::None,
+        DebandDither::Disabled,
         Projection::Perspective(PerspectiveProjection {
             fov: FOV_DEGREES.to_radians(),
             far: 1e14,
@@ -469,7 +619,9 @@ fn setup(
     commands.spawn((
         Sun,
         DirectionalLight {
-            illuminance: 10_000.0,
+            // scenery's sun has irradiance 1 before exposure; this matches it under Bevy's default
+            // camera exposure (EV100 9.7).
+            illuminance: 1000.0,
             ..default()
         },
         Transform::default(),
@@ -877,13 +1029,7 @@ fn draw(
             .with_scale(Vec3::splat(radius));
     }
     // Lone-body planets have a fixed inertial light; solar-system flights use the real Sun.
-    let star = game.bodies.iter().position(|b| b.parent_index.is_none());
-    let sunward = match star {
-        Some(s) if s != game.home => game
-            .render(game.positions[s] - game.positions[game.home])
-            .normalize(),
-        _ => game.render(DVec3::X),
-    };
+    let sunward = game.sun_body_fixed().as_vec3();
     **sun = Transform::default().looking_to(-sunward, Vec3::Y);
 
     // The map: bodies' orbits and the coast forecast, at the map weight's opacity.
@@ -915,6 +1061,48 @@ fn draw(
     );
     game.orbits = orbits;
     game.path = path;
+}
+
+/// scenery's shaders in the body-fixed frame: the camera and the Sun for the air pass and the
+/// ground, and the inertial stars turned into the planet's axes, fading in sunlit air.
+#[allow(clippy::type_complexity)]
+fn scenery(
+    game: Res<Game>,
+    mut scenery: ResMut<Scenery>,
+    window: Single<&Window>,
+    mut grounds: ResMut<Assets<GroundMaterial>>,
+    mut star_materials: ResMut<Assets<StarMaterial>>,
+    mut camera: Single<(&Transform, &mut AirSettings, &Projection), With<Camera3d>>,
+    mut sky: Single<&mut Transform, (With<Sky>, Without<Camera3d>)>,
+) {
+    let scenery = &mut *scenery;
+    let eye = game.body_fixed(game.eye);
+    let sun = game.sun_body_fixed();
+    let (transform, air, projection) = &mut *camera;
+    let focal_pixels = f64::from(window.physical_height().max(1))
+        / (2.0 * (f64::from(FOV_DEGREES).to_radians() / 2.0).tan());
+    if let Projection::Perspective(perspective) = projection {
+        air.update(eye, transform.rotation, perspective, focal_pixels, sun);
+    }
+    update_ground(&mut scenery.uniforms, eye, sun, game.rocket.time());
+    if let Some(mut material) = grounds.get_mut(&scenery.ground) {
+        material.ground = scenery.uniforms;
+    }
+    // Ecliptic to body-fixed: the planet's axes as rows.
+    let [x, y, z] = game.axes;
+    sky.rotation = DQuat::from_mat3(&DMat3::from_cols(x, y, z).transpose()).as_quat();
+    let up = eye.normalize();
+    let altitude = eye.length() - game.bodies[game.home].radius_meters;
+    let smooth = |a: f64, b: f64, v: f64| {
+        let t = ((v - a) / (b - a)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    let daylight = smooth(-0.18, 0.02, up.dot(sun))
+        * (1.0 - smooth(0.0, 60e3, altitude))
+        * f64::from(u8::from(game.planet.atmosphere));
+    if let Some(mut stars) = star_materials.get_mut(&scenery.stars) {
+        stars.brightness = (0.08 * (1.0 - daylight)) as f32;
+    }
 }
 
 #[allow(clippy::type_complexity)]
