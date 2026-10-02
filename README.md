@@ -55,3 +55,5 @@ Bevy 固定在 0.19.1（需要 Rust 1.95 以上），編譯使用 crates.io。AP
 
 - `void-orbit-lab`：Sol／binary、四種繪圖框架、歷史／預測／機動計畫／目標路徑，以及燃燒編輯與自動執行。`cargo run -p void-orbit-lab`，操作見 [docs/orbit-lab.md](docs/orbit-lab.md)。
 - 詳細移植盤點與尚存缺口見 [docs/port-audit.md](docs/port-audit.md)。
+
+- `void-fleet-flight`／`void-fleet-flight-lab`：assembly 船在主遊戲行星／地形上，以 Fleet 執行空氣、分級、多船、SAS、warp 與滑行預測的第一輪獨立整合；`cargo run -p void-fleet-flight-lab`，調查結果與尚缺介面見 [docs/fleet-flight.md](docs/fleet-flight.md)。尚未替換主遊戲。

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use glam::DVec3;
 use void_math::hypot;
 use void_orbit::{
-    AdvanceOutcome, Ephemeris, PropagationRun, Tolerances, Trajectory, VesselPropagator,
+    AdvanceOutcome, EphemerisSource, PropagationRun, Tolerances, Trajectory, VesselPropagator,
     VesselState,
 };
 use void_terrain::Terrain;
@@ -33,7 +33,7 @@ fn clearance(position: DVec3, terrain: &Terrain) -> f64 {
 /// Coast from the current state through orbit physics, stopping at the sampled terrain.
 #[allow(clippy::too_many_arguments)]
 pub fn predict_coast(
-    ephemeris: &mut Ephemeris,
+    ephemeris: &mut dyn EphemerisSource,
     frame: &PlanetFrame,
     terrain: &Terrain,
     tolerances: Tolerances,

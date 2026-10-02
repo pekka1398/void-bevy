@@ -5489,6 +5489,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-fleet-flight"
+version = "0.0.0"
+dependencies = [
+ "glam 0.32.1",
+ "void-aero",
+ "void-assembly",
+ "void-frames",
+ "void-landing",
+ "void-orbit",
+ "void-vessels",
+]
+
+[[package]]
+name = "void-fleet-flight-lab"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "glam 0.32.1",
+ "void-app",
+ "void-assembly",
+ "void-assembly-lab",
+ "void-fleet-flight",
+ "void-landing",
+ "void-lod",
+ "void-orbit",
+ "void-vessels",
+]
+
+[[package]]
 name = "void-frames"
 version = "0.0.0"
 dependencies = [
