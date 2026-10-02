@@ -5435,6 +5435,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-aero-lab"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "glam 0.32.1",
+ "void-aero",
+]
+
+[[package]]
 name = "void-app"
 version = "0.0.0"
 dependencies = [
