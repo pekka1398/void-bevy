@@ -22,12 +22,14 @@ Bevy 固定在 0.19.1（需要 Rust 1.95 以上）。API 以 `vendor/bevy` 的�
 - `scenery`（`void-scenery`）：scenery lab 的 CPU 部分：大氣與三張表（穿透率、多重散射、天空輻照度）、雲的天氣圖與 3D 噪聲體積、星空、軌道視角。與 lab 逐位元相同，見 [docs/scenery.md](docs/scenery.md)。著色器在 `void-app` 的 `src/scenery.rs` 與 `src/shaders/scenery/`。
 - `sas`（`void-sas`）：sas lab 的姿態穩定控制器，與 lab 逐位元相同，見 [docs/sas.md](docs/sas.md)。
 - `navball`（`void-navball`）：navball lab 的姿態球幾何與繪圖（RGBA 緩衝區），見 [docs/navball.md](docs/navball.md)。
+- `view`（`void-view`）：view lab 的相機規則（地圖淡入、up 轉向、co-rotation、single／split）、密切軌道、繪圖座標系與地圖狀態，見 [docs/view.md](docs/view.md)。`void-orbit` 另有 orbit lab 的 `Simulation`。
 - `math`（`void-math`）：和 V8 一致的 `hypot` 與 fdlibm 函數，供各 crate 共用。
 - example `lod`：LOD 四分樹，預設在分層地形上（`-- --terrain lod` 是 LOD lab 自己的大陸，`-- --terrain sphere` 是依層級著色的光滑球）。操作照 lab/lod：左鍵拖曳平移、右鍵拖曳繞行星中心、Shift+左鍵轉視角、滾輪縮放；P 把相機移到探測器上方，方向鍵／PageUp／PageDown 移動探測器，`,` `.` 調整探測器的最小格像素（0 為關閉），V、H、B 切換相機 LOD、地平線剔除、線框。
 - example `landing`：landing lab 的頁面：兩節示範火箭在旋轉的行星上（`-- --planet pebble|luna|terra|aurelia|aurelia-fast`，預設 Pebble），各節周圍以碰撞層級畫地形，青色線是關掉引擎後的滑行預測。Space 點火／分離、Shift／Ctrl 油門、W/S A/D Q/E 轉向、左鍵拖曳環繞、滾輪縮放、1/2/3 時間倍率、P 暫停、R 重來、B 線框。
 - example `scenery`：scenery lab 的頁面：lab/lod 的 tile 用 lab 的地面與海著色器、星空、空氣與體積雲（同一個全螢幕 pass，依深度一起積分）、太陽圓盤、從地面到 200,000 km 的軌道視角、lab 的曝光與 ACES。`-- --terrain layered|lod|hills --at 緯度,經度 --preset ground|sunset|night|cloud|plane|orbit|space --tone aces|agx|neutral`。滑鼠同 lab；1–7 預設視角、`,` `.` 時間、R 時間倍率、`[` `]` 太陽赤緯、`-` `=` 海平面、Z X 曝光、T 色調映射（ACES、AgX、Neutral）、K L 雲量、A M C W O S 開關（大氣、多重散射、雲、只看天氣、海、星）。
 - example `sas`：sas lab 的頁面：示範火箭的真實慣量、無阻尼的姿態積分、SAS 開關、踢、調參與 15 秒圖表。T 開關、WASD QE 轉向、K／Shift+K 踢、V 整節／上級、`-` `=` 慣量倍率、1–8 調參、0 預設、R 重來。
 - example `navball`：navball lab 的頁面：320 px 與 150 px 兩顆球。WASD QE 依機體軸轉動，`[` `]` 緯度、J L／I K 速度方位與俯仰、`-` `=` 速度、R 重來。
+- example `view`：view lab 的頁面：從船 8 m 拉遠到 2e13 m，地圖淡入、相機轉向北方；`-- --view split` 為 KSP 的兩個視圖。拖曳、滾輪、Tab、點標籤、M、F（path frame）、Space、`,` `.`、Shift／Ctrl、Z、X、1–7，見 [docs/view.md](docs/view.md)。
 
 - example `system`：用 Rust 星曆畫 Sol 系統，所有物體經 `frames` 轉成相對相機的 f32。驗收重點是 Aurelia 地表上 10 m 的探測器（probe）：Aurelia 離根節點 1 AU、以 30 km/s 運動，從幾公尺外看探測器仍要完全靜止，旁邊 1 m 的橘色方塊也不能晃動。
 

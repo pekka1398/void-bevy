@@ -13,9 +13,9 @@
 | `VesselPropagator.ts` | `propagator.rs`：重力、J2、推力的四種控制（inertial、frenet、surface、force）、步長控制、撞擊偵測 |
 | `Apsides.ts`、`Dominance.ts` | `apsides.rs` |
 | `FlightPlan.ts` | `flight_plan.rs` |
+| `Simulation.ts`（時間、船的控制、預測、撞擊；view lab 用它） | `simulation.rs`，見 [view.md](view.md) |
 
 沒有移植的部分：
-- `Simulation.ts`：它是 lab 頁面的遊戲流程，之後由 Bevy 的 app 重新組裝。
 - `ReferenceFrames.ts`：由 `void-frames` 取代。
 - `frameAccelerationAt`：目前一律回傳 0。`lab/multiscale` 的 `FrameEphemeris` 會覆寫它，等移植 multiscale 時再改成 trait。
 

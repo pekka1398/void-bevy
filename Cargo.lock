@@ -5438,6 +5438,7 @@ dependencies = [
  "void-sas",
  "void-scenery",
  "void-terrain",
+ "void-view",
 ]
 
 [[package]]
