@@ -1,14 +1,16 @@
 //! The scenery lab's page in Bevy: lab/lod's tiles in the lab's ground and sea shader, the star
 //! field, the air and volumetric clouds integrated together over the scene, the sun's disc, the
-//! orbit view from the ground to 200,000 km, and the lab's exposure and ACES tone mapping.
+//! orbit view from the ground to 200,000 km, and the lab's exposure and tone mappings (three.js's
+//! ACES filmic, AgX and Neutral).
 //!
-//! `--terrain layered|hills` (the lab's `?terrain=`), `--at LAT,LON` in degrees (`?at=`), and
-//! `--preset ground|sunset|night|cloud|plane|orbit|space` to start from a preset.
+//! `--terrain layered|lod|hills` (the lab's `?terrain=`), `--at LAT,LON` in degrees (`?at=`), and
+//! `--preset ground|sunset|night|cloud|plane|orbit|space` to start from a preset, `--tone
+//! aces|agx|neutral`.
 //!
 //! Mouse as the lab: left drag pans, right drag orbits the planet centre, Shift + left drag turns,
 //! the wheel zooms. Keys stand in for the panel: 1–7 presets (ground, sunset, night, cloud layer,
 //! 10 km, 400 km, 20,000 km) · `,` `.` local time · R time rate · `[` `]` sun declination ·
-//! `-` `=` sea level (hold) · Z X exposure · K L cloud coverage · A atmosphere · M multi-scatter ·
+//! `-` `=` sea level (hold) · Z X exposure · T tone mapping · K L cloud coverage · A atmosphere · M multi-scatter ·
 //! C clouds · W weather only · O ocean · S stars.
 
 use std::f64::consts::{FRAC_PI_2, PI};
@@ -20,16 +22,18 @@ use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
-use bevy::render::view::{ColorGrading, ColorGradingGlobal, Msaa};
+use bevy::render::view::Msaa;
 use bevy::window::PrimaryWindow;
 use glam::DVec3;
-use void_app::air::{AirSettings, AirTextures, noise_volume_image, weather_image};
+use void_app::air::{AirSettings, AirTextures, ToneMapping, noise_volume_image, weather_image};
 use void_app::scenery::{
     GroundMaterial, GroundUniforms, SceneryPlugin, StarMaterial, star_mesh, table_image,
     update_ground,
 };
 use void_app::tiles::{Tile, TileField};
-use void_lod::{HOLMAN_SPLIT_DISTANCE_RATIOS, LodCamera, LodView, PlanetLodOptions};
+use void_lod::{
+    DemoTerrain, HOLMAN_SPLIT_DISTANCE_RATIOS, LodCamera, LodView, PlanetLodOptions, SurfaceSampler,
+};
 use void_scenery::atmosphere::{
     TRANSMITTANCE_HEIGHT, TRANSMITTANCE_WIDTH, build_transmittance_table,
 };
@@ -41,7 +45,7 @@ use void_scenery::tables::{
     build_multiple_scattering_table,
 };
 use void_scenery::{DEFAULT_STARS, OrbitView, earth_like_atmosphere, generate_stars};
-use void_terrain::{DEFAULT_LAYERED, SEA_LEVEL, Terrain, TerrainConfig};
+use void_terrain::{DEFAULT_LAYERED, MAX_HEIGHT, SEA_LEVEL, Terrain, TerrainConfig};
 
 const DEG: f64 = PI / 180.0;
 const FOV_DEGREES: f64 = 60.0;
@@ -71,35 +75,66 @@ fn main() {
         .run();
 }
 
-/// A terrain the lab can show (Terrains.ts).
+/// A terrain the lab can show (Terrains.ts): its sampler, bounds, sea level and rock and snow heights.
 struct SceneryTerrain {
-    terrain: Arc<Terrain>,
-    /// Cell size the camera's ground height is sampled at: the layered planet's 1 m, the hills' full detail.
-    point_cell: Option<f64>,
+    label: String,
+    sampler: Arc<dyn SurfaceSampler + Send + Sync>,
+    radius_meters: f64,
+    max_height_meters: f64,
     default_sea_level: f64,
     rock_height: f64,
     snow_height: f64,
 }
 
+impl SceneryTerrain {
+    /// Full-detail height under the camera: a 1 m cell is the layered planet's full detail, and the
+    /// hills and lab/lod's continents ignore the cell.
+    fn height(&self, direction: DVec3) -> f64 {
+        self.sampler.sample(direction, 1.0).height_meters
+    }
+}
+
 fn scenery_terrain(id: &str) -> SceneryTerrain {
     match id {
+        // This lab's layered planet: continents, mountain belts, eroded hills down to metres.
         "layered" => SceneryTerrain {
-            terrain: Arc::new(Terrain::from_config(&TerrainConfig::Layered(
+            label: "scenery | layered".into(),
+            sampler: Arc::new(Terrain::from_config(&TerrainConfig::Layered(
                 DEFAULT_LAYERED,
             ))),
-            point_cell: Some(1.0),
+            radius_meters: DEFAULT_LAYERED.radius_meters,
+            max_height_meters: MAX_HEIGHT,
             default_sea_level: SEA_LEVEL,
             rock_height: SEA_LEVEL + 2600.0,
             snow_height: SEA_LEVEL + 4800.0,
         },
-        "hills" => SceneryTerrain {
-            terrain: void_landing::aurelia().terrain,
-            point_cell: None,
-            default_sea_level: 1800.0,
-            rock_height: 4500.0,
-            snow_height: 6000.0,
-        },
-        other => panic!("unknown terrain {other:?}; valid: layered, hills"),
+        // lab/lod's kilometre-scale planet: warped continents, flat ocean floor, ridged mountains.
+        "lod" => {
+            let t = DemoTerrain::preset("normal");
+            SceneryTerrain {
+                label: format!("lab/lod | {}", t.name),
+                radius_meters: t.radius_meters,
+                max_height_meters: t.max_height_meters,
+                default_sea_level: 300.0,
+                rock_height: t.params.rock_height_meters,
+                snow_height: t.params.snow_height_meters,
+                sampler: Arc::new(t),
+            }
+        }
+        // lab/landing's Aurelia hills, the ground lab/flight flies over.
+        "hills" => {
+            let t = void_landing::aurelia().terrain;
+            SceneryTerrain {
+                label: "lab/landing | Aurelia hills".into(),
+                radius_meters: t.radius_meters,
+                max_height_meters: t.max_height_meters,
+                default_sea_level: 1800.0,
+                rock_height: 4500.0,
+                snow_height: 6000.0,
+                sampler: t,
+            }
+        }
+        other => panic!("unknown terrain {other:?}; valid: layered, lod, hills"),
     }
 }
 
@@ -107,6 +142,7 @@ struct Args {
     terrain: String,
     at: (f64, f64),
     preset: Option<String>,
+    tone: ToneMapping,
 }
 
 fn args() -> Args {
@@ -114,6 +150,7 @@ fn args() -> Args {
         terrain: "layered".into(),
         at: (0.3, 0.5),
         preset: None,
+        tone: ToneMapping::AcesFilmic,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -121,6 +158,14 @@ fn args() -> Args {
         match flag.as_str() {
             "--terrain" => out.terrain = value,
             "--preset" => out.preset = Some(value),
+            "--tone" => {
+                out.tone = match value.as_str() {
+                    "aces" => ToneMapping::AcesFilmic,
+                    "agx" => ToneMapping::AgX,
+                    "neutral" => ToneMapping::Neutral,
+                    other => panic!("--tone {other}: aces, agx or neutral"),
+                }
+            }
             "--at" => {
                 let parts: Vec<f64> = value
                     .split(',')
@@ -133,7 +178,7 @@ fn args() -> Args {
                 out.at = (parts[0] * DEG, parts[1] * DEG);
             }
             other => panic!(
-                "unknown argument {other}; use --terrain layered|hills, --at LAT,LON, --preset NAME"
+                "unknown argument {other}; use --terrain layered|lod|hills, --at LAT,LON, --preset NAME, --tone aces|agx|neutral"
             ),
         }
     }
@@ -153,6 +198,8 @@ struct Scenery {
     sea_level: f64,
     /// Exposure as the lab's slider: ×10^value.
     exposure: f64,
+    tone_mapping: ToneMapping,
+
     atmosphere: bool,
     multiple: bool,
     ocean: bool,
@@ -165,7 +212,7 @@ struct Scenery {
     ground: Handle<GroundMaterial>,
     uniforms: GroundUniforms,
     star_material: Handle<StarMaterial>,
-        tables_ms: f64,
+    tables_ms: f64,
     clouds_ms: f64,
     fps: f64,
 }
@@ -197,7 +244,7 @@ struct Where {
 
 impl Scenery {
     fn surface_height(&self, up: DVec3) -> f64 {
-        let land = self.terrain.terrain.sample(up, self.terrain.point_cell).0;
+        let land = self.terrain.height(up);
         if self.ocean {
             land.max(self.sea_level)
         } else {
@@ -260,10 +307,11 @@ fn setup(
         terrain: terrain_id,
         at,
         preset,
+        tone,
     } = args();
     let terrain = scenery_terrain(&terrain_id);
-    let radius = terrain.terrain.radius_meters;
-    let max_height = terrain.terrain.max_height_meters;
+    let radius = terrain.radius_meters;
+    let max_height = terrain.max_height_meters;
 
     let started = std::time::Instant::now();
     let params = earth_like_atmosphere(radius);
@@ -324,7 +372,7 @@ fn setup(
             retain_frames: 90,
             max_cached_tiles: 2400,
         },
-        Some(terrain.terrain.clone()),
+        Some(terrain.sampler.clone()),
         ground.clone(),
     );
     field.no_frustum_culling = true;
@@ -352,6 +400,8 @@ fn setup(
         rate: 0,
         declination_degrees: 10.0,
         exposure: 0.8,
+        tone_mapping: tone,
+
         atmosphere: true,
         multiple: true,
         ocean: true,
@@ -363,7 +413,7 @@ fn setup(
         ground,
         uniforms,
         star_material,
-                tables_ms,
+        tables_ms,
         clouds_ms,
         fps: 30.0,
     };
@@ -388,9 +438,9 @@ fn setup(
         AirSettings::new(&params),
         Hdr,
         Msaa::Off,
-        Tonemapping::AcesFitted,
+        // three.js's tone mapping runs at the end of the air pass instead.
+        Tonemapping::None,
         DebandDither::Disabled,
-        ColorGrading::default(),
         Projection::Perspective(PerspectiveProjection {
             fov: (FOV_DEGREES * DEG) as f32,
             near: 0.1,
@@ -492,12 +542,19 @@ fn controls(
     }
     let sea = f64::from(u8::from(keys.pressed(KeyCode::Equal)))
         - f64::from(u8::from(keys.pressed(KeyCode::Minus)));
-    s.sea_level = (s.sea_level + sea * 500.0 * dt).clamp(0.0, s.terrain.terrain.max_height_meters);
+    s.sea_level = (s.sea_level + sea * 500.0 * dt).clamp(0.0, s.terrain.max_height_meters);
     if keys.just_pressed(KeyCode::KeyZ) {
         s.exposure = (s.exposure - 0.05).max(-1.0);
     }
     if keys.just_pressed(KeyCode::KeyX) {
         s.exposure = (s.exposure + 0.05).min(3.0);
+    }
+    if keys.just_pressed(KeyCode::KeyT) {
+        s.tone_mapping = match s.tone_mapping {
+            ToneMapping::AcesFilmic => ToneMapping::AgX,
+            ToneMapping::AgX => ToneMapping::Neutral,
+            _ => ToneMapping::AcesFilmic,
+        };
     }
     if keys.just_pressed(KeyCode::KeyK) {
         s.coverage = (s.coverage - 0.05).max(0.0);
@@ -566,20 +623,12 @@ fn frame(
     mut grounds: ResMut<Assets<GroundMaterial>>,
     mut star_materials: ResMut<Assets<StarMaterial>>,
     mut tiles: Query<&mut Transform, TileOnly>,
-    mut camera: Single<
-        (
-            &mut Transform,
-            &mut ColorGrading,
-            &mut AirSettings,
-            &Projection,
-        ),
-        CameraOnly,
-    >,
+    mut camera: Single<(&mut Transform, &mut AirSettings, &Projection), CameraOnly>,
     mut sky: Single<(&mut Transform, &mut Visibility), SkyOnly>,
     mut hud: Single<&mut Text, With<Hud>>,
 ) {
     let s = &mut *s;
-        let dt = f64::from(time.delta_secs()).min(0.1);
+    let dt = f64::from(time.delta_secs()).min(0.1);
     let raw = f64::from(time.delta_secs()).max(1e-3);
     s.fps += (1.0 / raw - s.fps) * 0.05;
     // High-orbit redraws do not advance the ocean clock.
@@ -594,17 +643,12 @@ fn frame(
     s.keep_above_surface();
     let here = s.here();
     let (right, up, back) = s.view.basis();
-    let (camera_transform, grading, air, projection) = &mut *camera;
+    let (camera_transform, air, projection) = &mut *camera;
     camera_transform.rotation = Quat::from_mat3(&Mat3::from_cols(
         right.as_vec3(),
         up.as_vec3(),
         back.as_vec3(),
     ));
-    // three's ACES multiplies by exposure / 0.6 first; Bevy's applies ColorGrading's exposure in stops.
-    grading.global = ColorGradingGlobal {
-        exposure: (10f64.powf(s.exposure) / 0.6).log2() as f32,
-        ..default()
-    };
 
     let focal_pixels =
         f64::from(window.physical_height()) / (2.0 * (FOV_DEGREES * DEG / 2.0).tan());
@@ -641,6 +685,8 @@ fn frame(
     air.weather_only = f32::from(u8::from(s.weather_only));
     air.coverage = s.coverage as f32;
     air.sea_level = s.sea_level as f32;
+    air.exposure = 10f64.powf(s.exposure) as f32;
+    air.tone_mapping = s.tone_mapping as u8 as f32;
 
     update_ground(&mut s.uniforms, here.position, sun, s.seconds);
     s.uniforms.sea_level = s.sea_level as f32;
@@ -673,12 +719,12 @@ fn frame(
          height {} AGL | {} ASL\n\
          lat {:.3} lon {:.3} pitch {:.0} deg\n\
          sun {:.1} deg above horizon   local time {}   rate {}   declination {:.1} deg\n\
-         sea level {:.0} m   exposure x{:.2}   atmosphere {}   multi-scatter {}   ocean {}   stars {}\n\
+         sea level {:.0} m   exposure x{:.2}   tone mapping {}   atmosphere {}   multi-scatter {}   ocean {}   stars {}\n\
          clouds {}   weather only {}   cloud coverage {:.2}\n\
                   sky tables {:.0} ms   cloud noise {:.0} ms   tiles {} drawn (L{}-L{}) | {} building   {:.0} fps\n\
          left drag pan | right drag orbit | Shift+left turn | wheel zoom\n\
-         1-7 ground, sunset, night, cloud layer, 10 km, 400 km, 20,000 km | , . time | R rate | [ ] declination | - = sea | Z X exposure | K L coverage | A M C W O S toggles",
-        s.terrain.terrain.name,
+         1-7 ground, sunset, night, cloud layer, 10 km, 400 km, 20,000 km | , . time | R rate | [ ] declination | - = sea | Z X exposure | T tone | K L coverage | A M C W O S toggles",
+        s.terrain.label,
         meters(here.height),
         meters(altitude - s.sea_level),
         here.latitude / DEG,
@@ -690,6 +736,7 @@ fn frame(
         s.declination_degrees,
         s.sea_level,
         10f64.powf(s.exposure),
+        s.tone_mapping.label(),
         on(s.atmosphere),
         on(s.multiple),
         on(s.ocean),
@@ -702,7 +749,7 @@ fn frame(
         field.0.drawn_count(),
         field.0.levels.0,
         field.0.levels.1,
-                field.0.building_count(),
+        field.0.building_count(),
         s.fps,
     );
 }

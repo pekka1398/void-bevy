@@ -87,6 +87,30 @@ pub struct AirSettings {
     pub macro_origin: Vec3,
     pub sea_level: f32,
     pub focal_pixels: f32,
+    /// The lab's exposure multiplier (10^slider) and tone mapping (`ToneMapping as f32`).
+    pub exposure: f32,
+    pub tone_mapping: f32,
+}
+
+/// three.js's tone mappings the lab offers, done at the end of the air pass. The camera's own
+/// `Tonemapping` should be `None`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToneMapping {
+    AcesFilmic = 0,
+    AgX = 1,
+    Neutral = 2,
+    None = 3,
+}
+
+impl ToneMapping {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::AcesFilmic => "ACES filmic",
+            Self::AgX => "AgX",
+            Self::Neutral => "Neutral",
+            Self::None => "none",
+        }
+    }
 }
 
 impl AirSettings {
@@ -126,6 +150,8 @@ impl AirSettings {
             macro_origin: Vec3::ZERO,
             sea_level: 0.0,
             focal_pixels: 1000.0,
+            exposure: 1.0,
+            tone_mapping: ToneMapping::AcesFilmic as u8 as f32,
         }
     }
 
@@ -213,10 +239,14 @@ pub fn noise_volume_image(data: Vec<u8>, size: usize) -> Image {
         levels.push(next);
         n = m;
     }
-        let mip_level_count = levels.len() as u32;
+    let mip_level_count = levels.len() as u32;
     // `Image::new` takes the top level alone; the whole chain follows, level after level.
     let mut image = Image::new(
-        Extent3d { width: size as u32, height: size as u32, depth_or_array_layers: size as u32 },
+        Extent3d {
+            width: size as u32,
+            height: size as u32,
+            depth_or_array_layers: size as u32,
+        },
         TextureDimension::D3,
         levels[0].clone(),
         TextureFormat::Rgba8Unorm,

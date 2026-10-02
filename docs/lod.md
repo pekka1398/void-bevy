@@ -31,3 +31,5 @@
 | 選擇：lab bench 的 5 條腳本路徑 × 2 種建造模型（全部建好／每幀 6 個），共 10,400 幀 | 每幀的 tile 數、請求、剔除、折疊、建造的 tile、渲染順序、請求順序與優先權、最後的快取：**全部相同** |
 
 最初用 `sqrt(dot)` 和標準庫的 `tan` 時，「static chase、每幀 6 個」在第 154 幀選了不同的第 5、6 個 tile：兩組 tile 的優先權只差 3e-13（相對），一個 ulp 就決定了順序。換成上面兩項後才逐位元相同，檢查也因此用「差 0」當門檻，之後任何改動造成的差異都會被抓到。
+
+lab 自己的地形（`src/app/DemoSurface.ts`）在 `demo.rs`：`DemoTerrain::preset("seam" | "normal" | "landing")`，參數來自 `presets/planets.json`。網格檢查用的就是它，所以和 lab 逐位元相同。

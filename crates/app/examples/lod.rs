@@ -1,5 +1,6 @@
 //! The LOD quadtree with the LOD lab's landing preset and camera controls, on scenery's layered
-//! terrain (`--terrain layered`, the default) or a smooth sphere coloured by tile level
+//! terrain (`--terrain layered`, the default), the LOD lab's own continents (`--terrain lod`) or a
+//! smooth sphere coloured by tile level
 //! (`--terrain sphere`). Every tile is its own anchor: its f64 body-fixed origin minus the f64
 //! camera position becomes the f32 translation, so vertices stay small however far the tile is
 //! from the planet centre. Tiles are built in the background. No sea or atmosphere is drawn yet:
@@ -17,7 +18,7 @@ use bevy::render::settings::WgpuSettings;
 use glam::DVec3;
 use serde_json::Value;
 use void_app::tiles::{Tile, TileField, anchor};
-use void_lod::{LodCamera, LodView, PlanetLodOptions};
+use void_lod::{DemoTerrain, LodCamera, LodView, PlanetLodOptions, SurfaceSampler};
 use void_terrain::{DEFAULT_LAYERED, LayeredOptions, Terrain, TerrainConfig};
 
 const PRESETS: &str = include_str!("../../lod/presets/planets.json");
@@ -179,21 +180,27 @@ fn setup(
     let presets: Value = serde_json::from_str(PRESETS).expect("presets/planets.json");
     let p = &presets["landing"];
     let f = |v: &Value| v.as_f64().unwrap_or_else(|| panic!("preset value {v}"));
-    let terrain = match terrain_argument().as_str() {
-        "layered" => Some(Arc::new(Terrain::from_config(&TerrainConfig::Layered(
-            LayeredOptions {
-                radius_meters: f(&p["radiusMeters"]),
-                ..DEFAULT_LAYERED
-            },
-        )))),
-        "sphere" => None,
-        other => panic!("--terrain {other}: layered or sphere"),
-    };
     // The declared height range is the terrain's; the sphere keeps the preset's, so culling and
     // LOD match the lab. The LOD band covers the whole range, as the landing preset's does.
-    let max_height = terrain
-        .as_ref()
-        .map_or(f(&p["maxSurfaceHeightMeters"]), |t| t.max_height_meters);
+    let (terrain, max_height): (Option<Arc<dyn SurfaceSampler + Send + Sync>>, f64) =
+        match terrain_argument().as_str() {
+            "layered" => {
+                let t = Terrain::from_config(&TerrainConfig::Layered(LayeredOptions {
+                    radius_meters: f(&p["radiusMeters"]),
+                    ..DEFAULT_LAYERED
+                }));
+                let max = t.max_height_meters;
+                (Some(Arc::new(t)), max)
+            }
+            // The LOD lab's own continents, on the same preset.
+            "lod" => {
+                let t = DemoTerrain::preset("landing");
+                let max = t.max_height_meters;
+                (Some(Arc::new(t)), max)
+            }
+            "sphere" => (None, f(&p["maxSurfaceHeightMeters"])),
+            other => panic!("--terrain {other}: layered, lod or sphere"),
+        };
     let options = PlanetLodOptions {
         radius_meters: f(&p["radiusMeters"]),
         min_surface_height_meters: f(&p["minSurfaceHeightMeters"]),
@@ -496,7 +503,7 @@ fn terrain_argument() -> String {
     match args.as_slice() {
         [] => "layered".into(),
         [flag, name] if flag == "--terrain" => name.clone(),
-        other => panic!("unknown arguments {other:?}; use --terrain layered|sphere"),
+        other => panic!("unknown arguments {other:?}; use --terrain layered|lod|sphere"),
     }
 }
 
@@ -506,6 +513,7 @@ impl Planet {
         self.field
             .terrain
             .as_ref()
-            .map_or(0.0, |t| t.height(point.normalize()))
+            // A 1 m cell is the full detail of every terrain here.
+            .map_or(0.0, |t| t.sample(point.normalize(), 1.0).height_meters)
     }
 }

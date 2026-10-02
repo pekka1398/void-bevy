@@ -50,8 +50,11 @@ struct Air {
     weather_only: f32,
     macro_origin: vec3<f32>,
     sea_level: f32,
-    /// Viewport height over 2 tan(fov / 2).
+        /// Viewport height over 2 tan(fov / 2).
     focal_pixels: f32,
+    /// The renderer's exposure multiplier and tone mapping: 0 ACES filmic, 1 AgX, 2 Neutral, 3 none.
+    exposure: f32,
+    tone_mapping: f32,
 }
 
 @group(0) @binding(0) var scene_texture: texture_2d<f32>;
@@ -360,6 +363,92 @@ fn shell_roots(shell_height: f32, r0: f32, mu0: f32, orbital: bool, projection: 
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let ray = view_ray(in.uv, in.position);
     let scene = textureLoad(scene_texture, vec2<i32>(in.position.xy), 0).rgb;
-    let medium = transport(ray);
-    return vec4((scene + sun_disc(ray)) * medium.transmittance + medium.inscatter, 1.0);
+        let medium = transport(ray);
+    let radiance = (scene + sun_disc(ray)) * medium.transmittance + medium.inscatter;
+    return vec4(tone_map(radiance), 1.0);
+}
+
+// ---------------------------------------------------------------- three.js's tone mapping
+// (ToneMappingFunctions.js), so exposure and curves match the lab exactly; Bevy's own is off.
+
+fn tone_map(color: vec3<f32>) -> vec3<f32> {
+    let mode = u32(air.tone_mapping);
+    if mode == 0u {
+        return aces_filmic(color * air.exposure / 0.6);
+    } else if mode == 1u {
+        return agx(color * air.exposure);
+    } else if mode == 2u {
+        return neutral(color * air.exposure);
+    }
+    return color * air.exposure;
+}
+
+fn rrt_and_odt_fit(v: vec3<f32>) -> vec3<f32> {
+    let a = v * (v + 0.0245786) - 0.000090537;
+    let b = v * (0.983729 * v + 0.4329510) + 0.238081;
+    return a / b;
+}
+
+/// Stephen Hill's ACES fit: sRGB → XYZ → D65_2_D60 → AP1 → RRT_SAT, the RRT and ODT, then back.
+fn aces_filmic(color: vec3<f32>) -> vec3<f32> {
+    let rgb_to_rrt = mat3x3<f32>(
+        vec3(0.59719, 0.35458, 0.04823),
+        vec3(0.07600, 0.90834, 0.01566),
+        vec3(0.02840, 0.13383, 0.83777),
+    );
+    let odt_to_rgb = mat3x3<f32>(
+        vec3(1.60475, -0.53108, -0.07367),
+        vec3(-0.10208, 1.10813, -0.00605),
+        vec3(-0.00327, -0.07276, 1.07602),
+    );
+    // Rows as written: v · M.
+    return clamp(rrt_and_odt_fit(color * rgb_to_rrt) * odt_to_rgb, vec3(0.0), vec3(1.0));
+}
+
+fn agx_default_contrast_approx(x: vec3<f32>) -> vec3<f32> {
+    let x2 = x * x;
+    let x4 = x2 * x2;
+    return 15.5 * (x4 * x2) - 40.14 * (x4 * x) + (31.96 * x4 - 6.868 * (x2 * x) + (0.4298 * x2 + (0.1191 * x - 0.00232)));
+}
+
+fn agx(color: vec3<f32>) -> vec3<f32> {
+    let srgb_to_rec2020 = mat3x3<f32>(vec3(0.6274, 0.0691, 0.0164), vec3(0.3293, 0.9195, 0.0880), vec3(0.0433, 0.0113, 0.8956));
+    let rec2020_to_srgb = mat3x3<f32>(vec3(1.6605, -0.1246, -0.0182), vec3(-0.5876, 1.1329, -0.1006), vec3(-0.0728, -0.0083, 1.1187));
+    let inset = mat3x3<f32>(
+        vec3(0.856627153315983, 0.137318972929847, 0.11189821299995),
+        vec3(0.0951212405381588, 0.761241990602591, 0.0767994186031903),
+        vec3(0.0482516061458583, 0.101439036467562, 0.811302368396859),
+    );
+    let outset = mat3x3<f32>(
+        vec3(1.1271005818144368, -0.1413297634984383, -0.14132976349843826),
+        vec3(-0.11060664309660323, 1.157823702216272, -0.11060664309660294),
+        vec3(-0.016493938717834573, -0.016493938717834257, 1.2519364065950405),
+    );
+    let min_ev = -12.47393;
+    let max_ev = 4.026069;
+    // Columns as written: M · v, as GLSL's mat3(vec3, vec3, vec3).
+    var c = inset * (srgb_to_rec2020 * color);
+    c = clamp((log2(max(c, vec3(1e-10))) - min_ev) / (max_ev - min_ev), vec3(0.0), vec3(1.0));
+    c = outset * agx_default_contrast_approx(c);
+    c = pow(max(vec3(0.0), c), vec3(2.2));
+    return clamp(rec2020_to_srgb * c, vec3(0.0), vec3(1.0));
+}
+
+/// Khronos PBR Neutral.
+fn neutral(color_in: vec3<f32>) -> vec3<f32> {
+    let start_compression = 0.8 - 0.04;
+    let desaturation = 0.15;
+    var color = color_in;
+    let x = min(color.r, min(color.g, color.b));
+    let offset = select(0.04, x - 6.25 * x * x, x < 0.08);
+    color -= offset;
+    let peak = max(color.r, max(color.g, color.b));
+    if peak < start_compression {
+        return color;
+    }
+    let d = 1.0 - start_compression;
+    let new_peak = 1.0 - d * d / (peak + d - start_compression);
+    color *= new_peak / peak;
+    let g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
+    return mix(color, vec3(new_peak), g);
 }

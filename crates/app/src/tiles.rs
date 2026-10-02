@@ -14,10 +14,10 @@ use bevy::render::render_resource::{PrimitiveTopology, VertexFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures::check_ready};
 use glam::DVec3;
 use void_lod::{
-    FACE_EDGES, LodSelection, LodView, PlanetLod, PlanetLodOptions, SurfaceSample, TileMeshData,
-    TileMeshOptions, build_tile_indices, build_tile_mesh, selected_neighbor, stitch_edges,
+    FACE_EDGES, LodSelection, LodView, PlanetLod, PlanetLodOptions, SurfaceSample, SurfaceSampler,
+    TileMeshData, TileMeshOptions, build_tile_indices, build_tile_mesh, selected_neighbor,
+    stitch_edges,
 };
-use void_terrain::Terrain;
 
 /// Each vertex's surface height above the reference radius, metres (lab/lod's `height` attribute).
 pub const ATTRIBUTE_HEIGHT: MeshVertexAttribute =
@@ -42,8 +42,8 @@ pub fn level_color(level: u32) -> [f32; 3] {
 /// The quadtree, its background builds and its drawn tiles, drawn with material `M`.
 pub struct TileField<M: Material = StandardMaterial> {
     pub lod: PlanetLod,
-    /// None draws a smooth sphere coloured by tile level.
-    pub terrain: Option<Arc<Terrain>>,
+    /// The surface tiles are built on; None draws a smooth sphere coloured by tile level.
+    pub terrain: Option<Arc<dyn SurfaceSampler + Send + Sync>>,
     building: HashMap<u64, Task<TileMeshData>>,
     /// Drawn tiles: entity and the coarse neighbours its seams are stitched to.
     drawn: HashMap<u64, (Entity, [Option<u64>; 4])>,
@@ -62,7 +62,7 @@ pub struct TileField<M: Material = StandardMaterial> {
 impl<M: Material> TileField<M> {
     pub fn new(
         options: PlanetLodOptions,
-        terrain: Option<Arc<Terrain>>,
+        terrain: Option<Arc<dyn SurfaceSampler + Send + Sync>>,
         material: Handle<M>,
     ) -> Self {
         let (indices, grid) = build_tile_indices(options.resolution);
@@ -136,7 +136,11 @@ impl<M: Material> TileField<M> {
             let terrain = self.terrain.clone();
             let task = AsyncComputeTaskPool::get().spawn(async move {
                 match terrain {
-                    Some(terrain) => build_tile_mesh(key, &*terrain, options),
+                    Some(terrain) => build_tile_mesh(
+                        key,
+                        &|d: DVec3, cell: f64| terrain.sample(d, cell),
+                        options,
+                    ),
                     None => {
                         let color = level_color(key.level);
                         let sphere = |_direction: DVec3, _cell: f64| SurfaceSample {

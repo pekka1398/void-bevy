@@ -5,7 +5,7 @@ use std::sync::Arc;
 use glam::DVec3;
 use serde_json::Value;
 use void_lod::{
-    FACE_EDGES, FaceEdge, LodCamera, LodView, PlanetLod, PlanetLodOptions, SurfaceSample, TileKey,
+    FACE_EDGES, FaceEdge, LodCamera, LodView, PlanetLod, PlanetLodOptions, TileKey,
     TileMeshData, TileMeshOptions, build_tile_mesh, cube_to_sphere, face_neighbor, neighbor_key,
     sphere_to_cube, stitch_edges, tile_containing, tiles_around,
 };
@@ -109,123 +109,6 @@ fn geometry_matches_the_lod_lab() {
     assert!(direction_error == 0.0 && uv_error == 0.0);
 }
 
-/// The LOD lab's demo terrain (`lab/lod/src/app/DemoSurface.ts`), a test fixture.
-struct DemoSurface {
-    max_height: f64,
-    t: Value,
-}
-
-const GRADIENTS: [[f64; 3]; 12] = [
-    [1.0, 1.0, 0.0],
-    [-1.0, 1.0, 0.0],
-    [1.0, -1.0, 0.0],
-    [-1.0, -1.0, 0.0],
-    [1.0, 0.0, 1.0],
-    [-1.0, 0.0, 1.0],
-    [1.0, 0.0, -1.0],
-    [-1.0, 0.0, -1.0],
-    [0.0, 1.0, 1.0],
-    [0.0, -1.0, 1.0],
-    [0.0, 1.0, -1.0],
-    [0.0, -1.0, -1.0],
-];
-
-/// `Math.imul` hash on int32, as the lab's.
-fn hash(x: i32, y: i32, z: i32) -> u32 {
-    let h =
-        x.wrapping_mul(374_761_393) ^ y.wrapping_mul(668_265_263) ^ z.wrapping_mul(1_442_695_041);
-    let h = (h ^ ((h as u32) >> 13) as i32).wrapping_mul(1_274_126_177);
-    (h ^ ((h as u32) >> 16) as i32) as u32
-}
-
-fn fade(t: f64) -> f64 {
-    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
-}
-
-fn lerp(a: f64, b: f64, t: f64) -> f64 {
-    a + (b - a) * t
-}
-
-fn smoothstep(a: f64, b: f64, x: f64) -> f64 {
-    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-fn perlin(x: f64, y: f64, z: f64) -> f64 {
-    let (ix, iy, iz) = (x.floor(), y.floor(), z.floor());
-    let (fx, fy, fz) = (x - ix, y - iy, z - iz);
-    let (wx, wy, wz) = (fade(fx), fade(fy), fade(fz));
-    let corner = |dx: f64, dy: f64, dz: f64| {
-        let g = GRADIENTS
-            [hash((ix + dx) as i32, (iy + dy) as i32, (iz + dz) as i32) as usize % GRADIENTS.len()];
-        (g[0] * (fx - dx) + g[1] * (fy - dy) + g[2] * (fz - dz)) * std::f64::consts::FRAC_1_SQRT_2
-    };
-    let bottom = lerp(
-        lerp(corner(0.0, 0.0, 0.0), corner(1.0, 0.0, 0.0), wx),
-        lerp(corner(0.0, 1.0, 0.0), corner(1.0, 1.0, 0.0), wx),
-        wy,
-    );
-    let top = lerp(
-        lerp(corner(0.0, 0.0, 1.0), corner(1.0, 0.0, 1.0), wx),
-        lerp(corner(0.0, 1.0, 1.0), corner(1.0, 1.0, 1.0), wx),
-        wy,
-    );
-    lerp(bottom, top, wz)
-}
-
-fn fractal(x: f64, y: f64, z: f64, octaves: u64) -> f64 {
-    let (mut sum, mut frequency, mut amplitude, mut weight) = (0.0, 1.0, 1.0, 0.0);
-    for _ in 0..octaves {
-        sum += perlin(x * frequency, y * frequency, z * frequency) * amplitude;
-        weight += amplitude;
-        frequency *= 2.0;
-        amplitude *= 0.5;
-    }
-    sum / weight
-}
-
-impl DemoSurface {
-    fn sample(&self, d: DVec3) -> SurfaceSample {
-        let t = &self.t;
-        let n = |k: &str| f(&t[k]);
-        let i = |k: &str, j: usize| f(&t[k][j]);
-        let (x, y, z) = (d.x, d.y, d.z);
-        let (wf, wo, ws) = (n("warpFrequency"), u(&t["warpOctaves"]), n("warpStrength"));
-        let warp_x = fractal(x * wf + i("warpOffsets", 0), y * wf, z * wf, wo) * ws;
-        let warp_y = fractal(x * wf, y * wf + i("warpOffsets", 1), z * wf, wo) * ws;
-        let warp_z = fractal(x * wf, y * wf, z * wf + i("warpOffsets", 2), wo) * ws;
-        let (px, py, pz) = (x + warp_x, y + warp_y, z + warp_z);
-        let cf = n("continentFrequency");
-        let continent = fractal(px * cf, py * cf, pz * cf, u(&t["continentOctaves"]));
-        let land = smoothstep(n("coastStart"), n("coastEnd"), continent);
-        let ridge = |j: usize| {
-            let rf = i("ridgeFrequencies", j);
-            1.0 - perlin(px * rf, py * rf, pz * rf).abs().min(1.0)
-        };
-        let mountains = i("ridgeWeights", 0) * ridge(0).powf(i("ridgePowers", 0))
-            + i("ridgeWeights", 1) * ridge(1).powf(i("ridgePowers", 1))
-            + i("ridgeWeights", 2) * ridge(2).powf(i("ridgePowers", 2));
-        let height_meters = self.max_height
-            * land
-            * (n("landBaseHeightFraction") + n("landMountainHeightFraction") * mountains);
-        let color3 = |k: &str| [i(k, 0), i(k, 1), i(k, 2)];
-        let color = if land < 0.02 {
-            let ocean = color3("oceanColor");
-            [ocean[0], ocean[1] + 0.07 * land, ocean[2]]
-        } else if height_meters > n("snowHeightMeters") {
-            color3("snowColor")
-        } else if height_meters > n("rockHeightMeters") {
-            color3("rockColor")
-        } else {
-            [0.13 + 0.12 * land, 0.25 + 0.1 * land, 0.12]
-        };
-        SurfaceSample {
-            height_meters,
-            color: color.map(|c| c as f32),
-        }
-    }
-}
-
 struct MeshError {
     positions: f64,
     normals: f64,
@@ -300,9 +183,12 @@ fn check_mesh(ours: &TileMeshData, lab: &Value, label: &str) -> MeshError {
 fn meshes_match_the_lod_lab() {
     let g = golden("meshes");
     let presets = &g["presets"];
-    let surface = |preset: &str| DemoSurface {
-        max_height: f(&presets[preset]["maxSurfaceHeightMeters"]),
-        t: presets[preset]["terrain"].clone(),
+    // The crate's port of the lab's surface, on the preset the golden file carries.
+    let surface = |preset: &str| void_lod::DemoTerrain {
+        name: preset.into(),
+        radius_meters: f(&presets[preset]["radiusMeters"]),
+        max_height_meters: f(&presets[preset]["maxSurfaceHeightMeters"]),
+        params: serde_json::from_value(presets[preset]["terrain"].clone()).unwrap(),
     };
     let options = |preset: &str| TileMeshOptions {
         radius_meters: f(&presets[preset]["radiusMeters"]),
@@ -310,7 +196,7 @@ fn meshes_match_the_lod_lab() {
     };
     let build = |preset: &str, k: TileKey| {
         let s = surface(preset);
-        build_tile_mesh(k, &|d: DVec3, _cell: f64| s.sample(d), options(preset))
+        build_tile_mesh(k, &s, options(preset))
     };
     let mut worst = MeshError {
         positions: 0.0,

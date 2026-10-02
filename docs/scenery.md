@@ -42,6 +42,7 @@
 - lab 的 transport 與 resolve 是兩個 pass（中間存半浮點）；這裡併成一個，公式相同：`(場景 + 太陽圓盤) × 穿透率 + 散射光`。
 - 深度：Bevy 是無限遠的 reverse-Z，`視線距離 = near / depth`；天空的深度是 0。lab 用對數深度。
 - 表格以半浮點上傳（和 lab 一樣）；噪聲體積的 mip 在 CPU 上以 2×2×2 平均建好（lab 由 WebGL 的 generateMipmap 建）。
-- 曝光與 ACES：Bevy 的 `AcesFitted` 和 three.js 的 `acesFilmicToneMapping` 是同一條曲線；three 先乘 `曝光 / 0.6`，這裡用 `ColorGrading` 的曝光（以 stop 計）給同樣的倍數。
+- 曝光與色調映射：在 air pass 的最後照 three.js 的 `ToneMappingFunctions.js` 做（ACES filmic 先乘 `曝光 / 0.6`；AgX；Neutral），相機的 `Tonemapping` 是 `None`。Bevy 的 AgX 是查表版本，和 three 的近似式不同，所以不用它。
 - 一個和 lab 不同的地方：lab 的 `mix(1e30, 地面距離, 是否打到地面)` 在 NVIDIA/Vulkan 上算成 `a + (b − a)·t`，1e30 − 1e30 = 0，使每條打到地面的光線長度為 0（整顆行星沒有空氣也沒有雲）。改用 `select`，結果與 lab 的原意相同。
-- 只有 ACES；lab 的 AgX、Neutral 還沒移植。`--terrain lod`（lab/lod 的大陸）也還沒有。
+- 地形：`layered`（本 lab）、`lod`（lab/lod 的大陸，`void_lod::DemoTerrain`，與 lab 的 tile 逐位元相同）、`hills`（landing 的 Aurelia）。
+- lab 的面板用鍵盤代替（見 example 的說明）。
