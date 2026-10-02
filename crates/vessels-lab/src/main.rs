@@ -526,13 +526,8 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyX) {
         c.throttle = 0.0;
     }
-    let axis = |a, b| f64::from(keys.pressed(a) as u8) - f64::from(keys.pressed(b) as u8);
     c.turn = if window.focused {
-        DVec3::new(
-            axis(KeyCode::KeyW, KeyCode::KeyS),
-            axis(KeyCode::KeyQ, KeyCode::KeyE),
-            axis(KeyCode::KeyA, KeyCode::KeyD),
-        )
+        pilot_turn(&keys)
     } else {
         DVec3::ZERO
     };
@@ -861,9 +856,48 @@ fn visuals(
         }
     }
 }
+// Match lab/vessels's pilot(): positive pitch S, roll E, yaw D.
+fn pilot_turn(keys: &ButtonInput<KeyCode>) -> DVec3 {
+    let axis = |positive, negative| {
+        f64::from(keys.pressed(positive) as u8) - f64::from(keys.pressed(negative) as u8)
+    };
+    DVec3::new(
+        axis(KeyCode::KeyS, KeyCode::KeyW),
+        axis(KeyCode::KeyE, KeyCode::KeyQ),
+        axis(KeyCode::KeyD, KeyCode::KeyA),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pilot_keys_match_ts_local_axes() {
+        for (key, expected) in [
+            (KeyCode::KeyW, -DVec3::X),
+            (KeyCode::KeyS, DVec3::X),
+            (KeyCode::KeyQ, -DVec3::Y),
+            (KeyCode::KeyE, DVec3::Y),
+            (KeyCode::KeyA, -DVec3::Z),
+            (KeyCode::KeyD, DVec3::Z),
+        ] {
+            let mut keys = ButtonInput::default();
+            keys.press(key);
+            assert_eq!(pilot_turn(&keys), expected);
+        }
+        let mut keys = ButtonInput::default();
+        for key in [
+            KeyCode::KeyW,
+            KeyCode::KeyS,
+            KeyCode::KeyQ,
+            KeyCode::KeyE,
+            KeyCode::KeyA,
+            KeyCode::KeyD,
+        ] {
+            keys.press(key);
+        }
+        assert_eq!(pilot_turn(&keys), DVec3::ZERO);
+    }
     #[test]
     fn bevy_systems_initialize_without_query_conflicts() {
         let mut world = World::new();

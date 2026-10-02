@@ -31,6 +31,34 @@ impl FreeFallFrame {
             previous: state,
         }
     }
+    /// Latest propagated origin time.
+    pub fn origin_time(&self) -> f64 {
+        self.run.time
+    }
+    /// Query a current or future origin, propagating it on demand as in the TS lab.
+    /// The mutable ephemeris is explicit because propagation extends its history.
+    pub fn origin_at(&mut self, ephemeris: &mut Ephemeris, time: f64) -> FrameState {
+        self.advance_origin(ephemeris, time);
+        self.origin(time)
+    }
+    pub fn to_inertial_at(
+        &mut self,
+        ephemeris: &mut Ephemeris,
+        time: f64,
+        local: FrameState,
+    ) -> FrameState {
+        self.origin_at(ephemeris, time);
+        self.to_inertial(time, local)
+    }
+    pub fn from_inertial_at(
+        &mut self,
+        ephemeris: &mut Ephemeris,
+        time: f64,
+        inertial: FrameState,
+    ) -> FrameState {
+        self.origin_at(ephemeris, time);
+        self.from_inertial(time, inertial)
+    }
     pub fn advance_origin(&mut self, ephemeris: &mut Ephemeris, time: f64) {
         assert!(time >= self.run.time, "free fall: time reversed");
         if time == self.run.time {

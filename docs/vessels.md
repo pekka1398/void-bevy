@@ -36,7 +36,7 @@ cargo test -p void-vessels -p void-vessels-lab
 
 `propulsion`、`burn`、`step_thrust` 是兩種擁有者共用的供油／推力實作，使用 assembly 的 `crossfeed_tanks`。同群引擎共用油箱、按存量比例耗油；軌道段在熄火時切斷，接觸步按步內實際剩餘燃料平均推力。燃料改變後重心、慣量及 live part poses 跟隨更新。
 
-`FreeFallFrame::advance_origin()` 先準備下一個固定步的原點，`ContactFrame` 的唯讀加速度查詢可使用步前／步後原點；不複製重力公式。ContactWorld 仍使用原有 float64 自由位移和 leapfrog 半步速度。
+`FreeFallFrame::origin_at()`、`to_inertial_at()`、`from_inertial_at()` 接收可變 ephemeris，按需推進原點；`origin_time()` 回傳最新時間，向過去查詢會 panic。`FreeFallFrame::advance_origin()` 先準備下一個固定步的原點，`ContactFrame` 的唯讀加速度查詢可使用步前／步後原點；不複製重力公式。ContactWorld 仍使用原有 float64 自由位移和 leapfrog 半步速度。
 
 ## 驗收程式
 
@@ -57,7 +57,7 @@ TS 對照資料：
 npx tsx lab/void-bevy/golden/vessels.ts
 ```
 
-`tests/checks.rs` 是 lab 的 `vessels-check.ts` 全部 38 項，門檻照 lab。Rapier 一邊是 native、一邊是 WASM，接觸相關的數字不逐位元相同，但印出的數值幾乎都和 lab 一致（交會 196／652 s、最近 40.3 m、分離 0.1128 m/s、熄火 94.58 s、跳躍高度 14.18 km、助推級 306 s 落地等）。只有 pebble 上的兩級火箭立地一項標為 `#[ignore]`：landing 的 ContactWorld 在細長火箭以底緣搖晃時會增加能量（這裡 30 s +190 J，lab 前 5 s +47 J，TS 也有，不是移植差異；搖晃本身是混沌的，兩邊 1 s 後就分開），lab 剛好 5.5 s、傾斜 1.5° 睡著，這裡 30 s、傾斜 5.0°。這是 landing 的問題，未在 vessels 修改。
+`tests/checks.rs` 是 lab 的 `vessels-check.ts` 全部 38 項，門檻照 lab。Rapier 一邊是 native、一邊是 WASM，接觸相關的數字不逐位元相同，但印出的數值幾乎都和 lab 一致（交會 196／652 s、最近 40.3 m、分離 0.1128 m/s、熄火 94.58 s、跳躍高度 14.18 km、助推級 306 s 落地等）。只有 pebble 上的兩級火箭立地一項標為 `#[ignore]`：native 約 30 s 後以 5.0° 傾斜睡眠，TS 約 5.5 s、1.5°；native 超過原測試的 3° 門檻，未放寬門檻。先前寫的「30 s 增加 190 J」結論撤回：重新用 body-fixed 動能、重力與離心有效位能量測，1/60 s 步長在 30 s 的總能量是減少 190.46 J，60 s 內相對初始值的最大增加只有約 0.000007 J；1/120、1/240 s 也都是淨損失。這不能證明每一步都耗散，但不支持原本的持續灌能診斷，因此沒有以此修改 landing 求解器。量測可執行 `cargo run -p void-vessels --example contact_energy_audit`。
 
 `tests/fleet.rs` 另有：五個 owning TS 場景的姿態／位置／速度／零件對照、600 s bubble 滑行與獨立軌道比較、交會進出事件、旋轉分離動量及零件保留、接觸後合併動量與姿態、兩擁有者的燃燒、耗盡與分級、共用供油群、SAS、rails、地面睡眠及一日不漂移、地面→軌道→地面跳躍、rails 高度帶攔截、耗油後 live 重心／接點。另有 Bevy 系統存取、生成／切船／分級／重設及 debug join 檢查。
 

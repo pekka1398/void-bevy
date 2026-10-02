@@ -701,12 +701,12 @@ fn landed_pod_settles_sleeps_and_rides_on_rails() {
     landed(aurelia(), pod_tank("pod"));
 }
 
-/// The 8.8 m demo rocket rocks on its rim, and landing's ContactWorld gains energy while it does
-/// (+190 J in 30 s here, +47 J in 5 s in the lab: not a port difference). Native and WASM Rapier
-/// part after a second, so this one settles tilted 5.0° after 30 s; the lab's run happens to sleep
-/// at 1.5° after 5.5 s. See docs/vessels.md.
+/// Native and WASM contact trajectories diverge: the native tall rocket settles
+/// at about 5.0 degrees after 30 s, versus 1.5 degrees after 5.5 s in TS.
+/// This violates the TS tilt threshold; a separate total-energy audit shows
+/// a net loss, not the previously reported gain. See docs/vessels.md.
 #[test]
-#[ignore = "landing's ContactWorld gains energy while a tall rocket rocks; see docs/vessels.md"]
+#[ignore = "native tall-rocket resting tilt exceeds the TS 3-degree threshold; see docs/vessels.md"]
 fn landed_rocket_settles_sleeps_and_rides_on_rails() {
     landed(pebble(), demo_craft());
 }
