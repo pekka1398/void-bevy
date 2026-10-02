@@ -15,6 +15,9 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseSc
 use bevy::prelude::*;
 use glam::DVec3;
 use std::sync::Arc;
+use void_app::map::{
+    MapMarker, PATH_COLOR, color, draw_map_lines, label_click, place_map_labels, spawn_map_labels,
+};
 use void_app::tiles::{Tile, TileField};
 use void_landing::{ContactWorldOptions, landing_lod_options, level_for_tile_size};
 use void_lod::LodView;
@@ -25,7 +28,7 @@ use void_orbit::{
 use void_terrain::{HillsOptions, Terrain, TerrainConfig};
 use void_view::{
     FocusGeometry, FocusKind, LabelKind, MapFrame, MapOrbits, MapPath, OrbitCamera, PathFrameKind,
-    PlottingFrame, ViewMode, ViewState, camera_spin, frame_to_ecliptic, map_labels, view_state,
+    PlottingFrame, ViewMode, ViewState, camera_spin, map_labels, view_state,
 };
 
 const SYSTEM: &str = include_str!("../../orbit/systems/sol.json");
@@ -34,8 +37,6 @@ const WARPS: [f64; 6] = [1.0, 10.0, 100.0, 1e3, 1e4, 1e5];
 const MAX_VESSEL_STEPS_PER_FRAME: u64 = 20_000;
 const MAX_PREDICTION_STEPS_PER_FRAME: u64 = 4_000;
 const THROTTLE_RATE_PER_SECOND: f64 = 0.5;
-const PATH_COLOR: &str = "#4fc8ff";
-const LABEL_HEIGHT: f32 = 13.0;
 
 fn main() {
     App::new()
@@ -195,21 +196,6 @@ struct Sun;
 
 #[derive(Component)]
 struct Hud;
-
-/// A map label: what it names, and its text child.
-#[derive(Component)]
-struct Label {
-    kind: LabelKind,
-    /// The apsis slot (0 or 1) for apsis labels.
-    slot: usize,
-    text: Entity,
-}
-
-fn color(hex: &str) -> Color {
-    Srgba::hex(hex.trim_start_matches('#'))
-        .map(Color::from)
-        .unwrap_or(Color::WHITE)
-}
 
 fn setup(
     mut commands: Commands,
@@ -419,65 +405,7 @@ fn setup(
         });
 
     // Labels: every body, the vessel and two apsides; clickable once the map is half in.
-    let font = TextFont {
-        font_size: FontSize::Px(12.0),
-        ..default()
-    };
-    let mut kinds: Vec<(LabelKind, usize, String, Color)> = bodies
-        .iter()
-        .map(|b| {
-            (
-                if b.parent_index.is_none() {
-                    LabelKind::Star
-                } else {
-                    LabelKind::Body(b.index)
-                },
-                0,
-                b.name.clone(),
-                color(&b.color),
-            )
-        })
-        .collect();
-    kinds.push((LabelKind::Vessel, 0, "Vessel".into(), color("#7dffb0")));
-    kinds.push((LabelKind::Apsis, 0, String::new(), color(PATH_COLOR)));
-    kinds.push((LabelKind::Apsis, 1, String::new(), color(PATH_COLOR)));
-    for (kind, slot, name, dot) in kinds {
-        let text = commands
-            .spawn((
-                Text::new(name),
-                font.clone(),
-                TextShadow {
-                    offset: Vec2::ONE,
-                    color: Color::BLACK.with_alpha(0.8),
-                },
-            ))
-            .id();
-        let marker = commands
-            .spawn((
-                Button,
-                Node {
-                    position_type: PositionType::Absolute,
-                    align_items: AlignItems::Center,
-                    column_gap: px(4),
-                    ..default()
-                },
-                Visibility::Hidden,
-            ))
-            .with_children(|m| {
-                m.spawn((
-                    Node {
-                        width: px(6),
-                        height: px(6),
-                        border_radius: BorderRadius::MAX,
-                        ..default()
-                    },
-                    BackgroundColor(dot),
-                ));
-            })
-            .id();
-        commands.entity(marker).add_child(text);
-        commands.entity(marker).insert(Label { kind, slot, text });
-    }
+    spawn_map_labels(&mut commands, &bodies);
 
     commands.spawn((
         Hud,
@@ -502,7 +430,7 @@ fn controls(
     motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
     time: Res<Time>,
-    labels: Query<(&Interaction, &Label)>,
+    labels: Query<(&Interaction, &MapMarker)>,
     mut lab: ResMut<Lab>,
     mut dragging: Local<bool>,
 ) {
@@ -569,26 +497,15 @@ fn controls(
 
     // Labels take clicks once the map is half in, and a click on one never starts a drag.
     let map_weight = lab.state.map_or(0.0, |s| s.map_weight);
-    let mut over_label = false;
-    for (interaction, label) in &labels {
-        if *interaction == Interaction::None || map_weight <= 0.5 {
-            continue;
+    let (over_label, clicked) = label_click(&labels, &buttons, map_weight);
+    match clicked {
+        Some(LabelKind::Vessel) => lab.set_focus(Focus::Vessel),
+        Some(LabelKind::Body(i)) => lab.set_focus(Focus::Body(i)),
+        Some(LabelKind::Star) => {
+            let star = lab.bodies().iter().position(|b| b.parent_index.is_none());
+            lab.set_focus(Focus::Body(star.expect("a star")));
         }
-        over_label = true;
-        if *interaction == Interaction::Pressed && buttons.just_pressed(MouseButton::Left) {
-            match label.kind {
-                LabelKind::Vessel => lab.set_focus(Focus::Vessel),
-                LabelKind::Star | LabelKind::Body(_) => {
-                    if let LabelKind::Body(i) = label.kind {
-                        lab.set_focus(Focus::Body(i));
-                    } else {
-                        let star = lab.bodies().iter().position(|b| b.parent_index.is_none());
-                        lab.set_focus(Focus::Body(star.unwrap()));
-                    }
-                }
-                LabelKind::Apsis => {}
-            }
-        }
+        Some(LabelKind::Apsis) | None => {}
     }
     let any = [MouseButton::Left, MouseButton::Right, MouseButton::Middle];
     if buttons.any_just_pressed(any) && !over_label {
@@ -774,44 +691,24 @@ fn draw(
             true,
         );
     }
-    let alpha = state.map_weight as f32;
-    if alpha > 0.0 {
-        for body in &bodies {
-            let Some(placement) = lab.orbits.placement(&bodies, body.index, &frame) else {
-                continue;
-            };
-            let shape = &lab.orbits.shapes[body.index];
-            let points = shape.points.iter().map(|&p| {
-                let e = match &placement.axes {
-                    Some(axes) => frame_to_ecliptic(axes, p),
-                    None => p,
-                };
-                lab.render(placement.anchor + e)
-            });
-            let c = color(&body.color).with_alpha(alpha);
-            if shape.closed {
-                let first = shape.points[0];
-                let close = std::iter::once(lab.render(placement.anchor + first));
-                gizmos.linestrip(points.chain(close), c);
-            } else {
-                gizmos.linestrip(points, c);
-            }
-        }
-        if lab.path.visible {
-            gizmos.linestrip(
-                lab.path.points.iter().map(|&p| lab.render(p)),
-                color(PATH_COLOR).with_alpha(alpha),
-            );
-        }
-    }
+    let render = |v: DVec3| lab.render(v);
+    draw_map_lines(
+        &mut gizmos,
+        &bodies,
+        &lab.orbits,
+        &[(&lab.path, color(PATH_COLOR))],
+        &frame,
+        state.map_weight as f32,
+        &render,
+    );
 }
 
 #[allow(clippy::type_complexity)]
 fn labels(
     lab: Res<Lab>,
     camera: Single<(&Camera, &GlobalTransform)>,
-    mut markers: Query<(&Label, &mut Node, &mut Visibility, &ComputedNode)>,
-    mut texts: Query<(&mut Text, &mut Visibility), Without<Label>>,
+    mut markers: Query<(&MapMarker, &mut Node, &mut Visibility, &ComputedNode)>,
+    mut texts: Query<(&mut Text, &mut Visibility), Without<MapMarker>>,
 ) {
     let Some(state) = lab.state else { return };
     let (camera, camera_transform) = *camera;
@@ -834,75 +731,16 @@ fn labels(
     };
     let apsides = lab.path.apsis_positions(&frame);
     let wanted = map_labels(lab.bodies(), &frame, focus, &apsides);
-    // A label overlapping a higher-priority one keeps only its dot.
-    let mut shown: Vec<(Vec2, f32)> = Vec::new();
-    let mut placed: Vec<(LabelKind, usize, Vec2, bool, String)> = Vec::new();
-    let mut apsis_slot = 0;
-    for label in &wanted {
-        let slot = if label.kind == LabelKind::Apsis {
-            apsis_slot += 1;
-            apsis_slot - 1
-        } else {
-            0
-        };
-        let world = lab.render(label.relative);
-        // In front of the camera, and not far off screen.
-        let ahead = camera_transform.forward().dot(world) > 0.0;
-        let Ok(at) = camera.world_to_viewport(camera_transform, world) else {
-            continue;
-        };
-        let size = camera.logical_viewport_size().unwrap_or(Vec2::ONE);
-        let visible = state.map_weight > 0.0
-            && ahead
-            && at.x > -0.1 * size.x
-            && at.x < 1.1 * size.x
-            && at.y > -0.1 * size.y
-            && at.y < 1.1 * size.y;
-        if !visible {
-            continue;
-        }
-        let width = markers
-            .iter()
-            .find(|(m, ..)| m.kind == label.kind && m.slot == slot)
-            .map_or(60.0, |(.., computed)| {
-                computed.size().x * computed.inverse_scale_factor()
-            });
-        let crowded = shown.iter().any(|(p, w)| {
-            (p.y - at.y).abs() < LABEL_HEIGHT
-                && if at.x >= p.x {
-                    at.x - p.x < *w
-                } else {
-                    p.x - at.x < width
-                }
-        });
-        if !crowded {
-            shown.push((at, width));
-        }
-        placed.push((label.kind, slot, at, crowded, label.text.clone()));
-    }
-    for (marker, mut node, mut visibility, _) in &mut markers {
-        let found = placed
-            .iter()
-            .find(|(kind, slot, ..)| *kind == marker.kind && *slot == marker.slot);
-        match found {
-            Some((_, _, at, crowded, text)) => {
-                *visibility = Visibility::Inherited;
-                node.left = px(at.x - 3.0);
-                node.top = px(at.y - 7.0);
-                if let Ok((mut t, mut v)) = texts.get_mut(marker.text) {
-                    if t.0 != *text {
-                        t.0.clone_from(text);
-                    }
-                    *v = if *crowded {
-                        Visibility::Hidden
-                    } else {
-                        Visibility::Inherited
-                    };
-                }
-            }
-            None => *visibility = Visibility::Hidden,
-        }
-    }
+    let render = |v: DVec3| lab.render(v);
+    place_map_labels(
+        camera,
+        camera_transform,
+        &mut markers,
+        &mut texts,
+        &wanted,
+        state.map_weight,
+        &render,
+    );
 }
 
 fn distance_text(m: f64) -> String {
