@@ -1,6 +1,6 @@
 /**
  * Golden data for crates/rotation, from lab/rotation's RotatingFrame.ts.
- * Run from the repository root: npx tsx lab/void-bevy/golden/rotation.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void rotation
  */
 import { writeFileSync } from 'node:fs';
 import { fictitiousTorque, freeRotationStep, inertiaIn, rotationStep, type Mat3, type Quaternion, type Vec3 } from '../../rotation/src/RotatingFrame';

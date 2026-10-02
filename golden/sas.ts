@@ -2,7 +2,7 @@
  * Golden data for crates/sas, from lab/sas's StabilityAssist.ts. Each step's input (the attitude the
  * controller saw) and output are recorded, so the Rust controller is checked on exactly the lab's
  * inputs, apart from the integrator (whose sin and cos are V8's).
- * Run from the repository root: npx tsx lab/void-bevy/golden/sas.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void sas
  */
 import { writeFileSync } from 'node:fs';
 import type { Vec3 } from '../../landing/src/orbitCore';

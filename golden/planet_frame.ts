@@ -1,6 +1,6 @@
 /**
  * Golden data for crates/landing's PlanetFrame, from lab/landing.
- * Run from the repository root: npx tsx lab/void-bevy/golden/planet_frame.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void planet_frame
  */
 import { writeFileSync } from 'node:fs';
 import { PlanetFrame } from '../../landing/src/physics/PlanetFrame';

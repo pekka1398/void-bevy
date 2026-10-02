@@ -1,1 +1,5 @@
-target/
+/target/
+/lab-log/
+/vendor/
+__pycache__/
+*.pyc

@@ -2,7 +2,7 @@
  * Golden data for crates/view, from lab/view: view states over zooms, focuses and modes; camera
  * drags, zooms and co-rotation; osculating ellipses by angle and by time; orbits in a surface frame;
  * a path frame's samples through PathCache.
- * Run from the repository root: npx tsx lab/void-bevy/golden/view.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void view
  */
 import { writeFileSync } from 'node:fs';
 import { Simulation, normalize } from '../../orbit/src/orbit';

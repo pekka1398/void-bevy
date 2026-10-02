@@ -1,6 +1,6 @@
 /**
  * System specs and golden data for crates/orbit, from the orbit lab.
- * Run from the repository root: npx tsx lab/void-bevy/golden/orbit.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void orbit
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { SYSTEM_PRESETS } from '../../orbit/src/app/SystemPresets';

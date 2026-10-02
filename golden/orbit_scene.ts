@@ -1,5 +1,5 @@
 /** Headless geometry emitted by the actual TS SceneView. The tiny DOM stub supplies only
- * marker elements; no renderer/window is opened. Run at repo root with npx tsx.
+ * marker elements; no renderer/window is opened. Run: python3 tools/regenerate-golden.py --reference-root ../void orbit_scene.
  */
 import { writeFileSync } from 'node:fs';
 import * as THREE from 'three';

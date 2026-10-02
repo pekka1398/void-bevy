@@ -1,5 +1,5 @@
 /** Four plotting frames from TS, including the previously missed two-body frame.
- * Run from the repository root: npx tsx lab/void-bevy/golden/reference_frames.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void reference_frames
  */
 import { writeFileSync } from 'node:fs';
 import { buildSystem } from '../../orbit/src/orbit/SystemSpec';

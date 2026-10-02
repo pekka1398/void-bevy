@@ -1,6 +1,6 @@
 /**
  * Golden data for crates/lod, from the LOD lab's own code.
- * Run from the repository root: npx tsx lab/void-bevy/golden/lod.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void lod
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { BENCH_SCENARIOS } from '../../lod/src/app/BenchScenarios';

@@ -3,7 +3,7 @@
  * setup (Sol, a 100 km equatorial orbit of Aurelia, the orbit lab's chemical stage). A scripted
  * session: coast, manual burns in several attitude modes, hold, warp, a planned burn flown
  * automatically, and finally a retrograde burn down to an impact.
- * Run from the repository root: npx tsx lab/void-bevy/golden/simulation.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void simulation
  */
 import { writeFileSync } from 'node:fs';
 import { SYSTEM_PRESETS } from '../../orbit/src/app/SystemPresets';

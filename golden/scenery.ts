@@ -1,7 +1,7 @@
 /**
  * Golden data for crates/scenery: lab/scenery's atmosphere tables, sky references, cloud weather and
  * noise volumes, star field and orbit view. Big buffers are written raw (little-endian) beside the JSON.
- * Run from the repository root: npx tsx lab/void-bevy/golden/scenery.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void scenery
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { buildTransmittanceTable, earthLikeAtmosphere, skyRadiance, transmittanceCoords, transmittanceRay, type Vec3 } from '../../scenery/src/Atmosphere';

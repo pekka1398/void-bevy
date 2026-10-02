@@ -1,7 +1,7 @@
 /**
  * Golden data for crates/navball, from lab/navball's Navball.ts: bases, ball points, heading and
  * pitch over random attitudes and latitudes (including both poles), and horizon directions.
- * Run from the repository root: npx tsx lab/void-bevy/golden/navball.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void navball
  */
 import { writeFileSync } from 'node:fs';
 import { headingPitch, horizonDirection, navballBasis, toBall, type Vec3 } from '../../navball/src/Navball';

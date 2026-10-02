@@ -56,6 +56,8 @@ workspace 共 21 個 package：15 個功能／基礎 crate、`void-app` 及 5 �
 
 ## 能否獨立
 
+此處保留搬遷前的檢查紀錄。獨立 repository 已建立，開發規則／ignore／參考重產入口已補齊，實際搬遷與驗證見 [migration.md](migration.md)。
+
 **可獨立編譯與繼續開發。** 本次把 `git ls-files lab/void-bevy` 列出的檔案複製到 `/tmp/void-bevy-independence-*`，不帶 TS、vendor 或原根目錄設定：
 
 - 先前 `cargo metadata --offline --no-deps`：20 packages（新增 orbit-lab 後為 21），全部 local path dependency 在新 workspace 內。

@@ -1,4 +1,4 @@
-/** Rust assembly fixtures from the owning TS lab. Run from repo root with npx tsx. */
+/** Rust assembly fixtures from the owning TS lab. Run: python3 tools/regenerate-golden.py --reference-root ../void assembly. */
 import { writeFileSync } from 'node:fs';
 import { CATALOG, compile, demoCraft, freshCraft, addPart, summary, freeNodes, fuelSources, partInertiaPerKg } from '../../assembly/src/model';
 const v = (p: { x: number; y: number; z: number }) => [p.x, p.y, p.z];

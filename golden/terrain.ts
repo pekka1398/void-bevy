@@ -1,7 +1,7 @@
 /**
  * Golden data for crates/terrain: scenery's layered planet and landing's hills, as the main game
  * and landing build them (landing's TerrainConfig), and tiles built on them by lab/lod.
- * Run from the repository root: npx tsx lab/void-bevy/golden/terrain.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void terrain
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { buildTileMesh, type TileKey } from '../../lod/src/lod';

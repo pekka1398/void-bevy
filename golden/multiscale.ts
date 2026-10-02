@@ -2,7 +2,7 @@
  * Golden data for crates/multiscale, from lab/multiscale: split-position arithmetic (bigint cells
  * as decimal strings), the coupled world's states (compact three-system fixture and the wide
  * light-year fixture), and the coasting probe's flights with their frame hand-offs.
- * Run from the repository root: npx tsx lab/void-bevy/golden/multiscale.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void multiscale
  */
 import { writeFileSync } from 'node:fs';
 import { buildSystem, YEAR, type BuiltSystem, type SystemSpec, type Vec3 } from '../../multiscale/src/cores';

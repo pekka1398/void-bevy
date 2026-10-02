@@ -1,14 +1,17 @@
 # void-bevy
 
-VOID 的 Bevy 移植 lab。Rust cargo workspace，每個功能一個 crate：`cargo test` 是 headless 檢查，`examples/` 是可開視窗的驗證場景。TS 各 lab 是參考實作，移植的 crate 以它們的輸出為對照。
+VOID 的 Bevy／Rust／native Rapier 開發主線，從原 TS 專案的移植 lab 獨立而來。Rust Cargo workspace，每個功能一個 crate：`cargo test` 是 headless 檢查，`examples/` 是可開視窗的驗證場景。TS 各 lab 是參考實作，移植的 crate 以它們的輸出為對照。
 
 ```sh
-cd lab/void-bevy
+cd void-bevy
+cargo run -p void-app                   # 主遊戲
 cargo run -p void-app --example system   # Sol 系統與地表探測器
 cargo test                 # 全部 crate 的檢查
 ```
 
-Bevy 固定在 0.19.1（需要 Rust 1.95 以上）。API 以 `vendor/bevy` 的同版原始碼為準，那份是 shallow clone，被根目錄的 `vendor/` 忽略規則排除；編譯用 crates.io 的同一版本。
+Bevy 固定在 0.19.1（需要 Rust 1.95 以上），編譯使用 crates.io。API 可查 Cargo registry 的同版原始碼；舊專案的 `vendor/bevy`／`vendor/rapier` 僅是參考，不是此 workspace 的編譯依賴。
+
+開發規則見 [AGENTS.md](AGENTS.md)，原筆記保留於 [NOTE.md](NOTE.md)。來源歷史、搬遷與 golden 重產方式見 [docs/migration.md](docs/migration.md)。
 
 ## crate
 
@@ -48,7 +51,7 @@ Bevy 固定在 0.19.1（需要 Rust 1.95 以上）。API 以 `vendor/bevy` 的�
   - 天體是真實比例的普通球體，沒有地形 LOD。球面網格最多比真實半徑低約 3 km，所以探測器看起來可能浮在多面體表面上，或陷進去。另外在慣性模式下貼近地面時，行星網格的頂點（f32、6e6 m 量級）可能有約 0.5 m 的抖動。這些是暫時用整顆球網格造成的限制，正是之後地形 tile 要各自掛 anchor 的原因，與 frames 本身無關。
   - 紅點是本初子午線與赤道的交點，藍點是北極；天體標籤是螢幕空間文字。
 
-對照資料要重新產生時，從 repo 根目錄執行 `npx tsx lab/void-bevy/golden/<name>.ts`。serde_json 開了 `float_roundtrip`：預設的解析器可能差一個 ulp，golden 檢查看得出來。
+日常編譯與測試不需舊 TS。對照資料要重新產生時，從此 repo 根目錄執行 `python3 tools/regenerate-golden.py --reference-root ../void <name>`（舊參考需已安裝 Node 依賴）；詳見 [搬遷說明](docs/migration.md)。serde_json 開了 `float_roundtrip`：預設的解析器可能差一個 ulp，golden 檢查看得出來。
 
 - `void-orbit-lab`：Sol／binary、四種繪圖框架、歷史／預測／機動計畫／目標路徑，以及燃燒編輯與自動執行。`cargo run -p void-orbit-lab`，操作見 [docs/orbit-lab.md](docs/orbit-lab.md)。
 - 詳細移植盤點與尚存缺口見 [docs/port-audit.md](docs/port-audit.md)。

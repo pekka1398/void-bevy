@@ -1,6 +1,6 @@
 /**
  * Golden data for crates/orbit's vessel propagator, apsides, dominance and flight plan.
- * Run from the repository root: npx tsx lab/void-bevy/golden/vessel.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void vessel
  */
 import { writeFileSync } from 'node:fs';
 import { SYSTEM_PRESETS } from '../../orbit/src/app/SystemPresets';

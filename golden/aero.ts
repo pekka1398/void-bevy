@@ -2,7 +2,7 @@
  * Golden data for crates/aero, from lab/aerodynamics: the atmosphere, the wing polar, forces and
  * heat loads on the three test vehicles in random states, mass properties, thermal steps, the
  * reentry run in 10 s chunks and the lab check's single 400 s run, and the aircraft's free flight.
- * Run from the repository root: npx tsx lab/void-bevy/golden/aero.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void aero
  */
 import { writeFileSync } from 'node:fs';
 import RAPIER from '@dimforge/rapier3d-compat';

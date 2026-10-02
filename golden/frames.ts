@@ -1,6 +1,6 @@
 /**
  * Golden data for crates/frames, from the orbit lab's own frame code.
- * Run from the repository root: npx tsx lab/void-bevy/golden/frames.ts
+ * Run from this workspace: python3 tools/regenerate-golden.py --reference-root ../void frames
  */
 import { writeFileSync } from 'node:fs';
 import { bodyOrientation, equatorialAxes } from '../../orbit/src/orbit/BodyRotation';

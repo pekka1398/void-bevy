@@ -3,7 +3,7 @@
 `void-vessels` 移植 `lab/vessels` 的 Fleet；不依賴 Bevy。`void-vessels-lab` 是獨立 Bevy 驗收程式，不接入 `void-app`，也不依賴 aero。主遊戲原本的 `PartJointRocket` 尚未替換。
 
 ```sh
-cd lab/void-bevy
+cd void-bevy
 cargo run -p void-vessels-lab          # 預設地面發射
 cargo run -p void-vessels-lab -- 2     # 1–6：發射、交會、滑行、旋轉分離、碰撞合併、SAS
 cargo test -p void-vessels -p void-vessels-lab
@@ -54,7 +54,7 @@ TS 對照資料：
 
 ```sh
 # repo 根目錄
-npx tsx lab/void-bevy/golden/vessels.ts
+python3 tools/regenerate-golden.py --reference-root ../void vessels
 ```
 
 `tests/checks.rs` 是 lab 的 `vessels-check.ts` 全部 38 項，門檻照 lab。Rapier 一邊是 native、一邊是 WASM，接觸相關的數字不逐位元相同，但印出的數值幾乎都和 lab 一致（交會 196／652 s、最近 40.3 m、分離 0.1128 m/s、熄火 94.58 s、跳躍高度 14.18 km、助推級 306 s 落地等）。只有 pebble 上的兩級火箭立地一項標為 `#[ignore]`：native 約 30 s 後以 5.0° 傾斜睡眠，TS 約 5.5 s、1.5°；native 超過原測試的 3° 門檻，未放寬門檻。先前寫的「30 s 增加 190 J」結論撤回：重新用 body-fixed 動能、重力與離心有效位能量測，1/60 s 步長在 30 s 的總能量是減少 190.46 J，60 s 內相對初始值的最大增加只有約 0.000007 J；1/120、1/240 s 也都是淨損失。這不能證明每一步都耗散，但不支持原本的持續灌能診斷，因此沒有以此修改 landing 求解器。量測可執行 `cargo run -p void-vessels --example contact_energy_audit`。

@@ -97,7 +97,7 @@ let s_in_to = m.apply_state(state_in_from);     // 含 ω × r 項
 | t = 1e9 s 的自轉角：取餘法 vs 精確值，以及原本 `2πt/period` 的誤差 | 0 vs 1.0e-11 rad |
 | 會 panic 的情況：Free 座標系未寫入就使用、寫入時間不符、旋轉四元數非單位長度、自轉參數無效 | 都會 panic |
 
-golden data 要重新產生時，從 repo 根目錄執行 `npx tsx lab/void-bevy/golden/frames.ts`。
+golden data 要重新產生時，從 repo 根目錄執行 `python3 tools/regenerate-golden.py --reference-root ../void frames`。
 
 ## 待決定
 

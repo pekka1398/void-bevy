@@ -1,4 +1,4 @@
-/** Owning TS Fleet reference; run from repo root with npx tsx. */
+/** Owning TS Fleet reference; run: python3 tools/regenerate-golden.py --reference-root ../void vessels. */
 import { writeFileSync } from 'node:fs';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { createLabScene, type ScenarioId } from '../../vessels/src/LabScenes';

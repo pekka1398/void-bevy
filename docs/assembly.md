@@ -2,7 +2,7 @@
 
 `crates/assembly`（`void-assembly`）移植 TS `lab/assembly` 的資料模型與試飛物理，不依賴 Bevy。獨立的 `crates/assembly-lab`（`void-assembly-lab`）提供 Bevy 編輯器與試飛畫面，不依賴 `void-app`，`void-app` 也不依賴 assembly。
 
-從 `lab/void-bevy` 執行：
+從新 workspace 根目錄執行：
 
 ```sh
 cargo run -p void-assembly-lab
@@ -58,8 +58,8 @@ Launch 使用當下的自訂組裝建立 Rapier compound bodies，不是另一�
 
 ```sh
 # repo 根目錄
-npx tsx lab/void-bevy/golden/assembly.ts
-npx tsx lab/void-bevy/golden/assembly_visuals.ts
+python3 tools/regenerate-golden.py --reference-root ../void assembly
+python3 tools/regenerate-golden.py --reference-root ../void assembly_visuals
 ```
 
 11 項核心測試涵蓋 TS 姿態／質量／空接點／供油對照、反向接合與不同 parts 順序、錯誤資料拒絕、子樹、真正連通群、切斷分離器的子邊、pad 接觸、起飛與 Isp 耗油、旋轉分離的位置／線動量／角動量、燃料耗盡、自訂 JSON 船、無效試飛與不同級數。另有 4 項編輯器檢查：從空船組裝至試飛再返回、無效操作不替換現有船、實際檔案匯出／載入與錯誤檔案拒絕，以及 Bevy 系統初始化沒有存取衝突。
