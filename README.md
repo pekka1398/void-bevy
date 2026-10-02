@@ -49,3 +49,6 @@ Bevy 固定在 0.19.1（需要 Rust 1.95 以上）。API 以 `vendor/bevy` 的�
   - 紅點是本初子午線與赤道的交點，藍點是北極；天體標籤是螢幕空間文字。
 
 對照資料要重新產生時，從 repo 根目錄執行 `npx tsx lab/void-bevy/golden/<name>.ts`。serde_json 開了 `float_roundtrip`：預設的解析器可能差一個 ulp，golden 檢查看得出來。
+
+- `void-orbit-lab`：Sol／binary、四種繪圖框架、歷史／預測／機動計畫／目標路徑，以及燃燒編輯與自動執行。`cargo run -p void-orbit-lab`，操作見 [docs/orbit-lab.md](docs/orbit-lab.md)。
+- 詳細移植盤點與尚存缺口見 [docs/port-audit.md](docs/port-audit.md)。

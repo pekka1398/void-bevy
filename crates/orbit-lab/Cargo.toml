@@ -1,13 +1,15 @@
 [package]
-name = "void-orbit"
+name = "void-orbit-lab"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
 
 [dependencies]
-void-math.workspace = true
+bevy.workspace = true
 glam.workspace = true
-serde.workspace = true
+void-orbit.workspace = true
+void-view.workspace = true
+
+[dev-dependencies]
 serde_json.workspace = true
-void-frames.workspace = true

@@ -16,7 +16,7 @@
 | `Simulation.ts`（時間、船的控制、預測、撞擊；view lab 用它） | `simulation.rs`，見 [view.md](view.md) |
 
 沒有移植的部分：
-- `ReferenceFrames.ts`：由 `void-frames` 取代。
+- `ReferenceFrames.ts`：`FrameEvaluator` 提供 barycentric、body-inertial、body-surface、two-body-rotating 四種繪圖框架；樹狀框架仍由 `void-frames` 提供。
 - `frameAccelerationAt`：目前一律回傳 0。`lab/multiscale` 的 `FrameEphemeris` 會覆寫它，等移植 multiscale 時再改成 trait。
 
 Rust 的介面和 TS 有兩點不同：
@@ -68,3 +68,5 @@ Rust 的介面和 TS 有兩點不同：
 | binary | 20 ms | 32 ms |
 
 快 1.4–1.6 倍，符合純量程式碼的預期。為了和 TS 逐位元一致，運算順序完全照抄，沒有 SIMD，也沒有多執行緒。之後要優化時，可以改用 SoA 加 SIMD，或把天體分組平行計算；屆時對照檢查改用容差即可，不再要求逐位元相同。
+
+獨立操作與路徑觀察入口：見 [orbit-lab](orbit-lab.md)。

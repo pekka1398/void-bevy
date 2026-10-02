@@ -8,6 +8,7 @@ mod flight_plan;
 mod hermite;
 mod kepler;
 mod propagator;
+mod reference_frames;
 mod simulation;
 mod system;
 mod trajectory;
@@ -28,6 +29,9 @@ pub use kepler::{
 pub use propagator::{
     AdvanceOutcome, AttitudeLaw, Control, ForceControl, Impact, PropagationRun, ThrustControl,
     Tolerances, VesselPropagator, VesselState,
+};
+pub use reference_frames::{
+    FrameEvaluator, FrameSpec, PlotFrameState, direction_to_frame, to_frame,
 };
 pub use simulation::{
     AdvanceReport, AttitudeMode, EngineSpec, ImpactRecord, STANDARD_GRAVITY, Simulation,

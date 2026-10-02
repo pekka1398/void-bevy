@@ -5570,6 +5570,18 @@ dependencies = [
  "serde",
  "serde_json",
  "void-frames",
+ "void-math",
+]
+
+[[package]]
+name = "void-orbit-lab"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "glam 0.32.1",
+ "serde_json",
+ "void-orbit",
+ "void-view",
 ]
 
 [[package]]

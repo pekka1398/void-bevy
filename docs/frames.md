@@ -103,4 +103,4 @@ golden data 要重新產生時，從 repo 根目錄執行 `npx tsx lab/void-bevy
 
 - 根節點是太陽系質心。銀河層之後再加。
 - `Free` 座標系由誰寫入、什麼時候寫入，等到船的物理移植時再定，屆時參考 Krakensbane。
-- 雙體旋轉座標系（`two-body-rotating`）等到 orbit crate 移植時再補。
+- 雙體旋轉繪圖座標系（`two-body-rotating`）由 `void-orbit::FrameEvaluator` 提供，見 [orbit-lab](orbit-lab.md)；不屬於此樹狀框架 API。
