@@ -1,0 +1,532 @@
+//! The stability assist against lab/sas: the controller on the lab's own inputs (golden data from
+//! `golden/sas.ts`), then the lab's checks (`sas-check.ts`) with its thresholds, on the demo
+//! rocket's real inertias and on the rocket itself through `PartJointRocket`'s per-step steering.
+
+use std::f64::consts::{FRAC_1_SQRT_2, PI};
+
+use glam::{DQuat, DVec3};
+use serde_json::Value;
+use void_landing::{
+    LanderControl, PartJointRocket, PhysicsMode, RocketPart, STEERING_TORQUE, demo_rocket, pebble,
+    planet_ephemeris,
+};
+use void_rotation::{Mat3, matrix, rotation_step};
+use void_sas::{SAS_TUNING, SasPhase, SasTuning, StabilityAssist, attitude_error};
+
+const DT: f64 = 1.0 / 60.0;
+const DEG: f64 = 180.0 / PI;
+
+fn golden() -> Value {
+    let path = format!("{}/tests/golden/sas.json", env!("CARGO_MANIFEST_DIR"));
+    serde_json::from_str(&std::fs::read_to_string(&path).expect(&path)).expect(&path)
+}
+
+fn f(v: &Value) -> f64 {
+    v.as_f64().unwrap_or_else(|| panic!("not a number: {v}"))
+}
+
+fn v3(v: &Value) -> DVec3 {
+    DVec3::new(f(&v[0]), f(&v[1]), f(&v[2]))
+}
+
+fn quat(v: &Value) -> DQuat {
+    DQuat::from_xyzw(f(&v[0]), f(&v[1]), f(&v[2]), f(&v[3]))
+}
+
+fn phase(name: &str) -> SasPhase {
+    match name {
+        "off" => SasPhase::Off,
+        "pilot" => SasPhase::Pilot,
+        "damping" => SasPhase::Damping,
+        "holding" => SasPhase::Holding,
+        _ => panic!("phase {name}"),
+    }
+}
+
+#[test]
+fn matches_the_lab_bit_for_bit() {
+    let g = golden();
+    let mut errors = 0;
+    for c in g["errors"].as_array().unwrap() {
+        let e = attitude_error(quat(&c["target"]), quat(&c["current"]));
+        assert_eq!(e, v3(&c["error"]), "attitude error {c}");
+        errors += 1;
+    }
+    let inertia: Mat3 = g["inertia"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(f)
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+    let (max_torque, dt) = (f(&g["maxTorque"]), f(&g["dt"]));
+    let mut steps = 0;
+    for run in g["runs"].as_array().unwrap() {
+        let t = &run["tuning"];
+        let mut sas = StabilityAssist::new(
+            max_torque,
+            SasTuning {
+                rate_seconds: f(&t["rateSeconds"]),
+                attitude_seconds: f(&t["attitudeSeconds"]),
+                brake_fraction: f(&t["brakeFraction"]),
+                lock_rate: f(&t["lockRate"]),
+            },
+        );
+        for (k, s) in run["steps"].as_array().unwrap().iter().enumerate() {
+            if let Some(on) = s["reset"].as_bool() {
+                sas.set_enabled(on);
+            }
+            let u = sas.command(
+                quat(&s["rotation"]),
+                v3(&s["angularVelocity"]),
+                &inertia,
+                v3(&s["pilot"]),
+                dt,
+            );
+            assert_eq!(u, v3(&s["command"]), "step {k}: command");
+            assert_eq!(sas.phase(), phase(s["phase"].as_str().unwrap()), "step {k}");
+            assert_eq!(
+                sas.target(),
+                (!s["target"].is_null()).then(|| quat(&s["target"])),
+                "step {k}"
+            );
+            steps += 1;
+        }
+    }
+    println!("{errors} attitude errors and {steps} controller steps identical to the lab");
+}
+
+// --- The lab's checks ---------------------------------------------------------------------------
+
+fn angle(a: DQuat, b: DQuat) -> f64 {
+    attitude_error(a, b).length()
+}
+
+fn tilted() -> DQuat {
+    let (x, y, z, w) = (0.12, -0.3, 0.2, 0.92);
+    let l = void_math::hypot([x, y, z, w]);
+    DQuat::from_xyzw(x / l, y / l, z / l, w / l)
+}
+
+fn local(rotation: DQuat, w: DVec3) -> DVec3 {
+    let r = matrix(rotation);
+    DVec3::new(
+        r[0] * w.x + r[3] * w.y + r[6] * w.z,
+        r[1] * w.x + r[4] * w.y + r[7] * w.z,
+        r[2] * w.x + r[5] * w.y + r[8] * w.z,
+    )
+}
+
+/// The demo rocket's controlled inertia on the pad and after staging.
+fn inertias() -> (Mat3, Mat3) {
+    let planet = pebble();
+    let (mut eph, index) = planet_ephemeris(&planet);
+    let demo = demo_rocket(&planet.terrain);
+    let mut pad = PartJointRocket::landed(
+        &mut eph,
+        index,
+        planet.terrain.clone(),
+        demo.full.clone(),
+        demo.upper.clone(),
+        demo.booster.clone(),
+        demo.options,
+        demo.launch_site,
+    );
+    let stack = pad.controlled_inertia();
+    pad.separate(&eph);
+    (stack, pad.controlled_inertia())
+}
+
+/// A craft on lab/landing's flight attitude integrator with no damping.
+struct Craft {
+    rotation: DQuat,
+    angular_velocity: DVec3,
+    largest_command: f64,
+    inertia: Mat3,
+    sas: StabilityAssist,
+}
+
+impl Craft {
+    fn new(inertia: Mat3) -> Self {
+        Self {
+            rotation: tilted(),
+            angular_velocity: DVec3::ZERO,
+            largest_command: 0.0,
+            inertia,
+            sas: StabilityAssist::new(STEERING_TORQUE, SAS_TUNING),
+        }
+    }
+
+    fn step(&mut self, pilot: DVec3) -> DVec3 {
+        let u = self.sas.command(
+            self.rotation,
+            self.angular_velocity,
+            &self.inertia,
+            pilot,
+            DT,
+        );
+        self.largest_command = self.largest_command.max(u.abs().max_element());
+        (self.rotation, self.angular_velocity) = rotation_step(
+            self.rotation,
+            self.angular_velocity,
+            &self.inertia,
+            u * STEERING_TORQUE,
+            DVec3::ZERO,
+            DT,
+        );
+        u
+    }
+
+    fn run(&mut self, seconds: f64, pilot: DVec3, mut each: impl FnMut(&Self, f64)) {
+        for k in 0..(seconds / DT).round() as usize {
+            self.step(pilot);
+            each(self, k as f64 * DT);
+        }
+    }
+}
+
+fn scaled(m: Mat3, k: f64) -> Mat3 {
+    m.map(|v| v * k)
+}
+
+#[test]
+fn holds_against_a_kick() {
+    let (stack, upper) = inertias();
+    println!(
+        "inertia (kg m², local diagonal): stack {:.0} / {:.0} / {:.0}, upper {:.0} / {:.0} / {:.0}",
+        stack[0], stack[4], stack[8], upper[0], upper[4], upper[8]
+    );
+    for (label, inertia) in [
+        ("full stack", stack),
+        ("upper stage", upper),
+        ("stack x4 (heavier craft)", scaled(stack, 4.0)),
+        ("upper x0.25 (nearly empty)", scaled(upper, 0.25)),
+    ] {
+        let mut craft = Craft::new(inertia);
+        craft.sas.set_enabled(true);
+        craft.run(0.5, DVec3::ZERO, |_, _| {});
+        let lock = craft.sas.target().expect("locked");
+        let locked_at_once =
+            craft.sas.phase() == SasPhase::Holding && angle(lock, tilted()) < 1e-12;
+        // Kick: an off-axis spin of 0.2 rad/s in the frame.
+        craft.angular_velocity = DVec3::new(0.12, -0.1, 0.13);
+        let kick = craft.angular_velocity.length();
+        let (mut peak, mut settled, mut close_in, mut overshoot) =
+            (0.0_f64, f64::INFINITY, f64::INFINITY, 0.0_f64);
+        craft.run(30.0, DVec3::ZERO, |c, t| {
+            let a = angle(lock, c.rotation);
+            peak = peak.max(a);
+            if close_in == f64::INFINITY && peak > 0.0 && a < 0.01 * peak {
+                close_in = t;
+            }
+            if close_in != f64::INFINITY {
+                overshoot = overshoot.max(a);
+            }
+            if a < 0.1 / DEG && c.angular_velocity.length() < 1e-3 {
+                if settled == f64::INFINITY {
+                    settled = t;
+                }
+            } else {
+                settled = f64::INFINITY;
+            }
+        });
+        let fin = angle(lock, craft.rotation);
+        println!(
+            "{label}: kick {kick:.2} rad/s turned it {:.2}° away; back within 0.1° and 1e-3 rad/s after {settled:.2} s, overshoot {:.2}% of the peak, final {:.1e}°, largest command {:.3}",
+            peak * DEG,
+            overshoot / peak * 100.0,
+            fin * DEG,
+            craft.largest_command
+        );
+        assert!(
+            locked_at_once
+                && fin < 0.01 / DEG
+                && settled < 15.0
+                && overshoot < 0.05 * peak
+                && craft.largest_command <= 1.0 + 1e-12,
+            "holds against a kick: {label}"
+        );
+    }
+}
+
+#[test]
+fn pilot_input_release_and_new_lock() {
+    let (stack, _) = inertias();
+    let mut craft = Craft::new(stack);
+    craft.sas.set_enabled(true);
+    craft.run(0.5, DVec3::ZERO, |_, _| {});
+    let original = craft.sas.target().unwrap();
+    // Off-axis drift while the pilot pitches: SAS must stop it on the free axes.
+    let r = matrix(craft.rotation);
+    let (y, z) = (0.05, 0.05);
+    craft.angular_velocity = DVec3::new(
+        r[1] * y + r[2] * z,
+        r[4] * y + r[5] * z,
+        r[7] * y + r[8] * z,
+    );
+    let mut pass_through = true;
+    for _ in 0..60 {
+        if craft.step(DVec3::X).x != 1.0 {
+            pass_through = false;
+        }
+    }
+    let phase_while_held = craft.sas.phase();
+    let spin = local(craft.rotation, craft.angular_velocity);
+    let (pitch_rate, off_axis) = (spin.x.abs(), spin.y.hypot(spin.z));
+    let (mut locked_at, mut lock_time) = (None, f64::INFINITY);
+    craft.run(15.0, DVec3::ZERO, |c, t| {
+        if locked_at.is_none() && c.sas.phase() == SasPhase::Holding {
+            locked_at = c.sas.target();
+            lock_time = t;
+        }
+    });
+    let locked_at = locked_at.expect("locked again");
+    let (drift, moved) = (angle(locked_at, craft.rotation), angle(original, locked_at));
+    println!(
+        "1 s of full pitch: command stayed 1, pitch rate {pitch_rate:.3} rad/s; roll/yaw drift 0.071 -> {off_axis:.2e} rad/s"
+    );
+    println!(
+        "locked {lock_time:.2} s after release, {:.1}° from the old lock; 15 s later {:.1e}° from the new one",
+        moved * DEG,
+        drift * DEG
+    );
+    assert!(
+        pass_through
+            && phase_while_held == SasPhase::Pilot
+            && off_axis < 0.1 * 0.05 * 2.0 * FRAC_1_SQRT_2
+            && pitch_rate > 0.2,
+        "pilot axis passes through, other axes are damped"
+    );
+    assert!(
+        moved > 5.0 / DEG && drift < 0.01 / DEG,
+        "release damps, then locks the new attitude"
+    );
+}
+
+#[test]
+fn off_passes_through_and_does_not_stop_a_spin() {
+    let (_, upper) = inertias();
+    let mut craft = Craft::new(upper);
+    let pilot = DVec3::new(0.3, -1.0, 0.0);
+    let same = craft.step(pilot);
+    // Spin about the long axis (a principal axis): with SAS off and no damping it keeps going.
+    craft.rotation = DQuat::IDENTITY;
+    craft.angular_velocity = DVec3::new(0.0, 0.4, 0.0);
+    craft.run(10.0, DVec3::ZERO, |_, _| {});
+    let kept = craft.angular_velocity.length();
+    println!("spin 0.4 rad/s after 10 s: {kept:.12} rad/s");
+    assert!(same == pilot && craft.sas.phase() == SasPhase::Off && (kept - 0.4).abs() < 1e-12);
+}
+
+#[test]
+fn turned_on_while_spinning() {
+    let (stack, _) = inertias();
+    let mut craft = Craft::new(stack);
+    craft.angular_velocity = DVec3::new(0.3, 0.2, -0.1);
+    craft.sas.set_enabled(true);
+    let (mut lock_time, mut rate_at_lock) = (f64::INFINITY, f64::INFINITY);
+    craft.run(20.0, DVec3::ZERO, |c, t| {
+        if lock_time == f64::INFINITY && c.sas.phase() == SasPhase::Holding {
+            lock_time = t;
+            rate_at_lock = c.angular_velocity.length();
+        }
+    });
+    let drift = angle(craft.sas.target().unwrap(), craft.rotation);
+    println!(
+        "0.37 rad/s stopped and locked after {lock_time:.2} s (spin {rate_at_lock:.1e} rad/s); then {:.1e}° from the lock",
+        drift * DEG
+    );
+    assert!(
+        lock_time < 10.0
+            && rate_at_lock < 3e-3
+            && drift < 0.01 / DEG
+            && craft.largest_command <= 1.0 + 1e-12
+    );
+}
+
+#[test]
+fn bad_input_panics() {
+    let stack: Mat3 = [9000.0, 0.0, 0.0, 0.0, 2000.0, 0.0, 0.0, 0.0, 9000.0];
+    let panics =
+        |run: &dyn Fn()| std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)).is_err();
+    let on = || {
+        let mut sas = StabilityAssist::new(STEERING_TORQUE, SAS_TUNING);
+        sas.set_enabled(true);
+        sas
+    };
+    let cases = [
+        panics(&|| {
+            StabilityAssist::new(0.0, SAS_TUNING);
+        }),
+        panics(&|| {
+            StabilityAssist::new(
+                STEERING_TORQUE,
+                SasTuning {
+                    rate_seconds: 0.2,
+                    attitude_seconds: 0.5,
+                    brake_fraction: 0.5,
+                    lock_rate: 1e-3,
+                },
+            );
+        }),
+        panics(&|| {
+            on().command(tilted(), DVec3::ZERO, &stack, DVec3::new(1.5, 0.0, 0.0), DT);
+        }),
+        panics(&|| {
+            on().command(tilted(), DVec3::ZERO, &stack, DVec3::ZERO, 0.0);
+        }),
+        panics(&|| {
+            on().command(
+                tilted(),
+                DVec3::ZERO,
+                &[0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                DVec3::ZERO,
+                DT,
+            );
+        }),
+        panics(&|| {
+            on().command(
+                tilted(),
+                DVec3::ZERO,
+                &[1.0, 0.0, 0.0, 0.0, f64::NAN, 0.0, 0.0, 0.0, 1.0],
+                DVec3::ZERO,
+                DT,
+            );
+        }),
+    ];
+    println!("thrown: {cases:?} (torque 0, loose tuning, pilot 1.5, dt 0, zero and NaN inertia)");
+    assert!(cases.iter().all(|&c| c));
+}
+
+#[test]
+fn on_the_rocket_in_contact_and_in_flight() {
+    let planet = pebble();
+    let (mut eph, index) = planet_ephemeris(&planet);
+    let demo = demo_rocket(&planet.terrain);
+    let mut rocket = PartJointRocket::landed(
+        &mut eph,
+        index,
+        planet.terrain.clone(),
+        demo.full.clone(),
+        demo.upper.clone(),
+        demo.booster.clone(),
+        demo.options,
+        demo.launch_site,
+    );
+    let step = demo.options.contact.step_seconds;
+
+    // Both a turn and a steering law: the rocket refuses.
+    let both = {
+        let mut probe = PartJointRocket::landed(
+            &mut eph,
+            index,
+            planet.terrain.clone(),
+            demo.full.clone(),
+            demo.upper.clone(),
+            demo.booster.clone(),
+            demo.options,
+            demo.launch_site,
+        );
+        let control = LanderControl {
+            up: 1.0,
+            turn: Some(DVec3::ZERO),
+            ..Default::default()
+        };
+        let mut steer = |_, _| DVec3::ZERO;
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            probe.advance(&mut eph, step, &control, Some(&mut steer))
+        }))
+        .is_err()
+    };
+
+    // Tip it with the keys while climbing, then hand over to SAS and keep climbing into free flight.
+    let tip = LanderControl {
+        throttle: 1.0,
+        up: 1.0,
+        turn: Some(DVec3::new(0.4, 0.2, 0.0)),
+        ..Default::default()
+    };
+    for _ in 0..60 {
+        rocket.advance(&mut eph, step, &tip, None);
+    }
+    let tip_spin = rocket.part_angular_velocity(RocketPart::Upper).length();
+    let climb = LanderControl {
+        throttle: 1.0,
+        up: 1.0,
+        ..Default::default()
+    };
+    let mut sas = StabilityAssist::new(STEERING_TORQUE, SAS_TUNING);
+    sas.set_enabled(true);
+    let (mut calls, mut inertia_matches) = (0_usize, true);
+    let start = rocket.time();
+    let mut contact_steps = 0;
+    while rocket.mode() == PhysicsMode::Contact && rocket.time() - start < 60.0 {
+        let expected = rocket.controlled_inertia();
+        let mut steer = |sample: void_landing::AttitudeSample, dt: f64| {
+            calls += 1;
+            if sample
+                .inertia_local
+                .iter()
+                .zip(&expected)
+                .any(|(a, b)| (a - b).abs() > 1e-9 * expected[0].abs())
+            {
+                inertia_matches = false;
+            }
+            sas.command(
+                sample.rotation,
+                sample.angular_velocity,
+                &sample.inertia_local,
+                DVec3::ZERO,
+                dt,
+            )
+        };
+        rocket.advance(&mut eph, step, &climb, Some(&mut steer));
+        contact_steps += 1;
+    }
+    let contact_spin = rocket.part_angular_velocity(RocketPart::Upper).length();
+    let in_flight = rocket.mode() == PhysicsMode::Flight;
+    let locked_in_contact = sas.phase() == SasPhase::Holding;
+    let contact_calls = calls;
+
+    // In flight: one advance over several frames, as time warp does; SAS still runs every step.
+    let (flight_start, held, calls_before) = (rocket.time(), rocket.orientation(), calls);
+    {
+        let mut steer = |sample: void_landing::AttitudeSample, dt: f64| {
+            calls += 1;
+            sas.command(
+                sample.rotation,
+                sample.angular_velocity,
+                &sample.inertia_local,
+                DVec3::ZERO,
+                dt,
+            )
+        };
+        rocket.advance(&mut eph, 4.0, &climb, Some(&mut steer));
+    }
+    let flight_calls = calls - calls_before;
+    let expected_calls = ((rocket.time() - flight_start) / step).round() as usize;
+    let drift = angle(held, rocket.orientation());
+    println!(
+        "tipped to {tip_spin:.3} rad/s under thrust; SAS stopped and locked it before leaving the contact band ({contact_steps} steps, {contact_calls} steering calls), spin there {contact_spin:.1e} rad/s"
+    );
+    println!(
+        "4 s burn in one advance: {flight_calls} steering calls for {expected_calls} steps; attitude held within {:.1e}°",
+        drift * DEG
+    );
+    assert!(both, "turn and steering together panic");
+    assert!(
+        locked_in_contact
+            && contact_spin < 3e-3
+            && inertia_matches
+            && contact_calls == contact_steps,
+        "SAS on the rocket in contact physics"
+    );
+    assert!(
+        in_flight
+            && rocket.mode() == PhysicsMode::Flight
+            && flight_calls.abs_diff(expected_calls) <= 1
+            && drift < 0.05 / DEG,
+        "SAS on the rocket in free flight"
+    );
+}

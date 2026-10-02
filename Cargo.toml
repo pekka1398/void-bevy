@@ -26,6 +26,8 @@ void-landing = { path = "crates/landing" }
 void-lod = { path = "crates/lod" }
 void-terrain = { path = "crates/terrain" }
 void-scenery = { path = "crates/scenery" }
+void-sas = { path = "crates/sas" }
+void-navball = { path = "crates/navball" }
 
 # Bevy is slow unoptimised; our own crates stay quick to rebuild.
 [profile.dev]

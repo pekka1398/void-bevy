@@ -1,5 +1,5 @@
 //! Math shared by the physics crates, matching V8 where the labs depend on the last digits:
-//! `hypot` as V8's `Math.hypot`, and fdlibm's `tan`, `acos`, `asin`, `atan`, `exp`, which V8 also
+//! `hypot` as V8's `Math.hypot`, and fdlibm's `tan`, `acos`, `asin`, `atan`, `atan2`, `exp`, which V8 also
 //! uses. V8's `sin` and `cos` are neither fdlibm nor the system's (each differs on 1–3% of inputs),
 //! so code using them agrees with the labs to an ulp, not bit for bit.
 
@@ -41,7 +41,7 @@ pub fn length(v: DVec3) -> f64 {
 }
 
 // fdlibm, as V8's Math functions; the system libm behind std rounds some inputs differently.
-pub use libm::{acos, asin, atan, exp, tan};
+pub use libm::{acos, asin, atan, atan2, exp, tan};
 
 // fdlibm as well, but V8 differs from these: see the crate note.
 pub use libm::{cos, pow, sin};

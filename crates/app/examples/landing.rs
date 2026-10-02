@@ -14,12 +14,12 @@ use bevy::prelude::*;
 use bevy::render::RenderPlugin;
 use bevy::render::render_resource::WgpuFeatures;
 use bevy::render::settings::WgpuSettings;
-use glam::{DQuat, DVec3};
+use glam::DVec3;
+use void_app::parts::spawn_shape;
 use void_app::tiles::{Tile, TileField, anchor};
 use void_landing::{
-    BodyShape, CoastPrediction, DemoRocket, LanderControl, LandingPlanet, PartJointRocket,
-    PhysicsMode, Piece, RocketPart, SimpleShape, demo_rocket, landing_lod_options, planet_by_id,
-    planet_ephemeris, predict_coast,
+    CoastPrediction, DemoRocket, LanderControl, LandingPlanet, PartJointRocket, PhysicsMode,
+    RocketPart, demo_rocket, landing_lod_options, planet_by_id, planet_ephemeris, predict_coast,
 };
 use void_lod::LodView;
 use void_orbit::Ephemeris;
@@ -131,51 +131,6 @@ fn new_rocket(
         demo.options,
         demo.launch_site,
     )
-}
-
-/// Bevy meshes for a compound collider: cylinders, cones and boxes on Y, as Rapier's.
-fn spawn_shape(
-    parent: &mut ChildSpawnerCommands,
-    shape: &BodyShape,
-    meshes: &mut Assets<Mesh>,
-    material: &Handle<StandardMaterial>,
-) {
-    let pieces: Vec<Piece> = match shape {
-        BodyShape::Compound(pieces) => pieces.clone(),
-        BodyShape::Simple(s) => vec![Piece {
-            shape: *s,
-            position: DVec3::ZERO,
-            rotation: None,
-            mass: None,
-        }],
-    };
-    for piece in pieces {
-        let mesh = match piece.shape {
-            SimpleShape::Cylinder {
-                radius,
-                half_height,
-            } => meshes.add(Cylinder::new(radius as f32, 2.0 * half_height as f32)),
-            SimpleShape::Cone {
-                radius,
-                half_height,
-            } => meshes.add(Cone {
-                radius: radius as f32,
-                height: 2.0 * half_height as f32,
-            }),
-            SimpleShape::Box { half_extents: h } => meshes.add(Cuboid::new(
-                2.0 * h.x as f32,
-                2.0 * h.y as f32,
-                2.0 * h.z as f32,
-            )),
-            SimpleShape::Ball { radius } => meshes.add(Sphere::new(radius as f32)),
-        };
-        let rotation = piece.rotation.unwrap_or(DQuat::IDENTITY).as_quat();
-        parent.spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(material.clone()),
-            Transform::from_translation(piece.position.as_vec3()).with_rotation(rotation),
-        ));
-    }
 }
 
 fn setup(

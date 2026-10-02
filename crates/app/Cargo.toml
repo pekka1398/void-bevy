@@ -16,5 +16,8 @@ void-terrain.workspace = true
 void-landing.workspace = true
 void-scenery.workspace = true
 void-math.workspace = true
+void-navball.workspace = true
+void-rotation.workspace = true
+void-sas.workspace = true
 # The version Bevy already pulls in, for the half-float tables.
 half = "2.7"
