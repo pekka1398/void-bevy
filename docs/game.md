@@ -26,6 +26,17 @@ cargo test -p void-app --test flight                    # lab/flight 的接線�
 - lab-log：debug build 寫入 `lab-log/flight.jsonl`（已被 .gitignore 排除），欄位順序與 lab 相同（`wall` 在前）。事件：`session`、每秒一次的 `flight-sample`（時間、模式、相機、地圖權重、co-rotation、tile 數與快取、主執行緒各階段耗時）、`focus`、`reset`、`path-frame`、`terrain-visibility`。lab 的 GPU 繪圖統計（draw call、三角形數、renderer 複本大小）沒有對應，`drawMs` 是 draw system 的 CPU 時間。
 - 火箭和其他天體用 Bevy 的 StandardMaterial 與一盞平行光（1000 lux，在 Bevy 預設曝光下對應 scenery 的太陽照度 1），不經過大氣衰減，所以黃昏時火箭比地面亮。lab 也是一樣的簡化。
 
+## 空氣（TS 沒有）
+
+TS 主遊戲在真空飛行，aero 只在它自己的 lab 裡。這裡把 aero 接進主遊戲，是刻意的新增，不是移植：
+
+- 行星帶 `air_density_scale`（`void-landing`）：Aurelia 與 Terra 是 `Some(1.0)`，Pebble 與 Luna 是 None，也就是完全沒有空氣場，不是處處為零的場。Aurelia 在 `sol.json` 裡就是地球（5.9722e24 kg、6371 km），所以用地球大氣不需要任何調整。
+- 大氣模型是 aero 的 `EarthAtmosphere`，即 US standard 分層。0–50 km 與 ISA 表逐項相符（地面 1.2250、5 km 0.73643、10 km 0.41351 kg/m³）；86 km 以上是等溫近似，105–120 km 收到真空。模型只吃海拔，不含地形高度。
+- 施力路徑：`void-orbit` 的 `AirSource`（自由飛行，Dopri5 每個 stage 都問）與 contact step 的既有外力 hook（Rapier，每個剛體各自問）。`void-landing` 不認識 aero，只負責把本體座標的力轉成慣性加速度（`PlanetAir`）；`void-app` 的 `aero_field.rs` 才接上 aero。沒有設定空氣場時行為與先前完全相同。
+- 每一級是一個圓柱氣動體（front_cd 0.6、rear_cd 0.8、side_cd 1.1，照 aero lab 的火箭）。兩級相接時互相遮住對接面，但助推級較粗（半徑 1.5 m vs 1.05 m），露出的那圈肩部仍然吃阻力。
+- **只有力，還沒有力矩**：火箭不會自己對準氣流（風標效應），氣動阻尼也還沒有。要補的話需要在這個 trait 上加力矩，並讓 contact step 與飛行姿態積分各開一條路。
+- demo 火箭當初是照「無大氣」調的（`demo_rocket.rs`），所以加上空氣後垂直全推力上升的助推級熄火從 2460 m/s、97.7 km 掉到 1381 m/s、46.8 km。火箭參數沒有為此重新配平。
+
 ## 檢查（`tests/flight.rs`）
 
 lab/flight 的 `flight-check.ts`，門檻相同：

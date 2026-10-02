@@ -2,6 +2,7 @@
 //! uses the orbit crate's inertial propagator above the terrain band; near the ground, bodies are
 //! handed to Rapier in the planet-fixed frame.
 
+mod air;
 mod coast;
 mod contact_world;
 mod demo_rocket;
@@ -10,6 +11,7 @@ mod planet_frame;
 mod planets;
 mod rocket;
 
+pub use air::{AirField, PlanetAir};
 pub use coast::{
     CoastPrediction, EncounterPairState, EncounterPhysicsGate, EncounterRanges, predict_coast,
 };

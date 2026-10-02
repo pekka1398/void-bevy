@@ -11,12 +11,13 @@ use glam::{DQuat, DVec3};
 use rapier3d::prelude::{FixedJointBuilder, ImpulseJointHandle, RigidBodyHandle};
 use void_math::hypot;
 use void_orbit::{
-    AdvanceOutcome, AttitudeLaw, Control, Ephemeris, PropagationRun, ThrustControl,
+    AdvanceOutcome, AirSource, AttitudeLaw, Control, Ephemeris, PropagationRun, ThrustControl,
     VesselPropagator, VesselState, body_orientation,
 };
 use void_rotation::{Mat3, matrix, rotation_step};
 use void_terrain::Terrain;
 
+use crate::air::{AirField, PlanetAir, unit};
 use crate::contact_world::ContactWorld;
 use crate::lander::{LanderControl, LanderOptions, LanderSpec, STANDARD_GRAVITY, rotate};
 use crate::planet_frame::{ContactFrame, FrameState, PlanetFrame};
@@ -191,6 +192,7 @@ pub struct PartJointRocket {
     sim_time: f64,
     last_mode: PhysicsMode,
     propagator: VesselPropagator,
+    air: Option<Arc<dyn AirField>>,
 }
 
 impl PartJointRocket {
@@ -259,6 +261,7 @@ impl PartJointRocket {
             crashes: Vec::new(),
             crash_detection: false,
             propagator: VesselPropagator::new(ephemeris, options.tolerances),
+            air: None,
             terrain: terrain.clone(),
             options,
             upper: slot(&upper_spec, UPPER_OFFSET),
@@ -458,6 +461,13 @@ impl PartJointRocket {
             }
         }
         out
+    }
+
+    /// Fly through air instead of vacuum. The field is asked in the planet's body-fixed frame, in
+    /// both free flight and contact; None, the default, is vacuum and the behaviour this crate had
+    /// before there was any air at all.
+    pub fn set_air_field(&mut self, air: Option<Arc<dyn AirField>>) {
+        self.air = air;
     }
 
     pub fn contact_worlds(&self) -> Vec<&ContactWorld<PlanetFrame>> {
@@ -843,14 +853,39 @@ impl PartJointRocket {
             (before.y + push.y) / 2.0,
             (before.z + push.z) / 2.0,
         );
+        // Each Rapier body is its own rigid unit here, so the air is asked about one part at a
+        // time, at the attitude Rapier is holding it in.
+        let air = self.air.clone();
+        let in_air: Vec<(usize, RigidBodyHandle, RocketPart, DQuat, f64)> = PARTS
+            .into_iter()
+            .filter_map(|which| {
+                let s = self.slot(which);
+                let (w, b) = (s.world?, s.body?);
+                Some((
+                    w,
+                    b,
+                    which,
+                    unit(q64(*self.world_ref(w).body(b).rotation())),
+                    self.part_mass(which),
+                ))
+            })
+            .collect();
         for w in self.contact_world_indices() {
             let engine_here = engine.world == Some(w);
-            let mut extra = |body: RigidBodyHandle, _: FrameState| {
-                if engine_here && Some(body) == engine.body {
+            let (air, in_air) = (air.as_ref(), &in_air);
+            let mut extra = |body: RigidBodyHandle, state: FrameState| {
+                let mut a = if engine_here && Some(body) == engine.body {
                     average
                 } else {
                     DVec3::ZERO
+                };
+                if let Some(field) = air
+                    && let Some((_, _, which, rotation, mass)) =
+                        in_air.iter().find(|(iw, ib, ..)| *iw == w && *ib == body)
+                {
+                    a += field.force(&[*which], state, *rotation, *mass) / *mass;
                 }
+                a
             };
             self.world_mut(w).step(ephemeris, Some(&mut extra));
         }
@@ -867,8 +902,7 @@ impl PartJointRocket {
             let Some(mut run) = self.slot_mut(which).run.take() else {
                 continue;
             };
-            let engine = (which == engine_part).then_some(which);
-            self.propagate(ephemeris, &mut run, t1, engine, control.throttle, control);
+            self.propagate(ephemeris, &[which], &mut run, t1, control.throttle, control);
             self.slot_mut(which).run = Some(run);
             self.step_flight_attitude(&[which], control, steering.as_deref_mut(), step);
         }
@@ -994,14 +1028,13 @@ impl PartJointRocket {
             }
         }
         for parts in &units {
-            let engine = parts.contains(&engine_part).then_some(engine_part);
             if parts.len() == 2 {
                 let mut run = self.attached_run.take().expect("attached");
-                self.propagate(ephemeris, &mut run, end, engine, control.throttle, control);
+                self.propagate(ephemeris, parts, &mut run, end, control.throttle, control);
                 self.attached_run = Some(run);
             } else {
                 let mut run = self.slot_mut(parts[0]).run.take().expect("flying");
-                self.propagate(ephemeris, &mut run, end, engine, control.throttle, control);
+                self.propagate(ephemeris, parts, &mut run, end, control.throttle, control);
                 self.slot_mut(parts[0]).run = Some(run);
             }
         }
@@ -1027,12 +1060,29 @@ impl PartJointRocket {
     fn propagate(
         &mut self,
         ephemeris: &mut Ephemeris,
+        parts: &[RocketPart],
         run: &mut PropagationRun,
         end: f64,
-        engine: Option<RocketPart>,
         throttle: f64,
         command: &LanderControl,
     ) {
+        // The engine burns for the unit it is flying with, if it is in this one.
+        let engine_part = self.engine_part();
+        let engine = parts.contains(&engine_part).then_some(engine_part);
+        // The air field sees this unit at the attitude the attitude integrator is holding; the
+        // propagator keeps the source only for as long as this leg.
+        let air = self.air.clone().map(|field| {
+            Arc::new(PlanetAir::new(
+                field,
+                &self.frame.body,
+                self.frame.omega,
+                parts,
+                self.part_orientation(parts[0]),
+                ephemeris,
+                run.time,
+            )) as Arc<dyn AirSource>
+        });
+        self.propagator.set_air_source(air);
         while run.time + 1e-12 < end {
             let thrust = engine
                 .and_then(|e| self.flight_control(e, throttle, run.time, command.orbital_attitude));

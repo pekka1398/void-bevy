@@ -30,6 +30,7 @@ use glam::{DMat3, DQuat, DVec3};
 use serde_json::json;
 use std::collections::HashMap;
 use std::time::Instant;
+use void_app::aero_field::RocketAir;
 use void_app::air::{AirSettings, AirTextures, noise_volume_image, weather_image};
 use void_app::flight::{
     GamePlanet, PARTS, PHYSICS_MAX_RATE, TIME_RATES, distance_text, game_planet_by_id,
@@ -221,7 +222,7 @@ struct Game {
 
 impl Game {
     fn launch(&mut self) -> PartJointRocket {
-        PartJointRocket::landed(
+        let mut rocket = PartJointRocket::landed(
             &mut self.ephemeris,
             self.home,
             self.planet.planet.terrain.clone(),
@@ -230,7 +231,9 @@ impl Game {
             self.demo.booster.clone(),
             self.demo.options,
             self.demo.launch_site,
-        )
+        );
+        rocket.set_air_field(RocketAir::for_planet(&self.planet.planet, &self.demo));
+        rocket
     }
 
     /// An ecliptic vector in render axes (the planet's body-fixed axes).
@@ -798,7 +801,7 @@ fn setup(
     if let Some(site) = planet.launch_site {
         demo.launch_site = site;
     }
-    let rocket = PartJointRocket::landed(
+    let mut rocket = PartJointRocket::landed(
         &mut ephemeris,
         home,
         planet.planet.terrain.clone(),
@@ -808,6 +811,7 @@ fn setup(
         demo.options,
         demo.launch_site,
     );
+    rocket.set_air_field(RocketAir::for_planet(&planet.planet, &demo));
 
     // scenery's atmosphere tables and cloud noise, and the ground and sea shader on the tiles.
     let scenery_started = Instant::now();

@@ -8,6 +8,8 @@ Bevy/Rust/native Rapier 的可行性實驗已有足夠成果，可以成為主�
 
 TS 主遊戲沒有整合 assembly、aerodynamics、vessels、multiscale。Rust 同樣保持這些 lab 獨立，符合參考版，不是漏移植；不需要為了獨立專案而先整合它們。
 
+（搬遷後的新增：aero 已接入主遊戲，行星有大氣會對火箭施力。這是刻意超出 TS 的範圍，不屬於移植盤點，見 [game.md](game.md)。assembly、vessels、multiscale 仍獨立。）
+
 ## 已有的系統
 
 workspace 共 21 個 package：15 個功能／基礎 crate、`void-app` 及 5 個獨立 lab 程式。

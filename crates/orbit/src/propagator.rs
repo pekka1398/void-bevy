@@ -1,6 +1,7 @@
 //! One vessel through the ephemeris' gravity, as `lab/orbit/src/orbit/VesselPropagator.ts`.
 
 use std::f64::consts::TAU;
+use std::sync::Arc;
 
 use glam::DVec3;
 
@@ -239,6 +240,17 @@ impl PropagationRun {
     }
 }
 
+/// An acceleration that depends on where the vessel is and how fast it is going, which a constant
+/// `Control` cannot express: air, in practice. The integrator asks for it inside every stage, so an
+/// implementation must be a pure function of the arguments — it may not accumulate anything.
+///
+/// Orbit knows nothing about atmospheres or vessel shapes; whoever supplies the source owns both.
+pub trait AirSource: Send + Sync {
+    /// Acceleration in the ephemeris frame, m/s², at `t` for a vessel of `mass_kg` passing
+    /// `position` with `velocity`. Zero outside any atmosphere.
+    fn acceleration(&self, t: f64, position: DVec3, velocity: DVec3, mass_kg: f64) -> DVec3;
+}
+
 /// Gravity and thrust as the integrator sees them; borrowed apart from the stepper.
 struct Field {
     gm: Vec<f64>,
@@ -249,6 +261,7 @@ struct Field {
     positions: Vec<DVec3>,
     velocities: Vec<DVec3>,
     control: Option<Control>,
+    air: Option<Arc<dyn AirSource>>,
 }
 
 impl Field {
@@ -319,6 +332,9 @@ impl Field {
                 dy[6] = -c.thrust_newtons / c.exhaust_velocity;
             }
             None => dy[6] = 0.0,
+        }
+        if let Some(air) = &self.air {
+            a += air.acceleration(t, DVec3::new(x, yy, z), DVec3::new(y[3], y[4], y[5]), y[6]);
         }
         dy[3] = a.x;
         dy[4] = a.y;
@@ -433,9 +449,20 @@ impl VesselPropagator {
                 positions: vec![DVec3::ZERO; bodies.len()],
                 velocities: vec![DVec3::ZERO; bodies.len()],
                 control: None,
+                air: None,
             },
             body_count: bodies.len(),
         }
+    }
+
+    /// Add an acceleration the control cannot express, or None to fly through vacuum. It is in
+    /// force for every later `advance` on this propagator.
+    pub fn set_air_source(&mut self, air: Option<Arc<dyn AirSource>>) {
+        self.field.air = air;
+    }
+
+    pub fn has_air_source(&self) -> bool {
+        self.field.air.is_some()
     }
 
     /// Unit thrust direction the law gives for a state at t.
@@ -510,7 +537,10 @@ impl VesselPropagator {
                 );
             }
         }
-        if run.derivative_control != Some(control) {
+        // The stored derivative is the previous step's last stage, which is only still right if the
+        // field has not moved under it. An air source is state-dependent and whoever owns it may
+        // have retuned it between calls (the vessel's attitude, say), so re-evaluate then.
+        if run.derivative_control != Some(control) || self.field.air.is_some() {
             self.field
                 .evaluate(ephemeris, run.time, &run.y, &mut run.dy);
             run.derivative_control = Some(control);

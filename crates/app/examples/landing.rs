@@ -15,6 +15,7 @@ use bevy::render::RenderPlugin;
 use bevy::render::render_resource::WgpuFeatures;
 use bevy::render::settings::WgpuSettings;
 use glam::DVec3;
+use void_app::aero_field::RocketAir;
 use void_app::parts::spawn_shape;
 use void_app::tiles::{Tile, TileField, anchor};
 use void_landing::{
@@ -122,7 +123,7 @@ fn new_rocket(
     body_index: usize,
     demo: &DemoRocket,
 ) -> PartJointRocket {
-    PartJointRocket::landed(
+    let mut rocket = PartJointRocket::landed(
         ephemeris,
         body_index,
         sim_planet.terrain.clone(),
@@ -131,7 +132,9 @@ fn new_rocket(
         demo.booster.clone(),
         demo.options,
         demo.launch_site,
-    )
+    );
+    rocket.set_air_field(RocketAir::for_planet(sim_planet, demo));
+    rocket
 }
 
 fn setup(

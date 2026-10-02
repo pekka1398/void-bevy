@@ -22,9 +22,14 @@ pub struct LandingPlanet {
     /// Data the terrain is built from; tile builders rebuild the same terrain from it.
     pub terrain_config: TerrainConfig,
     pub terrain: Arc<Terrain>,
+    /// Sea-level air density as a multiple of Earth's 1.225 kg/m³, or None for an airless world.
+    /// Only the amount of air is a planet's own: the profile it thins out along is the aero
+    /// crate's, so this is meaningful on an Earth-size planet and a liberty elsewhere.
+    pub air_density_scale: Option<f64>,
 }
 
 struct PlanetParameters {
+    air_density_scale: Option<f64>,
     id: &'static str,
     name: &'static str,
     color: &'static str,
@@ -84,6 +89,7 @@ fn landing_planet(p: PlanetParameters) -> LandingPlanet {
         },
         terrain: Arc::new(Terrain::from_config(&terrain_config)),
         terrain_config,
+        air_density_scale: p.air_density_scale,
     }
 }
 
@@ -94,6 +100,7 @@ pub fn pebble() -> LandingPlanet {
     let radius_meters = 100e3;
     landing_planet(PlanetParameters {
         id: "pebble",
+        air_density_scale: None,
         name: "Pebble",
         color: "#6f8f5a",
         radius_meters,
@@ -109,6 +116,7 @@ pub fn pebble() -> LandingPlanet {
 pub fn moon_size() -> LandingPlanet {
     landing_planet(PlanetParameters {
         id: "luna",
+        air_density_scale: None,
         name: "Luna",
         color: "#9a9a92",
         radius_meters: 1_737_400.0,
@@ -124,6 +132,7 @@ pub fn moon_size() -> LandingPlanet {
 pub fn earth_size() -> LandingPlanet {
     landing_planet(PlanetParameters {
         id: "terra",
+        air_density_scale: Some(1.0),
         name: "Terra",
         color: "#4f7f4a",
         radius_meters: 6_371_000.0,
@@ -181,6 +190,7 @@ fn aurelia_with_spin(spin_factor: f64) -> LandingPlanet {
         system,
         terrain: Arc::new(Terrain::from_config(&terrain_config)),
         terrain_config,
+        air_density_scale: Some(1.0),
     }
 }
 

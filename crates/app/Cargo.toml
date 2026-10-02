@@ -14,6 +14,7 @@ void-lod.workspace = true
 # Session log lines keep the lab's field order ("wall" first).
 serde_json = { workspace = true, features = ["preserve_order"] }
 void-terrain.workspace = true
+void-aero.workspace = true
 void-landing.workspace = true
 void-scenery.workspace = true
 void-math.workspace = true

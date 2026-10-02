@@ -27,8 +27,8 @@ pub use kepler::{
     solve_kepler_elliptic, state_from_elements, true_anomaly,
 };
 pub use propagator::{
-    AdvanceOutcome, AttitudeLaw, Control, ForceControl, Impact, PropagationRun, ThrustControl,
-    Tolerances, VesselPropagator, VesselState,
+    AdvanceOutcome, AirSource, AttitudeLaw, Control, ForceControl, Impact, PropagationRun,
+    ThrustControl, Tolerances, VesselPropagator, VesselState,
 };
 pub use reference_frames::{
     FrameEvaluator, FrameSpec, PlotFrameState, direction_to_frame, to_frame,
