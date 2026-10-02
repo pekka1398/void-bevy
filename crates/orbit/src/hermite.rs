@@ -14,6 +14,11 @@ pub struct HermiteBasis {
     d3: f64,
     d4: f64,
     d5: f64,
+    dd1: f64,
+    dd2: f64,
+    dd3: f64,
+    dd4: f64,
+    dd5: f64,
 }
 
 impl HermiteBasis {
@@ -34,6 +39,11 @@ impl HermiteBasis {
             d3: 1.5 * s2 - 4.0 * s3 + 2.5 * s4,
             d4: -12.0 * s2 + 28.0 * s3 - 15.0 * s4,
             d5: 30.0 * s2 - 60.0 * s3 + 30.0 * s4,
+            dd1: -36.0 * s + 96.0 * s2 - 60.0 * s3,
+            dd2: 1.0 - 9.0 * s + 18.0 * s2 - 10.0 * s3,
+            dd3: 3.0 * s - 12.0 * s2 + 10.0 * s3,
+            dd4: -24.0 * s + 84.0 * s2 - 60.0 * s3,
+            dd5: 60.0 * s - 180.0 * s2 + 120.0 * s3,
         }
     }
 
@@ -49,5 +59,12 @@ impl HermiteBasis {
             + self.d1 * v0
             + self.d4 * v1
             + self.h * (self.d2 * a0 + self.d3 * a1)
+    }
+
+    pub fn acceleration(&self, p0: f64, p1: f64, v0: f64, v1: f64, a0: f64, a1: f64) -> f64 {
+        self.dd5 * (p1 - p0) / self.hh
+            + (self.dd1 * v0 + self.dd4 * v1) / self.h
+            + self.dd2 * a0
+            + self.dd3 * a1
     }
 }

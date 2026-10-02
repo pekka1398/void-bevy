@@ -14,7 +14,7 @@ mod trajectory;
 
 pub use apsides::{Apsis, ApsisKind, DominanceTree, find_apsides};
 pub use dopri5::Dopri5;
-pub use ephemeris::{Ephemeris, EphemerisOptions, suggested_step_seconds};
+pub use ephemeris::{Ephemeris, EphemerisOptions, suggested_step_seconds, yoshida8_sequence};
 pub use flight_plan::{
     BurnSchedule, FlightPlan, ManeuverSpec, ManeuverStatus, PlanEngine, ReferenceMode,
 };

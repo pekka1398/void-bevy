@@ -6,7 +6,7 @@
 | --- | --- |
 | `Kepler.ts` | `kepler.rs` |
 | `SystemSpec.ts`（`buildSystem`、潮汐鎖定自轉） | `system.rs` |
-| `Hermite.ts`（位置與速度） | `hermite.rs` |
+| `Hermite.ts`（位置、速度與加速度） | `hermite.rs` |
 | `Ephemeris.ts` | `ephemeris.rs`，實作 `void_frames::BodyStates` |
 | `Dopri5.ts` | `dopri5.rs`（`Dopri5<N>`，維度是常數泛型） |
 | `Trajectory.ts` | `trajectory.rs` |

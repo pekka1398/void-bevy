@@ -5528,6 +5528,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-multiscale"
+version = "0.0.0"
+dependencies = [
+ "glam 0.32.1",
+ "serde_json",
+ "void-math",
+ "void-orbit",
+]
+
+[[package]]
 name = "void-navball"
 version = "0.0.0"
 dependencies = [

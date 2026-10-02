@@ -18,7 +18,8 @@ const YOSHIDA8_W: [f64; 7] = [
     1.042_426_208_699_91,
 ];
 
-fn yoshida8_sequence() -> [f64; 15] {
+/// The 15 substep weights, w7 .. w1 w0 w1 .. w7, as the lab's `YOSHIDA8_SEQUENCE`.
+pub fn yoshida8_sequence() -> [f64; 15] {
     let w0 = 1.0 - 2.0 * YOSHIDA8_W.iter().fold(0.0, |sum, w| sum + w);
     let mut sequence = [0.0; 15];
     for (i, w) in YOSHIDA8_W.iter().enumerate() {
