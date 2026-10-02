@@ -29,9 +29,11 @@ impl Plugin for SceneryPlugin {
         bevy::asset::embedded_asset!(app, "shaders/scenery/atmosphere.wgsl");
         bevy::asset::embedded_asset!(app, "shaders/scenery/ground.wgsl");
         bevy::asset::embedded_asset!(app, "shaders/scenery/stars.wgsl");
+        bevy::asset::embedded_asset!(app, "shaders/scenery/air.wgsl");
         app.add_plugins((
             MaterialPlugin::<GroundMaterial>::default(),
             MaterialPlugin::<StarMaterial>::default(),
+            crate::air::AirPlugin,
         ))
         .add_systems(Startup, load_shared_shaders);
     }

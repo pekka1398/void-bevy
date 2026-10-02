@@ -1,6 +1,6 @@
-//! The scenery lab's page in Bevy, stage A: lab/lod's tiles in the lab's ground and sea shader, the
-//! star field, the orbit view from the ground to 200,000 km, and the lab's exposure and ACES tone
-//! mapping. The air between the ground and the camera, the sky and the clouds come in later stages.
+//! The scenery lab's page in Bevy: lab/lod's tiles in the lab's ground and sea shader, the star
+//! field, the air and volumetric clouds integrated together over the scene, the sun's disc, the
+//! orbit view from the ground to 200,000 km, and the lab's exposure and ACES tone mapping.
 //!
 //! `--terrain layered|hills` (the lab's `?terrain=`), `--at LAT,LON` in degrees (`?at=`), and
 //! `--preset ground|sunset|night|cloud|plane|orbit|space` to start from a preset.
@@ -8,7 +8,8 @@
 //! Mouse as the lab: left drag pans, right drag orbits the planet centre, Shift + left drag turns,
 //! the wheel zooms. Keys stand in for the panel: 1–7 presets (ground, sunset, night, cloud layer,
 //! 10 km, 400 km, 20,000 km) · `,` `.` local time · R time rate · `[` `]` sun declination ·
-//! `-` `=` sea level (hold) · Z X exposure · A atmosphere · M multi-scatter · O ocean · S stars.
+//! `-` `=` sea level (hold) · Z X exposure · K L cloud coverage · A atmosphere · M multi-scatter ·
+//! C clouds · W weather only · O ocean · S stars.
 
 use std::f64::consts::{FRAC_PI_2, PI};
 use std::sync::Arc;
@@ -18,9 +19,11 @@ use bevy::camera::visibility::NoFrustumCulling;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
+use bevy::render::render_resource::TextureUsages;
 use bevy::render::view::{ColorGrading, ColorGradingGlobal, Msaa};
 use bevy::window::PrimaryWindow;
 use glam::DVec3;
+use void_app::air::{AirSettings, AirTextures, noise_volume_image, weather_image};
 use void_app::scenery::{
     GroundMaterial, GroundUniforms, SceneryPlugin, StarMaterial, star_mesh, table_image,
     update_ground,
@@ -30,8 +33,12 @@ use void_lod::{HOLMAN_SPLIT_DISTANCE_RATIOS, LodCamera, LodView, PlanetLodOption
 use void_scenery::atmosphere::{
     TRANSMITTANCE_HEIGHT, TRANSMITTANCE_WIDTH, build_transmittance_table,
 };
+use void_scenery::clouds::{
+    DETAIL_SIZE, SHAPE_SIZE, WEATHER_HEIGHT, WEATHER_WIDTH, build_cloud_noise, build_cloud_weather,
+};
 use void_scenery::tables::{
-    IRRADIANCE_HEIGHT, IRRADIANCE_WIDTH, build_irradiance_table, build_multiple_scattering_table,
+    IRRADIANCE_HEIGHT, IRRADIANCE_WIDTH, MULTIPLE_SCATTERING_SIZE, build_irradiance_table,
+    build_multiple_scattering_table,
 };
 use void_scenery::{DEFAULT_STARS, OrbitView, earth_like_atmosphere, generate_stars};
 use void_terrain::{DEFAULT_LAYERED, SEA_LEVEL, Terrain, TerrainConfig};
@@ -150,11 +157,17 @@ struct Scenery {
     multiple: bool,
     ocean: bool,
     stars: bool,
+    clouds: bool,
+    weather_only: bool,
+    coverage: f64,
+
     last_frame_height: f64,
     ground: Handle<GroundMaterial>,
     uniforms: GroundUniforms,
     star_material: Handle<StarMaterial>,
-    tables_ms: f64,
+        tables_ms: f64,
+    clouds_ms: f64,
+    fps: f64,
 }
 
 #[derive(Resource)]
@@ -258,6 +271,12 @@ fn setup(
     let multiple = build_multiple_scattering_table(&params, &transmittance, 64, 20);
     let irradiance = build_irradiance_table(&params, &transmittance, &multiple, 128, 24);
     let tables_ms = started.elapsed().as_secs_f64() * 1e3;
+    let started = std::time::Instant::now();
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let weather = build_cloud_weather(threads);
+    let shape = build_cloud_noise(SHAPE_SIZE, false);
+    let detail = build_cloud_noise(DETAIL_SIZE, true);
+    let clouds_ms = started.elapsed().as_secs_f64() * 1e3;
 
     let uniforms = GroundUniforms::new(
         &params,
@@ -265,18 +284,32 @@ fn setup(
         terrain.rock_height,
         terrain.snow_height,
     );
+    let transmittance = images.add(table_image(
+        &transmittance,
+        TRANSMITTANCE_WIDTH,
+        TRANSMITTANCE_HEIGHT,
+    ));
+    let irradiance = images.add(table_image(
+        &irradiance,
+        IRRADIANCE_WIDTH,
+        IRRADIANCE_HEIGHT,
+    ));
     let ground = grounds.add(GroundMaterial {
         ground: uniforms,
-        transmittance: images.add(table_image(
-            &transmittance,
-            TRANSMITTANCE_WIDTH,
-            TRANSMITTANCE_HEIGHT,
+        transmittance: transmittance.clone(),
+        irradiance: irradiance.clone(),
+    });
+    commands.insert_resource(AirTextures {
+        transmittance,
+        multiple: images.add(table_image(
+            &multiple,
+            MULTIPLE_SCATTERING_SIZE,
+            MULTIPLE_SCATTERING_SIZE,
         )),
-        irradiance: images.add(table_image(
-            &irradiance,
-            IRRADIANCE_WIDTH,
-            IRRADIANCE_HEIGHT,
-        )),
+        irradiance,
+        weather: images.add(weather_image(weather, WEATHER_WIDTH, WEATHER_HEIGHT)),
+        shape: images.add(noise_volume_image(shape, SHAPE_SIZE)),
+        detail: images.add(noise_volume_image(detail, DETAIL_SIZE)),
     });
     let mut field = TileField::new(
         PlanetLodOptions {
@@ -323,11 +356,16 @@ fn setup(
         multiple: true,
         ocean: true,
         stars: true,
+        clouds: true,
+        weather_only: false,
+        coverage: void_scenery::clouds::DEFAULT_CLOUD_COVERAGE,
         last_frame_height: f64::INFINITY,
         ground,
         uniforms,
         star_material,
-        tables_ms,
+                tables_ms,
+        clouds_ms,
+        fps: 30.0,
     };
     scenery.keep_above_surface();
     if let Some(name) = preset {
@@ -340,7 +378,14 @@ fn setup(
     commands.insert_resource(scenery);
 
     commands.spawn((
-        Camera3d::default(),
+        Camera3d {
+            // The air pass reads the scene's depth.
+            depth_texture_usages: (TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING)
+                .into(),
+            ..default()
+        },
+        AirSettings::new(&params),
         Hdr,
         Msaa::Off,
         Tonemapping::AcesFitted,
@@ -454,10 +499,18 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyX) {
         s.exposure = (s.exposure + 0.05).min(3.0);
     }
+    if keys.just_pressed(KeyCode::KeyK) {
+        s.coverage = (s.coverage - 0.05).max(0.0);
+    }
+    if keys.just_pressed(KeyCode::KeyL) {
+        s.coverage = (s.coverage + 0.05).min(1.0);
+    }
     for (key, flag) in [
         (KeyCode::KeyA, &mut s.atmosphere),
         (KeyCode::KeyM, &mut s.multiple),
         (KeyCode::KeyO, &mut s.ocean),
+        (KeyCode::KeyC, &mut s.clouds),
+        (KeyCode::KeyW, &mut s.weather_only),
         (KeyCode::KeyS, &mut s.stars),
     ] {
         if keys.just_pressed(key) {
@@ -513,12 +566,22 @@ fn frame(
     mut grounds: ResMut<Assets<GroundMaterial>>,
     mut star_materials: ResMut<Assets<StarMaterial>>,
     mut tiles: Query<&mut Transform, TileOnly>,
-    mut camera: Single<(&mut Transform, &mut ColorGrading), CameraOnly>,
+    mut camera: Single<
+        (
+            &mut Transform,
+            &mut ColorGrading,
+            &mut AirSettings,
+            &Projection,
+        ),
+        CameraOnly,
+    >,
     mut sky: Single<(&mut Transform, &mut Visibility), SkyOnly>,
     mut hud: Single<&mut Text, With<Hud>>,
 ) {
     let s = &mut *s;
-    let dt = f64::from(time.delta_secs()).min(0.1);
+        let dt = f64::from(time.delta_secs()).min(0.1);
+    let raw = f64::from(time.delta_secs()).max(1e-3);
+    s.fps += (1.0 / raw - s.fps) * 0.05;
     // High-orbit redraws do not advance the ocean clock.
     if s.ocean && s.last_frame_height < 20000.0 {
         s.seconds += dt;
@@ -531,7 +594,7 @@ fn frame(
     s.keep_above_surface();
     let here = s.here();
     let (right, up, back) = s.view.basis();
-    let (camera_transform, grading) = &mut *camera;
+    let (camera_transform, grading, air, projection) = &mut *camera;
     camera_transform.rotation = Quat::from_mat3(&Mat3::from_cols(
         right.as_vec3(),
         up.as_vec3(),
@@ -563,6 +626,22 @@ fn frame(
         .draw(&mut commands, &mut meshes, &mut tiles, here.position);
     s.last_frame_height = here.height;
 
+    if let Projection::Perspective(perspective) = &**projection {
+        air.update(
+            here.position,
+            camera_transform.rotation,
+            perspective,
+            focal_pixels,
+            sun,
+        );
+    }
+    air.enabled = f32::from(u8::from(s.atmosphere));
+    air.multiple_enabled = f32::from(u8::from(s.multiple));
+    air.clouds_enabled = f32::from(u8::from(s.clouds));
+    air.weather_only = f32::from(u8::from(s.weather_only));
+    air.coverage = s.coverage as f32;
+    air.sea_level = s.sea_level as f32;
+
     update_ground(&mut s.uniforms, here.position, sun, s.seconds);
     s.uniforms.sea_level = s.sea_level as f32;
     s.uniforms.ocean_enabled = f32::from(u8::from(s.ocean));
@@ -590,14 +669,15 @@ fn frame(
 
     let on = |b: bool| if b { "on" } else { "off" };
     hud.0 = format!(
-        "SCENERY (stage A: ground, sea, stars; no air or clouds yet)   {}\n\
+        "SCENERY   {}\n\
          height {} AGL | {} ASL\n\
          lat {:.3} lon {:.3} pitch {:.0} deg\n\
          sun {:.1} deg above horizon   local time {}   rate {}   declination {:.1} deg\n\
-         sea level {:.0} m   exposure x{:.2}   atmosphere {}   multi-scatter {} (stage B)   ocean {}   stars {}\n\
-         sky tables {:.0} ms   tiles {} drawn (L{}-L{}) | {} building\n\
+         sea level {:.0} m   exposure x{:.2}   atmosphere {}   multi-scatter {}   ocean {}   stars {}\n\
+         clouds {}   weather only {}   cloud coverage {:.2}\n\
+                  sky tables {:.0} ms   cloud noise {:.0} ms   tiles {} drawn (L{}-L{}) | {} building   {:.0} fps\n\
          left drag pan | right drag orbit | Shift+left turn | wheel zoom\n\
-         1-7 ground, sunset, night, cloud layer, 10 km, 400 km, 20,000 km | , . time | R rate | [ ] declination | - = sea | Z X exposure | A M O S toggles",
+         1-7 ground, sunset, night, cloud layer, 10 km, 400 km, 20,000 km | , . time | R rate | [ ] declination | - = sea | Z X exposure | K L coverage | A M C W O S toggles",
         s.terrain.terrain.name,
         meters(here.height),
         meters(altitude - s.sea_level),
@@ -614,11 +694,16 @@ fn frame(
         on(s.multiple),
         on(s.ocean),
         on(s.stars),
+        on(s.clouds),
+        on(s.weather_only),
+        s.coverage,
         s.tables_ms,
+        s.clouds_ms,
         field.0.drawn_count(),
         field.0.levels.0,
         field.0.levels.1,
-        field.0.building_count(),
+                field.0.building_count(),
+        s.fps,
     );
 }
 
