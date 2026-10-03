@@ -5,7 +5,7 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     rc::Rc,
 };
-use void_frames::{BodyId, BodyStates};
+use void_frames::{BodyId, BodyStates, SplitPosition};
 use void_multiscale::*;
 use void_orbit::{EphemerisSource, Tolerances, VesselPropagator};
 

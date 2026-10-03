@@ -4,7 +4,8 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     rc::Rc,
 };
-use void_multiscale::{SplitPosition, default_galaxy, wide_world};
+use void_frames::SplitPosition;
+use void_multiscale::{default_galaxy, wide_world};
 use void_multiscale_lab::Encounter;
 
 fn scene(galaxy: SplitPosition) -> Encounter {

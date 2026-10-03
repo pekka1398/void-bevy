@@ -4,7 +4,8 @@
 use glam::DVec3;
 use void_orbit::{BuiltSystem, SystemSpec, build_system};
 
-use crate::{CoupledWorld, FramedState, SplitPosition, SystemSeed, Traveller};
+use crate::{CoupledWorld, FramedState, SystemSeed, Traveller};
+use void_frames::SplitPosition;
 
 pub const LIGHT_YEAR: f64 = 299_792_458.0 * 365.25 * 86400.0;
 pub const AU: f64 = 149_597_870_700.0;

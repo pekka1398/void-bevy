@@ -15,6 +15,7 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseSc
 use bevy::prelude::*;
 use glam::DVec3;
 use void_app::map::color as css;
+use void_frames::SplitPosition;
 use void_multiscale::*;
 use void_view::{OrbitCamera, ellipse_points};
 

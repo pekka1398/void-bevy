@@ -5,7 +5,8 @@ use glam::DVec3;
 use void_math::{hypot, pow};
 use void_orbit::Dopri5;
 
-use crate::{CoupledWorld, SplitPosition};
+use crate::CoupledWorld;
+use void_frames::SplitPosition;
 
 /// A position and velocity relative to system `frame`'s barycentre. Every frame has the same
 /// axes; none rotates.

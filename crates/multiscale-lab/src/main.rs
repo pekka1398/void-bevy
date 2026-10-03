@@ -8,6 +8,7 @@ use bevy::{
 use glam::DVec3;
 use std::{cell::RefCell, rc::Rc};
 use void_assembly_lab::parts::RenderAssets;
+use void_frames::SplitPosition;
 use void_multiscale::*;
 use void_multiscale_lab::Encounter;
 

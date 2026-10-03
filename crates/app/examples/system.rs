@@ -8,7 +8,7 @@ use std::ops::Not;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use glam::{DQuat, DVec3};
-use void_frames::{BodyId, FrameId, FrameTree, Motion};
+use void_frames::{BodyId, FrameId, FrameTree, Motion, SystemId};
 use void_orbit::{Ephemeris, EphemerisOptions, SystemSpec, build_system, suggested_step_seconds};
 
 const SYSTEM: &str = include_str!("../../orbit/systems/sol.json");
@@ -153,6 +153,7 @@ fn setup(
     );
     ephemeris.extend_to(step_seconds);
     let mut tree = FrameTree::new();
+    let sol = tree.add_system(SystemId(0));
 
     let sphere = meshes.add(Sphere::new(1.0).mesh().uv(96, 48));
     let marker = meshes.add(Sphere::new(1.0).mesh().uv(16, 8));
@@ -170,7 +171,7 @@ fn setup(
     let mut targets = Vec::new();
     let mut sun = None;
     for body in &system.bodies {
-        let (inertial, surface) = tree.add_body(BodyId(body.index), body.rotation);
+        let (inertial, surface) = tree.add_body(sol, BodyId(body.index), body.rotation);
         let is_star = body.parent_index.is_none();
         if is_star {
             sun = Some(inertial);

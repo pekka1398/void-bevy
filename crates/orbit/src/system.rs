@@ -403,17 +403,9 @@ pub fn build_system(spec: &SystemSpec) -> BuiltSystem {
 }
 
 /// Body-fixed axes at time t in the ecliptic, as the orbit lab's `bodyOrientation`
-/// (`BodyRotation.ts`): z the spin axis, x the prime meridian. The angle is
-/// `angle_at_epoch + 2π t / period`, the lab's formula; `void_frames::Spin::angle` removes whole
-/// turns exactly first, which differs from this in the last digits at large t.
+/// (`BodyRotation.ts`): z the spin axis, x the prime meridian. `Spin::body_axes` is the one
+/// formula; it removes whole turns exactly first, so it differs from the lab's
+/// `angle_at_epoch + 2π t / period` in the last digits at large t.
 pub fn body_orientation(spin: &Spin, t: f64) -> [DVec3; 3] {
-    let [node, quadrature, pole] = spin.equatorial_basis();
-    let angle = spin.angle_at_epoch_radians + 2.0 * std::f64::consts::PI * t / spin.period_seconds;
-    let (s, c) = (angle.sin(), angle.cos());
-    let x = DVec3::new(
-        c * node.x + s * quadrature.x,
-        c * node.y + s * quadrature.y,
-        c * node.z + s * quadrature.z,
-    );
-    [x, pole.cross(x), pole]
+    spin.body_axes(t)
 }

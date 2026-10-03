@@ -1,7 +1,8 @@
 //! The lab check's compact fixture: three small two-body systems a few million kilometres apart.
 
 use glam::DVec3;
-use void_multiscale::{SplitPosition, SystemSeed};
+use void_frames::SplitPosition;
+use void_multiscale::SystemSeed;
 use void_orbit::{SystemSpec, build_system};
 
 pub fn small_system(id: &str, mass: f64) -> void_orbit::BuiltSystem {

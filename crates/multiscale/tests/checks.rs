@@ -4,6 +4,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use glam::DVec3;
+use void_frames::{CELL_METERS, SplitPosition};
 use void_multiscale::*;
 use void_orbit::{
     AdvanceOutcome, BuiltSystem, CelestialBody, Ephemeris, EphemerisOptions, PropagationRun,

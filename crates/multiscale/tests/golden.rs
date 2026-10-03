@@ -5,6 +5,7 @@
 
 use glam::DVec3;
 use serde_json::Value;
+use void_frames::SplitPosition;
 use void_multiscale::*;
 
 mod common;

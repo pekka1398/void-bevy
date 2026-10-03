@@ -1,8 +1,9 @@
 //! The TS lab's existing Fleet collision/merge, near a planet in a distant system.
 use glam::{DQuat, DVec3};
+use void_frames::SplitPosition;
 use void_frames::{BodyId, BodyStates};
 use void_landing::FrameState;
-use void_multiscale::{FrameEphemeris, SharedWorld, SplitPosition};
+use void_multiscale::{FrameEphemeris, SharedWorld};
 use void_orbit::EphemerisSource;
 use void_vessels::{Fleet, FleetOptions, pod_tank};
 

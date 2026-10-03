@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use glam::DVec3;
-use void_frames::{BodyId, BodyStates};
+use void_frames::{BodyId, BodyStates, FrameSource, SplitPosition, SystemId};
 
 use crate::hermite::HermiteBasis;
 use crate::system::{BuiltSystem, CelestialBody};
@@ -363,6 +363,21 @@ impl BodyStates for Ephemeris {
         );
         let (basis, left, right) = self.bracket(t);
         Self::interpolate(&basis, left, right, body.0, true)
+    }
+}
+
+/// One star system at the galaxy's origin: the frame tree's view of a lone system.
+impl FrameSource for Ephemeris {
+    fn system_state(&self, system: SystemId, _t: f64) -> (SplitPosition, DVec3) {
+        assert_eq!(
+            system,
+            SystemId(0),
+            "a single-system ephemeris has only system 0"
+        );
+        (SplitPosition::ORIGIN, DVec3::ZERO)
+    }
+    fn body_in_system(&self, body: BodyId, t: f64) -> (DVec3, DVec3) {
+        BodyStates::body_state(self, body, t)
     }
 }
 

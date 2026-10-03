@@ -56,8 +56,23 @@ impl Spin {
     /// The turns are removed with an exact remainder before scaling, so the angle keeps full
     /// precision however large t is; what remains is t's own spacing (1.2e-7 s at t = 1e9 s).
     pub fn angle(&self, t: f64) -> f64 {
-        self.angle_at_epoch_radians
-            + TAU * (t.rem_euclid(self.period_seconds) / self.period_seconds)
+        // 2π r / period in the lab's order, so within the first turn this is the lab's angle to
+        // the bit; past it, the exact remainder keeps the precision the lab's 2π t / period loses.
+        self.angle_at_epoch_radians + TAU * t.rem_euclid(self.period_seconds) / self.period_seconds
+    }
+
+    /// Body-fixed axes at time t as ecliptic vectors: z the spin axis, x the prime meridian. The
+    /// one formula for a body's orientation; the surface frame's motion is the same turn.
+    pub fn body_axes(&self, t: f64) -> [DVec3; 3] {
+        let [node, quadrature, pole] = self.equatorial_basis();
+        let angle = self.angle(t);
+        let (s, c) = (angle.sin(), angle.cos());
+        let x = DVec3::new(
+            c * node.x + s * quadrature.x,
+            c * node.y + s * quadrature.y,
+            c * node.z + s * quadrature.z,
+        );
+        [x, pole.cross(x), pole]
     }
 
     /// Spin rate, radians per second.

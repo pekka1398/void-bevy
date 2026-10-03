@@ -6,7 +6,7 @@ use glam::DVec3;
 use void_math::hypot;
 use void_orbit::{BuiltSystem, CelestialBody, HermiteBasis, yoshida8_sequence};
 
-use crate::SplitPosition;
+use void_frames::SplitPosition;
 
 /// A system to place in the world: its built bodies (barycentric), where its barycentre is and
 /// how fast it moves.

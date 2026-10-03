@@ -4,12 +4,10 @@
 //! Bevy.
 //!
 mod fixtures;
-mod split;
 mod traveller;
 mod world;
 
 pub use fixtures::*;
-pub use split::*;
 pub use traveller::*;
 pub use world::*;
 

@@ -2,7 +2,7 @@
 use crate::CoupledWorld;
 use glam::DVec3;
 use std::{cell::RefCell, rc::Rc};
-use void_frames::{BodyId, BodyStates};
+use void_frames::{BodyId, BodyStates, FrameSource, SplitPosition, SystemId};
 use void_orbit::{CelestialBody, EphemerisSource};
 
 pub type SharedWorld = Rc<RefCell<CoupledWorld>>;
@@ -48,6 +48,28 @@ impl BodyStates for FrameEphemeris {
         )
     }
 }
+/// The frame tree's view of the shared world: systems at their split barycentres, each body
+/// relative to its own system (unlike `BodyStates`, which is relative to the selected system).
+impl FrameSource for FrameEphemeris {
+    fn system_state(&self, system: SystemId, t: f64) -> (SplitPosition, DVec3) {
+        let world = self.world.borrow();
+        let states = world.at(t);
+        let s = states
+            .get(system.0)
+            .unwrap_or_else(|| panic!("frame ephemeris: unknown {system:?}"));
+        (s.origin, s.velocity)
+    }
+    fn body_in_system(&self, body: BodyId, t: f64) -> (DVec3, DVec3) {
+        let world = self.world.borrow();
+        let m = world
+            .membership
+            .get(body.0)
+            .expect("frame ephemeris: unknown body");
+        let g = &world.at(t)[m.system];
+        (g.body_position(m.local), g.body_velocity(m.local))
+    }
+}
+
 impl EphemerisSource for FrameEphemeris {
     fn bodies(&self) -> &[CelestialBody] {
         &self.bodies
@@ -110,6 +132,6 @@ impl EphemerisSource for FrameEphemeris {
         self.states_at(t, positions, None);
     }
     fn body_position(&self, body: usize, t: f64) -> DVec3 {
-        self.body_state(BodyId(body), t).0
+        BodyStates::body_state(self, BodyId(body), t).0
     }
 }

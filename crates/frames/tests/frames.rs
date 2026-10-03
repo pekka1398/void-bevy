@@ -1,13 +1,18 @@
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use glam::{DQuat, DVec3};
-use void_frames::{BodyId, BodyStates, FrameTree, Motion, Spin, State};
+use void_frames::{
+    BodyId, FrameId, FrameSource, FrameTree, Motion, Spin, SplitPosition, State, SystemId,
+};
 
 /// Bodies on circular orbits about the barycentre: (radius, period, phase at t = 0).
 struct Circles(Vec<(f64, f64, f64)>);
 
-impl BodyStates for Circles {
-    fn body_state(&self, body: BodyId, t: f64) -> (DVec3, DVec3) {
+impl FrameSource for Circles {
+    fn system_state(&self, _: SystemId, _: f64) -> (SplitPosition, DVec3) {
+        (SplitPosition::ORIGIN, DVec3::ZERO)
+    }
+    fn body_in_system(&self, body: BodyId, t: f64) -> (DVec3, DVec3) {
         let (r, period, phase) = self.0[body.0];
         let w = TAU / period;
         let a = phase + w * t;
@@ -18,11 +23,21 @@ impl BodyStates for Circles {
     }
 }
 
+/// A tree with one star system at the galaxy's origin, and that system's frame.
+fn one_system() -> (FrameTree, FrameId) {
+    let mut tree = FrameTree::new();
+    let system = tree.add_system(SystemId(0));
+    (tree, system)
+}
+
 /// Bodies that stay put.
 struct Still(Vec<DVec3>);
 
-impl BodyStates for Still {
-    fn body_state(&self, body: BodyId, _t: f64) -> (DVec3, DVec3) {
+impl FrameSource for Still {
+    fn system_state(&self, _: SystemId, _: f64) -> (SplitPosition, DVec3) {
+        (SplitPosition::ORIGIN, DVec3::ZERO)
+    }
+    fn body_in_system(&self, body: BodyId, _t: f64) -> (DVec3, DVec3) {
         (self.0[body.0], DVec3::ZERO)
     }
 }
@@ -77,15 +92,11 @@ fn matches_the_orbit_lab() {
             pole_longitude_radians: s["poleLongitudeRadians"].as_f64().unwrap(),
             angle_at_epoch_radians: s["angleAtEpochRadians"].as_f64().unwrap(),
         };
-        let mut tree = FrameTree::new();
-        let (inertial, surface) = tree.add_body(BodyId(0), spin);
+        let (mut tree, system) = one_system();
+        let (inertial, surface) = tree.add_body(system, BodyId(0), spin);
         let bodies = Still(vec![origin]);
 
-        let equatorial = columns(
-            tree.at(0.0, &bodies)
-                .transform(inertial, FrameTree::ROOT)
-                .rotation(),
-        );
+        let equatorial = columns(tree.at(0.0, &bodies).transform(inertial, system).rotation());
         for (axis, expected) in equatorial
             .iter()
             .zip(case["equatorial"].as_array().unwrap())
@@ -94,11 +105,11 @@ fn matches_the_orbit_lab() {
         }
         for o in case["orientations"].as_array().unwrap() {
             let snapshot = tree.at(o["t"].as_f64().unwrap(), &bodies);
-            let axes = columns(snapshot.transform(surface, FrameTree::ROOT).rotation());
+            let axes = columns(snapshot.transform(surface, system).rotation());
             for (axis, expected) in axes.iter().zip(o["axes"].as_array().unwrap()) {
                 axes_error = axes_error.max((*axis - v3(expected)).length());
             }
-            let into = snapshot.transform(FrameTree::ROOT, surface);
+            let into = snapshot.transform(system, surface);
             for (p, expected) in points.iter().zip(o["toFrame"].as_array().unwrap()) {
                 let expected = v3(expected);
                 point_error =
@@ -116,8 +127,8 @@ fn matches_the_orbit_lab() {
 
 #[test]
 fn common_ancestor_keeps_metre_scale_precision_at_one_au() {
-    let mut tree = FrameTree::new();
-    let (_, surface) = tree.add_body(BodyId(0), EARTH);
+    let (mut tree, system) = one_system();
+    let (_, surface) = tree.add_body(system, BodyId(0), EARTH);
     let tile_at = DVec3::new(0.31, -0.72, 0.62).normalize() * EARTH_RADIUS;
     let tile_turn = DQuat::from_euler(glam::EulerRot::ZXY, 0.4, -1.1, 0.25);
     let tile = tree.add_fixed(surface, Motion::fixed(tile_at, tile_turn));
@@ -158,8 +169,8 @@ fn common_ancestor_keeps_metre_scale_precision_at_one_au() {
 
 #[test]
 fn ground_point_moves_with_the_spin() {
-    let mut tree = FrameTree::new();
-    let (inertial, surface) = tree.add_body(BodyId(0), EARTH);
+    let (mut tree, system) = one_system();
+    let (inertial, surface) = tree.add_body(system, BodyId(0), EARTH);
     let bodies = Still(vec![DVec3::new(AU, 0.0, 0.0)]);
     let ground = DVec3::new(4.1e6, -2.3e6, 4.3e6);
     let s = tree
@@ -182,9 +193,9 @@ fn ground_point_moves_with_the_spin() {
 /// spinning bodies. This checks `then` and `inverse` together.
 #[test]
 fn velocities_match_finite_differences() {
-    let mut tree = FrameTree::new();
-    let (_, earth) = tree.add_body(BodyId(0), EARTH);
-    let (_, moon) = tree.add_body(BodyId(1), MOON);
+    let (mut tree, system) = one_system();
+    let (_, earth) = tree.add_body(system, BodyId(0), EARTH);
+    let (_, moon) = tree.add_body(system, BodyId(1), MOON);
     let pad = tree.add_fixed(
         moon,
         Motion::fixed(
@@ -218,9 +229,9 @@ fn velocities_match_finite_differences() {
 
 #[test]
 fn transforms_compose_and_invert() {
-    let mut tree = FrameTree::new();
-    let (earth_inertial, earth) = tree.add_body(BodyId(0), EARTH);
-    let (_, moon) = tree.add_body(BodyId(1), MOON);
+    let (mut tree, system) = one_system();
+    let (earth_inertial, earth) = tree.add_body(system, BodyId(0), EARTH);
+    let (_, moon) = tree.add_body(system, BodyId(1), MOON);
     let bodies = Circles(vec![(1.0e8, 2.0e6, 0.0), (4.8e8, 2.4e6, 1.0)]);
     let snapshot = tree.at(7.7e5, &bodies);
     let state = State {
@@ -271,20 +282,20 @@ fn spin_angle_keeps_precision_at_large_times() {
 #[test]
 #[should_panic(expected = "used before it was written")]
 fn unwritten_free_frame_panics() {
-    let mut tree = FrameTree::new();
-    let free = tree.add_free(FrameTree::ROOT);
+    let (mut tree, system) = one_system();
+    let free = tree.add_free(system);
     let bodies = Still(vec![]);
-    tree.at(0.0, &bodies).transform(free, FrameTree::ROOT);
+    tree.at(0.0, &bodies).transform(free, system);
 }
 
 #[test]
 #[should_panic(expected = "written at t = 1")]
 fn stale_free_frame_panics() {
-    let mut tree = FrameTree::new();
-    let free = tree.add_free(FrameTree::ROOT);
+    let (mut tree, system) = one_system();
+    let free = tree.add_free(system);
     tree.set_free(free, 1.0, Motion::IDENTITY);
     let bodies = Still(vec![]);
-    tree.at(2.0, &bodies).transform(free, FrameTree::ROOT);
+    tree.at(2.0, &bodies).transform(free, system);
 }
 
 #[test]
@@ -296,11 +307,175 @@ fn non_unit_rotation_panics() {
 #[test]
 #[should_panic(expected = "spin period")]
 fn invalid_spin_panics() {
-    FrameTree::new().add_body(
+    let (mut tree, system) = one_system();
+    tree.add_body(
+        system,
         BodyId(0),
         Spin {
             period_seconds: 0.0,
             ..EARTH
         },
     );
+}
+
+/// Two systems 30,000 light-years out: a point near one, expressed in the other's frame, keeps
+/// sub-millimetre precision because the systems' split positions are subtracted exactly; the same
+/// transform through the root in float64 is off by kilometres.
+#[test]
+fn systems_meet_at_the_galaxy_without_losing_centimetres() {
+    const CELL: f64 = 4_294_967_296.0;
+    /// About 30,000 light-years, in cells.
+    const FAR: i128 = 66_000_000_000;
+    struct Galaxy;
+    impl FrameSource for Galaxy {
+        fn system_state(&self, system: SystemId, _: f64) -> (SplitPosition, DVec3) {
+            match system.0 {
+                0 => (
+                    SplitPosition::new(DVec3::ZERO, [FAR, 0, 0]),
+                    DVec3::new(2.0e5, 0.0, 0.0),
+                ),
+                1 => (
+                    SplitPosition::new(DVec3::new(1234.5, -77.25, 3.0), [FAR + 1000, 3, 0]),
+                    DVec3::new(1.9e5, 1.0e3, 0.0),
+                ),
+                other => panic!("no system {other}"),
+            }
+        }
+        fn body_in_system(&self, _: BodyId, _: f64) -> (DVec3, DVec3) {
+            panic!("no bodies")
+        }
+    }
+    let mut tree = FrameTree::new();
+    let a = tree.add_system(SystemId(0));
+    let b = tree.add_system(SystemId(1));
+    let probe = tree.add_fixed(
+        a,
+        Motion::fixed(DVec3::new(0.5, -0.25, 0.125), DQuat::IDENTITY),
+    );
+    let snapshot = tree.at(0.0, &Galaxy);
+    assert_eq!(snapshot.common_ancestor(probe, b), FrameTree::ROOT);
+    let point = DVec3::new(0.25, 0.5, -0.125);
+    // Every term is exactly representable, so this is the exact answer.
+    let expected = DVec3::new(
+        -1000.0 * CELL - 1234.5 + 0.75,
+        -3.0 * CELL + 77.25 + 0.25,
+        -3.0 + 0.0,
+    );
+    let exact = (snapshot.transform(probe, b).apply_point(point) - expected).length();
+    let via_root = (snapshot.transform_via_root(probe, b).apply_point(point) - expected).length();
+    let velocity = snapshot
+        .transform(probe, b)
+        .apply_state(State {
+            position: point,
+            velocity: DVec3::ZERO,
+        })
+        .velocity;
+    println!(
+        "30,000 ly out: {exact:.1e} m across the galaxy exactly, {via_root:.1e} m through the root"
+    );
+    assert!(exact < 1e-3, "across the galaxy: {exact:e} m");
+    assert!(
+        via_root > 1e3,
+        "the root path should show galactic rounding, got {via_root:e} m"
+    );
+    assert_eq!(velocity, DVec3::new(1.0e4, -1.0e3, 0.0));
+    // And back.
+    let back = snapshot
+        .transform(b, probe)
+        .apply_point(snapshot.transform(probe, b).apply_point(point));
+    assert!((back - point).length() < 1e-3, "round trip {back:?}");
+}
+
+#[test]
+fn frames_come_and_go() {
+    let (mut tree, system) = one_system();
+    let (_, surface) = tree.add_body(system, BodyId(0), EARTH);
+    let scene = tree.add_fixed(
+        surface,
+        Motion::fixed(DVec3::new(6.4e6, 0.0, 0.0), DQuat::IDENTITY),
+    );
+    let vessel = tree.add_free(scene);
+    assert_eq!(tree.system_of(vessel), Some(system));
+    assert_eq!(tree.system_of(FrameTree::ROOT), None);
+    tree.reparent(vessel, system);
+    assert_eq!(tree.parent(vessel), Some(system));
+    tree.remove(scene);
+    assert!(!tree.contains(scene));
+    let again = tree.add_free(system);
+    assert_ne!(again, scene, "ids are never reused");
+    let pad = tree.add_fixed(system, Motion::IDENTITY);
+    tree.set_fixed(pad, Motion::fixed(DVec3::X, DQuat::IDENTITY));
+}
+
+#[test]
+#[should_panic(expected = "still has children")]
+fn removing_a_frame_with_children_panics() {
+    let (mut tree, system) = one_system();
+    let (inertial, _) = tree.add_body(system, BodyId(0), EARTH);
+    tree.remove(inertial);
+}
+
+#[test]
+#[should_panic(expected = "is not in this tree")]
+fn a_removed_frame_is_gone() {
+    let (mut tree, system) = one_system();
+    let free = tree.add_free(system);
+    tree.remove(free);
+    tree.parent(free);
+}
+
+#[test]
+#[should_panic(expected = "used before it was written")]
+fn a_moved_free_frame_must_be_written_again() {
+    let (mut tree, system) = one_system();
+    let (_, surface) = tree.add_body(system, BodyId(0), EARTH);
+    let free = tree.add_free(surface);
+    tree.set_free(free, 0.0, Motion::IDENTITY);
+    tree.reparent(free, system);
+    tree.at(0.0, &Still(vec![DVec3::ZERO]))
+        .transform(free, system);
+}
+
+/// A dynamic frame follows whatever its source says now, with no write step to forget.
+#[test]
+fn dynamic_frames_ask_the_source() {
+    struct Moving;
+    impl FrameSource for Moving {
+        fn system_state(&self, _: SystemId, _: f64) -> (SplitPosition, DVec3) {
+            (SplitPosition::ORIGIN, DVec3::ZERO)
+        }
+        fn body_in_system(&self, _: BodyId, _: f64) -> (DVec3, DVec3) {
+            (DVec3::ZERO, DVec3::ZERO)
+        }
+        fn dynamic_motion(&self, key: u64, t: f64) -> Motion {
+            assert_eq!(key, 7);
+            Motion::new(
+                DVec3::new(t, 0.0, 0.0),
+                DVec3::X,
+                DQuat::IDENTITY,
+                DVec3::ZERO,
+            )
+        }
+    }
+    let (mut tree, system) = one_system();
+    let vessel = tree.add_dynamic(system, 7);
+    for t in [0.0, 2.5, 10.0] {
+        let s = tree
+            .at(t, &Moving)
+            .transform(vessel, system)
+            .apply_state(State {
+                position: DVec3::Y,
+                velocity: DVec3::ZERO,
+            });
+        assert_eq!(s.position, DVec3::new(t, 1.0, 0.0));
+        assert_eq!(s.velocity, DVec3::X);
+    }
+}
+
+#[test]
+#[should_panic(expected = "has no dynamic frames")]
+fn a_source_without_dynamic_frames_panics() {
+    let (mut tree, system) = one_system();
+    let vessel = tree.add_dynamic(system, 1);
+    tree.at(0.0, &Still(vec![])).transform(vessel, system);
 }

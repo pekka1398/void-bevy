@@ -3,9 +3,10 @@ use glam::{DMat3, DQuat, DVec3};
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
 use void_assembly::demo_craft;
+use void_frames::SplitPosition;
 use void_frames::{BodyId, BodyStates};
 use void_landing::{FrameState, aurelia, planet_ephemeris};
-use void_multiscale::{FrameEphemeris, SplitPosition, wide_world};
+use void_multiscale::{FrameEphemeris, wide_world};
 use void_orbit::{AdvanceOutcome, EphemerisSource, PropagationRun, VesselPropagator, VesselState};
 use void_vessels::{Fleet, FleetOptions, VesselMode, pod_tank};
 fn initial(f: &Fleet, body: usize, altitude: f64) -> FrameState {
