@@ -382,7 +382,17 @@ impl FrameSource for Ephemeris {
 }
 
 /// Source of body states in inertial axes, optionally with an accelerating origin.
-pub trait EphemerisSource: BodyStates {
+///
+/// Physics sees everything relative to one star system's barycentre, `origin_system`
+/// (`BodyStates`, `states_at`, …). The frame tree sees each body relative to its own system and
+/// every system in the galaxy (`FrameSource`); both views come from the same states.
+pub trait EphemerisSource: BodyStates + FrameSource {
+    /// Star systems in the galaxy, numbered from 0.
+    fn system_count(&self) -> usize;
+    /// The system a body belongs to.
+    fn system_of(&self, body: usize) -> SystemId;
+    /// The system whose barycentre the physics view is relative to.
+    fn origin_system(&self) -> SystemId;
     fn bodies(&self) -> &[CelestialBody];
     fn step_seconds(&self) -> f64;
     fn start_time(&self) -> f64;
@@ -396,6 +406,19 @@ pub trait EphemerisSource: BodyStates {
     fn frame_acceleration_at(&self, t: f64) -> DVec3;
 }
 impl EphemerisSource for Ephemeris {
+    fn system_count(&self) -> usize {
+        1
+    }
+    fn system_of(&self, body: usize) -> SystemId {
+        assert!(
+            body < self.bodies.len(),
+            "body {body} is not in this ephemeris"
+        );
+        SystemId(0)
+    }
+    fn origin_system(&self) -> SystemId {
+        SystemId(0)
+    }
     fn bodies(&self) -> &[CelestialBody] {
         Ephemeris::bodies(self)
     }
@@ -435,7 +458,24 @@ impl BodyStates for Box<dyn EphemerisSource> {
         (**self).body_state(body, t)
     }
 }
+impl FrameSource for Box<dyn EphemerisSource> {
+    fn system_state(&self, system: SystemId, t: f64) -> (SplitPosition, DVec3) {
+        (**self).system_state(system, t)
+    }
+    fn body_in_system(&self, body: BodyId, t: f64) -> (DVec3, DVec3) {
+        (**self).body_in_system(body, t)
+    }
+}
 impl EphemerisSource for Box<dyn EphemerisSource> {
+    fn system_count(&self) -> usize {
+        (**self).system_count()
+    }
+    fn system_of(&self, body: usize) -> SystemId {
+        (**self).system_of(body)
+    }
+    fn origin_system(&self) -> SystemId {
+        (**self).origin_system()
+    }
     fn bodies(&self) -> &[CelestialBody] {
         (**self).bodies()
     }

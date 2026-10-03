@@ -138,3 +138,23 @@ fn invalid_frames_and_uncovered_queries_panic() {
     let mut eval = FrameEvaluator::new(&eph, FrameSpec::Barycentric);
     assert!(catch_unwind(AssertUnwindSafe(|| eval.evaluate(&eph, 1.0))).is_err());
 }
+
+#[test]
+fn system_frames_agree_with_the_ephemeris() {
+    let mut e = ephemeris("sol");
+    e.extend_to(1e6);
+    let frames = SystemFrames::new(&e);
+    assert_eq!(frames.systems, vec![frames.origin]);
+    let t = 1e6;
+    let snapshot = frames.tree.at(t, &e);
+    for i in 0..e.bodies().len() {
+        let (p, v) = void_frames::BodyStates::body_state(&e, void_frames::BodyId(i), t);
+        let s = snapshot
+            .transform(frames.inertial[i], frames.origin)
+            .apply_state(void_frames::State {
+                position: DVec3::ZERO,
+                velocity: DVec3::ZERO,
+            });
+        assert_eq!((s.position, s.velocity), (p, v), "{i}");
+    }
+}

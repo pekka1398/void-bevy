@@ -5,6 +5,7 @@ mod apsides;
 mod dopri5;
 mod ephemeris;
 mod flight_plan;
+mod frames;
 mod hermite;
 mod kepler;
 mod propagator;
@@ -22,6 +23,7 @@ pub use flight_plan::{
     BurnSchedule, FlightPlan, FlightPlanCheckpoint, ManeuverSpec, ManeuverStatus, PlanEngine,
     ReferenceMode,
 };
+pub use frames::SystemFrames;
 pub use hermite::HermiteBasis;
 pub use kepler::{
     EllipticElements, OsculatingOrbit, orbital_period_seconds, osculating_orbit,

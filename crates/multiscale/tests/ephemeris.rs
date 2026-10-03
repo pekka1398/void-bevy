@@ -45,3 +45,54 @@ fn accelerating_origin_preserves_all_gravity_sources() {
     assert_eq!(e.end_time(), other.end_time());
     assert!(catch_unwind(AssertUnwindSafe(|| e.forget_before(50.0))).is_err());
 }
+
+#[test]
+fn system_frames_agree_with_the_physics_view() {
+    let world = Rc::new(RefCell::new(CoupledWorld::new(
+        common::compact_seeds(SplitPosition::at(DVec3::new(3e17, -2e16, 5e15))),
+        10.0,
+        8192,
+    )));
+    let mut e = FrameEphemeris::new(world.clone(), "B");
+    e.extend_to(100.0);
+    let frames = void_orbit::SystemFrames::new(&e);
+    assert_eq!(frames.systems.len(), 3);
+    let t = 50.0;
+    let snapshot = frames.tree.at(t, &e);
+    let mut foreign = 0;
+    for i in 0..e.bodies().len() {
+        if e.system_of(i) != e.origin_system() {
+            foreign += 1;
+        }
+        let (p, v) = e.body_state(BodyId(i), t);
+        let s = snapshot
+            .transform(frames.inertial[i], frames.origin)
+            .apply_state(void_frames::State {
+                position: DVec3::ZERO,
+                velocity: DVec3::ZERO,
+            });
+        // Bodies of other systems are 4e9 m away; the bridge is exact, so only the last bits move.
+        assert!(
+            (s.position - p).length() <= 1e-15 * p.length().max(1.0),
+            "{i}: {s:?} {p}"
+        );
+        assert!(
+            (s.velocity - v).length() <= 1e-12 * v.length().max(1.0),
+            "{i}: {s:?} {v}"
+        );
+        let axes = e.bodies()[i].rotation.body_axes(t);
+        let turn = snapshot.transform(frames.surface[i], frames.origin);
+        for (k, axis) in axes.iter().enumerate() {
+            let mut unit = DVec3::ZERO;
+            unit[k] = 1.0;
+            assert!(
+                (turn.apply_direction(unit) - *axis).length() < 1e-15,
+                "{i} axis {k}"
+            );
+        }
+    }
+    assert!(
+        foreign > 0,
+        "the fixture should have bodies outside the origin system"
+    );
+}

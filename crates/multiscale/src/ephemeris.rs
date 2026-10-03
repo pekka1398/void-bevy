@@ -71,6 +71,22 @@ impl FrameSource for FrameEphemeris {
 }
 
 impl EphemerisSource for FrameEphemeris {
+    fn system_count(&self) -> usize {
+        self.world.borrow().ids.len()
+    }
+    fn system_of(&self, body: usize) -> SystemId {
+        SystemId(
+            self.world
+                .borrow()
+                .membership
+                .get(body)
+                .expect("frame ephemeris: unknown body")
+                .system,
+        )
+    }
+    fn origin_system(&self) -> SystemId {
+        SystemId(self.system_index)
+    }
     fn bodies(&self) -> &[CelestialBody] {
         &self.bodies
     }
