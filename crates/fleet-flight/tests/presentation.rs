@@ -186,3 +186,36 @@ fn non_finite_view_input_is_rejected() {
         .is_err()
     );
 }
+#[test]
+fn the_camera_frame_agrees_with_the_inertial_eye() {
+    let mut s = session();
+    for main_camera in [true, false] {
+        view(&mut s, ViewCommand::Configure { main_camera });
+        let sim = s.sim();
+        let f = &sim.fleet;
+        let sample = sim.presentation.sample(sim);
+        let axes = f
+            .frames()
+            .transform(f.body_frames(sim.home).1, f.origin_frame())
+            .rotation();
+        // Through the focus frame, the focus sits exactly one camera distance away.
+        let focus = sample
+            .to_camera(f, sample.focus_frame, axes)
+            .apply_point(sample.focus_local);
+        assert!((focus + axes.inverse() * sample.offset).length() < 1e-9);
+        // The long way, through the system's large coordinates, lands on the same eye.
+        let eye = sample
+            .to_camera(f, f.origin_frame(), axes)
+            .apply_point(sample.eye);
+        assert!(eye.length() < 1e-3, "{eye}");
+        for part in f.part_snapshots(&sim.selected) {
+            let near = sample
+                .to_camera(f, part.frame, axes)
+                .apply_point(part.local_position);
+            let far = sample
+                .to_camera(f, f.origin_frame(), axes)
+                .apply_point(part.position);
+            assert!((near - far).length() < 1e-3, "{}: {near} {far}", part.id);
+        }
+    }
+}

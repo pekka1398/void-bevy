@@ -427,6 +427,16 @@ impl Transform {
         })
     }
 
+    /// To a frame that is not in the tree, given by its motion relative to `to` (a camera hung
+    /// on its focus for one draw): the precision is still that of `from` and `to`'s ancestor.
+    pub fn into_child(&self, child: &Motion) -> Transform {
+        child.assert_valid();
+        Transform {
+            down: child.then(&self.down),
+            ..*self
+        }
+    }
+
     /// `from` axes to `to` axes.
     pub fn rotation(&self) -> DQuat {
         (self.down.rotation.inverse() * self.up.rotation).normalize()

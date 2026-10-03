@@ -100,8 +100,13 @@ impl VesselSnapshot {
 pub struct PartSnapshot {
     pub id: String,
     pub definition: &'static PartDefinition,
+    /// Inertial (origin frame) placement.
     pub position: DVec3,
     pub rotation: DQuat,
+    /// The vessel's parts frame, and the part's pose in it: renderers go from here.
+    pub frame: FrameId,
+    pub local_position: DVec3,
+    pub local_rotation: DQuat,
     pub fuel_kg: f64,
     pub stage: Option<u32>,
     pub staged: bool,
@@ -125,6 +130,8 @@ pub struct VesselColliderMesh {
     pub vessel: String,
     pub position: DVec3,
     pub rotation: DQuat,
+    /// The vessel's parts frame; the mesh is in its coordinates.
+    pub frame: FrameId,
     pub mesh: void_landing::BodyColliderMesh,
 }
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -152,6 +159,9 @@ pub struct TerrainTile {
     pub tile: String,
     pub position: DVec3,
     pub rotation: DQuat,
+    /// The scene's contact frame; the tile sits at `local_position` in its axes.
+    pub frame: FrameId,
+    pub local_position: DVec3,
 }
 struct Ground {
     spec: GroundSpec,
@@ -761,6 +771,16 @@ impl Fleet {
     pub fn body_frames(&self, body: usize) -> (FrameId, FrameId) {
         (self.frames.inertial[body], self.frames.surface[body])
     }
+    /// A vessel's centre of mass, in its parts frame: what a camera following it looks at.
+    pub fn centre_of_mass_local(&self, id: &str) -> DVec3 {
+        match &self.vessel(id).owner {
+            // The propagator carries the centre of mass as the frame's origin.
+            Owner::Orbit { .. } => DVec3::ZERO,
+            Owner::Scene { scene, body, .. } => {
+                vec64(self.scenes[scene].world.body(*body).local_center_of_mass())
+            }
+        }
+    }
     /// A vessel's parts frame: part poses are in its coordinates.
     pub fn vessel_frame(&self, id: &str) -> FrameId {
         *self
@@ -897,6 +917,7 @@ impl Fleet {
     }
     pub fn part_snapshots(&self, id: &str) -> Vec<PartSnapshot> {
         let v = self.vessel(id);
+        let frame = self.vessel_frame(id);
         let (origin, q) = self.poses_frame(v);
         let p = self.propulsion_of(v);
         v.poses
@@ -908,6 +929,9 @@ impl Fleet {
                     definition: part.definition,
                     position: origin + q * pose.position,
                     rotation: (q * pose.rotation).normalize(),
+                    frame,
+                    local_position: pose.position,
+                    local_rotation: pose.rotation,
                     fuel_kg: part.fuel_kg,
                     stage: part.stage,
                     staged: self.staged.contains(id),
@@ -1023,6 +1047,8 @@ impl Fleet {
                         )
                         .position,
                     rotation: self.axes(id),
+                    frame: s.contact,
+                    local_position: t.origin,
                 })
             })
             .collect()
@@ -1063,6 +1089,7 @@ impl Fleet {
                         vessel: id.clone(),
                         position,
                         rotation,
+                        frame: self.vessel_frame(id),
                         mesh,
                     })
                     .collect()

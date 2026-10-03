@@ -17,7 +17,7 @@ use void_assembly_lab::parts::RenderAssets;
 use void_fleet_flight::session::{
     Action, FlightSession, InitialWorld, Outcome, Playback, Recording,
 };
-use void_landing::{FrameState, PlanetFrame, demo_rocket, landing_lod_options};
+use void_landing::{FrameState, demo_rocket, landing_lod_options};
 use void_lod::{LodCamera, LodView};
 use void_vessels::nearby_site;
 
@@ -114,6 +114,15 @@ impl Ground {
     }
 }
 const EXPOSURE: f32 = 6.309_573;
+/// A part's placement in the render world, from its own parts frame.
+fn part_transform(
+    to_camera: &mut impl FnMut(void_frames::FrameId) -> void_frames::Transform,
+    p: &void_vessels::PartSnapshot,
+) -> Transform {
+    let into = to_camera(p.frame);
+    Transform::from_translation(into.apply_point(p.local_position).as_vec3())
+        .with_rotation((into.rotation() * p.local_rotation).as_quat())
+}
 fn scene_color(color: Color) -> Color {
     let c = color.to_linear();
     Color::linear_rgba(
@@ -693,23 +702,20 @@ fn instruments(
     fleet.ephemeris.positions_at(fleet.time(), &mut positions);
     let reference = void_orbit::DominanceTree::new(fleet.ephemeris.bodies())
         .dominant(&positions, ship.position);
-    let frame = PlanetFrame::new(&fleet.ephemeris, reference);
-    let local = frame.to_body_fixed(
-        &fleet.ephemeris,
-        fleet.time(),
+    let local = sim.body_fixed(
+        reference,
         FrameState {
             position: ship.position,
             velocity: ship.velocity,
         },
     );
-    let axes = void_orbit::body_orientation(&frame.body.rotation, fleet.time());
-    let q = glam::DQuat::from_mat3(&glam::DMat3::from_cols(axes[0], axes[1], axes[2])).normalize();
+    let q = surface_axes(fleet, reference);
     let input = void_navball::NavballInput {
         nose: (ship.rotation * DVec3::Y).normalize(),
         top: (ship.rotation * DVec3::Z).normalize(),
         up: (ship.position - fleet.ephemeris.body_position(reference, fleet.time())).normalize(),
-        pole: frame.body.rotation.axis(),
-        prime_meridian: axes[0],
+        pole: fleet.ephemeris.bodies()[reference].rotation.axis(),
+        prime_meridian: q * DVec3::X,
         velocity: if lab.session.sim().presentation.speed_surface {
             q * local.velocity
         } else {
@@ -730,6 +736,13 @@ fn instruments(
             );
         }
     }
+}
+/// A body's surface axes in origin-frame coordinates; the render world uses the home planet's.
+fn surface_axes(fleet: &void_vessels::Fleet, body: usize) -> glam::DQuat {
+    fleet
+        .frames()
+        .transform(fleet.body_frames(body).1, fleet.origin_frame())
+        .rotation()
 }
 fn axis(keys: &ButtonInput<KeyCode>, plus: KeyCode, minus: KeyCode) -> f64 {
     keys.pressed(plus) as i32 as f64 - keys.pressed(minus) as i32 as f64
@@ -1300,41 +1313,40 @@ fn draw(
         ground.reset(&lab.session.sim().planet);
         lab.dirty = false;
     }
-    let f = &lab.session.sim().fleet;
-    let frame = PlanetFrame::new(&f.ephemeris, lab.session.sim().home);
-    let a = void_orbit::body_orientation(&frame.body.rotation, f.time());
-    let q = glam::DQuat::from_mat3(&glam::DMat3::from_cols(a[0], a[1], a[2])).normalize();
-    let selected = f.snapshot(&lab.session.sim().selected);
-    let state = frame.to_body_fixed(
-        &f.ephemeris,
-        f.time(),
-        FrameState {
-            position: selected.position,
-            velocity: selected.velocity,
-        },
-    );
-    let up = state.position.normalize();
-    let sample = lab.session.sim().presentation.sample(lab.session.sim());
-    let local = |position| {
-        frame
-            .to_body_fixed(
-                &f.ephemeris,
-                f.time(),
-                FrameState {
-                    position,
-                    velocity: DVec3::ZERO,
-                },
-            )
-            .position
+    let sim = lab.session.sim();
+    let f = &sim.fleet;
+    let surface = f.body_frames(sim.home).1;
+    // The render world: the home planet's surface axes, with the eye at the origin.
+    let q = surface_axes(f, sim.home);
+    let selected = f.snapshot(&sim.selected);
+    let up = sim
+        .body_fixed(
+            sim.home,
+            FrameState {
+                position: selected.position,
+                velocity: selected.velocity,
+            },
+        )
+        .position
+        .normalize();
+    let sample = sim.presentation.sample(sim);
+    let mut to_camera = HashMap::new();
+    let mut to_camera = |from: void_frames::FrameId| {
+        *to_camera
+            .entry(from)
+            .or_insert_with(|| sample.to_camera(f, from, q))
     };
-    let eye = local(sample.eye);
-    let focus = local(sample.focus);
-    let camera_up = if lab.session.sim().presentation.main_camera {
+    let focus = to_camera(sample.focus_frame).apply_point(sample.focus_local);
+    let eye = f
+        .frames()
+        .transform(sample.focus_frame, surface)
+        .apply_point(sample.camera(f, q).translation);
+    let camera_up = if sim.presentation.main_camera {
         q.conjugate() * sample.view.up
     } else {
         up
     };
-    **camera = Transform::default().looking_to((focus - eye).as_vec3(), camera_up.as_vec3());
+    **camera = Transform::default().looking_to(focus.as_vec3(), camera_up.as_vec3());
     lab.focus_position = sample.focus;
     lab.view = Some(sample.view);
     lab.eye = eye;
@@ -1359,18 +1371,7 @@ fn draw(
     });
     for p in &snapshots {
         if !lab.parts.contains_key(&p.id) {
-            let origin = frame
-                .to_body_fixed(
-                    &f.ephemeris,
-                    f.time(),
-                    FrameState {
-                        position: p.position,
-                        velocity: DVec3::ZERO,
-                    },
-                )
-                .position;
-            let root = Transform::from_translation((origin - eye).as_vec3())
-                .with_rotation((q.conjugate() * p.rotation).as_quat());
+            let root = part_transform(&mut to_camera, p);
             let entities = assets.parts[&p.definition.id]
                 .iter()
                 .map(|piece| {
@@ -1398,19 +1399,7 @@ fn draw(
     }
     for (visual, mut transform, mut visibility) in &mut parts {
         if let Some(p) = snapshots.iter().find(|p| p.id == visual.id) {
-            let origin = frame
-                .to_body_fixed(
-                    &f.ephemeris,
-                    f.time(),
-                    FrameState {
-                        position: p.position,
-                        velocity: DVec3::ZERO,
-                    },
-                )
-                .position;
-            *transform = Transform::from_translation((origin - eye).as_vec3())
-                .with_rotation((q.conjugate() * p.rotation).as_quat())
-                .mul_transform(visual.local);
+            *transform = part_transform(&mut to_camera, p).mul_transform(visual.local);
             *visibility = if visual.flame && !p.firing {
                 Visibility::Hidden
             } else {
@@ -1421,16 +1410,9 @@ fn draw(
     let observers = snapshots
         .iter()
         .map(|p| {
-            frame
-                .to_body_fixed(
-                    &f.ephemeris,
-                    f.time(),
-                    FrameState {
-                        position: p.position,
-                        velocity: DVec3::ZERO,
-                    },
-                )
-                .position
+            f.frames()
+                .transform(p.frame, surface)
+                .apply_point(p.local_position)
         })
         .collect();
     ground.finish_builds();
@@ -1475,22 +1457,12 @@ fn draw(
     lab.collision.retain(|key, _| live.contains(key));
     if lab.session.sim().presentation.colliders {
         for collider in f.vessel_collider_meshes() {
-            let origin = frame
-                .to_body_fixed(
-                    &f.ephemeris,
-                    f.time(),
-                    FrameState {
-                        position: collider.position,
-                        velocity: DVec3::ZERO,
-                    },
-                )
-                .position;
-            let rotation = q.conjugate() * collider.rotation;
+            let into = to_camera(collider.frame);
             let vertices = &collider.mesh.vertices;
             let indices = unique_edges(&collider.mesh.triangles);
             for edge in indices.as_chunks::<2>().0 {
                 let point = |i: u32| {
-                    (origin - eye + rotation * Vec3::from_array(vertices[i as usize]).as_dvec3())
+                    into.apply_point(Vec3::from_array(vertices[i as usize]).as_dvec3())
                         .as_vec3()
                 };
                 gizmos.line(point(edge[0]), point(edge[1]), Color::srgb(0.2, 1.0, 0.4));
@@ -1505,23 +1477,13 @@ fn draw(
                     .map(|i| Vec3::from_array(vertices[*i as usize]))
                     .collect()
             });
-            let origin = frame
-                .to_body_fixed(
-                    &f.ephemeris,
-                    f.time(),
-                    FrameState {
-                        position: tile.position,
-                        velocity: DVec3::ZERO,
-                    },
-                )
-                .position;
-            let rot = q.conjugate() * tile.rotation;
+            let into = to_camera(tile.frame);
+            let point = |v: Vec3| {
+                into.apply_point(tile.local_position + v.as_dvec3())
+                    .as_vec3()
+            };
             for edge in vertices.as_chunks::<2>().0 {
-                gizmos.line(
-                    (origin - eye + rot * edge[0].as_dvec3()).as_vec3(),
-                    (origin - eye + rot * edge[1].as_dvec3()).as_vec3(),
-                    Color::srgb(0.2, 1.0, 0.4),
-                );
+                gizmos.line(point(edge[0]), point(edge[1]), Color::srgb(0.2, 1.0, 0.4));
             }
         }
     }
@@ -1537,18 +1499,9 @@ fn draw(
         && let Some(plan) = lab.session.sim().plans.get(&lab.session.sim().selected)
     {
         let trajectory = &plan.plan.trajectory;
+        let into = to_camera(f.origin_frame());
         gizmos.linestrip(
-            (0..trajectory.count()).map(|i| {
-                let local = frame.to_body_fixed(
-                    &f.ephemeris,
-                    f.time(),
-                    FrameState {
-                        position: trajectory.position(i),
-                        velocity: trajectory.velocity(i),
-                    },
-                );
-                (local.position - eye).as_vec3()
-            }),
+            (0..trajectory.count()).map(|i| into.apply_point(trajectory.position(i)).as_vec3()),
             Color::srgb(1.0, 0.6, 0.15),
         );
     }
@@ -1563,9 +1516,8 @@ fn draw(
     let r = selected.position - positions[navigation];
     let v = selected.velocity - velocities[navigation];
     let orbital = void_orbit::osculating_orbit(r, v, body.gm);
-    let surface = PlanetFrame::new(&f.ephemeris, navigation).to_body_fixed(
-        &f.ephemeris,
-        f.time(),
+    let surface = sim.body_fixed(
+        navigation,
         FrameState {
             position: selected.position,
             velocity: selected.velocity,
@@ -2248,9 +2200,8 @@ fn update_scenery(
     };
     let sim = lab.session.sim();
     let f = &sim.fleet;
-    let frame = PlanetFrame::new(&f.ephemeris, sim.home);
-    let axes = void_orbit::body_orientation(&frame.body.rotation, f.time());
-    let q = glam::DQuat::from_mat3(&glam::DMat3::from_cols(axes[0], axes[1], axes[2])).normalize();
+    let q = surface_axes(f, sim.home);
+    let radius = f.ephemeris.bodies()[sim.home].radius_meters;
     let eye = lab.eye;
     let bodies = f.ephemeris.bodies();
     let root = bodies
@@ -2294,7 +2245,7 @@ fn update_scenery(
     for mut transform in &mut sky {
         transform.rotation = q.conjugate().as_quat();
     }
-    let altitude = eye.length() - frame.body.radius_meters;
+    let altitude = eye.length() - radius;
     let smooth = |a: f64, b: f64, x: f64| {
         let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
         t * t * (3.0 - 2.0 * t)
@@ -2364,8 +2315,7 @@ fn draw_map(
         .states_at(fleet.time(), &mut positions, Some(&mut velocities));
     let ship = fleet.snapshot(&lab.session.sim().selected);
     let reference = void_orbit::DominanceTree::new(bodies).dominant(&positions, ship.position);
-    let axes = void_orbit::body_orientation(&bodies[home].rotation, fleet.time());
-    let q = glam::DQuat::from_mat3(&glam::DMat3::from_cols(axes[0], axes[1], axes[2])).normalize();
+    let q = surface_axes(fleet, home);
     let frame = void_view::MapFrame {
         time: fleet.time(),
         positions: &positions,
@@ -2407,17 +2357,10 @@ fn draw_map(
     } else {
         lab.plan_path.hide();
     }
-    let home_frame = PlanetFrame::new(&fleet.ephemeris, home);
-    let eye_inertial = home_frame
-        .to_inertial(
-            &fleet.ephemeris,
-            fleet.time(),
-            FrameState {
-                position: lab.eye,
-                velocity: DVec3::ZERO,
-            },
-        )
-        .position;
+    let eye_inertial = fleet
+        .frames()
+        .transform(fleet.body_frames(home).1, fleet.origin_frame())
+        .apply_point(lab.eye);
     let render = |v: DVec3| (q.conjugate() * (v + frame.origin - eye_inertial)).as_vec3();
     for (body, mut transform) in &mut spheres {
         transform.translation = render(positions[body.0] - frame.origin);

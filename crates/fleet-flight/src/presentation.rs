@@ -1,8 +1,10 @@
 //! Camera and observation controls share the command journal with physics. Rendering only reads
 //! these decisions: camera spin must never depend on how often a renderer happens to run.
 use crate::FleetFlight;
-use glam::DVec3;
+use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
+use void_frames::{FrameId, Motion, Transform};
+use void_vessels::Fleet;
 use void_view::{FocusGeometry, FocusKind, OrbitCamera, PathFrameKind, ViewMode, ViewState};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -45,9 +47,39 @@ pub enum ViewCommand {
     Toggle { setting: Toggle },
 }
 pub struct CameraSample {
+    /// Inertial (origin frame) eye and focus, for readouts; drawing goes through `to_camera`.
     pub eye: DVec3,
     pub focus: DVec3,
     pub view: ViewState,
+    /// The frame the camera hangs on (the selected vessel's parts frame, or a focused body's
+    /// inertial frame) and the focus point in it.
+    pub focus_frame: FrameId,
+    pub focus_local: DVec3,
+    /// Eye minus focus, in origin-frame axes.
+    pub offset: DVec3,
+}
+impl CameraSample {
+    /// The camera frame relative to its focus frame: origin at the eye, with axes `axes` given in
+    /// origin-frame coordinates.
+    pub fn camera(&self, fleet: &Fleet, axes: DQuat) -> Motion {
+        let turn = fleet
+            .frames()
+            .transform(self.focus_frame, fleet.origin_frame())
+            .rotation()
+            .inverse();
+        Motion::fixed(
+            self.focus_local + turn * self.offset,
+            (turn * axes).normalize(),
+        )
+    }
+    /// From any frame of the fleet's tree into the camera frame, through the frames' common
+    /// ancestor: a part 40 m from the eye keeps its digits however far the system is.
+    pub fn to_camera(&self, fleet: &Fleet, from: FrameId, axes: DQuat) -> Transform {
+        fleet
+            .frames()
+            .transform(from, self.focus_frame)
+            .into_child(&self.camera(fleet, axes))
+    }
 }
 impl Presentation {
     pub fn new(position: DVec3, centre: DVec3, time: f64) -> Self {
@@ -230,26 +262,24 @@ impl Presentation {
         self.last_time = sim.fleet.time();
     }
     pub fn sample(&self, sim: &FleetFlight) -> CameraSample {
+        let f = &sim.fleet;
         let (geometry, _, _, focus) = self.geometry(sim);
         let view = void_view::view_state(ViewMode::Single, false, &geometry, self.distance);
+        let (focus_frame, focus_local) = match self.focus_body {
+            Some(body) => (f.body_frames(body).0, DVec3::ZERO),
+            None => (
+                f.vessel_frame(&sim.selected),
+                f.centre_of_mass_local(&sim.selected),
+            ),
+        };
         let direction = if self.main_camera {
             self.direction
         } else {
-            let ship = sim.fleet.snapshot(&sim.selected);
-            let frame = void_landing::PlanetFrame::new(&sim.fleet.ephemeris, sim.home);
-            let axes = void_orbit::body_orientation(&frame.body.rotation, sim.fleet.time());
-            let q = glam::DQuat::from_mat3(&glam::DMat3::from_cols(axes[0], axes[1], axes[2]))
-                .normalize();
-            let up = frame
-                .to_body_fixed(
-                    &sim.fleet.ephemeris,
-                    sim.fleet.time(),
-                    void_landing::FrameState {
-                        position: ship.position,
-                        velocity: ship.velocity,
-                    },
-                )
-                .position
+            let surface = f.body_frames(sim.home).1;
+            let frames = f.frames();
+            let up = frames
+                .transform(focus_frame, surface)
+                .apply_point(focus_local)
                 .normalize();
             let east = if up.x.hypot(up.y) > 1e-9 {
                 DVec3::new(-up.y, up.x, 0.0).normalize()
@@ -257,14 +287,20 @@ impl Presentation {
                 DVec3::X
             };
             let north = up.cross(east);
-            q * (east * (self.yaw.cos() * self.pitch.cos())
-                + north * (self.yaw.sin() * self.pitch.cos())
-                + up * self.pitch.sin())
+            frames.transform(surface, f.origin_frame()).apply_direction(
+                east * (self.yaw.cos() * self.pitch.cos())
+                    + north * (self.yaw.sin() * self.pitch.cos())
+                    + up * self.pitch.sin(),
+            )
         };
+        let offset = direction * self.distance;
         CameraSample {
-            eye: focus + direction * self.distance,
+            eye: focus + offset,
             focus,
             view,
+            focus_frame,
+            focus_local,
+            offset,
         }
     }
 }

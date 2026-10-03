@@ -6,7 +6,7 @@ pub mod presentation;
 pub mod session;
 pub mod warp;
 pub use air::FleetAir;
-use glam::{DQuat, DVec3};
+use glam::DVec3;
 use std::sync::Arc;
 use void_assembly::Craft;
 use void_landing::{
@@ -112,9 +112,8 @@ impl FleetFlight {
     pub fn predict(&mut self, horizon: f64) -> CoastPrediction {
         let snap = self.fleet.snapshot(&self.selected);
         let frame = PlanetFrame::new(&self.fleet.ephemeris, self.home);
-        let state = frame.to_body_fixed(
-            &self.fleet.ephemeris,
-            self.fleet.time(),
+        let state = self.body_fixed(
+            self.home,
             FrameState {
                 position: snap.position,
                 velocity: snap.velocity,
@@ -141,12 +140,37 @@ impl FleetFlight {
             position: DVec3::X * r + offset,
             velocity: DVec3::Y * ((body.gm / r).sqrt() - frame.omega * r),
         };
-        let state = frame.to_inertial(&self.fleet.ephemeris, self.fleet.time(), local);
-        let a = void_orbit::body_orientation(&body.rotation, self.fleet.time());
-        let rotation = DQuat::from_mat3(&glam::DMat3::from_cols(a[0], a[1], a[2])).normalize();
+        let ground = self.fleet.frames().transform(
+            self.fleet.body_frames(self.home).1,
+            self.fleet.origin_frame(),
+        );
+        let state = ground.apply_state(void_frames::State {
+            position: local.position,
+            velocity: local.velocity,
+        });
+        let state = FrameState {
+            position: state.position,
+            velocity: state.velocity,
+        };
+        let rotation = ground.rotation();
         let id = self.fleet.launch(craft, state, rotation, DVec3::ZERO);
         self.fleet.advance(0.0);
         id
+    }
+    /// An origin-frame state in a body's surface (body-fixed) frame.
+    pub fn body_fixed(&self, body: usize, inertial: FrameState) -> FrameState {
+        let s = self
+            .fleet
+            .frames()
+            .transform(self.fleet.origin_frame(), self.fleet.body_frames(body).1)
+            .apply_state(void_frames::State {
+                position: inertial.position,
+                velocity: inertial.velocity,
+            });
+        FrameState {
+            position: s.position,
+            velocity: s.velocity,
+        }
     }
     pub fn mode(&self) -> VesselMode {
         self.fleet.snapshot(&self.selected).mode

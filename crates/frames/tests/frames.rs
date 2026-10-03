@@ -479,3 +479,24 @@ fn a_source_without_dynamic_frames_panics() {
     let vessel = tree.add_dynamic(system, 1);
     tree.at(0.0, &Still(vec![])).transform(vessel, system);
 }
+
+#[test]
+fn a_child_outside_the_tree_keeps_the_ancestor_precision() {
+    let (mut tree, system) = one_system();
+    let (_, surface) = tree.add_body(system, BodyId(0), EARTH);
+    let ground = DVec3::new(0.31, -0.72, 0.62).normalize() * EARTH_RADIUS;
+    let vessel = tree.add_fixed(surface, Motion::fixed(ground, DQuat::IDENTITY));
+    let focus = tree.add_fixed(surface, Motion::fixed(ground + DVec3::X, DQuat::IDENTITY));
+    let bodies = Circles(vec![(AU, 3.155_76e7, 0.3)]);
+    let t = 4.0e5;
+    let snapshot = tree.at(t, &bodies);
+    // A camera 40 m from its focus, turned; never stored in the tree.
+    let turn = DQuat::from_euler(glam::EulerRot::ZXY, 0.3, 0.2, -0.9);
+    let camera = Motion::fixed(DVec3::new(0.0, 40.0, 0.0), turn);
+    let seen = snapshot
+        .transform(vessel, focus)
+        .into_child(&camera)
+        .apply_point(DVec3::ZERO);
+    let expected = turn.inverse() * (-DVec3::X - DVec3::new(0.0, 40.0, 0.0));
+    assert!((seen - expected).length() < 1e-8, "{seen} {expected}");
+}
