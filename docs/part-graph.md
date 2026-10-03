@@ -60,12 +60,13 @@ impl PartGraph {
     pub fn part(&self, id: &str) -> &Part;
     pub fn part_mut(&mut self, id: &str) -> &mut Part;
     pub fn connections(&self) -> &[Connection];
-    pub fn connect(&mut self, connection: Connection);                 // 對接；接點必須空著、大小相同
+    pub fn check_connection(&self, connection: &Connection);           // 接點必須存在、空著、大小相同
+    pub fn connect(&mut self, connection: Connection);                 // 對接
     pub fn disconnect(&mut self, part: &str, node: &str) -> Connection; // 分離
     pub fn components(&self, ids: &[String]) -> Vec<Vec<String>>;      // 保留 ids 的順序
-    pub fn free_nodes(&self, ids: &[String]) -> Vec<FreeNode>;
-    pub fn crossfeed_tanks(&self, engine: &str) -> Vec<String>;
-    pub fn mass(&self, ids: &[String]) -> f64;
+    pub fn free_nodes(&self, ids: &[String]) -> Vec<(String, &'static AttachNode)>;
+    pub fn crossfeed_tanks(&self, members: &[String], engine: &str) -> Vec<String>; // 依 members 的順序
+    pub fn mass(&self, ids: &[String]) -> f64;                         // 依 ids 的順序加總
 }
 
 // void-vessels：船是零件圖的一個連通分量加上物理擁有者
@@ -99,16 +100,15 @@ impl Fleet {
 | 步驟 | 內容 | 行為是否改變 |
 | --- | --- | --- |
 | 1. `PartGraph` | assembly 新增 `graph.rs`：`Part`、`PartGraph` 與操作；`components`、`free_nodes`、`crossfeed_tanks` 與現有函式結果相同 | 不改（新程式） |
-| 2. Fleet 的零件狀態 | `Fleet` 改存 `PartGraph`：燃料、分級、點火進零件；`lit`、`staged`、`PropulsionPart` 退場；`decouple`、`join` 改用 `disconnect`／`connect` | 不改。存檔格式改變（`FleetCheckpoint` 版本、`MODEL_VERSION`） |
-| 3. pose 進零件 | `Vessel::poses` 改成 `members`，pose 存在零件上 | 不改 |
-| 4. 零件座標系 | `Dynamic::Part`、`part_frame`；`node_frame`、`free_nodes` 的位置、`PartSnapshot` 經樹；vessels lab 的對接捕獲用兩個接點的樹轉換 | 只有捨入（經 LCA 的轉換與手乘順序不同），量出並記錄 |
-| 5. 噴嘴面積進 catalog | 引擎模組加 `nozzleExitAreaM2`，`FleetAir` 讀它 | 不改；catalog 改變，舊存檔照例拒絕 |
-| 6. 文件 | 本頁、vessels.md、assembly.md、fleet-flight.md、status.md | 無 |
+| 2. Fleet 存零件圖 | `Fleet` 改存 `PartGraph`：燃料、分級、點火、pose 都進零件；`lit`、`staged`、`PropulsionPart`、`Vessel::poses` 退場（船改存 `members`）；`decouple`、`join` 改用 `disconnect`／`connect` | 不改。存檔格式改變（`FleetCheckpoint` 版本、`MODEL_VERSION`） |
+| 3. 零件座標系 | `Dynamic::Part`、`part_frame`；`node_frame`、`free_nodes` 的位置、`PartSnapshot` 經樹；vessels lab 的對接捕獲用兩個接點的樹轉換 | 只有捨入（經 LCA 的轉換與手乘順序不同），量出並記錄 |
+| 4. 噴嘴面積進 catalog | 引擎模組加 `nozzleExitAreaM2`，`FleetAir` 讀它 | 不改；catalog 改變，舊存檔照例拒絕 |
+| 5. 文件 | 本頁、vessels.md、assembly.md、fleet-flight.md、status.md | 無 |
 
 ### 驗證
 
 - 既有測試（vessels 的 38 項 lab 檢查、Fleet、fleet-flight、seam-check、multiscale lab）門檻不變。
-- **前後逐位元對照。** 一個暫時的 probe 用同一個劇本（地面發射、點火、分級、分離、軌道燃燒、交會氣泡、對接、rails）在改之前與改之後各跑一次，每步印出所有船與零件的狀態，兩邊必須完全相同。第 4 步只允許零件座標系那幾項有捨入差，量出來記在本頁。
+- **前後逐位元對照。** 一個暫時的 probe 用同一個劇本（地面發射、點火、分級、分離、軌道燃燒、交會氣泡、對接、rails）在改之前與改之後各跑一次，每步印出所有船與零件的狀態，兩邊必須完全相同。第 3 步只允許零件座標系那幾項有捨入差，量出來記在本頁。
 - 新測試：`PartGraph` 的操作（分離後的連通分量、對接佔用與大小檢查、交叉供油）、零件座標系與接點位置、存檔還原後零件狀態相同。
 
 ### 進度
@@ -116,6 +116,7 @@ impl Fleet {
 | 步驟 | 結果 | 與原計畫的差異 |
 | --- | --- | --- |
 | 1. `PartGraph` | `void_assembly::graph`：`Part`（定義、燃料、分級、已分級、點火、pose，加上 `engine()`／`decoupler()`／`is_command()`）與 `PartGraph`（`add`、`insert`、`restore_connections`、`connect`、`disconnect`、`connection_at`、`components`、`free_nodes`、`crossfeed_tanks`、`mass`）。檢查：demo 與主遊戲火箭的零件、pose、質量、連通分量、空接點、交叉供油都和 `CompiledCraft` 相同；分離後各引擎只連到自己那半的油箱，對接後合成一個分量；未知零件、重複零件、佔用或不存在的接點、自己接自己、沒有引擎卻點火都會 panic | `crossfeed_tanks` 與 `mass` 依呼叫者給的成員順序：Fleet 依船上零件的順序加總，捨入才和現在相同 |
+| 2. Fleet 存零件圖 | `Fleet::parts` 是 `PartGraph`，燃料、分級、點火、pose 都在零件上；`Vessel` 只剩名字、根零件、成員順序與物理擁有者。`lit`、`staged`、`PropulsionPart`、`Vessel::poses` 與 Fleet 自己的 `connections` 退場。`decouple` 先 `disconnect`，再依 `components` 分船；`join` 合船後 `connect`。分船、合船、軌道上燒完一段時重新以質心為原點，改的是成員的 pose。`propulsion`、`burn` 直接讀寫零件圖。`FleetCheckpoint` 版本 2 → 3：零件存分級、點火、pose，不再有 lit／staged 清單，連接經 `restore_connections` 檢查後依原順序還原。`MODEL_VERSION` 6 → 7。probe 的劇本：主遊戲上升、分級、rails；交會；旋轉分離；對接；存檔還原。它印出 927 行逐位元的狀態，改前改後 md5 相同。新測試：分級、分離後，每艘船是零件圖的一個連通分量；存檔還原後，每個零件的燃料（逐位元）、分級、點火、pose，以及連接的順序都相同。workspace 測試 313 passed、0 failed、4 ignored，clippy 無警告 | 原計畫的第 2、3 步合併：狀態進零件和 pose 進零件改的是同一批函式（分離、對接、重新置中），分開做要先寫一份過渡的同步。對接的接點檢查改由 `PartGraph::check_connection` 在 settle 之前做，panic 訊息改成零件圖的。存檔還原多檢查「點火的零件必須已分級」 |
 
 ## 之後（不在本 branch，另行決定）
 

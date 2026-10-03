@@ -698,3 +698,80 @@ fn grounds_and_checkpoints_need_the_environments_terrain() {
     let same = s.fleet.environment().clone();
     Fleet::from_checkpoint(e, same, saved, None);
 }
+
+/// The part graph is the fleet's record of its parts: separation takes a connection out of it,
+/// each vessel is one of its connected groups, and a checkpoint restores every part's state and
+/// pose and the connections in their order.
+#[test]
+fn the_part_graph_is_the_record_and_a_checkpoint_restores_it() {
+    let mut s = create_lab_scene(Scenario::Separate);
+    let f = &mut s.fleet;
+    let connections = f.parts().connections().len();
+    // The demo's first stage lights its lower engine; the second releases the decoupler and
+    // lights the upper engine.
+    assert!(f.stage("v1").is_empty());
+    assert!(f.parts().part("v1/p6").lit);
+    f.set_control(
+        "v1",
+        VesselControl {
+            throttle: 1.0,
+            ..f.control("v1")
+        },
+    );
+    f.advance(0.5);
+    assert_eq!(f.stage("v1"), ["v2"]);
+    let decoupler = f.parts().part("v1/p4");
+    assert!(decoupler.staged && !decoupler.lit);
+    assert!(f.parts().part("v1/p3").lit);
+    assert_eq!(f.parts().connections().len(), connections - 1);
+    let members = |f: &Fleet, id: &str| -> Vec<String> {
+        f.part_snapshots(id).into_iter().map(|p| p.id).collect()
+    };
+    let all: Vec<String> = f
+        .vessel_ids()
+        .iter()
+        .flat_map(|id| members(f, id))
+        .collect();
+    let groups = f.parts().components(&all);
+    assert_eq!(groups.len(), 2);
+    for id in f.vessel_ids() {
+        let mut own = members(f, &id);
+        own.sort();
+        assert!(
+            groups.iter().any(|g| {
+                let mut g = g.clone();
+                g.sort();
+                g == own
+            }),
+            "{id} is not one connected group"
+        );
+    }
+    f.advance(0.5);
+    let (ephemeris, _) = void_landing::planet_ephemeris(&s.planet);
+    let restored = Fleet::from_checkpoint(
+        ephemeris,
+        s.fleet.environment().clone(),
+        s.fleet.checkpoint(),
+        None,
+    );
+    let (a, b): (Vec<_>, Vec<_>) = (
+        s.fleet.parts().parts().collect(),
+        restored.parts().parts().collect(),
+    );
+    assert_eq!(a.len(), b.len());
+    for (a, b) in a.iter().zip(&b) {
+        assert_eq!(a.id, b.id);
+        assert_eq!(a.definition.id, b.definition.id);
+        assert_eq!(a.fuel_kg.to_bits(), b.fuel_kg.to_bits(), "{}", a.id);
+        assert_eq!(
+            (a.stage, a.staged, a.lit, a.pose),
+            (b.stage, b.staged, b.lit, b.pose),
+            "{}",
+            a.id
+        );
+    }
+    assert_eq!(
+        s.fleet.parts().connections(),
+        restored.parts().connections()
+    );
+}

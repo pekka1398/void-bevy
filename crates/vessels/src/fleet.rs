@@ -1,6 +1,5 @@
 use crate::{
-    ForcePart, ForceSample, FreeFallFrame, PartForces, Propulsion, PropulsionPart, burn,
-    propulsion, step_thrust,
+    ForcePart, ForceSample, FreeFallFrame, PartForces, Propulsion, burn, propulsion, step_thrust,
 };
 use glam::{DMat3, DQuat, DVec3};
 use rapier3d::prelude::RigidBodyHandle;
@@ -8,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use void_assembly::{
-    Connection, Craft, Module, PartDefinition, PartPose, Shape, compile, node, part_inertia_per_kg,
+    Connection, Craft, Module, PartDefinition, PartGraph, PartPose, Shape, compile, node,
+    part_inertia_per_kg,
 };
 use void_environment::Environment;
 use void_frames::{
@@ -29,7 +29,6 @@ use void_terrain::Terrain;
 mod guidance;
 pub use guidance::{GuidanceStatus, GuidedBurn};
 
-type Poses = Vec<(String, PartPose)>;
 type SceneGroup = (Option<usize>, Vec<String>, Vec<(u64, usize)>);
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct FleetOptions {
@@ -210,7 +209,7 @@ enum Dynamic {
     Bubble(u64),
     /// A scene's floating origin.
     Floating(u64),
-    /// A vessel's parts frame (poses' origin and axes).
+    /// A vessel's parts frame (its parts' poses are in it).
     Vessel(String),
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -227,11 +226,13 @@ enum Owner {
     },
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
+/// One connected group of the part graph and its physics owner. The members' order is the order
+/// their masses, inertia and thrust are summed in.
 struct Vessel {
     id: String,
     name: String,
     root: String,
-    poses: Poses,
+    members: Vec<String>,
     owner: Owner,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -239,7 +240,8 @@ struct Sas {
     assist: StabilityAssist,
     ground: Option<usize>,
 }
-/// Fleet owns the part graph. Every connected vessel has exactly one physics owner.
+/// Fleet owns the part graph. Every connected group of it is a vessel with exactly one physics
+/// owner.
 pub struct Fleet {
     pub ephemeris: Box<dyn EphemerisSource>,
     pub options: FleetOptions,
@@ -249,14 +251,12 @@ pub struct Fleet {
     environment: Arc<Environment>,
     forces: Option<Arc<dyn PartForces>>,
     grounds: Vec<Ground>,
-    parts: HashMap<String, PropulsionPart>,
-    connections: Vec<Connection>,
+    /// Every part's state and pose, and the connections between parts.
+    parts: PartGraph,
     vessels: BTreeMap<String, Vessel>,
     order: Vec<String>,
     controls: HashMap<String, VesselControl>,
     guidance: BTreeMap<String, GuidedBurn>,
-    lit: HashSet<String>,
-    staged: HashSet<String>,
     sas: HashMap<String, Sas>,
     scenes: BTreeMap<u64, Scene>,
     /// Star systems and bodies, with scenes and vessels as dynamic frames below them.
@@ -386,14 +386,11 @@ impl Fleet {
             environment,
             forces: None,
             grounds,
-            parts: HashMap::new(),
-            connections: vec![],
+            parts: PartGraph::new(),
             vessels: BTreeMap::new(),
             order: vec![],
             controls: HashMap::new(),
             guidance: BTreeMap::new(),
-            lit: HashSet::new(),
-            staged: HashSet::new(),
             sas: HashMap::new(),
             scenes: BTreeMap::new(),
             frames,
@@ -430,14 +427,20 @@ impl Fleet {
     }
     fn force_sample(&self, v: &Vessel, time: f64) -> Option<ForceSample> {
         self.forces.as_ref().map(|forces| {
-            let parts = self
-                .centred(&v.poses)
-                .0
-                .into_iter()
-                .map(|(id, pose)| ForcePart {
-                    definition: self.parts[&id].definition,
-                    id,
-                    pose,
+            let c = self.centre(&v.members);
+            let parts = v
+                .members
+                .iter()
+                .map(|id| {
+                    let part = self.parts.part(id);
+                    ForcePart {
+                        id: id.clone(),
+                        definition: part.definition,
+                        pose: PartPose {
+                            position: part.pose.position - c,
+                            rotation: part.pose.rotation,
+                        },
+                    }
                 })
                 .collect::<Vec<_>>();
             forces.sample(
@@ -446,7 +449,7 @@ impl Fleet {
                 time,
                 &self.snapshot_of(v),
                 &parts,
-                &self.connections,
+                self.parts.connections(),
             )
         })
     }
@@ -458,7 +461,11 @@ impl Fleet {
         self.pending
     }
     pub fn connection_snapshots(&self) -> Vec<Connection> {
-        self.connections.clone()
+        self.parts.connections().to_vec()
+    }
+    /// Every part's state and pose (in its vessel's parts frame), and the connections.
+    pub fn parts(&self) -> &PartGraph {
+        &self.parts
     }
     pub fn sas_target(&self, id: &str) -> Option<DQuat> {
         self.vessel(id);
@@ -476,38 +483,34 @@ impl Fleet {
     fn vessel(&self, id: &str) -> &Vessel {
         self.vessels.get(id).expect("fleet: unknown vessel")
     }
-    fn mass(&self, poses: &Poses) -> f64 {
-        poses.iter().map(|(id, _)| self.part_mass(id)).sum()
+    fn mass(&self, members: &[String]) -> f64 {
+        self.parts.mass(members)
     }
     fn part_mass(&self, id: &str) -> f64 {
-        let p = &self.parts[id];
-        p.definition.dry_mass_kg + p.fuel_kg
+        self.parts.part(id).mass_kg()
     }
-    fn centred(&self, poses: &Poses) -> (Poses, DVec3) {
-        let c = poses.iter().fold(DVec3::ZERO, |sum, (id, p)| {
-            sum + p.position * self.part_mass(id)
-        }) / self.mass(poses);
-        (
-            poses
-                .iter()
-                .map(|(id, p)| {
-                    (
-                        id.clone(),
-                        PartPose {
-                            position: p.position - c,
-                            rotation: p.rotation,
-                        },
-                    )
-                })
-                .collect(),
-            c,
-        )
+    /// The members' centre of mass in their vessel's parts frame.
+    fn centre(&self, members: &[String]) -> DVec3 {
+        members.iter().fold(DVec3::ZERO, |sum, id| {
+            sum + self.parts.part(id).pose.position * self.part_mass(id)
+        }) / self.mass(members)
     }
-    fn inertia_of(&self, poses: &Poses) -> DMat3 {
-        poses.iter().fold(DMat3::ZERO, |sum, (id, p)| {
-            let d = part_inertia_per_kg(self.parts[id].definition);
-            let r = DMat3::from_quat(p.rotation);
-            let v = p.position;
+    /// Moves the parts frame's origin to the members' centre of mass; returns where it was.
+    fn recentre(&mut self, members: &[String]) -> DVec3 {
+        let c = self.centre(members);
+        for id in members {
+            let pose = &mut self.parts.part_mut(id).pose;
+            pose.position -= c;
+        }
+        c
+    }
+    /// The members' inertia about `about` in their parts frame's axes.
+    fn inertia_of(&self, members: &[String], about: DVec3) -> DMat3 {
+        members.iter().fold(DMat3::ZERO, |sum, id| {
+            let part = self.parts.part(id);
+            let d = part_inertia_per_kg(part.definition);
+            let r = DMat3::from_quat(part.pose.rotation);
+            let v = part.pose.position - about;
             let outer = DMat3::from_cols(v * v.x, v * v.y, v * v.z);
             sum + (r * DMat3::from_diagonal(d) * r.transpose()
                 + DMat3::IDENTITY * v.length_squared()
@@ -516,34 +519,26 @@ impl Fleet {
         })
     }
     pub fn inertia(&self, id: &str) -> Mat3 {
-        rows(self.inertia_of(&self.centred(&self.vessel(id).poses).0))
+        let v = self.vessel(id);
+        rows(self.inertia_of(&v.members, self.centre(&v.members)))
     }
     fn commanded(&self, v: &Vessel) -> bool {
-        v.poses.iter().any(|(id, _)| {
-            self.parts[id]
-                .definition
-                .modules
-                .iter()
-                .any(|m| matches!(m, Module::Command))
-        })
+        v.members.iter().any(|id| self.parts.part(id).is_command())
     }
     fn propulsion_with_forces(&self, v: &Vessel, sample: Option<&ForceSample>) -> Propulsion {
         self.propulsion_at(v, sample, self.time)
     }
     fn propulsion_at(&self, v: &Vessel, sample: Option<&ForceSample>, time: f64) -> Propulsion {
-        let parts: Vec<_> = v.poses.iter().map(|(id, _)| &self.parts[id]).collect();
         let mut p = propulsion(
-            &parts,
-            &v.poses,
-            &self.connections,
-            &self.lit,
+            &self.parts,
+            &v.members,
             self.effective_throttle(&v.id, time),
-            self.centred(&v.poses).1,
+            self.centre(&v.members),
         );
         if let Some(sample) = sample {
             p.force = DVec3::ZERO;
             p.torque = DVec3::ZERO;
-            let centre = self.centred(&v.poses).1;
+            let centre = self.centre(&v.members);
             for group in &mut p.groups {
                 for engine in &mut group.engines {
                     let scale = *sample
@@ -573,18 +568,10 @@ impl Fleet {
     /// when the pilot currently coasts; it does not ignite unstaged engines or mutate controls.
     pub fn full_throttle_vacuum_thrust(&self, id: &str) -> Propulsion {
         let v = self.vessel(id);
-        let parts: Vec<_> = v.poses.iter().map(|(id, _)| &self.parts[id]).collect();
-        propulsion(
-            &parts,
-            &v.poses,
-            &self.connections,
-            &self.lit,
-            1.0,
-            self.centred(&v.poses).1,
-        )
+        propulsion(&self.parts, &v.members, 1.0, self.centre(&v.members))
     }
     pub fn fuel(&self, id: &str) -> f64 {
-        self.parts[id].fuel_kg
+        self.parts.part(id).fuel_kg
     }
     pub fn control(&self, id: &str) -> VesselControl {
         self.controls[id]
@@ -651,39 +638,19 @@ impl Fleet {
         }
         let id = format!("v{}", self.next_vessel);
         self.next_vessel += 1;
-        let mut poses = vec![];
-        for p in c.parts {
-            let pid = format!("{id}/{}", p.instance.id);
-            self.parts.insert(
-                pid.clone(),
-                PropulsionPart {
-                    id: pid.clone(),
-                    definition: p.definition,
-                    fuel_kg: p.instance.fuel_kg,
-                    stage: p.instance.stage,
-                },
-            );
-            poses.push((pid, p.pose));
-        }
-        for link in c.connections {
-            self.connections.push(Connection {
-                a: format!("{id}/{}", link.a),
-                b: format!("{id}/{}", link.b),
-                ..link
-            });
-        }
-        let poses = self.centred(&poses).0;
+        let members = self.parts.add(&c, &id);
+        self.recentre(&members);
         let run = PropagationRun::new(VesselState {
             time: self.time,
             position: state.position,
             velocity: state.velocity,
-            mass_kg: self.mass(&poses),
+            mass_kg: self.mass(&members),
         });
         let v = Vessel {
             id: id.clone(),
             name: craft.name.clone(),
             root: format!("{id}/{}", c.root_id),
-            poses,
+            members,
             owner: Owner::Orbit {
                 run: Box::new(run),
                 rotation,
@@ -917,8 +884,8 @@ impl Fleet {
             velocity: s.velocity,
             rotation: q,
             angular_velocity: w,
-            mass_kg: self.mass(&v.poses),
-            part_ids: v.poses.iter().map(|(id, _)| id.clone()).collect(),
+            mass_kg: self.mass(&v.members),
+            part_ids: v.members.clone(),
         }
     }
     /// The vessel's parts frame in inertial coordinates.
@@ -933,10 +900,11 @@ impl Fleet {
         let frame = self.vessel_frame(id);
         let (origin, q) = self.poses_frame(v);
         let p = self.propulsion_of(v);
-        v.poses
+        v.members
             .iter()
-            .map(|(id, pose)| {
-                let part = &self.parts[id];
+            .map(|id| {
+                let part = self.parts.part(id);
+                let pose = &part.pose;
                 PartSnapshot {
                     id: id.clone(),
                     definition: part.definition,
@@ -947,8 +915,8 @@ impl Fleet {
                     local_rotation: pose.rotation,
                     fuel_kg: part.fuel_kg,
                     stage: part.stage,
-                    staged: self.staged.contains(id),
-                    lit: self.lit.contains(id),
+                    staged: part.staged,
+                    lit: part.lit,
                     firing: p
                         .groups
                         .iter()
@@ -1006,7 +974,7 @@ impl Fleet {
     pub fn vessel_of_part(&self, id: &str) -> String {
         self.order
             .iter()
-            .find(|v| self.vessels[*v].poses.iter().any(|(p, _)| p == id))
+            .find(|v| self.vessels[*v].members.iter().any(|p| p == id))
             .expect("fleet: unknown part")
             .clone()
     }
@@ -1014,32 +982,22 @@ impl Fleet {
         let vid = self.vessel_of_part(id);
         let v = self.vessel(&vid);
         let (o, q) = self.poses_frame(v);
-        let p = &v.poses.iter().find(|(p, _)| p == id).unwrap().1;
-        let n = node(self.parts[id].definition, n).expect("unknown node");
+        let part = self.parts.part(id);
+        let p = &part.pose;
+        let n = node(part.definition, n).expect("unknown node");
         (
             o + q * (p.position + p.rotation * n.position),
             q * (p.rotation * n.direction),
         )
     }
     pub fn free_nodes(&self, id: &str) -> Vec<FreeNode> {
-        self.vessel(id)
-            .poses
-            .iter()
-            .flat_map(|(p, _)| {
-                self.parts[p]
-                    .definition
-                    .nodes
-                    .iter()
-                    .filter(move |n| {
-                        !self.connections.iter().any(|c| {
-                            (&c.a == p && c.node_a == n.id) || (&c.b == p && c.node_b == n.id)
-                        })
-                    })
-                    .map(move |n| FreeNode {
-                        part: p.clone(),
-                        node: n.id.clone(),
-                        size: n.size,
-                    })
+        self.parts
+            .free_nodes(&self.vessel(id).members)
+            .into_iter()
+            .map(|(part, n)| FreeNode {
+                part,
+                node: n.id.clone(),
+                size: n.size,
             })
             .collect()
     }
@@ -1258,10 +1216,11 @@ impl Fleet {
         push: DVec3,
     ) {
         let pieces = v
-            .poses
+            .members
             .iter()
-            .map(|(id, p)| {
-                let d = self.parts[id].definition;
+            .map(|id| {
+                let part = self.parts.part(id);
+                let (d, p) = (part.definition, &part.pose);
                 Piece {
                     shape: match d.shape {
                         Shape::Box => SimpleShape::Box {
@@ -1287,7 +1246,7 @@ impl Fleet {
             .collect();
         let spec = ContactBodySpec {
             shape: BodyShape::Compound(pieces),
-            mass_kg: self.mass(&v.poses),
+            mass_kg: self.mass(&v.members),
             friction: 0.8,
             restitution: 0.0,
             lock_rotations: false,
@@ -1321,7 +1280,7 @@ impl Fleet {
             }
         };
         self.remove_scene_body(&v, false);
-        v.poses = self.centred(&v.poses).0;
+        self.recentre(&v.members);
         let axes = self.axes(scene).conjugate();
         let local = self.scene_local(scene, snap.state());
         let w = axes * snap.angular_velocity - self.scenes[&scene].world.frame.spin();
@@ -1333,7 +1292,7 @@ impl Fleet {
         let s = self.snapshot(id);
         let mut v = self.vessels.remove(id).unwrap();
         self.remove_scene_body(&v, false);
-        v.poses = self.centred(&v.poses).0;
+        self.recentre(&v.members);
         v.owner = Owner::Orbit {
             run: Box::new(PropagationRun::new(VesselState {
                 time: self.time,
@@ -1349,7 +1308,7 @@ impl Fleet {
     }
     fn settle(&mut self, id: &str) {
         let v = self.vessel(id);
-        if !matches!(v.owner, Owner::Scene { .. }) || self.centred(&v.poses).1.length() == 0.0 {
+        if !matches!(v.owner, Owner::Scene { .. }) || self.centre(&v.members).length() == 0.0 {
             return;
         }
         let local = self.scene_centre(v);
@@ -1361,7 +1320,7 @@ impl Fleet {
         let w = vec64(b.angvel());
         let mut v = self.vessels.remove(id).unwrap();
         self.remove_scene_body(&v, true);
-        v.poses = self.centred(&v.poses).0;
+        self.recentre(&v.members);
         self.add_scene_body(&mut v, scene, local, q, w, push);
         self.put(v);
     }
@@ -1376,13 +1335,14 @@ impl Fleet {
             }
             _ => self.body_fixed(g, self.snapshot(&v.id).state()).position,
         };
-        let reach = self
-            .centred(&v.poses)
-            .0
+        let c = self.centre(&v.members);
+        let reach = v
+            .members
             .iter()
-            .map(|(id, p)| {
-                let d = self.parts[id].definition;
-                p.position.length()
+            .map(|id| {
+                let part = self.parts.part(id);
+                let d = part.definition;
+                (part.pose.position - c).length()
                     + (d.height / 2.0).hypot(if d.shape == Shape::Box {
                         d.radius * 2.0_f64.sqrt()
                     } else {
@@ -1427,7 +1387,7 @@ impl Fleet {
                 let gap = (self.clearance_over(v, i) - g.spec.band_enter_meters).max(0.0);
                 let speed = s.velocity.length();
                 let a = 1.2 * g.frame.body.gm / s.position.length_squared()
-                    + self.propulsion_of(v).force.length() / self.mass(&v.poses);
+                    + self.propulsion_of(v).force.length() / self.mass(&v.members);
                 safe = safe.min(((-speed + (speed * speed + 2.0 * a * gap).sqrt()) / a).max(1e-3));
             }
         }
@@ -1513,10 +1473,11 @@ impl Fleet {
     pub fn stages_left(&self, id: &str) -> Vec<u32> {
         let mut s: Vec<_> = self
             .vessel(id)
-            .poses
+            .members
             .iter()
-            .filter(|(id, _)| !self.staged.contains(id))
-            .filter_map(|(id, _)| self.parts[id].stage)
+            .map(|id| self.parts.part(id))
+            .filter(|p| !p.staged)
+            .filter_map(|p| p.stage)
             .collect();
         s.sort_unstable();
         s.dedup();
@@ -1529,91 +1490,38 @@ impl Fleet {
         };
         let parts: Vec<_> = self
             .vessel(id)
-            .poses
+            .members
             .iter()
-            .filter(|(p, _)| self.parts[p].stage == Some(next) && !self.staged.contains(p))
-            .map(|(p, _)| p.clone())
+            .filter(|p| {
+                let part = self.parts.part(p);
+                part.stage == Some(next) && !part.staged
+            })
+            .cloned()
             .collect();
         let mut split = vec![];
         for p in &parts {
-            if self.parts[p]
-                .definition
-                .modules
-                .iter()
-                .any(|m| matches!(m, Module::Decoupler { .. }))
-            {
+            if self.parts.part(p).decoupler().is_some() {
                 let new = self.decouple(p);
-                self.staged.insert(p.clone());
+                self.parts.part_mut(p).staged = true;
                 split.push(new);
             }
         }
         for p in parts {
-            if self.parts[&p]
-                .definition
-                .modules
-                .iter()
-                .any(|m| matches!(m, Module::Engine { .. }))
-            {
-                self.staged.insert(p.clone());
-                self.lit.insert(p);
+            if self.parts.part(&p).engine().is_some() {
+                let part = self.parts.part_mut(&p);
+                part.staged = true;
+                part.lit = true;
             }
         }
         split
     }
-    fn components(&self, poses: &Poses) -> Vec<Vec<String>> {
-        let mut left: HashSet<_> = poses.iter().map(|(id, _)| id.clone()).collect();
-        let mut out = vec![];
-        for (id, _) in poses {
-            if !left.remove(id) {
-                continue;
-            }
-            let mut g = vec![id.clone()];
-            let mut i = 0;
-            while i < g.len() {
-                for c in &self.connections {
-                    let next = if c.a == g[i] {
-                        Some(&c.b)
-                    } else if c.b == g[i] {
-                        Some(&c.a)
-                    } else {
-                        None
-                    };
-                    if let Some(n) = next
-                        && left.remove(n)
-                    {
-                        g.push(n.clone());
-                    }
-                }
-                i += 1;
-            }
-            out.push(g);
-        }
-        out
-    }
     pub fn decouple(&mut self, part: &str) -> String {
-        let d = self.parts[part].definition;
-        let (node_id, impulse) = d
-            .modules
-            .iter()
-            .find_map(|m| {
-                if let Module::Decoupler {
-                    node_id,
-                    impulse_ns,
-                } = m
-                {
-                    Some((node_id.clone(), *impulse_ns))
-                } else {
-                    None
-                }
-            })
-            .expect("not a decoupler");
-        let edge = self
-            .connections
-            .iter()
-            .position(|c| {
-                (c.a == part && c.node_a == node_id) || (c.b == part && c.node_b == node_id)
-            })
-            .expect("decoupler node not connected");
+        let d = self.parts.part(part).definition;
+        let (node_id, impulse) = self.parts.part(part).decoupler().expect("not a decoupler");
+        assert!(
+            self.parts.connection_at(part, node_id).is_some(),
+            "decoupler node not connected"
+        );
         let id = self.vessel_of_part(part);
         if matches!(self.vessel(&id).owner, Owner::Orbit { .. }) {
             let scene = self.new_scene(None, std::slice::from_ref(&id));
@@ -1629,21 +1537,21 @@ impl Fleet {
         let q = quat64(*world.body(body).rotation());
         let w = vec64(world.body(body).angvel());
         let control = self.controls[&id];
-        self.connections.remove(edge);
-        let groups = self.components(&old.poses);
+        self.parts.disconnect(part, node_id);
+        let groups = self.parts.components(&old.members);
         assert_eq!(groups.len(), 2, "decouple: expected two groups");
         self.remove_scene_body(&old, true);
         let mut made = vec![];
         let mut created = String::new();
         for ids in groups {
             let keeps = ids.contains(&old.root);
-            let poses: Poses = old
-                .poses
+            let members: Vec<String> = old
+                .members
                 .iter()
-                .filter(|(p, _)| ids.contains(p))
+                .filter(|p| ids.contains(p))
                 .cloned()
                 .collect();
-            let (poses, c) = self.centred(&poses);
+            let c = self.recentre(&members);
             let offset = q * c;
             let local = FrameState {
                 position: state.position + offset,
@@ -1662,13 +1570,7 @@ impl Fleet {
                 old.root.clone()
             } else {
                 ids.iter()
-                    .find(|p| {
-                        self.parts[*p]
-                            .definition
-                            .modules
-                            .iter()
-                            .any(|m| matches!(m, Module::Command))
-                    })
+                    .find(|p| self.parts.part(p).is_command())
                     .unwrap_or(&ids[0])
                     .clone()
             };
@@ -1676,7 +1578,7 @@ impl Fleet {
                 id: new_id.clone(),
                 name: old.name.clone(),
                 root,
-                poses,
+                members,
                 owner: old.owner.clone(),
             };
             self.controls.insert(
@@ -1697,8 +1599,8 @@ impl Fleet {
         let own_id = self.vessel_of_part(part);
         let other = made.iter().find(|id| *id != &own_id).unwrap();
         let own = self.vessel(&own_id);
-        let pose = own.poses.iter().find(|(p, _)| p == part).unwrap().1;
-        let n = node(d, &node_id).unwrap();
+        let pose = self.parts.part(part).pose;
+        let n = node(d, node_id).unwrap();
         let Owner::Scene { body: a, .. } = own.owner else {
             unreachable!()
         };
@@ -1724,18 +1626,13 @@ impl Fleet {
         };
         assert_eq!(sa, sb, "join: requires shared scene");
         let scene = *sa;
-        let na = node(self.parts[part_a].definition, node_a).unwrap();
-        let nb = node(self.parts[part_b].definition, node_b).unwrap();
-        assert_eq!(na.size, nb.size, "join: node sizes differ");
-        for (p, n) in [(part_a, node_a), (part_b, node_b)] {
-            assert!(
-                !self
-                    .connections
-                    .iter()
-                    .any(|c| (c.a == p && c.node_a == n) || (c.b == p && c.node_b == n)),
-                "join: occupied node"
-            );
-        }
+        let connection = Connection {
+            a: part_a.into(),
+            node_a: node_a.into(),
+            b: part_b.into(),
+            node_b: node_b.into(),
+        };
+        self.parts.check_connection(&connection);
         // Core join preserves poses; the lab enforces the 0.25 m debug capture range.
         self.settle(&a);
         self.settle(&b);
@@ -1752,7 +1649,7 @@ impl Fleet {
                 quat64(*world.body(body).rotation()),
                 vec64(world.body(body).angvel()),
                 push,
-                self.mass(&v.poses),
+                self.mass(&v.members),
             ));
         }
         let (aa, qa, wa, pa, ma) = sides[0];
@@ -1766,25 +1663,24 @@ impl Fleet {
         for (v, (s, q, w, _, m)) in [(&va, (aa, qa, wa, pa, ma)), (&vb, (bb, qb, wb, pb, mb))] {
             let r = DMat3::from_quat(q);
             let d = s.position - c;
-            angular += r * self.inertia_of(&v.poses) * r.transpose() * (w + spin)
+            angular += r * self.inertia_of(&v.members, DVec3::ZERO) * r.transpose() * (w + spin)
                 + d.cross(s.velocity - velocity + spin.cross(d)) * m;
         }
         let inv = qa.conjugate();
         let to_a = inv * qb;
         let offset = inv * (bb.position - aa.position);
-        let mut poses = va.poses.clone();
-        poses.extend(vb.poses.iter().map(|(id, p)| {
-            (
-                id.clone(),
-                PartPose {
-                    position: offset + to_a * p.position,
-                    rotation: to_a * p.rotation,
-                },
-            )
-        }));
-        let poses = self.centred(&poses).0;
+        for id in &vb.members {
+            let pose = &mut self.parts.part_mut(id).pose;
+            *pose = PartPose {
+                position: offset + to_a * pose.position,
+                rotation: to_a * pose.rotation,
+            };
+        }
+        let members: Vec<String> = va.members.iter().chain(&vb.members).cloned().collect();
+        self.recentre(&members);
         let r = DMat3::from_quat(qa);
-        let w = (r * self.inertia_of(&poses) * r.transpose()).inverse() * angular - spin;
+        let w =
+            (r * self.inertia_of(&members, DVec3::ZERO) * r.transpose()).inverse() * angular - spin;
         self.remove_scene_body(&va, true);
         self.remove_scene_body(&vb, true);
         self.order.retain(|id| id != &b);
@@ -1794,13 +1690,8 @@ impl Fleet {
         self.sas.remove(&b);
         self.guidance.remove(&b);
         self.event(&b, Some(self.scene_mode(scene)), None, Some(scene));
-        self.connections.push(Connection {
-            a: part_a.into(),
-            node_a: node_a.into(),
-            b: part_b.into(),
-            node_b: node_b.into(),
-        });
-        let mut joined = Vessel { poses, ..va };
+        self.parts.connect(connection);
+        let mut joined = Vessel { members, ..va };
         self.add_scene_body(
             &mut joined,
             scene,
@@ -1825,7 +1716,7 @@ impl Fleet {
     fn steering(&mut self, v: &Vessel, q: DQuat, w: DVec3, dt: f64) -> DVec3 {
         let pilot = self.controls[&v.id].turn;
         let ground = self.attitude_ground(v);
-        let inertia = rows(self.inertia_of(&self.centred(&v.poses).0));
+        let inertia = rows(self.inertia_of(&v.members, self.centre(&v.members)));
         let turn = if let Some(sas) = self.sas.get_mut(&v.id) {
             if sas.ground != ground {
                 sas.assist.set_enabled(true);
@@ -1955,7 +1846,7 @@ impl Fleet {
                 Some(Control::Thrust(void_orbit::ThrustControl {
                     thrust_newtons: p.force.length(),
                     exhaust_velocity: p.force.length() / p.flow_kg_per_second,
-                    minimum_mass_kg: self.mass(&v.poses)
+                    minimum_mass_kg: self.mass(&v.members)
                         - p.groups.iter().map(|g| g.fuel_kg).sum::<f64>(),
                     attitude: g.attitude,
                 }))
@@ -1963,7 +1854,7 @@ impl Fleet {
                 Some(Control::Force(ForceControl {
                     force: q * p.force,
                     mass_flow_kg_per_second: p.flow_kg_per_second,
-                    minimum_mass_kg: self.mass(&v.poses)
+                    minimum_mass_kg: self.mass(&v.members)
                         - p.groups.iter().map(|g| g.fuel_kg).sum::<f64>(),
                 }))
             } else {
@@ -1980,9 +1871,8 @@ impl Fleet {
                     leg - t
                 };
                 burn(&mut self.parts, &p.groups, duration);
-                let mass = self.mass(&v.poses);
-                let (poses, c) = self.centred(&v.poses);
-                v.poses = poses;
+                let mass = self.mass(&v.members);
+                let c = self.recentre(&v.members);
                 let Owner::Orbit { run, rotation, .. } = &mut v.owner else {
                     unreachable!()
                 };
@@ -2049,7 +1939,7 @@ impl Fleet {
                         unreachable!()
                     };
                     let torque = p.torque + self.steering(&v, *rotation, *angular_velocity, h);
-                    let inertia = rows(self.inertia_of(&v.poses));
+                    let inertia = rows(self.inertia_of(&v.members, DVec3::ZERO));
                     let Owner::Orbit {
                         rotation,
                         angular_velocity,
@@ -2108,7 +1998,7 @@ impl Fleet {
             } else {
                 tau + self.steering(&v, q, w, dt)
             };
-            let now = q * force / (self.mass(&v.poses) - burned / 2.0) + air_acceleration;
+            let now = q * force / (self.mass(&v.members) - burned / 2.0) + air_acceleration;
             self.scenes
                 .get_mut(&scene)
                 .unwrap()
@@ -2140,9 +2030,9 @@ impl Fleet {
             burn(&mut self.parts, &p.groups, dt);
             let masses: Vec<_> = self
                 .vessel(&id)
-                .poses
+                .members
                 .iter()
-                .map(|(id, _)| self.part_mass(id))
+                .map(|id| self.part_mass(id))
                 .collect();
             self.scenes
                 .get_mut(&scene)
@@ -2171,7 +2061,7 @@ impl Fleet {
                 let Owner::Scene { body, .. } = v.owner else {
                     unreachable!()
                 };
-                let m = self.mass(&v.poses);
+                let m = self.mass(&v.members);
                 mass += m;
                 p += vec64(s.world.body(body).translation()) * m;
             }

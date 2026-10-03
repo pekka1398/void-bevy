@@ -35,15 +35,7 @@ impl Fleet {
         }
     }
     pub(super) fn full_rating_of(&self, v: &Vessel) -> Propulsion {
-        let parts: Vec<_> = v.poses.iter().map(|(id, _)| &self.parts[id]).collect();
-        propulsion(
-            &parts,
-            &v.poses,
-            &self.connections,
-            &self.lit,
-            1.0,
-            self.centred(&v.poses).1,
-        )
+        propulsion(&self.parts, &v.members, 1.0, self.centre(&v.members))
     }
     pub fn guidance(&self, id: &str) -> Option<&GuidedBurn> {
         self.vessel(id);
@@ -92,7 +84,7 @@ impl Fleet {
         let control = Control::Thrust(ThrustControl {
             thrust_newtons: p.force.length(),
             exhaust_velocity: p.force.length() / p.flow_kg_per_second,
-            minimum_mass_kg: self.mass(&v.poses) - p.flow_kg_per_second * (end_time - start_time),
+            minimum_mass_kg: self.mass(&v.members) - p.flow_kg_per_second * (end_time - start_time),
             attitude,
         });
         control.assert_valid(self.ephemeris.bodies().len());

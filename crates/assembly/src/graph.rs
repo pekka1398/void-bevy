@@ -171,7 +171,9 @@ impl PartGraph {
             .find(|c| (c.a == part && c.node_a == node) || (c.b == part && c.node_b == node))
     }
 
-    fn check_connection(&self, c: &Connection) {
+    /// Panics unless `c` could be made: two different parts, both nodes existing, free and the
+    /// same size.
+    pub fn check_connection(&self, c: &Connection) {
         assert_ne!(c.a, c.b, "part graph: {} connected to itself", c.a);
         let na = node(self.part(&c.a).definition, &c.node_a)
             .unwrap_or_else(|e| panic!("part graph: {e}"));
