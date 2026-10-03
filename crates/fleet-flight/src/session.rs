@@ -14,6 +14,8 @@ use void_orbit::SystemSpec;
 use void_terrain::{Terrain, TerrainConfig};
 use void_vessels::VesselControl;
 
+pub mod durable;
+
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
 pub const MODEL_VERSION: u32 = 3;
@@ -76,6 +78,12 @@ impl InitialWorld {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum Action {
+    ResetWorld {
+        initial: Box<InitialWorld>,
+    },
+    LoadWorld {
+        checkpoint: Box<crate::checkpoint::FlightCheckpoint>,
+    },
     Select {
         vessel: String,
     },
@@ -137,8 +145,23 @@ pub enum Outcome {
     Refused(String),
 }
 impl Action {
+    fn replacement_initial(&self) -> Option<&InitialWorld> {
+        match self {
+            Self::ResetWorld { initial } => Some(initial),
+            Self::LoadWorld { checkpoint } => Some(&checkpoint.initial),
+            _ => None,
+        }
+    }
     fn apply(&self, sim: &mut FleetFlight) -> Outcome {
         match self {
+            Self::ResetWorld { initial } => {
+                *sim = initial.build();
+                Outcome::Applied
+            }
+            Self::LoadWorld { checkpoint } => {
+                *sim = checkpoint.restore();
+                Outcome::Applied
+            }
             Self::Select { vessel } => {
                 sim.select(vessel);
                 Outcome::Applied
@@ -360,8 +383,11 @@ impl Recording {
         );
     }
     pub fn read(path: impl AsRef<Path>) -> Self {
-        let record: Self = serde_json::from_slice(&fs::read(path).expect("session: read file"))
-            .expect("session: invalid file");
+        let bytes = fs::read(path).expect("session: read file");
+        if durable::is_stream(&bytes) {
+            return durable::read_complete(&bytes);
+        }
+        let record: Self = serde_json::from_slice(&bytes).expect("session: invalid file");
         record.validate();
         record
     }
@@ -402,7 +428,9 @@ impl Recording {
 
 pub struct FlightSession {
     sim: FleetFlight,
+    current_initial: InitialWorld,
     recording: Recording,
+    stream: Option<durable::Writer>,
 }
 impl FlightSession {
     /// Read-only observation prevents callers from bypassing the command journal.
@@ -414,6 +442,7 @@ impl FlightSession {
     }
     pub fn new(initial: InitialWorld) -> Self {
         let sim = initial.build();
+        let current_initial = initial.clone();
         let recording = Recording {
             format_version: FORMAT_VERSION,
             model_version: MODEL_VERSION,
@@ -426,10 +455,25 @@ impl FlightSession {
                 state: world_mark(&sim),
             }],
         };
-        Self { sim, recording }
+        Self {
+            sim,
+            current_initial,
+            recording,
+            stream: None,
+        }
     }
     pub fn execute(&mut self, action: Action) -> Outcome {
+        let index = self.recording.entries.len();
+        if let Some(stream) = &mut self.stream {
+            stream.intent(index, &action);
+        }
         let outcome = action.apply(&mut self.sim);
+        if let Some(initial) = action.replacement_initial() {
+            self.current_initial = initial.clone();
+        }
+        if let Some(stream) = &mut self.stream {
+            stream.commit(index, &outcome);
+        }
         self.recording.entries.push(Entry {
             action,
             outcome: outcome.clone(),
@@ -437,7 +481,7 @@ impl FlightSession {
         outcome
     }
     pub fn recording_initial(&self) -> &InitialWorld {
-        &self.recording.initial
+        &self.current_initial
     }
     pub fn mark(&mut self) {
         let n = self.recording.entries.len();
@@ -445,6 +489,9 @@ impl FlightSession {
             after_actions: n,
             state: world_mark(&self.sim),
         };
+        if let Some(stream) = &mut self.stream {
+            stream.mark(mark.clone());
+        }
         if self
             .recording
             .marks
@@ -455,6 +502,22 @@ impl FlightSession {
         } else {
             self.recording.marks.push(mark);
         }
+    }
+    pub fn begin_stream(&mut self, path: impl AsRef<Path>) {
+        assert!(self.stream.is_none(), "journal: recording already active");
+        let recording = self.recording();
+        self.stream = Some(durable::Writer::create(path.as_ref(), recording));
+    }
+    pub fn finish_stream(&mut self) {
+        assert!(self.stream.is_some(), "journal: recording not active");
+        self.mark();
+        self.stream
+            .take()
+            .unwrap()
+            .finish(self.recording.entries.len());
+    }
+    pub fn streaming(&self) -> bool {
+        self.stream.is_some()
     }
     pub fn save(&mut self, path: impl AsRef<Path>) {
         self.mark();
@@ -470,6 +533,7 @@ impl FlightSession {
             .base
             .as_ref()
             .map_or_else(|| recording.initial.build(), |base| base.restore());
+        let mut current_initial = recording.initial.clone();
         let mut marks = recording.marks.iter().peekable();
         for index in 0..=recording.entries.len() {
             if index > 0 {
@@ -479,6 +543,9 @@ impl FlightSession {
                     entry.outcome,
                     "session: action {index} changed its outcome"
                 );
+                if let Some(initial) = entry.action.replacement_initial() {
+                    current_initial = initial.clone();
+                }
             }
             if marks.peek().is_some_and(|m| m.after_actions == index) {
                 assert_eq!(
@@ -489,13 +556,18 @@ impl FlightSession {
             }
         }
         assert!(marks.next().is_none(), "session: unreached mark");
-        Self { sim, recording }
+        Self {
+            sim,
+            current_initial,
+            recording,
+            stream: None,
+        }
     }
     pub fn load(path: impl AsRef<Path>) -> Self {
         Self::from_recording(Recording::read(path))
     }
     pub fn save_checkpoint(&self, path: impl AsRef<Path>) {
-        crate::checkpoint::FlightCheckpoint::capture(&self.sim, self.recording.initial.clone())
+        crate::checkpoint::FlightCheckpoint::capture(&self.sim, self.current_initial.clone())
             .write(path);
     }
     pub fn load_checkpoint(path: impl AsRef<Path>) -> Self {
@@ -503,6 +575,7 @@ impl FlightSession {
     }
     pub fn from_checkpoint(base: crate::checkpoint::FlightCheckpoint) -> Self {
         let sim = base.restore();
+        let current_initial = base.initial.clone();
         let recording = Recording {
             format_version: FORMAT_VERSION,
             model_version: MODEL_VERSION,
@@ -515,7 +588,12 @@ impl FlightSession {
                 state: world_mark(&sim),
             }],
         };
-        Self { sim, recording }
+        Self {
+            sim,
+            current_initial,
+            recording,
+            stream: None,
+        }
     }
 }
 

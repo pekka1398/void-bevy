@@ -129,3 +129,20 @@ Z 開始或取消機動前快轉；第一個有效機動須在 30 秒之後，�
 目標 vessel ID、開始／停止時間及中止原因納入直接 checkpoint、Action journal 和完整 world mark。模型版本為 3。headless 測試涵蓋大步長精確停止、中途保存／載入／重播、切船保留目標、手動操作取消，以及新交會先於燃燒前邊界中止。
 
 機動前快轉這批 workspace 全 target 回歸：256 passed、0 failed、3 ignored；後續新增的視窗時間／按鍵接線測試連同 app library 13 項全數通過。workspace Clippy（-D warnings）與 fmt 通過。
+
+## 逐條持久化的錄製與恢復
+
+`--record <新檔名>` 現在直接寫 JSONL stream，檔案必須尚不存在，避免覆寫先前驗收紀錄。header 保存可驗證的初始 journal／checkpoint；每條命令先寫 Intent 並 sync，模擬返回後再寫 Commit 並 sync。定期 Mark 與正常停止的 End 也持久化。F8／正常關窗完成 stream，panic／程序被終止不會偽造 End；所有已持久化的命令保留。同步寫入成本會出現在 simulation wall profile，這是 opt-in 錄製的成本，不宣稱零負擔。
+
+R 重設與 F7 讀檔也是完整的 ResetWorld／LoadWorld 命令，同一 stream 可以跨越重設或另一個星球的存檔。journal 保留最初的 header，當下世界的 metadata 則供後續直接存檔使用；重播遇到世界替換時重新整理繪圖資產。
+
+完成的 stream 可直接 `--verify`／`--replay`；原本 portable JSON journal 仍可讀，包含 pretty-printed JSON。未完成的 stream 必須明確恢復：
+
+```sh
+cargo run -p void-app -- --recover-recording lab-log/crash.jsonl --output lab-log/recovered.json
+cargo run -p void-app -- --verify lab-log/recovered.json
+```
+
+恢復重跑已 Commit 的前綴，檢查所有命令結果與現有 Mark，補上重建狀態的最後 Mark。只允許捨棄未以換行完成的 EOF 尾端，並在 `<output>.recovery.json` 記錄捨棄位元組數、原 stream 是否正常結束、已確認命令數，以及尚未 Commit 的完整命令（若有）。未完成命令不猜測是否成功，也不自動執行；原始 crash stream 保留。中間的 malformed line、序號跳號、未知版本、結果／狀態差异都直接失敗。
+
+headless 驗證包括獨立程序真實觸發控制斷言後留下命令、EOF 撕裂與中間損毀的區分、正常錄製重播、重設／跨世界載入後再存檔，以及實際 main binary 的恢復／驗證入口。相機與純視覺操作仍是 B 的下一個缺口。

@@ -141,7 +141,7 @@ impl Drop for Lab {
         if !std::thread::panicking()
             && let Some(path) = self.record_path.take()
         {
-            self.session.save(&path);
+            self.session.finish_stream();
             eprintln!("Fleet recording saved: {}", path.display());
         }
     }
@@ -167,6 +167,19 @@ fn argument(name: &str) -> Option<String> {
         .map(|i| args.get(i + 1).expect("argument needs a value").clone())
 }
 pub fn run(main_game: bool) {
+    if let Some(path) = argument("--recover-recording") {
+        let output = argument("--output").expect("--recover-recording requires --output");
+        let recovery = void_fleet_flight::session::durable::Recovery::read(path);
+        recovery.write(&output);
+        println!(
+            "Recovered Fleet recording: {} committed actions, pending command {}, {} EOF bytes discarded; report {}.recovery.json",
+            recovery.recording.entries.len(),
+            recovery.pending.is_some(),
+            recovery.discarded_tail_bytes,
+            output
+        );
+        return;
+    }
     if let Some(path) = argument("--verify-save") {
         let session = FlightSession::load_checkpoint(&path);
         println!(
@@ -227,6 +240,9 @@ pub fn run(main_game: bool) {
         .unwrap_or("lab-log/fleet-save.json".into())
         .into();
     lab.record_path = argument("--record").map(Into::into);
+    if let Some(path) = &lab.record_path {
+        lab.session.begin_stream(path);
+    }
     lab.profile =
         argument("--profile").map(|path| (void_diagnostics::Profiler::new(), path.into()));
     let mut app = App::new();
@@ -545,7 +561,10 @@ fn controls(
         lab.notice = format!("Saved {}", lab.save_path.display());
     }
     if keys.just_pressed(KeyCode::F7) {
-        lab.session = FlightSession::load_checkpoint(&lab.save_path);
+        let checkpoint = void_fleet_flight::checkpoint::FlightCheckpoint::read(&lab.save_path);
+        lab.session.execute(Action::LoadWorld {
+            checkpoint: Box::new(checkpoint),
+        });
         lab.craft = lab.session.recording_initial().craft.clone();
         lab.dirty = true;
         lab.prediction = None;
@@ -555,7 +574,7 @@ fn controls(
     }
     if keys.just_pressed(KeyCode::F8) {
         if let Some(path) = lab.record_path.take() {
-            lab.session.save(&path);
+            lab.session.finish_stream();
             lab.notice = format!("Recording finished: {}", path.display());
         } else {
             lab.notice = "No recording active; start with --record <file>".into();
@@ -573,7 +592,10 @@ fn controls(
         lab.paused = !lab.paused;
     }
     if keys.just_pressed(KeyCode::KeyR) {
-        lab.session = FlightSession::new(lab.session.recording_initial().clone());
+        let initial = lab.session.recording_initial().clone();
+        lab.session.execute(Action::ResetWorld {
+            initial: Box::new(initial),
+        });
         lab.dirty = true;
         lab.prediction = None;
         lab.paused = true;
@@ -962,11 +984,17 @@ fn simulate_inner(time: &Time, window: &Window, lab: &mut Lab) {
         return;
     }
     if let Some(mut playback) = lab.playback.take() {
+        let terrain_before = lab.session.sim().planet.terrain.clone();
         if playback.next_frame(&mut lab.session) {
             lab.playback = Some(playback);
         } else {
             lab.paused = true;
             lab.notice = "Replay complete: all world marks verified".into();
+        }
+        if !std::sync::Arc::ptr_eq(&terrain_before, &lab.session.sim().planet.terrain) {
+            lab.dirty = true;
+            lab.prediction = None;
+            lab.craft = lab.session.recording_initial().craft.clone();
         }
         return;
     }
