@@ -18,7 +18,6 @@ use bevy::camera::Hdr;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
-use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::pbr::wireframe::{Wireframe, WireframeColor, WireframePlugin};
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
@@ -28,7 +27,6 @@ use bevy::render::settings::WgpuSettings;
 use bevy::render::view::Msaa;
 use glam::{DMat3, DQuat, DVec3};
 use serde_json::json;
-use std::collections::HashMap;
 use std::time::Instant;
 use void_app::aero_field::RocketAir;
 use void_app::air::{AirSettings, AirTextures, noise_volume_image, weather_image};
@@ -36,17 +34,20 @@ use void_app::flight::{
     GamePlanet, PARTS, PHYSICS_MAX_RATE, TIME_RATES, distance_text, game_planet_by_id,
     mission_time, rate_text, vessel_axes, warp_limit,
 };
+use void_app::input::{FocusTarget, Input, Key};
 use void_app::lab_log::LabLog;
 use void_app::map::{
     MapMarker, PATH_COLOR, PLAN_COLOR, color, draw_map_lines, label_click, place_map_labels,
     spawn_map_labels,
 };
 use void_app::navball::{Navball, NavballLabel, draw_navball, spawn_navball};
+use void_app::overlay::{ColliderLine, ColliderLines, DebugView};
 use void_app::parts::{ColliderShape, spawn_shape};
 use void_app::scenery::{
     GroundMaterial, GroundUniforms, SceneryPlugin, StarMaterial, star_mesh, table_image,
     update_ground,
 };
+use void_app::session::{Header, Mark, Recorder, Session};
 use void_app::tiles::{Tile, TileField};
 use void_landing::{
     AttitudeSample, CoastPrediction, DemoRocket, FrameState, LanderControl, PartJointRocket,
@@ -129,11 +130,12 @@ fn main() {
             brightness: 40.0,
             ..default()
         })
+        .insert_resource(pilot_from_arguments())
         .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
-                controls,
+                read_input,
                 simulate,
                 terrain,
                 draw,
@@ -147,6 +149,67 @@ fn main() {
                 .chain(),
         )
         .run();
+}
+
+/// This frame's pilot input, filled by the window or by a recording being replayed, plus the two
+/// session jobs: writing one, and flying one that was written.
+#[derive(Resource, Default)]
+struct Pilot {
+    input: Input,
+    /// Where to record, before `setup` knows which planet the header should name.
+    record_to: Option<String>,
+    recorder: Option<Recorder>,
+    replay: Option<Replay>,
+    /// Frames flown, counted whether recording or not, so a mark can name one.
+    frame: usize,
+}
+
+/// A recorded session being flown back, and how far through it we are.
+struct Replay {
+    session: Session,
+    next: usize,
+    /// The marks compared so far, and the worst gap found, in metres and metres per second.
+    compared: usize,
+    worst: (f64, f64),
+}
+
+/// `--record <file>` writes this flight as a session; `--replay <file>` flies one back and leaves
+/// when it runs out of frames. Both at once would mean recording a replay, which is a copy of the
+/// file with the window's timing noise added, so it is refused.
+fn pilot_from_arguments() -> Pilot {
+    let (record, replay) = (argument("--record"), argument("--replay"));
+    assert!(
+        record.is_none() || replay.is_none(),
+        "a flight is either recorded or replayed, not both"
+    );
+    let mut pilot = Pilot::default();
+    if let Some(path) = replay {
+        let session = Session::read(&path);
+        assert!(
+            !session.frames.is_empty(),
+            "replay: {path} has no frames to fly"
+        );
+        // The planet is part of the recording because the same inputs on another world are another
+        // flight; the window's own --planet would otherwise silently win.
+        println!(
+            "replay: {path}: {} frames, {:.1} simulated seconds, {} marks, on {} with {} terrain",
+            session.frames.len(),
+            session.seconds(),
+            session.marks.len(),
+            session.header.planet,
+            session.header.terrain
+        );
+        pilot.replay = Some(Replay {
+            session,
+            next: 0,
+            compared: 0,
+            worst: (0.0, 0.0),
+        });
+    }
+    if let Some(path) = record {
+        pilot.record_to = Some(path);
+    }
+    pilot
 }
 
 fn argument(name: &str) -> Option<String> {
@@ -186,6 +249,7 @@ struct Game {
     path_frame: PathFrameKind,
     focus: Focus,
     camera: OrbitCamera,
+    dragging: bool,
     state: Option<ViewState>,
     positions: Vec<DVec3>,
     velocities: Vec<DVec3>,
@@ -713,18 +777,6 @@ impl Game {
 #[derive(Resource)]
 struct Ground(TileField<GroundMaterial>);
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct DebugView {
-    /// White triangle edges of the drawn terrain.
-    wire: bool,
-    /// Red tile boundaries.
-    bounds: bool,
-    /// Green colliders: Rapier's terrain triangles and the rocket's collider shapes.
-    colliders: bool,
-    /// Draw the terrain (off for profiling: LOD selection and builds keep running).
-    terrain: bool,
-}
-
 /// Main-thread timings since the last log sample, ms: (sum, max).
 #[derive(Default)]
 struct Timings {
@@ -746,15 +798,6 @@ impl Timings {
 }
 
 /// Green edges of the terrain triangles each loaded Rapier collider holds, by tile origin.
-#[derive(Resource)]
-struct ColliderLines {
-    lines: HashMap<[u64; 3], Entity>,
-    material: Handle<StandardMaterial>,
-}
-
-#[derive(Component)]
-struct ColliderLine;
-
 /// scenery's shading: the ground material's uniforms and the star field's material.
 #[derive(Resource)]
 struct Scenery {
@@ -784,17 +827,10 @@ struct Hud;
 #[derive(Component)]
 struct NavballHeading;
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-    mut grounds: ResMut<Assets<GroundMaterial>>,
-    mut star_materials: ResMut<Assets<StarMaterial>>,
-    window: Single<&Window>,
-) {
-    let planet_id = argument("--planet").unwrap_or_else(|| "aurelia".into());
-    let planet = game_planet_by_id(&planet_id, argument("--terrain").as_deref());
+/// The simulated game on its pad, with no window, no assets and no Bevy: everything `Game` holds is
+/// plain data, so the window's `setup` and a headless replay build the same thing the same way.
+fn new_game(planet_id: &str, terrain: Option<&str>) -> Game {
+    let planet = game_planet_by_id(planet_id, terrain);
     let (mut ephemeris, home) = planet_ephemeris(&planet.planet);
     let bodies = ephemeris.bodies().to_vec();
     let mut demo = demo_rocket(&planet.planet.terrain);
@@ -812,6 +848,104 @@ fn setup(
         demo.launch_site,
     );
     rocket.set_air_field(RocketAir::for_planet(&planet.planet, &demo));
+    // Start looking at the rocket from the side, a little above the horizon.
+    let start = rocket.frame.to_inertial(
+        &ephemeris,
+        0.0,
+        rocket.part_state(&ephemeris, RocketPart::Upper),
+    );
+    let radial = (start.position - ephemeris.body_position(home, 0.0)).normalize();
+    let side = DVec3::new(-radial.y, radial.x, 0.0).normalize();
+    let camera = OrbitCamera::new((side + 0.3 * radial).normalize(), VESSEL_DISTANCE);
+    let n = bodies.len();
+    let dominance = DominanceTree::new(&bodies);
+    Game {
+        orbits: MapOrbits::new(&bodies),
+        path: MapPath::new(),
+        planet,
+        ephemeris,
+        home,
+        dominance,
+        demo,
+        rocket,
+        stage: 0,
+        engine_armed: false,
+        throttle_percent: 0.0,
+        paused: false,
+        prediction: None,
+        prediction_at: f64::NEG_INFINITY,
+        prediction_generation: 0,
+        time_rate: 1.0,
+        warp_note: None,
+        altitude_agl: true,
+        speed_surface: true,
+        path_frame: PathFrameKind::Inertial,
+        focus: Focus::Vessel,
+        camera,
+        dragging: false,
+        state: None,
+        positions: vec![DVec3::ZERO; n],
+        velocities: vec![DVec3::ZERO; n],
+        started: std::time::Instant::now(),
+        help: false,
+        debug: DebugView::default(),
+        log: LabLog::open("flight"),
+        timings: Timings::default(),
+        sas: StabilityAssist::new(STEERING_TORQUE, SAS_TUNING),
+        sas_suspended: false,
+        plan: None,
+        plan_path: MapPath::new(),
+        selected: 0,
+        plan_message: String::new(),
+        executing: false,
+        warp_to_maneuver: false,
+        eye: DVec3::ZERO,
+        axes: [DVec3::X, DVec3::Y, DVec3::Z],
+        upper: start,
+        origin: start.position,
+        reference: home,
+        navigation: home,
+        spin: (home, 0.0),
+        bodies,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn setup(
+    mut pilot: ResMut<Pilot>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut grounds: ResMut<Assets<GroundMaterial>>,
+    mut star_materials: ResMut<Assets<StarMaterial>>,
+    window: Single<&Window>,
+) {
+    // A replay names its own world: flying the recorded inputs on a different planet would be a
+    // different flight, so the session's header wins over --planet rather than being checked later.
+    let (planet_id, terrain) = match &pilot.replay {
+        Some(replay) => (
+            replay.session.header.planet.clone(),
+            Some(replay.session.header.terrain.clone()),
+        ),
+        None => (
+            argument("--planet").unwrap_or_else(|| "aurelia".into()),
+            argument("--terrain"),
+        ),
+    };
+    let mut game = new_game(&planet_id, terrain.as_deref());
+    if let Some(path) = pilot.record_to.take() {
+        let header = Header {
+            planet: planet_id.clone(),
+            terrain: format!("{:?}", game.planet.terrain_id).to_lowercase(),
+            version: void_app::session::VERSION,
+        };
+        let recorder = Recorder::create(&path, &header);
+        println!("recording to {}", recorder.path().display());
+        pilot.recorder = Some(recorder);
+    }
+    let (planet, demo) = (game.planet.clone(), game.demo.clone());
+    let (bodies, home) = (game.bodies.clone(), game.home);
 
     // scenery's atmosphere tables and cloud noise, and the ground and sea shader on the tiles.
     let scenery_started = Instant::now();
@@ -876,14 +1010,11 @@ fn setup(
     let scenery_build_ms = scenery_started.elapsed().as_secs_f64() * 1e3;
     let lod_options = field.lod.options.clone();
     commands.insert_resource(Ground(field));
-    commands.insert_resource(ColliderLines {
-        lines: HashMap::new(),
-        material: materials.add(StandardMaterial {
-            base_color: overlay(Color::srgb_u8(0x3d, 0xff, 0x6e)),
-            unlit: true,
-            ..default()
-        }),
-    });
+    commands.insert_resource(ColliderLines::new(materials.add(StandardMaterial {
+        base_color: overlay(Color::srgb_u8(0x3d, 0xff, 0x6e)),
+        unlit: true,
+        ..default()
+    })));
     // The star catalogue is inertial (ecliptic axes), even while the planet spins.
     let (star_positions, star_colors) = generate_stars(&DEFAULT_STARS);
     let stars = star_materials.add(StarMaterial { brightness: 0.08 });
@@ -900,16 +1031,6 @@ fn setup(
         stars,
     });
 
-    // Start looking at the rocket from the side, a little above the horizon.
-    let start = rocket.frame.to_inertial(
-        &ephemeris,
-        0.0,
-        rocket.part_state(&ephemeris, RocketPart::Upper),
-    );
-    let radial = (start.position - ephemeris.body_position(home, 0.0)).normalize();
-    let side = DVec3::new(-radial.y, radial.x, 0.0).normalize();
-    let camera = OrbitCamera::new((side + 0.3 * radial).normalize(), VESSEL_DISTANCE);
-    let n = bodies.len();
     spawn_map_labels(&mut commands, &bodies);
 
     // Bodies other than the home planet are plain spheres; the star is unlit.
@@ -1060,58 +1181,6 @@ fn setup(
         },
     ));
 
-    let dominance = DominanceTree::new(&bodies);
-    let mut game = Game {
-        orbits: MapOrbits::new(&bodies),
-        path: MapPath::new(),
-        planet,
-        ephemeris,
-        home,
-        dominance,
-        demo,
-        rocket,
-        stage: 0,
-        engine_armed: false,
-        throttle_percent: 0.0,
-        paused: false,
-        prediction: None,
-        prediction_at: f64::NEG_INFINITY,
-        prediction_generation: 0,
-        time_rate: 1.0,
-        warp_note: None,
-        altitude_agl: true,
-        speed_surface: true,
-        path_frame: PathFrameKind::Inertial,
-        focus: Focus::Vessel,
-        camera,
-        state: None,
-        positions: vec![DVec3::ZERO; n],
-        velocities: vec![DVec3::ZERO; n],
-        started: std::time::Instant::now(),
-        help: false,
-        debug: DebugView {
-            terrain: true,
-            ..default()
-        },
-        log: LabLog::open("flight"),
-        timings: Timings::default(),
-        sas: StabilityAssist::new(STEERING_TORQUE, SAS_TUNING),
-        sas_suspended: false,
-        plan: None,
-        plan_path: MapPath::new(),
-        selected: 0,
-        plan_message: String::new(),
-        executing: false,
-        warp_to_maneuver: false,
-        eye: DVec3::ZERO,
-        axes: [DVec3::X, DVec3::Y, DVec3::Z],
-        upper: start,
-        origin: start.position,
-        reference: home,
-        navigation: home,
-        spin: (home, 0.0),
-        bodies,
-    };
     let session = json!({
         "event": "session",
         "planet": planet_id,
@@ -1132,35 +1201,177 @@ fn setup(
     commands.insert_resource(game);
 }
 
-fn axis(keys: &ButtonInput<KeyCode>, positive: KeyCode, negative: KeyCode) -> f64 {
-    keys.pressed(positive) as i32 as f64 - keys.pressed(negative) as i32 as f64
-}
+/// Every key the game reads, paired with the window's code for it. Modifiers collapse to one key
+/// each: the game has never cared which shift is down, and a recording that said would not replay
+/// on a keyboard laid out differently.
+const KEYS: [(Key, &[KeyCode]); 42] = [
+    (Key::Space, &[KeyCode::Space]),
+    (Key::Tab, &[KeyCode::Tab]),
+    (Key::Comma, &[KeyCode::Comma]),
+    (Key::Period, &[KeyCode::Period]),
+    (Key::Delete, &[KeyCode::Delete]),
+    (Key::Backspace, &[KeyCode::Backspace]),
+    (Key::BracketLeft, &[KeyCode::BracketLeft]),
+    (Key::BracketRight, &[KeyCode::BracketRight]),
+    (Key::ArrowUp, &[KeyCode::ArrowUp]),
+    (Key::ArrowDown, &[KeyCode::ArrowDown]),
+    (Key::ArrowLeft, &[KeyCode::ArrowLeft]),
+    (Key::ArrowRight, &[KeyCode::ArrowRight]),
+    (Key::PageUp, &[KeyCode::PageUp]),
+    (Key::PageDown, &[KeyCode::PageDown]),
+    (Key::Home, &[KeyCode::Home]),
+    (Key::End, &[KeyCode::End]),
+    (Key::F1, &[KeyCode::F1]),
+    (Key::F2, &[KeyCode::F2]),
+    (Key::F3, &[KeyCode::F3]),
+    (Key::F4, &[KeyCode::F4]),
+    (Key::F5, &[KeyCode::F5]),
+    (Key::A, &[KeyCode::KeyA]),
+    (Key::B, &[KeyCode::KeyB]),
+    (Key::D, &[KeyCode::KeyD]),
+    (Key::E, &[KeyCode::KeyE]),
+    (Key::G, &[KeyCode::KeyG]),
+    (Key::K, &[KeyCode::KeyK]),
+    (Key::L, &[KeyCode::KeyL]),
+    (Key::N, &[KeyCode::KeyN]),
+    (Key::P, &[KeyCode::KeyP]),
+    (Key::Q, &[KeyCode::KeyQ]),
+    (Key::R, &[KeyCode::KeyR]),
+    (Key::S, &[KeyCode::KeyS]),
+    (Key::T, &[KeyCode::KeyT]),
+    (Key::U, &[KeyCode::KeyU]),
+    (Key::V, &[KeyCode::KeyV]),
+    (Key::W, &[KeyCode::KeyW]),
+    (Key::X, &[KeyCode::KeyX]),
+    (Key::Y, &[KeyCode::KeyY]),
+    (
+        Key::Shift,
+        &[KeyCode::ShiftLeft, KeyCode::ShiftRight] as &[KeyCode],
+    ),
+    (
+        Key::Control,
+        &[KeyCode::ControlLeft, KeyCode::ControlRight] as &[KeyCode],
+    ),
+    (
+        Key::Alt,
+        &[KeyCode::AltLeft, KeyCode::AltRight] as &[KeyCode],
+    ),
+];
 
+/// This frame's pilot input, read once from the window so that every system downstream of it reads
+/// data instead of the keyboard — which is what lets a recording stand in for the keyboard.
 #[allow(clippy::too_many_arguments)]
-fn controls(
+fn read_input(
+    time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
     markers: Query<(&Interaction, &MapMarker)>,
-    mut game: ResMut<Game>,
-    mut dragging: Local<bool>,
+    game: Res<Game>,
+    mut pilot: ResMut<Pilot>,
+    mut exit: MessageWriter<AppExit>,
 ) {
-    let game = &mut *game;
-    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    if keys.just_pressed(KeyCode::Space) {
+    let pilot = &mut *pilot;
+    // A session being replayed drives the game instead of the keyboard, and the window becomes a
+    // way to watch it: nothing on the keyboard reaches the game, or the replay would not be one.
+    if let Some(replay) = &mut pilot.replay {
+        match replay.session.frames.get(replay.next) {
+            Some(frame) => {
+                pilot.input = *frame;
+                replay.next += 1;
+                return;
+            }
+            None => {
+                assert_eq!(
+                    replay.compared,
+                    replay.session.marks.len(),
+                    "replay: not every mark was checked"
+                );
+                println!(
+                    "replay: {} frames, {:.1} simulated seconds, {} marks compared, worst {:.3e} m and {:.3e} m/s",
+                    replay.session.frames.len(),
+                    replay.session.seconds(),
+                    replay.compared,
+                    replay.worst.0,
+                    replay.worst.1
+                );
+                exit.write(AppExit::Success);
+                pilot.input = Input::default();
+                return;
+            }
+        }
+    }
+    // At most 50 ms of wall time per frame: a stalled frame does not become a physics leap.
+    let mut input = Input::new(time.delta_secs_f64().clamp(0.0, 0.05));
+    for (key, codes) in KEYS {
+        if codes.iter().any(|&c| keys.just_pressed(c)) {
+            input.press(key);
+        } else if codes.iter().any(|&c| keys.pressed(c)) {
+            input.hold(key);
+        }
+    }
+    let any = [MouseButton::Left, MouseButton::Right, MouseButton::Middle];
+    input.mouse_held = buttons.any_pressed(any);
+    let (over_label, clicked) =
+        label_click(&markers, &buttons, game.state.map_or(0.0, |s| s.map_weight));
+    input.mouse_pressed = buttons.any_just_pressed(any) && !over_label;
+    input.focus = match clicked {
+        Some(LabelKind::Vessel) => Some(FocusTarget::Vessel),
+        Some(LabelKind::Body(i)) => Some(FocusTarget::Body(i)),
+        Some(LabelKind::Star) => Some(FocusTarget::Body(
+            game.bodies
+                .iter()
+                .position(|b| b.parent_index.is_none())
+                .expect("a star"),
+        )),
+        Some(LabelKind::Apsis) | None => None,
+    };
+    input.drag = (motion.delta.x as f64, motion.delta.y as f64);
+    input.scroll_pixels = match scroll.unit {
+        MouseScrollUnit::Line => -f64::from(scroll.delta.y) * 100.0,
+        MouseScrollUnit::Pixel => -f64::from(scroll.delta.y),
+    };
+    pilot.input = input;
+    if let Some(recorder) = &mut pilot.recorder {
+        recorder.frame(&input);
+    }
+}
+
+/// A mark is written every second or so of frames: often enough to find where a replay diverged,
+/// rarely enough that a long session stays a file a person can read.
+const FRAMES_PER_MARK: usize = 60;
+
+/// The state digest a session is checked against: where the upper stage is in the planet's own
+/// frame, how fast, how heavy, and which stage is flying.
+fn mark(game: &Game, frame: usize) -> Mark {
+    let state = game.rocket.body_fixed_state(&game.ephemeris);
+    Mark {
+        frame,
+        sim_time: game.rocket.time(),
+        position: state.position.to_array(),
+        velocity: state.velocity.to_array(),
+        mass_kg: game.rocket.mass_kg(),
+        stage: game.stage,
+    }
+}
+
+/// Keyboard actions, applied after the pointer actions of the same frame.
+fn apply_keys(game: &mut Game, keys: &Input) {
+    let shift = keys.held(Key::Shift);
+    if keys.just_pressed(Key::Space) {
         game.stage();
     }
-    if keys.just_pressed(KeyCode::KeyT) {
+    if keys.just_pressed(Key::T) {
         game.sas.toggle();
     }
-    if keys.just_pressed(KeyCode::KeyX) {
+    if keys.just_pressed(Key::X) {
         game.throttle_percent = 0.0;
     }
-    if keys.just_pressed(KeyCode::KeyP) {
+    if keys.just_pressed(Key::P) {
         game.paused = !game.paused;
     }
-    if keys.just_pressed(KeyCode::KeyG) {
+    if keys.just_pressed(Key::G) {
         game.path_frame = match game.path_frame {
             PathFrameKind::Inertial => PathFrameKind::Surface,
             PathFrameKind::Surface => PathFrameKind::Inertial,
@@ -1169,77 +1380,71 @@ fn controls(
         game.log(json!({ "event": "path-frame", "pathFrame": frame, "simTime": t }));
     }
     // The lab's dev panel switches.
-    if keys.just_pressed(KeyCode::F2) {
+    if keys.just_pressed(Key::F2) {
         game.debug.wire = !game.debug.wire;
     }
-    if keys.just_pressed(KeyCode::F3) {
+    if keys.just_pressed(Key::F3) {
         game.debug.bounds = !game.debug.bounds;
     }
-    if keys.just_pressed(KeyCode::F4) {
+    if keys.just_pressed(Key::F4) {
         game.debug.colliders = !game.debug.colliders;
     }
-    if keys.just_pressed(KeyCode::F5) {
+    if keys.just_pressed(Key::F5) {
         game.debug.terrain = !game.debug.terrain;
         let (visible, t) = (game.debug.terrain, game.rocket.time());
         game.log(json!({ "event": "terrain-visibility", "visible": visible, "simTime": t }));
     }
-    if keys.just_pressed(KeyCode::KeyK) {
+    if keys.just_pressed(Key::K) {
         game.altitude_agl = !game.altitude_agl;
     }
-    if keys.just_pressed(KeyCode::KeyL) {
+    if keys.just_pressed(Key::L) {
         game.speed_surface = !game.speed_surface;
     }
-    if keys.just_pressed(KeyCode::KeyR) {
+    if keys.just_pressed(Key::R) {
         game.reset();
     }
-    if keys.just_pressed(KeyCode::Comma) {
+    if keys.just_pressed(Key::Comma) {
         game.step_time_rate(-1);
     }
-    if keys.just_pressed(KeyCode::Period) {
+    if keys.just_pressed(Key::Period) {
         game.step_time_rate(1);
     }
-    if keys.just_pressed(KeyCode::F1) {
+    if keys.just_pressed(Key::F1) {
         game.help = !game.help;
     }
-    maneuver_keys(&keys, game);
-    if keys.just_pressed(KeyCode::Tab) {
+    maneuver_keys(keys, game);
+    if keys.just_pressed(Key::Tab) {
         let mut order = vec![Focus::Vessel];
         order.extend((0..game.bodies.len()).map(Focus::Body));
         let current = order.iter().position(|&f| f == game.focus).unwrap_or(0);
         let step = if shift { order.len() - 1 } else { 1 };
         game.set_focus(order[(current + step) % order.len()]);
     }
+}
+fn apply_pointer(game: &mut Game, keys: &Input) {
+    if let Some(target) = keys.focus {
+        game.set_focus(match target {
+            FocusTarget::Vessel => Focus::Vessel,
+            FocusTarget::Body(i) => {
+                assert!(i < game.bodies.len(), "input: unknown body {i}");
+                Focus::Body(i)
+            }
+        });
+    }
 
-    let map_weight = game.state.map_or(0.0, |s| s.map_weight);
-    let (over_label, clicked) = label_click(&markers, &buttons, map_weight);
-    match clicked {
-        Some(LabelKind::Vessel) => game.set_focus(Focus::Vessel),
-        Some(LabelKind::Body(i)) => game.set_focus(Focus::Body(i)),
-        Some(LabelKind::Star) => {
-            let star = game.bodies.iter().position(|b| b.parent_index.is_none());
-            game.set_focus(Focus::Body(star.expect("a star")));
-        }
-        Some(LabelKind::Apsis) | None => {}
+    if keys.mouse_pressed {
+        game.dragging = true;
     }
-    let any = [MouseButton::Left, MouseButton::Right, MouseButton::Middle];
-    if buttons.any_just_pressed(any) && !over_label {
-        *dragging = true;
-    }
-    if !buttons.any_pressed(any) {
-        *dragging = false;
+    if !keys.mouse_held {
+        game.dragging = false;
     }
     if let Some(state) = game.state {
-        if *dragging && motion.delta != Vec2::ZERO {
-            game.camera
-                .drag(motion.delta.x as f64, motion.delta.y as f64, state.up);
+        if game.dragging && keys.drag != (0.0, 0.0) {
+            game.camera.drag(keys.drag.0, keys.drag.1, state.up);
         }
-        let pixels = match scroll.unit {
-            MouseScrollUnit::Line => -f64::from(scroll.delta.y) * 100.0,
-            MouseScrollUnit::Pixel => -f64::from(scroll.delta.y),
-        };
-        if pixels != 0.0 {
+        if keys.scroll_pixels != 0.0 {
             game.camera.zoom(
-                (pixels * 0.0012).exp(),
+                (keys.scroll_pixels * 0.0012).exp(),
                 state.min_distance,
                 state.max_distance,
             );
@@ -1248,35 +1453,35 @@ fn controls(
 }
 
 /// The maneuver panel's actions on keys (the lab's panel buttons and fields).
-fn maneuver_keys(keys: &ButtonInput<KeyCode>, game: &mut Game) {
-    let alt = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
+fn maneuver_keys(keys: &Input, game: &mut Game) {
+    let alt = keys.held(Key::Alt);
     let step = if alt { 10.0 } else { 1.0 };
-    if keys.just_pressed(KeyCode::KeyN) {
+    if keys.just_pressed(Key::N) {
         game.plan_action(Game::add_maneuver);
     }
     if game.plan.is_none() {
         return;
     }
-    if keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) {
+    if keys.any_just_pressed([Key::Delete, Key::Backspace]) {
         game.plan_action(Game::remove_maneuver);
     }
     let count = game.plan.as_ref().map_or(0, |p| p.count());
-    if keys.just_pressed(KeyCode::BracketLeft) {
+    if keys.just_pressed(Key::BracketLeft) {
         game.selected = game.selected.saturating_sub(1);
     }
-    if keys.just_pressed(KeyCode::BracketRight) {
+    if keys.just_pressed(Key::BracketRight) {
         game.selected = (game.selected + 1).min(count.saturating_sub(1));
     }
-    type Edit = (KeyCode, fn(&mut ManeuverSpec, f64), f64);
+    type Edit = (Key, fn(&mut ManeuverSpec, f64), f64);
     let edits: [Edit; 8] = [
-        (KeyCode::ArrowUp, |s, d| s.prograde += d, step),
-        (KeyCode::ArrowDown, |s, d| s.prograde -= d, step),
-        (KeyCode::ArrowRight, |s, d| s.normal += d, step),
-        (KeyCode::ArrowLeft, |s, d| s.normal -= d, step),
-        (KeyCode::PageUp, |s, d| s.radial += d, step),
-        (KeyCode::PageDown, |s, d| s.radial -= d, step),
-        (KeyCode::End, |s, d| s.start_time += d, 60.0 * step),
-        (KeyCode::Home, |s, d| s.start_time -= d, 60.0 * step),
+        (Key::ArrowUp, |s, d| s.prograde += d, step),
+        (Key::ArrowDown, |s, d| s.prograde -= d, step),
+        (Key::ArrowRight, |s, d| s.normal += d, step),
+        (Key::ArrowLeft, |s, d| s.normal -= d, step),
+        (Key::PageUp, |s, d| s.radial += d, step),
+        (Key::PageDown, |s, d| s.radial -= d, step),
+        (Key::End, |s, d| s.start_time += d, 60.0 * step),
+        (Key::Home, |s, d| s.start_time -= d, 60.0 * step),
     ];
     for (key, edit, amount) in edits {
         if keys.just_pressed(key) {
@@ -1288,7 +1493,7 @@ fn maneuver_keys(keys: &ButtonInput<KeyCode>, game: &mut Game) {
             });
         }
     }
-    if keys.just_pressed(KeyCode::KeyV) {
+    if keys.just_pressed(Key::V) {
         // Auto, then each body fixed, then auto again.
         let n = game.bodies.len();
         game.plan_action(|g| {
@@ -1309,25 +1514,84 @@ fn maneuver_keys(keys: &ButtonInput<KeyCode>, game: &mut Game) {
             })
         });
     }
-    if keys.just_pressed(KeyCode::KeyY) {
+    if keys.just_pressed(Key::Y) {
         game.plan_action(|g| g.place_at_apsis(ApsisKind::Periapsis));
     }
-    if keys.just_pressed(KeyCode::KeyU) {
+    if keys.just_pressed(Key::U) {
         game.plan_action(|g| g.place_at_apsis(ApsisKind::Apoapsis));
     }
-    if keys.just_pressed(KeyCode::KeyB) {
+    if keys.just_pressed(Key::B) {
         game.plan_action(Game::warp_to_burn);
     }
 }
 
-fn simulate(time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
-    let game = &mut *game;
-    // At most 50 ms of wall time per frame: a stalled frame does not become a physics leap.
-    let wall = time.delta_secs_f64().clamp(0.0, 0.05);
-    let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
-    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    let delta = shift as i32 as f64 - ctrl as i32 as f64;
-    if delta != 0.0 && !keys.just_pressed(KeyCode::Tab) {
+fn simulate(mut pilot: ResMut<Pilot>, mut game: ResMut<Game>) {
+    let pilot = &mut *pilot;
+    if pilot
+        .replay
+        .as_ref()
+        .is_some_and(|r| pilot.frame >= r.session.frames.len())
+    {
+        return;
+    }
+    step(&mut game, &pilot.input);
+    pilot.frame += 1;
+    let here = mark(&game, pilot.frame);
+    if let Some(recorder) = &mut pilot.recorder
+        && pilot.frame.is_multiple_of(FRAMES_PER_MARK)
+    {
+        recorder.mark(&here);
+    }
+    // On replay, every mark the recording left at this frame must still be where it was. A gap is
+    // reported with the frame it appeared at rather than only at the end, because the first one is
+    // the one worth looking at — the rest are its consequences.
+    if let Some(replay) = &mut pilot.replay {
+        for was in replay
+            .session
+            .marks
+            .iter()
+            .filter(|m| m.frame == here.frame)
+        {
+            let (dp, dv) = was.distance(&here);
+            replay.compared += 1;
+            replay.worst = (replay.worst.0.max(dp), replay.worst.1.max(dv));
+            assert!(
+                was.stage == here.stage
+                    && (was.mass_kg - here.mass_kg).abs() < 1e-9
+                    && (was.sim_time - here.sim_time).abs() < 1e-9,
+                "replay: frame {} flew stage {} at {:.3} kg, the recording had stage {} at {:.3} kg",
+                here.frame,
+                here.stage,
+                here.mass_kg,
+                was.stage,
+                was.mass_kg
+            );
+            assert!(
+                dp < REPLAY_POSITION_METERS && dv < REPLAY_VELOCITY_METERS_PER_SECOND,
+                "replay: frame {} (T+{:.3} s) is {dp:.3e} m and {dv:.3e} m/s from the recording",
+                here.frame,
+                here.sim_time
+            );
+        }
+    }
+}
+
+/// How far a replayed frame may be from the recorded one. The game is deterministic given its state
+/// and the input, so this is the arithmetic's own room and not a tolerance for differences in
+/// behaviour: a millimetre is already thousands of times the 33 µm that the frame conversions cost
+/// at an astronomical unit, and anything approaching it means something other than rounding moved.
+const REPLAY_POSITION_METERS: f64 = 1e-3;
+const REPLAY_VELOCITY_METERS_PER_SECOND: f64 = 1e-6;
+
+/// One frame of the game: a function of the state it is given and the pilot's input, and of nothing
+/// else. The window calls it with what the keyboard said; a recording calls it with what the
+/// keyboard said when the session was flown, which is why those two agree.
+fn step(game: &mut Game, keys: &Input) {
+    apply_pointer(game, keys);
+    apply_keys(game, keys);
+    let wall = keys.seconds;
+    let delta = keys.axis(Key::Shift, Key::Control);
+    if delta != 0.0 && !keys.just_pressed(Key::Tab) {
         game.throttle_percent = (game.throttle_percent
             + delta * wall * THROTTLE_RATE_PERCENT_PER_SECOND)
             .clamp(0.0, 100.0);
@@ -1353,7 +1617,7 @@ fn simulate(time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<G
         }
         game.time_rate = if limit > PHYSICS_MAX_RATE { limit } else { 1.0 };
     }
-    Timings::add(&mut game.timings.frame, time.delta_secs_f64() * 1e3);
+    Timings::add(&mut game.timings.frame, keys.seconds * 1e3);
     game.timings.frames += 1;
     let physics_started = Instant::now();
     if !game.paused {
@@ -1373,9 +1637,9 @@ fn simulate(time: Res<Time>, keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<G
             game.rocket.advance_on_rails(&mut game.ephemeris, dt);
         } else {
             let pilot = DVec3::new(
-                axis(&keys, KeyCode::KeyS, KeyCode::KeyW),
-                axis(&keys, KeyCode::KeyE, KeyCode::KeyQ),
-                axis(&keys, KeyCode::KeyD, KeyCode::KeyA),
+                keys.axis(Key::S, Key::W),
+                keys.axis(Key::E, Key::Q),
+                keys.axis(Key::D, Key::A),
             );
             let mut control = LanderControl {
                 throttle: game.engine_throttle(),
@@ -1750,69 +2014,18 @@ fn overlays(
     }
 
     let started = Instant::now();
-    let key = |o: DVec3| [o.x.to_bits(), o.y.to_bits(), o.z.to_bits()];
-    let mut live: HashMap<[u64; 3], DVec3> = HashMap::new();
-    let mut new = Vec::new();
-    for world in game.rocket.contact_worlds() {
-        for tile in world.terrain_colliders() {
-            let k = key(tile.origin);
-            live.insert(k, tile.origin);
-            if debug.colliders && !lines.lines.contains_key(&k) {
-                new.push((k, world.terrain_collider_mesh(tile)));
-            }
-        }
-    }
-    lines.lines.retain(|k, entity| {
-        let keep = live.contains_key(k);
-        if !keep {
-            commands.entity(*entity).despawn();
-        }
-        keep
-    });
-    for (k, (vertices, triangles)) in new {
-        let mesh = Mesh::new(PrimitiveTopology::LineList, Default::default())
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vertices)
-            .with_inserted_indices(Indices::U32(unique_edges(&triangles)));
-        let entity = commands
-            .spawn((
-                ColliderLine,
-                Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(lines.material.clone()),
-                Transform::from_translation((live[&k] - eye).as_vec3()),
-            ))
-            .id();
-        lines.lines.insert(k, entity);
-    }
-    let line_visibility = if debug.colliders {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
-    for (k, entity) in &lines.lines {
-        if let Ok((mut transform, mut v)) = collider_lines.get_mut(*entity) {
-            transform.translation = (live[k] - eye).as_vec3();
-            v.set_if_neq(line_visibility);
-        }
-    }
+    lines.sync(
+        &mut commands,
+        &mut meshes,
+        &mut collider_lines,
+        &game.rocket.contact_worlds(),
+        eye,
+        debug.colliders,
+    );
     Timings::add(
         &mut game.timings.collider,
         started.elapsed().as_secs_f64() * 1e3,
     );
-}
-
-/// Each triangle edge once, as line-list indices.
-fn unique_edges(triangles: &[[u32; 3]]) -> Vec<u32> {
-    let mut seen = std::collections::HashSet::new();
-    let mut edges = Vec::new();
-    for [a, b, c] in triangles {
-        for (p, q) in [(*a, *b), (*b, *c), (*c, *a)] {
-            let edge = (p.min(q), p.max(q));
-            if seen.insert(edge) {
-                edges.extend([edge.0, edge.1]);
-            }
-        }
-    }
-    edges
 }
 
 /// The lab's once-a-second `flight-sample`: time, mode, camera, terrain and main-thread timings.
@@ -2162,4 +2375,408 @@ fn hud(game: Res<Game>, ground: Res<Ground>, mut text: Single<&mut Text, With<Hu
         // The default font has no middle dot or superscripts.
         game.planet.planet.label.replace('·', "|").replace('²', "2"),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A launch written as frames, the way a recording holds one: throttle up, stage, fly a while
+    /// steering, then separate. It is short enough to replay in a test and long enough to go
+    /// through the parts of the frame that matter — the engine, the staging, the steering, and the
+    /// hand-off from contact physics to free flight.
+    fn scripted_launch() -> Vec<Input> {
+        let mut frames = Vec::new();
+        let frame = |seconds: f64| Input::new(seconds);
+        // Stability assist on first. Without it a steering input is a torque with nothing to stop
+        // it, so the stack keeps turning and comes back down on its side — which is what the rocket
+        // really does, and not what this script is for.
+        let mut assist = frame(1.0 / 60.0);
+        assist.press(Key::T);
+        frames.push(assist);
+        // Three seconds of holding shift brings the throttle to full.
+        for _ in 0..180 {
+            let mut f = frame(1.0 / 60.0);
+            f.hold(Key::Shift);
+            frames.push(f);
+        }
+        // Ignition.
+        let mut ignite = frame(1.0 / 60.0);
+        ignite.press(Key::Space);
+        frames.push(ignite);
+        // Ninety seconds of climb, with a short pitch-over a third of the way up: long enough to
+        // put the steering, the air and the hand-off into the flight, short enough that the stack
+        // is still going up at the end of it rather than coming back down on its side.
+        for i in 0..90 * 60 {
+            let mut f = frame(1.0 / 60.0);
+            if (70 * 60..70 * 60 + 18).contains(&i) {
+                f.hold(Key::W);
+            }
+            frames.push(f);
+        }
+        // Separation, then half a minute of coasting with a roll input to move the attitude.
+        let mut separate = frame(1.0 / 60.0);
+        separate.press(Key::Space);
+        frames.push(separate);
+        for i in 0..30 * 60 {
+            let mut f = frame(1.0 / 60.0);
+            if i % 120 < 20 {
+                f.hold(Key::D);
+            }
+            frames.push(f);
+        }
+        frames
+    }
+
+    /// Fly frames through the game, writing a mark on the same frames the window would.
+    fn fly(game: &mut Game, frames: &[Input], mut each_mark: impl FnMut(Mark)) {
+        for (i, input) in frames.iter().enumerate() {
+            step(game, input);
+            let frame = i + 1;
+            if frame.is_multiple_of(FRAMES_PER_MARK) {
+                each_mark(mark(game, frame));
+            }
+        }
+    }
+
+    /// Where the stack is, as an orbit about the home planet: this is what "reached orbit" means.
+    fn orbit_of(game: &Game) -> void_orbit::OsculatingOrbit {
+        let state = game.part_inertial(RocketPart::Upper);
+        let n = game.bodies.len();
+        let (mut positions, mut velocities) = (vec![DVec3::ZERO; n], vec![DVec3::ZERO; n]);
+        game.ephemeris
+            .states_at(game.rocket.time(), &mut positions, Some(&mut velocities));
+        void_orbit::osculating_orbit(
+            state.position - positions[game.home],
+            state.velocity - velocities[game.home],
+            game.bodies[game.home].gm,
+        )
+    }
+
+    /// A gravity turn written as frames: climb straight up for `vertical` seconds, then tip the nose
+    /// over with a pitch pulse every `interval` seconds until `pitches` of them have gone in, and
+    /// hold the throttle open through staging to orbit.
+    fn gravity_turn(
+        vertical: f64,
+        interval: f64,
+        pulse_frames: usize,
+        pitches: usize,
+    ) -> Vec<Input> {
+        let mut frames = Vec::new();
+        let mut assist = Input::new(1.0 / 60.0);
+        assist.press(Key::T);
+        frames.push(assist);
+        for _ in 0..180 {
+            let mut f = Input::new(1.0 / 60.0);
+            f.hold(Key::Shift);
+            frames.push(f);
+        }
+        let mut ignite = Input::new(1.0 / 60.0);
+        ignite.press(Key::Space);
+        frames.push(ignite);
+        let total = 700 * 60;
+        let start = (vertical * 60.0) as usize;
+        let every = (interval * 60.0) as usize;
+        for i in 0..total {
+            let mut f = Input::new(1.0 / 60.0);
+            if i >= start {
+                let since = i - start;
+                if since / every < pitches && since % every < pulse_frames {
+                    f.hold(Key::W);
+                }
+            }
+            frames.push(f);
+        }
+        frames
+    }
+
+    /// Fly a gravity turn and report the best orbit it ever held, which is at upper-stage burnout
+    /// rather than at the end of a fixed window: after the fuel is gone a suborbital stack is on its
+    /// way back down, and measuring there says nothing about how close it came.
+    fn fly_to_burnout(frames: &[Input], trace: bool) -> (Game, void_orbit::OsculatingOrbit) {
+        let mut game = new_game("aurelia", Some("layered"));
+        let mut staged = false;
+        let mut best = orbit_of(&game);
+        let radius = game.planet.planet.terrain.radius_meters;
+        for (i, input) in frames.iter().enumerate() {
+            let mut input = *input;
+            // Stage the moment the booster runs dry, which is what a pilot does.
+            if !staged && game.stage == 1 && game.rocket.part_fuel_kg(RocketPart::Booster) <= 0.0 {
+                input.press(Key::Space);
+                staged = true;
+            }
+            step(&mut game, &input);
+            let o = orbit_of(&game);
+            if o.periapsis_radius_meters > best.periapsis_radius_meters {
+                best = o;
+            }
+            if trace && i.is_multiple_of(30 * 60) {
+                let state = game.rocket.body_fixed_state(&game.ephemeris);
+                let up = state.position.normalize();
+                let nose = game.rocket.part_orientation(RocketPart::Upper) * DVec3::Y;
+                println!(
+                    "  T+{:6.1} s stage {} alt {:8.0} m speed {:7.0} m/s pitch {:5.1} deg fuel {:6.0}+{:6.0} kg periapsis {:9.0} km apoapsis {:9.0} km",
+                    game.rocket.time(),
+                    game.stage,
+                    state.position.length() - radius,
+                    state.velocity.length(),
+                    nose.dot(up).clamp(-1.0, 1.0).acos().to_degrees(),
+                    game.rocket.part_fuel_kg(RocketPart::Upper),
+                    game.rocket.part_fuel_kg(RocketPart::Booster),
+                    (o.periapsis_radius_meters - radius) / 1e3,
+                    (o.apoapsis_radius_meters - radius) / 1e3,
+                );
+            }
+        }
+        (game, best)
+    }
+
+    #[test]
+    #[ignore = "a diagnostic, run by hand"]
+    fn trace_one_gravity_turn() {
+        let frames = gravity_turn(40.0, 8.0, 20, 16);
+        let (game, best) = fly_to_burnout(&frames, true);
+        let radius = game.planet.planet.terrain.radius_meters;
+        println!(
+            "best orbit held: periapsis {:.0} km, apoapsis {:.0} km, e {:.3}",
+            (best.periapsis_radius_meters - radius) / 1e3,
+            (best.apoapsis_radius_meters - radius) / 1e3,
+            best.eccentricity
+        );
+    }
+
+    #[test]
+    #[ignore = "a parameter search, run by hand when the rocket or the air changes"]
+    fn tune_the_gravity_turn() {
+        let mut best = (f64::NEG_INFINITY, (0.0, 0.0, 0, 0));
+        for vertical in [45.0, 60.0, 75.0] {
+            for interval in [14.0, 20.0, 28.0] {
+                for pulse in [30, 45, 60] {
+                    for pitches in [5, 7, 9] {
+                        let frames = gravity_turn(vertical, interval, pulse, pitches);
+                        let (game, o) = fly_to_burnout(&frames, false);
+                        let radius = game.planet.planet.terrain.radius_meters;
+                        let score = (o.periapsis_radius_meters - radius).min(300e3);
+                        if score > best.0 {
+                            best = (score, (vertical, interval, pulse, pitches));
+                            println!(
+                                "vertical {vertical:4.0} interval {interval:3.0} pulse {pulse:3} pitches {pitches:3}: periapsis {:9.1} km apoapsis {:9.1} km e {:.3}",
+                                (o.periapsis_radius_meters - radius) / 1e3,
+                                (o.apoapsis_radius_meters - radius) / 1e3,
+                                o.eccentricity
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        println!("best: {:?} with periapsis {:.1} km", best.1, best.0 / 1e3);
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let directory = std::env::temp_dir().join("void-replay-test");
+        std::fs::create_dir_all(&directory).expect("a scratch directory");
+        directory.join(name)
+    }
+
+    #[test]
+    fn a_recorded_session_replays_to_the_same_flight() {
+        let path = scratch("launch.jsonl");
+        let frames = scripted_launch();
+        let header = Header {
+            planet: "aurelia".into(),
+            terrain: "layered".into(),
+            version: void_app::session::VERSION,
+        };
+        // Fly it once, recording as the window would.
+        let mut game = new_game(&header.planet, Some(&header.terrain));
+        {
+            let mut recorder = Recorder::create(&path, &header);
+            for frame in &frames {
+                recorder.frame(frame);
+            }
+            let mut marks = 0;
+            let radius = game.planet.planet.terrain.radius_meters;
+            fly(&mut game, &frames, |m| {
+                recorder.mark(&m);
+                marks += 1;
+                if m.frame.is_multiple_of(1800) {
+                    println!(
+                        "  T+{:6.1} s: stage {}, {:8.1} m up at {:7.1} m/s, {:7.0} kg",
+                        m.sim_time,
+                        m.stage,
+                        DVec3::from_array(m.position).length() - radius,
+                        DVec3::from_array(m.velocity).length(),
+                        m.mass_kg
+                    );
+                }
+            });
+            assert!(marks > 100, "only {marks} marks over the flight");
+        }
+        let flown = mark(&game, frames.len());
+        // The flight has to have been a flight, or the replay below proves nothing: off the ground,
+        // through both stagings, and moving.
+        let altitude =
+            DVec3::from_array(flown.position).length() - game.planet.planet.terrain.radius_meters;
+        println!(
+            "recorded launch: {} frames, {:.0} s, stage {}, {:.1} km up at {:.0} m/s, {:.0} kg",
+            frames.len(),
+            flown.sim_time,
+            flown.stage,
+            altitude / 1e3,
+            DVec3::from_array(flown.velocity).length(),
+            flown.mass_kg
+        );
+        assert!(flown.stage == 2 && altitude > 20e3);
+
+        // Now fly the file, from a game built the same way and nothing carried over.
+        let session = Session::read(&path);
+        assert_eq!(session.header, header);
+        assert_eq!(session.frames, frames, "the file must hold what was flown");
+        let mut replayed = new_game(&session.header.planet, Some(&session.header.terrain));
+        let mut marks = session.marks.iter();
+        let mut worst = (0.0_f64, 0.0_f64);
+        fly(&mut replayed, &session.frames, |m| {
+            let was = marks
+                .next()
+                .expect("a recorded mark for every replayed one");
+            assert_eq!(was.frame, m.frame);
+            assert_eq!((was.stage, was.mass_kg), (m.stage, m.mass_kg));
+            let (dp, dv) = was.distance(&m);
+            worst = (worst.0.max(dp), worst.1.max(dv));
+        });
+        assert!(
+            marks.next().is_none(),
+            "every recorded mark must be reached"
+        );
+        println!(
+            "replay: worst {:.2e} m and {:.2e} m/s over {} marks",
+            worst.0,
+            worst.1,
+            session.marks.len()
+        );
+        assert!(worst.0 == 0.0 && worst.1 == 0.0, "the replay must be exact");
+        std::fs::remove_file(&path).expect("remove the scratch recording");
+    }
+
+    #[test]
+    fn replay_system_checks_nonperiodic_marks_and_stops_at_the_last_frame() {
+        let input = Input::new(0.01);
+        let mut expected = new_game("aurelia", Some("layered"));
+        step(&mut expected, &input);
+        let session = Session {
+            header: Header {
+                planet: "aurelia".into(),
+                terrain: "layered".into(),
+                version: void_app::session::VERSION,
+            },
+            frames: vec![input],
+            marks: vec![mark(&expected, 1)],
+        };
+        let mut app = App::new();
+        app.insert_resource(new_game("aurelia", Some("layered")))
+            .insert_resource(Pilot {
+                input,
+                replay: Some(Replay {
+                    session,
+                    next: 1,
+                    compared: 0,
+                    worst: (0.0, 0.0),
+                }),
+                ..default()
+            })
+            .add_systems(Update, simulate);
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<Pilot>()
+                .replay
+                .as_ref()
+                .unwrap()
+                .compared,
+            1
+        );
+        let before = mark(app.world().resource::<Game>(), 1);
+        app.update();
+        assert_eq!(app.world().resource::<Pilot>().frame, 1);
+        assert_eq!(mark(app.world().resource::<Game>(), 1), before);
+    }
+
+    #[test]
+    fn replayed_pointer_inputs_preserve_camera_and_label_drag_blocking() {
+        let mut frames = vec![Input::new(0.01)];
+        let mut pointer = Input::new(0.01);
+        pointer.mouse_held = true;
+        pointer.mouse_pressed = true;
+        pointer.drag = (30.0, -12.0);
+        pointer.scroll_pixels = -100.0;
+        frames.push(pointer);
+        pointer.mouse_pressed = false;
+        pointer.scroll_pixels = 0.0;
+        frames.push(pointer);
+        frames.push(Input::new(0.01));
+        let mut label = pointer;
+        label.focus = Some(FocusTarget::Body(0));
+        frames.push(label);
+        let mut first = new_game("aurelia", Some("layered"));
+        let mut second = new_game("aurelia", Some("layered"));
+        step(&mut first, &frames[0]);
+        let direction = first.camera.direction;
+        step(&mut first, &frames[1]);
+        assert_ne!(first.camera.direction, direction);
+        for input in &frames[2..] {
+            step(&mut first, input);
+        }
+        for input in &frames {
+            step(&mut second, input);
+        }
+        assert_eq!(first.camera.direction, second.camera.direction);
+        assert_eq!(first.camera.distance, second.camera.distance);
+        assert_eq!(first.focus, second.focus);
+        assert!(!first.dragging, "a label click cannot start a drag");
+    }
+
+    #[test]
+    fn recorded_focus_clicks_reach_the_game_without_window_input() {
+        let mut game = new_game("aurelia", Some("layered"));
+        let mut input = Input::new(0.0);
+        input.focus = Some(FocusTarget::Body(game.home));
+        step(&mut game, &input);
+        assert_eq!(game.focus, Focus::Body(game.home));
+        input.focus = Some(FocusTarget::Vessel);
+        step(&mut game, &input);
+        assert_eq!(game.focus, Focus::Vessel);
+    }
+
+    #[test]
+    fn a_changed_flight_fails_its_marks() {
+        // The point of the marks, and the only reason a recording is more than a way to watch the
+        // bug again: if the flight comes out different, the session says so by itself. Here the
+        // difference is one steering input removed, which is about as small as a change gets.
+        let frames = scripted_launch();
+        let mut recorded = Vec::new();
+        let mut game = new_game("aurelia", Some("layered"));
+        fly(&mut game, &frames, |m| recorded.push(m));
+        let mut changed = frames.clone();
+        let altered = changed
+            .iter_mut()
+            .rfind(|f| f.held(Key::W))
+            .expect("the script holds W");
+        *altered = Input::new(altered.seconds);
+        let mut other = new_game("aurelia", Some("layered"));
+        let mut marks = recorded.iter();
+        let mut worst = 0.0_f64;
+        fly(&mut other, &changed, |m| {
+            let was = marks.next().expect("a mark for every frame");
+            worst = worst.max(was.distance(&m).0);
+        });
+        println!(
+            "one steering frame removed: the flight ends up {worst:.2e} m away, against a {REPLAY_POSITION_METERS:.0e} m tolerance"
+        );
+        assert!(
+            worst > REPLAY_POSITION_METERS,
+            "removing a steering input moved the flight only {worst:.2e} m, so the marks would not \
+             have caught it: either the tolerance is too wide or the input does nothing"
+        );
+    }
 }

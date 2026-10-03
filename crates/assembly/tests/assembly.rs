@@ -400,3 +400,93 @@ fn independent_crossfeed_graph_handles_cycles_subsets_and_blocked_parts() {
     let duplicates = [parts[1], parts[1]];
     assert!(std::panic::catch_unwind(|| crossfeed_tanks(&duplicates, &links, "engine")).is_err());
 }
+
+/// SplitMix64, so the sweep below is reproducible without a dependency.
+struct Rng(u64);
+impl Rng {
+    fn unit(&mut self) -> f64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        ((z ^ (z >> 31)) >> 11) as f64 / (1u64 << 53) as f64
+    }
+    fn range(&mut self, low: f64, high: f64) -> f64 {
+        low + (high - low) * self.unit()
+    }
+    fn vector(&mut self, magnitude: f64) -> DVec3 {
+        let z = self.range(-1.0, 1.0);
+        let phi = self.range(0.0, std::f64::consts::TAU);
+        let r = (1.0 - z * z).max(0.0).sqrt();
+        DVec3::new(r * phi.cos(), r * phi.sin(), z) * magnitude
+    }
+}
+
+#[test]
+fn separation_conserves_momentum_from_any_motion() {
+    // The check above separates one stage from one tumbling state. Separation is instantaneous — no
+    // thrust, no fuel spent, no contact — so momentum conservation is the whole of what it must do,
+    // and it must do it from any motion rather than from the one written down. The craft's own
+    // spin and speed are swept; the fixed seed is in the source.
+    let mut rng = Rng(0x5EED_1A17_D00D_F00D);
+    let (mut worst_linear, mut worst_angular, mut worst_pose) = (0.0_f64, 0.0_f64, 0.0_f64);
+    let (mut at_linear, mut at_angular) = (String::new(), String::new());
+    for _ in 0..200 {
+        let mut f = AssemblyFlight::new(&demo_craft(), 0.0).unwrap();
+        f.stage();
+        let h = f.controlled_handle();
+        // Up to a brisk orbital-manoeuvre speed, and up to a tumble that would be alarming to ride.
+        let speed = rng.range(0.0, 300.0);
+        let spin = rng.range(0.0, 3.0);
+        let (v, w) = (rng.vector(speed), rng.vector(spin));
+        f.world.bodies[h].set_linvel(
+            rapier3d::math::Vector::new(v.x as f32, v.y as f32, v.z as f32),
+            true,
+        );
+        f.world.bodies[h].set_angvel(
+            rapier3d::math::Vector::new(w.x as f32, w.y as f32, w.z as f32),
+            true,
+        );
+        let poses: Vec<_> = f
+            .compiled
+            .parts
+            .iter()
+            .map(|p| (p.instance.id.clone(), f.part_pose(&p.instance.id)))
+            .collect();
+        let (before_linear, before_angular) = momentum(&f);
+        assert_eq!(f.stage(), Some(1));
+        let (after_linear, after_angular) = momentum(&f);
+        // Relative to the momentum carried, so a fast case is not held to the same absolute error
+        // as one that is barely moving: what must be conserved is the quantity, not a number of
+        // kilogram-metres. Rapier stores the velocities in f32, which sets the floor at about 1e-7.
+        let linear = (after_linear - before_linear).length() / before_linear.length().max(1.0);
+        let angular = (after_angular - before_angular).length() / before_angular.length().max(1.0);
+        if linear > worst_linear {
+            worst_linear = linear;
+            at_linear = format!("{:.0} m/s and {:.2} rad/s", v.length(), w.length());
+        }
+        if angular > worst_angular {
+            worst_angular = angular;
+            at_angular = format!("{:.0} m/s and {:.2} rad/s", v.length(), w.length());
+        }
+        // And every part that stayed attached must not have been nudged by the separation.
+        for (id, pose) in poses {
+            worst_pose = worst_pose.max((f.part_pose(&id).position - pose.position).length());
+        }
+    }
+    println!(
+        "separation over 200 tumbling states: linear momentum within {worst_linear:.2e} relative ({at_linear}), angular within {worst_angular:.2e} ({at_angular}), attached parts moved at most {worst_pose:.2e} m"
+    );
+    assert!(
+        worst_linear < 1e-6,
+        "linear momentum off by {worst_linear:.2e} relative at {at_linear}"
+    );
+    assert!(
+        worst_angular < 1e-6,
+        "angular momentum off by {worst_angular:.2e} relative at {at_angular}"
+    );
+    assert!(
+        worst_pose < 1e-5,
+        "separation moved an attached part by {worst_pose:.2e} m"
+    );
+}

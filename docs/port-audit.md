@@ -36,7 +36,8 @@ workspace 共 21 個 package：15 個功能／基礎 crate、`void-app` 及 5 �
 
 1. **已補齊：orbit 的雙體旋轉框架。** `void-orbit::FrameEvaluator` 已實作四種框架，並通過 TS golden 與原 60 天離軸檢查。以下保留盤點時的原因： TS `lab/orbit/src/orbit/ReferenceFrames.ts` 有 `two-body-rotating`：雙體質心原點、沿連線的 X 軸、軌道角動量的 Z 軸及瞬時旋轉週期。`lab/orbit/orbit-check.ts` 也實際驗證兩天體留在 X 軸上。Rust `frames/src/tree.rs` 沒有對應 Kind／建構 API，`view/src/path_frame.rs` 只有 inertial／surface。該項現已補入 orbit crate，frames 文件也已更新。
 2. **已補齊：完整 orbit lab 操作入口。** 新的 `void-orbit-lab` 提供下列操作；SceneView 路徑／漸暗顏色直接對照原 TS 輸出，視窗仍待使用者驗收。以下保留原盤點： Simulation／FlightPlan 的相關 Rust API 存在，但沒有原 `lab/orbit/src/app/main.ts`／`SceneView.ts` 的等價程式，供使用者選 Sol／binary、四種 plotting frame、初始軌道平面／導航參考、history／prediction／plan coast 範圍、計畫目標，並查看目標路徑／計畫末端標記。主遊戲有機動編輯按鍵，不代表此獨立 lab 已完整移植。
-3. **landing 的驗收能力。** TS `landing/src/main.ts` 有 surface／inertial camera frame、terrain／rocket collider 線及 tile boundaries。Rust `app/examples/landing.rs` 固定 body-fixed view，只有全域 wireframe。主遊戲已有 F2–F4 疊圖，但 landing example 本身缺少；這是驗收能力差異，不能只稱為 CSS／面板未搬。
+3. **已補齊實作，待視窗驗收：landing 的驗收能力。** `app/examples/landing.rs` 已提供 C 切換 surface／inertial camera frame、F2（或 B）地形線框、F3 tile boundaries、F4 實際碰撞地形與火箭 collider 線、F5 地形顯示。HUD 顯示傾角、睡眠、框架、碰撞 tile 與近期交接事件。碰撞線讀 Rapier 已載入網格；外觀與操作仍由使用者驗收。
+
 4. **LOD 的效能驗收工具。** 原 `BrowserBench.ts` 有 scripted rendered scenarios、settle/run/drain、p50/p95、CPU/GPU timings、draw calls／triangles 及 worker build 統計。Rust golden 重播 10,400 幀證明選擇結果一致，不等於重做這套真實渲染 benchmark。`lod` example 固定 landing preset，沒有原頁面的 preset 選擇／完整參數調整；DemoTerrain 資料已搬。
 5. **vessels 的觀察工具。** TS `FleetView.ts` 的歷史路徑與 `main.ts` 的 planet-view 捷徑在 Rust lab 中未提供；TS 的 collision-terrain wireframe 開關也不是 Rust 現有的零件 collider 疊圖。原始碼沒有對應的 history trail 管理。物理 API 與六場景不因此缺失。
 6. **multiscale encounter 的 WorldView 能力。** TS 兩場景共用可點天體／船焦點和軌道線的 WorldView；Rust interstellar example 有標籤與軌道，獨立 encounter 程式只有四個固定焦點／縮放預設，沒有等價的任意天體／第二船選取和軌道／可點標籤。遠方碰撞數值測試通過不代表這些觀察功能也移植了。
