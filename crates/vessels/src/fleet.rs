@@ -211,6 +211,8 @@ enum Dynamic {
     Floating(u64),
     /// A vessel's parts frame (its parts' poses are in it).
     Vessel(String),
+    /// A part, at its pose in its vessel's parts frame.
+    Part(String),
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum Owner {
@@ -263,6 +265,8 @@ pub struct Fleet {
     frames: SystemFrames,
     dynamic: HashMap<u64, Dynamic>,
     vessel_frames: HashMap<String, FrameId>,
+    /// Every part's frame, under its vessel's parts frame.
+    part_frames: HashMap<String, FrameId>,
     next_key: u64,
     gate: EncounterPhysicsGate,
     time: f64,
@@ -297,6 +301,10 @@ impl FrameSource for Fleet {
                 Motion::fixed(self.scenes[scene].world.origin, DQuat::IDENTITY)
             }
             Dynamic::Vessel(id) => self.vessel_motion(self.vessel(id)),
+            Dynamic::Part(id) => {
+                let pose = self.parts.part(id).pose;
+                Motion::fixed(pose.position, pose.rotation)
+            }
         }
     }
 }
@@ -396,6 +404,7 @@ impl Fleet {
             frames,
             dynamic: HashMap::new(),
             vessel_frames: HashMap::new(),
+            part_frames: HashMap::new(),
             next_key: 0,
             gate: EncounterPhysicsGate::new(options.encounter),
             time,
@@ -761,6 +770,13 @@ impl Fleet {
             }
         }
     }
+    /// A part's frame: under its vessel's parts frame, at the part's pose.
+    pub fn part_frame(&self, id: &str) -> FrameId {
+        *self
+            .part_frames
+            .get(id)
+            .unwrap_or_else(|| panic!("fleet: no frame for part {id}"))
+    }
     /// A vessel's parts frame: part poses are in its coordinates.
     pub fn vessel_frame(&self, id: &str) -> FrameId {
         *self
@@ -888,28 +904,22 @@ impl Fleet {
             part_ids: v.members.clone(),
         }
     }
-    /// The vessel's parts frame in inertial coordinates.
-    fn poses_frame(&self, v: &Vessel) -> (DVec3, DQuat) {
-        let t = self
-            .frames()
-            .transform(self.vessel_frame(&v.id), self.frames.origin);
-        (t.apply_point(DVec3::ZERO), t.rotation())
-    }
     pub fn part_snapshots(&self, id: &str) -> Vec<PartSnapshot> {
         let v = self.vessel(id);
         let frame = self.vessel_frame(id);
-        let (origin, q) = self.poses_frame(v);
+        let frames = self.frames();
         let p = self.propulsion_of(v);
         v.members
             .iter()
             .map(|id| {
                 let part = self.parts.part(id);
                 let pose = &part.pose;
+                let placed = frames.transform(self.part_frame(id), self.frames.origin);
                 PartSnapshot {
                     id: id.clone(),
                     definition: part.definition,
-                    position: origin + q * pose.position,
-                    rotation: (q * pose.rotation).normalize(),
+                    position: placed.apply_point(DVec3::ZERO),
+                    rotation: placed.rotation(),
                     frame,
                     local_position: pose.position,
                     local_rotation: pose.rotation,
@@ -978,17 +988,23 @@ impl Fleet {
             .expect("fleet: unknown part")
             .clone()
     }
+    /// A part's node and its outward direction, in inertial (origin frame) coordinates.
     pub fn node_frame(&self, id: &str, n: &str) -> (DVec3, DVec3) {
-        let vid = self.vessel_of_part(id);
-        let v = self.vessel(&vid);
-        let (o, q) = self.poses_frame(v);
+        self.node_in(id, n, self.frames.origin)
+    }
+    /// The distance between two parts' nodes, in the second part's frame.
+    pub fn node_gap(&self, a: &str, node_a: &str, b: &str, node_b: &str) -> f64 {
+        let frame = self.part_frame(b);
+        (self.node_in(a, node_a, frame).0 - self.node_in(b, node_b, frame).0).length()
+    }
+    /// A part's node and its outward direction in `frame`'s coordinates, through the two frames'
+    /// common ancestor: two nodes measured in one of their parts' frames keep the digits that
+    /// inertial coordinates lose.
+    pub fn node_in(&self, id: &str, n: &str, frame: FrameId) -> (DVec3, DVec3) {
         let part = self.parts.part(id);
-        let p = &part.pose;
         let n = node(part.definition, n).expect("unknown node");
-        (
-            o + q * (p.position + p.rotation * n.position),
-            q * (p.rotation * n.direction),
-        )
+        let t = self.frames().transform(self.part_frame(id), frame);
+        (t.apply_point(n.position), t.apply_direction(n.direction))
     }
     pub fn free_nodes(&self, id: &str) -> Vec<FreeNode> {
         self.parts
@@ -1165,17 +1181,35 @@ impl Fleet {
         self.dynamic
             .retain(|_, d| !matches!(d, Dynamic::Bubble(s) | Dynamic::Floating(s) if *s == id));
     }
-    /// Stores a vessel and hangs its parts frame under its owner's frame.
+    /// Stores a vessel, hangs its parts frame under its owner's frame and its parts' frames
+    /// under its parts frame.
     fn put(&mut self, v: Vessel) {
         let parent = match v.owner {
             Owner::Orbit { .. } => self.frames.origin,
             Owner::Scene { scene, .. } => self.scenes[&scene].contact,
         };
-        match self.vessel_frames.get(&v.id) {
-            Some(&frame) => self.frames.tree.reparent(frame, parent),
+        let frame = match self.vessel_frames.get(&v.id) {
+            Some(&frame) => {
+                self.frames.tree.reparent(frame, parent);
+                frame
+            }
             None => {
                 let frame = self.add_dynamic(parent, Dynamic::Vessel(v.id.clone()));
                 self.vessel_frames.insert(v.id.clone(), frame);
+                frame
+            }
+        };
+        for id in &v.members {
+            match self.part_frames.get(id) {
+                Some(&part) => {
+                    if self.frames.tree.parent(part) != Some(frame) {
+                        self.frames.tree.reparent(part, frame);
+                    }
+                }
+                None => {
+                    let part = self.add_dynamic(frame, Dynamic::Part(id.clone()));
+                    self.part_frames.insert(id.clone(), part);
+                }
             }
         }
         assert!(
@@ -1684,6 +1718,10 @@ impl Fleet {
         self.remove_scene_body(&va, true);
         self.remove_scene_body(&vb, true);
         self.order.retain(|id| id != &b);
+        let frame = self.vessel_frame(&a);
+        for id in &vb.members {
+            self.frames.tree.reparent(self.part_frames[id], frame);
+        }
         self.forget_vessel_frame(&b);
         self.gate.remove_vessel(&b);
         self.controls.remove(&b);

@@ -37,7 +37,7 @@
 | `Free` | 恆星系以下任意節點 | 由模擬寫入，只在寫入的時間有效 |
 | `Dynamic(key)` | 恆星系以下任意節點 | 每次求值都向來源要 `dynamic_motion(key, t)`，所以永遠跟著擁有者的即時狀態 |
 
-節點可以移除（只能移除葉節點，id 不會再發出）；Free、Fixed、Dynamic 可以換父節點（換到別處的 Free 必須重新寫入）。
+節點可以移除（只能移除葉節點，id 不會再發出）；Free、Fixed、Dynamic 可以換父節點，底下的節點跟著一起移（換到別處的 Free 必須重新寫入；底下節點的運動相對於它，不受影響）。船的零件座標系換擁有者時就帶著它的零件（[part-graph.md](part-graph.md)）。
 
 ## 來源
 
@@ -107,7 +107,7 @@ let g = snapshot.to_galaxy(from, p);
 | 經過月球來回轉換；直接轉換和分段合成的比較 | 6.4e-8、6.7e-8 m |
 | t = 1e9 s 的自轉角：取餘法 vs 原本 `2πt/period` | 5.6e-17 vs 1.0e-11 rad |
 | 不在樹裡的子座標系（相機）保有共同祖先的精度 | < 1e-8 m |
-| 節點移除、換父節點、Dynamic 向來源取值 | 通過 |
+| 節點移除、換父節點（連同子樹）、Dynamic 向來源取值 | 通過 |
 | 會 panic 的情況：Free 未寫入或時間不符、非單位四元數、自轉參數無效、移除有子節點的節點、使用已移除的節點、沒有 Dynamic 的來源被問 Dynamic | 都會 panic |
 
 其他 crate 的對應檢查：orbit `system_frames_agree_with_the_ephemeris`、multiscale `system_frames_agree_with_the_physics_view`（跨恆星系，含地表軸）、vessels `vessel_frames_follow_their_physics_owner`（場景、氣泡、join、存檔還原）、fleet-flight `the_camera_frame_agrees_with_the_inertial_eye`、landing `planet_frame_matches_the_landing_lab`、orbit `four_frames_match_ts`。

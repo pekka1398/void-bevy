@@ -227,7 +227,9 @@ impl FrameTree {
         }
     }
 
-    /// Moves a free or fixed frame under another parent; a free frame must be written again.
+    /// Moves a free, fixed or dynamic frame under another parent, with everything below it (a
+    /// vessel's parts frame and its parts). A moved free frame must be written again; the frames
+    /// below it keep their motion, which is relative to it.
     pub fn reparent(&mut self, id: FrameId, parent: FrameId) {
         assert!(
             matches!(
@@ -241,15 +243,20 @@ impl FrameTree {
             Self::ROOT,
             "frames below the galaxy hang under a system"
         );
-        assert_eq!(self.node(id).children, 0, "{id:?} still has children");
         let mut up = Some(parent);
         while let Some(p) = up {
             assert_ne!(p, id, "{id:?} cannot hang under itself");
             up = self.node(p).parent;
         }
+        let below = if self.node(id).children == 0 {
+            vec![]
+        } else {
+            self.below(id)
+        };
         let old = self.node(id).parent.expect("only the root has no parent");
         self.node_mut(old).children -= 1;
         self.node_mut(parent).children += 1;
+        let was = self.node(id).depth;
         let depth = self.node(parent).depth + 1;
         let node = self.node_mut(id);
         node.parent = Some(parent);
@@ -257,6 +264,26 @@ impl FrameTree {
         if let Kind::Free(slot) = &mut node.kind {
             *slot = None;
         }
+        for frame in below {
+            let node = self.node_mut(frame);
+            node.depth = node.depth - was + depth;
+        }
+    }
+
+    /// Every frame below `id`.
+    fn below(&self, id: FrameId) -> Vec<FrameId> {
+        (0..self.nodes.len())
+            .filter_map(|i| {
+                let mut up = self.nodes[i].as_ref()?.parent;
+                while let Some(p) = up {
+                    if p == id {
+                        return Some(FrameId(i as u32));
+                    }
+                    up = self.node(p).parent;
+                }
+                None
+            })
+            .collect()
     }
 
     /// Removes a leaf frame. Its id is never handed out again.

@@ -181,8 +181,7 @@ pub fn check(input: &Input) -> Value {
             f.advance(0.0);
             assert_eq!(f.snapshot(&a).mode, VesselMode::Bubble);
             assert_eq!(f.snapshot(&b).mode, VesselMode::Bubble);
-            let distance =
-                (f.node_frame("v1/p2", "bottom").0 - f.node_frame("v2/p2", "bottom").0).length();
+            let distance = f.node_gap("v1/p2", "bottom", "v2/p2", "bottom");
             assert!(distance <= 0.25, "join node distance {distance}");
             let metrics = instantaneous(
                 &mut f,

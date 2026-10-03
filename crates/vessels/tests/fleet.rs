@@ -139,11 +139,7 @@ fn spinning_separation_keeps_parts_poses_fuel_and_momentum() {
 #[test]
 fn collision_and_join_preserve_part_graph_and_both_momenta() {
     let mut s = create_lab_scene(Scenario::Join);
-    while (s.fleet.node_frame("v1/p2", "bottom").0 - s.fleet.node_frame("v2/p2", "bottom").0)
-        .length()
-        > 0.08
-        && s.fleet.time() < 60.0
-    {
+    while s.fleet.node_gap("v1/p2", "bottom", "v2/p2", "bottom") > 0.08 && s.fleet.time() < 60.0 {
         s.fleet.advance(1.0 / 60.0);
     }
     let f = &mut s.fleet;
@@ -154,15 +150,8 @@ fn collision_and_join_preserve_part_graph_and_both_momenta() {
         .iter()
         .flat_map(|id| f.part_snapshots(id))
         .collect();
-    let nodes = (
-        f.node_frame("v1/p2", "bottom").0,
-        f.node_frame("v2/p2", "bottom").0,
-    );
-    assert!(
-        (nodes.0 - nodes.1).length() < 0.25,
-        "join gap {}",
-        (nodes.0 - nodes.1).length()
-    );
+    let gap = f.node_gap("v1/p2", "bottom", "v2/p2", "bottom");
+    assert!(gap < 0.25, "join gap {gap}");
     f.join("v1/p2", "bottom", "v2/p2", "bottom");
     assert_eq!(f.vessel_ids(), ["v1"]);
     assert_eq!(f.snapshot("v1").mass_kg, 2240.0);
@@ -366,10 +355,7 @@ fn native_fleet_matches_owning_ts_lab_scenarios() {
             scene.fleet.decouple("v1/p4");
         }
         if scenario == Scenario::Join {
-            while (scene.fleet.node_frame("v1/p2", "bottom").0
-                - scene.fleet.node_frame("v2/p2", "bottom").0)
-                .length()
-                > 0.08
+            while scene.fleet.node_gap("v1/p2", "bottom", "v2/p2", "bottom") > 0.08
                 && scene.fleet.time() < 60.0
             {
                 scene.fleet.advance(1.0 / 60.0);
@@ -626,9 +612,7 @@ fn vessel_frames_follow_their_physics_owner() {
     assert_eq!(f.frame_tree().parent(bubble), Some(f.origin_frame()));
     let v2 = f.vessel_frame("v2");
     assert_eq!(f.frame_tree().parent(v2), Some(bubble));
-    while (f.node_frame("v1/p2", "bottom").0 - f.node_frame("v2/p2", "bottom").0).length() > 0.08
-        && f.time() < 60.0
-    {
+    while f.node_gap("v1/p2", "bottom", "v2/p2", "bottom") > 0.08 && f.time() < 60.0 {
         f.advance(1.0 / 60.0);
     }
     f.join("v1/p2", "bottom", "v2/p2", "bottom");
@@ -774,4 +758,63 @@ fn the_part_graph_is_the_record_and_a_checkpoint_restores_it() {
         s.fleet.parts().connections(),
         restored.parts().connections()
     );
+}
+
+/// Every part is a frame under its vessel's parts frame, at its pose; separation and docking move
+/// the parts' frames to their new vessel, and a restored fleet has them again.
+#[test]
+fn parts_are_frames_under_their_vessel() {
+    let check = |f: &Fleet| {
+        let frames = f.frames();
+        for id in f.vessel_ids() {
+            let vessel = f.vessel_frame(&id);
+            for p in f.part_snapshots(&id) {
+                let frame = f.part_frame(&p.id);
+                assert_eq!(f.frame_tree().parent(frame), Some(vessel), "{}", p.id);
+                let local = frames.transform(frame, vessel);
+                assert_eq!(local.apply_point(DVec3::ZERO), p.local_position, "{}", p.id);
+                assert!(
+                    local.rotation().dot(p.local_rotation).abs() > 1.0 - 1e-15,
+                    "{}",
+                    p.id
+                );
+                for n in &p.definition.nodes {
+                    let (at, out) = f.node_in(&p.id, &n.id, frame);
+                    assert!((at - n.position).length() < 1e-15, "{} {}", p.id, n.id);
+                    assert!((out - n.direction).length() < 1e-15, "{} {}", p.id, n.id);
+                }
+            }
+        }
+    };
+    let mut s = create_lab_scene(Scenario::Join);
+    check(&s.fleet);
+    while s.fleet.node_gap("v1/p2", "bottom", "v2/p2", "bottom") > 0.08 && s.fleet.time() < 60.0 {
+        s.fleet.advance(1.0 / 60.0);
+    }
+    let f = &mut s.fleet;
+    check(f);
+    // The gap through the two parts' common ancestor agrees with the inertial one to the
+    // inertial coordinates' rounding.
+    let inertial = (f.node_frame("v1/p2", "bottom").0 - f.node_frame("v2/p2", "bottom").0).length();
+    let gap = f.node_gap("v1/p2", "bottom", "v2/p2", "bottom");
+    assert!((gap - inertial).abs() < 1e-3, "{gap} {inertial}");
+    f.join("v1/p2", "bottom", "v2/p2", "bottom");
+    check(f);
+    assert_eq!(f.part_snapshots("v1").len(), 4);
+
+    let mut s = create_lab_scene(Scenario::Separate);
+    s.fleet.decouple("v1/p4");
+    check(&s.fleet);
+    assert_eq!(
+        s.fleet.frame_tree().parent(s.fleet.part_frame("v1/p5")),
+        Some(s.fleet.vessel_frame("v2"))
+    );
+    let (ephemeris, _) = void_landing::planet_ephemeris(&s.planet);
+    let restored = Fleet::from_checkpoint(
+        ephemeris,
+        s.fleet.environment().clone(),
+        s.fleet.checkpoint(),
+        None,
+    );
+    check(&restored);
 }

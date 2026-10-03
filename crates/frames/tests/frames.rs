@@ -415,6 +415,46 @@ fn frames_come_and_go() {
     tree.set_fixed(pad, Motion::fixed(DVec3::X, DQuat::IDENTITY));
 }
 
+/// A frame moves with everything below it: a vessel's parts frame takes its parts along.
+#[test]
+fn a_moved_frame_takes_its_subtree() {
+    let (mut tree, system) = one_system();
+    let (_, surface) = tree.add_body(system, BodyId(0), EARTH);
+    let scene = tree.add_fixed(
+        surface,
+        Motion::fixed(DVec3::new(6.4e6, 0.0, 0.0), DQuat::IDENTITY),
+    );
+    let vessel = tree.add_fixed(
+        scene,
+        Motion::fixed(DVec3::new(0.0, 3.0, 0.0), DQuat::from_rotation_z(0.5)),
+    );
+    let part = tree.add_fixed(vessel, Motion::fixed(DVec3::X, DQuat::IDENTITY));
+    let node = tree.add_fixed(part, Motion::fixed(DVec3::Y, DQuat::IDENTITY));
+    let pad = tree.add_fixed(system, Motion::fixed(DVec3::Z * 10.0, DQuat::IDENTITY));
+    tree.reparent(vessel, system);
+    assert_eq!(tree.parent(vessel), Some(system));
+    assert_eq!(tree.parent(part), Some(vessel));
+    assert_eq!(tree.parent(node), Some(part));
+    let source = Still(vec![DVec3::ZERO]);
+    let snapshot = tree.at(0.0, &source);
+    assert_eq!(snapshot.common_ancestor(node, pad), system);
+    assert_eq!(snapshot.common_ancestor(node, vessel), vessel);
+    let expected =
+        DVec3::new(0.0, 3.0, 0.0) + DQuat::from_rotation_z(0.5) * DVec3::new(1.0, 1.0, 0.0);
+    let got = snapshot.transform(node, system).apply_point(DVec3::ZERO);
+    assert!((got - expected).length() < 1e-12, "{got:?}");
+    // And back down under a deeper parent; the frames below follow.
+    tree.reparent(vessel, scene);
+    let snapshot = tree.at(0.0, &source);
+    assert_eq!(snapshot.common_ancestor(node, pad), system);
+    assert_eq!(snapshot.common_ancestor(node, scene), scene);
+    let got = snapshot.transform(node, scene).apply_point(DVec3::ZERO);
+    assert!((got - expected).length() < 1e-12, "{got:?}");
+    tree.remove(node);
+    tree.remove(part);
+    tree.remove(vessel);
+}
+
 #[test]
 #[should_panic(expected = "still has children")]
 fn removing_a_frame_with_children_panics() {

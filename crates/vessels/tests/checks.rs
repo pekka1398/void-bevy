@@ -369,8 +369,7 @@ fn joining_two_vessels() {
         DVec3::ZERO,
     );
     let (na, nb) = (format!("{a}/p2"), format!("{b}/p2"));
-    let gap_of =
-        |f: &Fleet| (f.node_frame(&na, "bottom").0 - f.node_frame(&nb, "bottom").0).length();
+    let gap_of = |f: &Fleet| f.node_gap(&na, "bottom", &nb, "bottom");
     let gap0 = gap_of(&fleet);
     let mut gap = gap0;
     while gap > 0.08 && fleet.time() < 60.0 {
