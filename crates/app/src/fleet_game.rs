@@ -1703,6 +1703,68 @@ mod tests {
         app
     }
     #[test]
+    fn main_orbital_predictions_replay_and_resume_without_observation_side_effects() {
+        let mut app = initialized_scene(true);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(31),
+        ))
+        .add_systems(Update, simulate.before(draw));
+        {
+            let mut lab = app.world_mut().non_send_mut::<Lab>();
+            let craft = lab.craft.clone();
+            let Outcome::Spawned(id) = lab.session.execute(Action::LaunchOrbit {
+                craft,
+                offset: DVec3::ZERO,
+            }) else {
+                panic!("orbital fixture spawn");
+            };
+            lab.session.execute(Action::Select { vessel: id });
+            lab.paused = false;
+        }
+        // Exercise the actual main-game automatic forecast, not a renderer-only pad fixture.
+        for _ in 0..5 {
+            app.world_mut().non_send_mut::<Lab>().prediction_at = f64::NEG_INFINITY;
+            app.update();
+        }
+        let mut lab = app.world_mut().non_send_mut::<Lab>();
+        assert_eq!(lab.prediction_generation, 5);
+        assert!(lab.prediction.as_ref().unwrap().points.len() > 3);
+        let mut replay = FlightSession::from_recording(lab.session.recording());
+        let saved = void_fleet_flight::checkpoint::FlightCheckpoint::capture(
+            lab.session.sim(),
+            lab.session.recording_initial().clone(),
+        );
+        let mut loaded = FlightSession::from_checkpoint(saved);
+        let expected = void_fleet_flight::session::world_mark(lab.session.sim());
+        assert_eq!(
+            void_fleet_flight::session::world_mark(replay.sim()),
+            expected
+        );
+        assert_eq!(
+            void_fleet_flight::session::world_mark(loaded.sim()),
+            expected
+        );
+        for session in [&mut lab.session, &mut replay, &mut loaded] {
+            session.execute(Action::Advance {
+                seconds: 0.219,
+                rails: false,
+            });
+            session.execute(Action::EndFrame {
+                paused: false,
+                rate: 0,
+            });
+        }
+        let expected = void_fleet_flight::session::world_mark(lab.session.sim());
+        assert_eq!(
+            void_fleet_flight::session::world_mark(replay.sim()),
+            expected
+        );
+        assert_eq!(
+            void_fleet_flight::session::world_mark(loaded.sim()),
+            expected
+        );
+    }
+    #[test]
     fn paused_window_inputs_replay_camera_and_rendering_does_not_change_marks() {
         let mut app = initialized_scene(true);
         let initial_direction = app
