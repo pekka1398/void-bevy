@@ -24,7 +24,7 @@
 ## 檢查（`cargo test --release -p void-landing`）
 
 純數學逐位元對照（`golden/planet_frame.ts`、`golden/rotation.ts`）：
-- `PlanetFrame`：Aurelia（Sol 系統）與 Pebble 的座標轉換和加速度（J2、潮汐、離心、科氏）：**差 0**。
+- `PlanetFrame`：Aurelia（Sol 系統）與 Pebble 的座標轉換和加速度（J2、潮汐、離心、科氏）：**差 0**。環境介面第 1 步起，潮汐用完整的重力定律（其他天體的 J2 也算進來，和軌道積分器相同），Aurelia 的加速度變成 8.5e-15 相對（門檻 1e-14 不變）；把其他天體的 J2 拿掉就回到差 0。見 [environment.md](environment.md)。
 - rotation：慣性矩、慣性力矩、自由旋轉步差 0；有力矩的一步 1 ulp；10 分鐘翻滾 3.7e-11（V8 的 sin、cos）。
 
 Rapier 部分移植 `landing-check.ts` 的全部檢查與門檻，數字和 TS（WebAssembly 的 Rapier）並列：

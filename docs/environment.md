@@ -59,46 +59,69 @@ physics 的大氣高度從參考球起算。畫面散射大氣的零點卻在參
 
 physics 的發射台空氣只有預期的 60%：阻力偏小，引擎背壓損失也偏小，大氣頂也低了 5 km。修正會改變飛行行為，所以列在下方「待決定」，由使用者決定。
 
-## 目標介面
+## 介面
 
 ```rust
-// void-orbit::gravity：唯一的重力定律
-// r = 點 − 天體中心；axis = 自轉軸；兩者在同一組軸。c = 1.5 J2 GM R²（點質量為 0）。
+// void_orbit::gravity：唯一的重力定律
+// r = 點 − 天體中心；axis = 自轉軸；兩者在同一組軸。c = oblateness(body) = 1.5 J2 GM R²（點質量為 0）。
 pub fn pull(gm: f64, c: f64, axis: DVec3, r: DVec3) -> DVec3;
+pub fn add_pull(a: &mut DVec3, gm: f64, c: f64, axis: DVec3, r: DVec3); // a += pull：先點質量、再 J2
+pub fn body_pull(body: &CelestialBody, r: DVec3) -> DVec3;               // 星曆（黃道）軸
 
 // void-environment
 pub struct BodyEnvironment {
     pub atmosphere: Option<Atmosphere>,
     pub air_datum_meters: f64,          // 大氣高度零點，從地形參考球起算（目前是 0）
-    pub terrain: Option<Arc<Terrain>>,
+    pub terrain: Option<Arc<Terrain>>,  // 必須在天體的球面上（半徑相同）
     pub sea_level_meters: Option<f64>,  // 從地形參考球起算；None 表示沒有海
+}
+impl BodyEnvironment {
+    pub fn airless(terrain: Arc<Terrain>) -> Self;
 }
 
 impl Environment {
-    /// `frames` 指出樹上每個天體的 BodyInertial／BodySurface（Fleet 的樹本身就是
-    /// SystemFrames 加上 Dynamic 節點）。`state` 是 `from` 座標系裡的狀態。
-    pub fn sample<S: FrameSource + ?Sized>(
-        &self,
-        at: &Snapshot<S>,
-        frames: &SystemFrames,
-        from: FrameId,
-        state: State,
-        body: BodyId,
-    ) -> Sample;
+    pub fn new(ephemeris: &dyn EphemerisSource) -> Self;          // 所有天體的重力
+    pub fn with(self, body: usize, place: BodyEnvironment) -> Self;
+    pub fn body(&self, body: usize) -> Option<&BodyEnvironment>;
+    pub fn frames(&self) -> &SystemFrames;                        // 呼叫者沒有自己的樹時用
+
+    // `frames` 指出樹上每個天體的 BodyInertial／BodySurface（Fleet 的樹就是 SystemFrames 加上
+    // Dynamic 節點，見 `Fleet::system_frames`）。`state`／`position` 在 `from` 裡，答案用 `from` 的軸。
+    pub fn gravity(&self, at: &Snapshot<S>, frames: &SystemFrames, from: FrameId, position: DVec3) -> DVec3;
+    pub fn surroundings(&self, at, frames, from, state: State, body: usize) -> Surroundings;
+    pub fn ground(&self, at, frames, from, position: DVec3, body: usize) -> Option<GroundSample>;
+    pub fn sample(&self, at, frames, from, state: State, body: usize) -> Sample; // gravity ＋ surroundings
+    pub fn surroundings_local(&self, body: usize, local: State) -> Surroundings;  // 狀態已在本體座標
 }
 
 pub struct Sample {
-    pub gravity: DVec3,               // `from` 的軸；所有天體；不含座標系本身的慣性項
-    pub up: DVec3,                    // `from` 的軸，離開 `body` 中心
-    pub radius: f64,                  // 到 `body` 中心
+    pub gravity: DVec3,               // 所有天體；不含座標系本身的慣性項
+    pub surroundings: Surroundings,
+}
+pub struct Surroundings {
+    pub body: usize,
+    pub up: DVec3,                    // 查詢的軸，離開天體中心
+    pub radius: f64,                  // 到天體中心
     pub air: Option<AirSample>,       // 沒有大氣或在大氣頂以上時為 None
     pub ground: Option<GroundSample>, // 沒有地形時為 None
     pub sea: Option<SeaSample>,       // 沒有海時為 None
 }
-pub struct AirSample  { pub altitude: f64, pub air: Air, pub airspeed: DVec3 } // airspeed 是相對空氣的速度，`from` 的軸
-pub struct GroundSample { pub height: f64, pub clearance: f64 }               // 地形高（參考球起算）、離地高度
-pub struct SeaSample  { pub depth: f64 }                                      // 海面下為正
+pub struct AirSample { pub altitude: f64, pub air: Air, pub airspeed: DVec3 } // airspeed：相對空氣，查詢的軸
+pub struct GroundSample { pub height: f64, pub clearance: f64 }              // 地形高（參考球起算）、離地高度
+pub struct SeaSample { pub depth: f64 }                                      // 海面下為正
 ```
+
+### 誰在用
+
+| 使用者 | 怎麼用 |
+| --- | --- |
+| orbit 積分器、`PlanetFrame`、`FreeFallFrame`、orbit-lab 起始速度 | `gravity::add_pull`／`pull`／`body_pull`，再加自己座標系的項 |
+| `Fleet` | 建構時收世界的 `Arc<Environment>`；接觸 tile、落地發射、離地高度（`ground`）讀它的地形；把它交給 `PartForces` |
+| fleet-flight `FleetAir`（主遊戲） | 引擎背壓與 `CraftAir` 的空氣都用 `surroundings`，從星曆的 origin 座標系、經環境自己的 `frames()` 查 |
+| landing `planet_environment` | 從 `LandingPlanet` 建世界的環境：fleet-flight（新飛行、存檔還原）與舊火箭共用 |
+| landing `PlanetAir`＋app `RocketAir`（舊火箭） | `PlanetAir` 經 `PlanetFrame`（座標樹）換到本體座標；`RocketAir` 用 `surroundings_local` |
+| aero `EntryFlight` | 以選定的大氣建自己的環境，用 `surroundings_local`；沒有空氣時用 `Air::VACUUM` |
+| multiscale `gravity_in` | 同一條點質量定律，保留自己 lab 的捨入（逐位元 golden） |
 
 ### 怎麼算
 
@@ -153,7 +176,6 @@ pub struct SeaSample  { pub depth: f64 }                                      //
 | 4. landing 與 aero | `PlanetAir`／`RocketAir`、`EntryFlight` 的大氣經環境取樣 | 不改；`EntryFlight` golden 門檻不放寬 |
 | 5. 待決定項目 | 依使用者決定：大氣零點、海 | 改（若決定要改） |
 | 6. 文件 | 本頁、aero.md、landing.md、fleet-flight.md、status.md | 無 |
-| 4. landing、app、aero | landing 提供 `planet_environment`（fleet-flight 的新飛行與存檔還原、舊火箭共用）。`PlanetAir` 改存 `PlanetFrame`，每個 stage 經座標樹換到本體座標，不再線性外推；app 的 `RocketAir` 經 `Environment::surroundings_local` 取空氣。`EntryFlight` 以選定的大氣建自己的環境，經 `surroundings_local` 取空氣，沒有空氣時用模型本來的真空狀態（新的 `Air::VACUUM`） | 新增 `surroundings_local`：本體座標的狀態不需要樹。修正舊火箭 contact step 的壓力位置（見下） |
 
 ### 進度
 
@@ -162,12 +184,14 @@ pub struct SeaSample  { pub depth: f64 }                                      //
 | 1. 重力定律 | `void_orbit::gravity`：`pull`、`add_pull`（累加形式）、`body_pull`、`oblateness`。積分器 `Field::gravity`、orbit-lab 起始圓軌道速度的徑向重力、`PlanetFrame` 的本體與潮汐都改用它。測試：極點與赤道的解析值、等於 J2 位能的負梯度、隨軸旋轉、多天體加總與 lab 寫法逐位元相同 | 見下 |
 | 2. `void-environment` | 大氣模型從 aero 搬來（`git mv`，aero 重新匯出 `Air`、`Atmosphere`、`EarthAtmosphere`、`smooth`、`validate_air`，aero 的 golden 不受影響）。`Environment::new(bodies).with(body, BodyEnvironment)`；查詢分成 `gravity`、`surroundings`、兩者合併的 `sample` | 從星球設定建環境的函式移到第 3 步：environment 不能依賴 landing（landing 之後要用它） |
 | 3. Fleet／fleet-flight | `Fleet::new(ephemeris, environment, …)`：世界的 `Arc<Environment>` 由呼叫者建立，`GroundSpec` 不再帶地形，接觸 tile、發射位置、離地高度都讀環境的地形；`clearance_over` 改用 `Environment::ground`。`FleetEnvironment` 改名 `PartForces`（`ForceSample`、`ForcePart`、`set_forces`），`sample` 多拿環境。`FleetAir` 的引擎背壓與 `CraftAir` 的空氣都經 `surroundings` 取；`AirSource::acceleration` 多拿星曆。新飛行與存檔還原用同一個函式建世界的環境（第 4 步移到 landing 的 `planet_environment`）。`MODEL_VERSION` 4 → 5 | 新增只查地形的 `Environment::ground`：離地檢查不能因為大氣模型的 −5 km 定義域而 panic。阻力在星曆軸算（只跟氣流與姿態有關），不再先轉到地表軸。存檔格式不變：仍存地形設定，還原時檢查與環境的地形相同。海平面還沒進 `FleetFlight`（`GamePlanet` 的海在 app，等「待決定」第 2 項） |
+| 4. landing、app、aero | landing 提供 `planet_environment`（fleet-flight 的新飛行與存檔還原、舊火箭共用）。`PlanetAir` 改存 `PlanetFrame`，每個 stage 經座標樹換到本體座標，不再線性外推；app 的 `RocketAir` 經 `Environment::surroundings_local` 取空氣。`EntryFlight` 以選定的大氣建自己的環境，經 `surroundings_local` 取空氣，沒有空氣時用模型本來的真空狀態（新的 `Air::VACUUM`） | 新增 `surroundings_local`：本體座標的狀態不需要樹。修正舊火箭 contact step 的壓力位置（見下） |
+| 6. 文件 | 本頁的介面與使用者表、aero.md、fleet-flight.md、vessels.md、game.md、landing.md、status.md | 原計畫沒列 vessels.md 與 game.md：`PartForces` 改名與舊火箭的熄火數字在那裡 |
 
 第 1 步的差異：
 
 - **累加順序是定律的一部分。** 先把每個天體的點質量與 J2 合成一個向量再加總，會讓 orbit lab 的撞擊時間 golden 從 1e-6 s 內變成差 2.8e-5 s。撞擊時間是 1e-4 s 解析度的二分法，golden 能對到 1e-6 s，靠的就是和 lab 同樣的捨入。所以積分器用 `add_pull`：先加點質量、再加 J2，和 lab 逐位元相同。門檻沒有放寬。
 - **multiscale 保留 lab 的算術。** 它的 golden 是逐位元比對；multiscale lab 用 `hypot` 和 r·r·r，orbit lab 用 r²·√r²，同一條定律的兩種捨入無法同時重現。`gravity_in` 註明它是 `pull` 的點質量情形；新測試 `gravity_is_the_shared_law` 確認兩者差在各天體拉力的 4 個 ulp 內。
-- **`PlanetFrame` 的潮汐多了其他天體的 J2。** 主遊戲的 Aurelia（sol，每個天體都有 J2）地表 100 m，四個時刻、四個方向：最多 1.1e-14 m/s²。對照點質量潮汐 1.3e-6 m/s²、地表重力 9.82 m/s²，屬於捨入等級。
+- **`PlanetFrame` 的潮汐多了其他天體的 J2。** 主遊戲的 Aurelia（sol，每個天體都有 J2）地表 100 m，四個時刻、四個方向：最多 1.1e-14 m/s²。對照點質量潮汐 1.3e-6 m/s²、地表重力 9.82 m/s²，屬於捨入等級。landing lab 的 `PlanetFrame` golden（點質量潮汐）：Aurelia 的加速度從差 0 變成 8.5e-15 相對，門檻 1e-14 不變；把其他天體的 J2 拿掉就回到差 0，所以差異全是 J2 潮汐，不是捨入。Pebble 仍差 0。
 
 第 2 步的檢查（`cargo test -p void-environment`，以及 landing 的 `tests/environment.rs`）：
 
@@ -210,10 +234,10 @@ pub struct SeaSample  { pub depth: f64 }                                      //
 2. **水先做到哪裡。**
    - 建議：先只做場，即海平面與深度。水的密度與浮力等零件模組需要時再加。
    - 只有 layered 有海。hills 的 1800 m 是大氣零點與色帶，不算海。
-3. **`AirSource` 拿星曆。** 這會改 orbit 的公開 trait，好處是積分器內不再線性外插天體中心。
+3. **`AirSource` 拿星曆。**（已採用，第 3 步） 這會改 orbit 的公開 trait，好處是積分器內不再線性外插天體中心。
    - 外插誤差約為 ½ × 天體中心加速度 × Δt²：1/60 s 時是 1e-6 m 等級，10 s 時是 0.3 m 等級。
    - 建議：要改，第 3 步量出前後差異。
-4. **`PlanetFrame` 的潮汐用完整定律。** 其他天體的 J2 會一起算進來，和積分器一致，這樣船在 rails 與地面之間切換時，看到的是同一個場。
+4. **`PlanetFrame` 的潮汐用完整定律。**（已採用，第 1 步） 其他天體的 J2 會一起算進來，和積分器一致，這樣船在 rails 與地面之間切換時，看到的是同一個場。
    - 建議：接受，第 1 步量出差異。
 
 ## 驗證原則

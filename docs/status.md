@@ -39,6 +39,7 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 ## 進行中
 
 - **座標樹統一**（branch `claude/adoring-darwin-qogeug`，尚未合入 master）：所有座標都走同一棵 `void-frames` 樹，從銀河、恆星系、天體、地面場景到船與相機；主遊戲的零件、碰撞線與 tile 直接從自己的座標系轉到相機，不再繞經 1 AU 的質心系。八步都完成，workspace 測試 296 passed、0 failed、4 ignored，clippy 無警告。主遊戲與 multiscale example／lab 的畫面需要視窗驗收。見 [frame-tree.md](frame-tree.md)、[frames.md](frames.md)。
+- **環境介面**（branch `claude/environment-interface`，從座標樹 branch 開出，尚未合入）：重力只剩一條定律（`void_orbit::gravity`）；新 crate `void-environment`（大氣模型從 aero 搬來）在樹上任一座標系查重力、大氣、地形、海。Fleet 收世界的 `Environment`，零件施力（`PartForces`，原 `FleetEnvironment`）、舊火箭與再入 lab 的空氣都經它取樣，積分器裡不再線性外推天體中心。第 1–4 步完成，workspace 測試 308 passed、0 failed、4 ignored，clippy 無警告；主遊戲的差異在捨入等級（`MODEL_VERSION` 5），合入前照例需要視窗驗收。順帶修正舊火箭在發射台一直用真空推力的錯誤。大氣高度零點與海的範圍等使用者決定。見 [environment.md](environment.md)。
 - **RCS／對接**：噴嘴分配、捕獲判定、接點吸附、解除對接、單推進劑與 RCS 零件，以及對接 lab 場景，尚未合入 master。合入前需要視窗驗收。
 
 ## 對照 NOTE.md 的願望清單
