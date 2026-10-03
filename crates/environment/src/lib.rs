@@ -12,9 +12,9 @@ pub use atmosphere::*;
 
 use std::sync::Arc;
 
-use glam::DVec3;
+use glam::{DQuat, DVec3};
 use void_frames::{FrameId, FrameSource, Snapshot, State};
-use void_orbit::{CelestialBody, SystemFrames, gravity};
+use void_orbit::{CelestialBody, EphemerisSource, SystemFrames, gravity};
 use void_terrain::Terrain;
 
 /// One body's air, ground and sea. Heights are metres above the body's radius
@@ -27,6 +27,18 @@ pub struct BodyEnvironment {
     pub terrain: Option<Arc<Terrain>>,
     /// None: no sea.
     pub sea_level_meters: Option<f64>,
+}
+
+impl BodyEnvironment {
+    /// Ground only: no air, no sea.
+    pub fn airless(terrain: Arc<Terrain>) -> Self {
+        Self {
+            atmosphere: None,
+            air_datum_meters: 0.0,
+            terrain: Some(terrain),
+            sea_level_meters: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -75,23 +87,31 @@ pub struct Sample {
     pub surroundings: Surroundings,
 }
 
+/// A state in a body's surface frame, and the turn back to the query's axes.
+struct InBody {
+    local: State,
+    radius: f64,
+    direction: DVec3,
+    back: DQuat,
+}
+
 #[derive(Clone, Debug)]
 pub struct Environment {
     bodies: Vec<CelestialBody>,
     places: Vec<Option<BodyEnvironment>>,
+    frames: SystemFrames,
 }
 
 impl Environment {
-    /// Gravity of `bodies` (an ephemeris's, in index order) and nothing else; `with` adds a body's
-    /// air, ground and sea.
-    pub fn new(bodies: &[CelestialBody]) -> Self {
+    /// Gravity of the ephemeris's bodies and nothing else; `with` adds a body's air, ground and
+    /// sea.
+    pub fn new(ephemeris: &dyn EphemerisSource) -> Self {
+        let bodies = ephemeris.bodies();
         assert!(!bodies.is_empty(), "environment: no bodies");
-        for (i, b) in bodies.iter().enumerate() {
-            assert_eq!(b.index, i, "environment: bodies out of order");
-        }
         Self {
             bodies: bodies.to_vec(),
             places: vec![None; bodies.len()],
+            frames: SystemFrames::new(ephemeris),
         }
     }
 
@@ -127,6 +147,12 @@ impl Environment {
 
     pub fn bodies(&self) -> &[CelestialBody] {
         &self.bodies
+    }
+
+    /// The ephemeris's own frames, for callers that hold no tree of their own (an integrator's
+    /// air, for one): evaluate `frames().tree` with the ephemeris and query from `frames().origin`.
+    pub fn frames(&self) -> &SystemFrames {
+        &self.frames
     }
 
     pub fn body(&self, body: usize) -> Option<&BodyEnvironment> {
@@ -175,6 +201,67 @@ impl Environment {
         state: State,
         body: usize,
     ) -> Surroundings {
+        let place = self.in_body(at, frames, from, state, body);
+        let (b, local, radius) = (&self.bodies[body], place.local, place.radius);
+        let described = self.places[body].as_ref();
+        let air = described.and_then(|p| {
+            let atmosphere = p.atmosphere.as_ref()?;
+            let altitude = radius - b.radius_meters - p.air_datum_meters;
+            (altitude < atmosphere.ceiling_meters()).then(|| AirSample {
+                altitude,
+                air: atmosphere.sample(altitude),
+                airspeed: place.back * local.velocity,
+            })
+        });
+        let sea = described.and_then(|p| {
+            Some(SeaSample {
+                depth: b.radius_meters + p.sea_level_meters? - radius,
+            })
+        });
+        Surroundings {
+            body,
+            up: place.back * place.direction,
+            radius,
+            air,
+            ground: self.ground_under(body, &place),
+            sea,
+        }
+    }
+
+    /// Only `body`'s terrain at `position` in `from`: for clearance checks that must not depend on
+    /// the air model's domain.
+    pub fn ground<S: FrameSource + ?Sized>(
+        &self,
+        at: &Snapshot<S>,
+        frames: &SystemFrames,
+        from: FrameId,
+        position: DVec3,
+        body: usize,
+    ) -> Option<GroundSample> {
+        let still = State {
+            position,
+            velocity: DVec3::ZERO,
+        };
+        self.ground_under(body, &self.in_body(at, frames, from, still, body))
+    }
+
+    fn ground_under(&self, body: usize, place: &InBody) -> Option<GroundSample> {
+        let terrain = self.places[body].as_ref()?.terrain.as_ref()?;
+        let height = terrain.height(place.direction);
+        Some(GroundSample {
+            height,
+            clearance: place.radius - self.bodies[body].radius_meters - height,
+        })
+    }
+
+    fn in_body<S: FrameSource + ?Sized>(
+        &self,
+        at: &Snapshot<S>,
+        frames: &SystemFrames,
+        from: FrameId,
+        state: State,
+        body: usize,
+    ) -> InBody {
         let b = self
             .bodies
             .get(body)
@@ -187,37 +274,11 @@ impl Environment {
         let local = to.apply_state(state);
         let radius = local.position.length();
         assert!(radius > 0.0, "environment: at the centre of {}", b.id);
-        let back = to.rotation().inverse();
-        let direction = local.position / radius;
-        let place = self.places[body].as_ref();
-        let air = place.and_then(|p| {
-            let atmosphere = p.atmosphere.as_ref()?;
-            let altitude = radius - b.radius_meters - p.air_datum_meters;
-            (altitude < atmosphere.ceiling_meters()).then(|| AirSample {
-                altitude,
-                air: atmosphere.sample(altitude),
-                airspeed: back * local.velocity,
-            })
-        });
-        let ground = place.and_then(|p| {
-            let height = p.terrain.as_ref()?.height(direction);
-            Some(GroundSample {
-                height,
-                clearance: radius - (b.radius_meters + height),
-            })
-        });
-        let sea = place.and_then(|p| {
-            Some(SeaSample {
-                depth: b.radius_meters + p.sea_level_meters? - radius,
-            })
-        });
-        Surroundings {
-            body,
-            up: back * direction,
+        InBody {
+            local,
             radius,
-            air,
-            ground,
-            sea,
+            direction: local.position / radius,
+            back: to.rotation().inverse(),
         }
     }
 

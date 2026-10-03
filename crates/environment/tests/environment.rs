@@ -46,7 +46,7 @@ fn terrain(radius_meters: f64) -> Arc<Terrain> {
 fn aurelia(e: &Ephemeris) -> (Environment, usize, Arc<Terrain>) {
     let b = index(e, "aurelia");
     let ground = terrain(e.bodies()[b].radius_meters);
-    let env = Environment::new(e.bodies()).with(
+    let env = Environment::new(e).with(
         b,
         BodyEnvironment {
             atmosphere: Some(Atmosphere::earth()),
@@ -166,13 +166,9 @@ fn surroundings_are_read_in_the_body_frame() {
         ("scene", local, near),
         ("origin", frames.origin, 1e-4),
     ] {
-        let s = env.surroundings(
-            &at,
-            &frames,
-            frame,
-            at.transform(surface, frame).apply_state(state),
-            b,
-        );
+        let there = at.transform(surface, frame).apply_state(state);
+        let s = env.surroundings(&at, &frames, frame, there, b);
+        assert_eq!(env.ground(&at, &frames, frame, there.position, b), s.ground);
         let turn = at.transform(frame, surface);
         let air = s.air.expect("air on the pad");
         let ground_sample = s.ground.expect("terrain");
@@ -276,7 +272,7 @@ fn invalid_queries_and_descriptions_panic() {
         env.clone().with(b, place());
     }));
     assert!(panics(|| {
-        Environment::new(e.bodies()).with(
+        Environment::new(&e).with(
             b,
             BodyEnvironment {
                 terrain: Some(terrain(radius + 1.0)),
@@ -285,7 +281,7 @@ fn invalid_queries_and_descriptions_panic() {
         );
     }));
     assert!(panics(|| {
-        Environment::new(e.bodies()).with(
+        Environment::new(&e).with(
             b,
             BodyEnvironment {
                 air_datum_meters: f64::INFINITY,

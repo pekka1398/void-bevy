@@ -1,6 +1,6 @@
 # vessels：多船、交會與物理交接
 
-`void-vessels` 移植 `lab/vessels` 的 Fleet；不依賴 Bevy。主遊戲 `void-app` 已經透過 `void-fleet-flight` 改用 Fleet，原本的 `PartJointRocket` 只留在 `legacy_flight` example。為此 Fleet 新增了可選的 `FleetEnvironment`（空氣）、逐船機動導引、直接 checkpoint，介面與驗證見 [fleet-flight.md](fleet-flight.md)。`void-vessels-lab` 仍是保留原 lab 六個場景的獨立 Bevy 驗收程式，不依賴 aero。
+`void-vessels` 移植 `lab/vessels` 的 Fleet；不依賴 Bevy。主遊戲 `void-app` 已經透過 `void-fleet-flight` 改用 Fleet，原本的 `PartJointRocket` 只留在 `legacy_flight` example。為此 Fleet 新增了可選的 `PartForces`（零件的空氣與噴嘴氣壓，原名 `FleetEnvironment`）、逐船機動導引、直接 checkpoint；地形、重力、大氣來自建構時交給 Fleet 的世界 `Environment`（[environment.md](environment.md)），介面與驗證見 [fleet-flight.md](fleet-flight.md)。`void-vessels-lab` 仍是保留原 lab 六個場景的獨立 Bevy 驗收程式，不依賴 aero。
 
 ```sh
 cd void-bevy

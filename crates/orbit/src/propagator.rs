@@ -250,8 +250,16 @@ impl PropagationRun {
 /// Orbit knows nothing about atmospheres or vessel shapes; whoever supplies the source owns both.
 pub trait AirSource: Send + Sync {
     /// Acceleration in the ephemeris frame, m/s², at `t` for a vessel of `mass_kg` passing
-    /// `position` with `velocity`. Zero outside any atmosphere.
-    fn acceleration(&self, t: f64, position: DVec3, velocity: DVec3, mass_kg: f64) -> DVec3;
+    /// `position` with `velocity`. Zero outside any atmosphere. `ephemeris` covers `t`, so the
+    /// source can place the bodies exactly at every stage.
+    fn acceleration(
+        &self,
+        ephemeris: &dyn EphemerisSource,
+        t: f64,
+        position: DVec3,
+        velocity: DVec3,
+        mass_kg: f64,
+    ) -> DVec3;
 }
 
 /// Gravity and thrust as the integrator sees them; borrowed apart from the stepper.
@@ -322,7 +330,13 @@ impl Field {
             None => dy[6] = 0.0,
         }
         if let Some(air) = &self.air {
-            a += air.acceleration(t, DVec3::new(x, yy, z), DVec3::new(y[3], y[4], y[5]), y[6]);
+            a += air.acceleration(
+                ephemeris,
+                t,
+                DVec3::new(x, yy, z),
+                DVec3::new(y[3], y[4], y[5]),
+                y[6],
+            );
         }
         dy[3] = a.x;
         dy[4] = a.y;

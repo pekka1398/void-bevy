@@ -86,7 +86,7 @@ impl Fleet {
                 .iter()
                 .map(|g| SavedGround {
                     body_index: g.spec.body_index,
-                    terrain: g.spec.terrain.config().clone(),
+                    terrain: self.terrain(g.spec.body_index).config().clone(),
                     tiles: g.spec.tiles,
                     band_enter_meters: g.spec.band_enter_meters,
                     band_exit_meters: g.spec.band_exit_meters,
@@ -129,10 +129,13 @@ impl Fleet {
             active_pairs: self.gate.active_pairs(),
         }
     }
+    /// `environment` and `forces` are the world's, as the caller built them; the saved terrain
+    /// must be the environment's.
     pub fn from_checkpoint(
         ephemeris: impl EphemerisSource + 'static,
+        environment: Arc<Environment>,
         saved: FleetCheckpoint,
-        environment: Option<Arc<dyn FleetEnvironment>>,
+        forces: Option<Arc<dyn PartForces>>,
     ) -> Self {
         assert_eq!(saved.version, 2, "fleet checkpoint: unsupported version");
         assert!(
@@ -145,18 +148,26 @@ impl Fleet {
         let grounds = saved
             .grounds
             .into_iter()
-            .map(|g| GroundSpec {
-                body_index: g.body_index,
-                terrain: Arc::new(Terrain::from_config(&g.terrain)),
-                tiles: g.tiles,
-                band_enter_meters: g.band_enter_meters,
-                band_exit_meters: g.band_exit_meters,
+            .map(|g| {
+                assert!(
+                    environment
+                        .body(g.body_index)
+                        .and_then(|b| b.terrain.as_ref())
+                        .is_some_and(|t| *t.config() == g.terrain),
+                    "fleet checkpoint: terrain differs from the environment's"
+                );
+                GroundSpec {
+                    body_index: g.body_index,
+                    tiles: g.tiles,
+                    band_enter_meters: g.band_enter_meters,
+                    band_exit_meters: g.band_exit_meters,
+                }
             })
             .collect();
-        let mut fleet = Fleet::new(ephemeris, saved.time, grounds, saved.options);
-        // Install environment before restoring integrator caches; set_environment intentionally
-        // invalidates the caches of existing vessels when a live environment changes.
-        fleet.environment = environment;
+        let mut fleet = Fleet::new(ephemeris, environment, saved.time, grounds, saved.options);
+        // Install forces before restoring integrator caches; set_forces intentionally invalidates
+        // the caches of existing vessels when live forces change.
+        fleet.forces = forces;
         for part in saved.parts {
             let definition = void_assembly::definition(&part.definition_id)
                 .expect("fleet checkpoint: unknown part");
@@ -203,7 +214,7 @@ impl Fleet {
                     (
                         SceneFrame::Ground(Box::new(g.frame.clone())),
                         Some(index),
-                        Some(g.spec.terrain.clone()),
+                        Some(fleet.terrain(g.spec.body_index).clone()),
                     )
                 }
                 SavedFrame::Bubble { origin } => (

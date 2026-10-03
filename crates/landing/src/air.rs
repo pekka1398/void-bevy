@@ -90,7 +90,14 @@ impl PlanetAir {
 }
 
 impl AirSource for PlanetAir {
-    fn acceleration(&self, t: f64, position: DVec3, velocity: DVec3, mass_kg: f64) -> DVec3 {
+    fn acceleration(
+        &self,
+        _: &dyn EphemerisSource,
+        t: f64,
+        position: DVec3,
+        velocity: DVec3,
+        mass_kg: f64,
+    ) -> DVec3 {
         let axes = body_orientation(&self.body.rotation, t);
         let centre = self.centre + self.centre_velocity * (t - self.epoch);
         let dp = position - centre;

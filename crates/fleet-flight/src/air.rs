@@ -1,26 +1,24 @@
-//! Assembly geometry and pressure ratings adapted to Fleet's engine-free force interface.
-use glam::{DMat3, DQuat, DVec3};
+//! Assembly geometry and pressure ratings: the part modules (drag, engine back pressure) that turn
+//! the world's `Environment` into forces for Fleet.
+use glam::{DQuat, DVec3};
 use std::{collections::HashMap, sync::Arc};
-use void_aero::{
-    AeroElement, AeroShape, AeroState, Atmosphere, BodyAero, EarthAtmosphere, NEUTRAL,
-    aerodynamic_forces,
-};
+use void_aero::{AeroElement, AeroShape, AeroState, BodyAero, NEUTRAL, aerodynamic_forces};
 use void_assembly::{Connection, Module, Shape};
-use void_frames::BodyId;
-use void_orbit::{AirSource, CelestialBody, EphemerisSource, body_orientation};
-use void_vessels::{EnvironmentPart, EnvironmentSample, FleetEnvironment, VesselSnapshot};
+use void_environment::Environment;
+use void_frames::State;
+use void_orbit::{AirSource, EphemerisSource};
+use void_vessels::{ForcePart, ForceSample, PartForces, VesselSnapshot};
 
 pub struct FleetAir {
+    /// The body whose air the craft flies through.
     pub body_index: usize,
-    pub atmosphere: Atmosphere,
     /// Authored nozzle areas by engine definition ID. Every engine must have an explicit rating.
     pub nozzle_areas: HashMap<String, f64>,
 }
 impl FleetAir {
-    pub fn earth(body_index: usize, density_scale: f64) -> Self {
+    pub fn new(body_index: usize) -> Self {
         Self {
             body_index,
-            atmosphere: Atmosphere::Earth(EarthAtmosphere::new(density_scale)),
             nozzle_areas: [
                 ("engine-large".into(), 0.12),
                 ("engine-small".into(), 0.15),
@@ -31,64 +29,71 @@ impl FleetAir {
         }
     }
 }
-fn axes(body: &CelestialBody, t: f64) -> DQuat {
-    let a = body_orientation(&body.rotation, t);
-    DQuat::from_mat3(&DMat3::from_cols(a[0], a[1], a[2])).normalize()
+/// The air seen at a state of the ephemeris's physics view, through the environment's own frames.
+fn air_at(
+    environment: &Environment,
+    ephemeris: &dyn EphemerisSource,
+    t: f64,
+    state: State,
+    body: usize,
+) -> Option<void_environment::AirSample> {
+    let frames = environment.frames();
+    environment
+        .surroundings(
+            &frames.tree.at(t, ephemeris),
+            frames,
+            frames.origin,
+            state,
+            body,
+        )
+        .air
 }
 struct CraftAir {
-    atmosphere: Atmosphere,
-    body: CelestialBody,
-    epoch: f64,
-    centre: DVec3,
-    centre_velocity: DVec3,
+    environment: Arc<Environment>,
+    body: usize,
     rotation: DQuat,
     elements: Vec<AeroElement>,
 }
 impl AirSource for CraftAir {
-    fn acceleration(&self, t: f64, position: DVec3, velocity: DVec3, mass: f64) -> DVec3 {
-        let q = axes(&self.body, t);
-        let r = q.conjugate() * (position - self.centre - self.centre_velocity * (t - self.epoch));
-        let altitude = r.length() - self.body.radius_meters;
-        if altitude >= self.atmosphere.ceiling_meters() {
+    fn acceleration(
+        &self,
+        ephemeris: &dyn EphemerisSource,
+        t: f64,
+        position: DVec3,
+        velocity: DVec3,
+        mass: f64,
+    ) -> DVec3 {
+        let state = State { position, velocity };
+        let Some(air) = air_at(&self.environment, ephemeris, t, state, self.body) else {
             return DVec3::ZERO;
-        }
-        let omega = self.body.rotation.rate();
-        let v = q.conjugate() * (velocity - self.centre_velocity) - DVec3::Z.cross(r) * omega;
+        };
+        // Drag depends on the airflow and attitude only, so it is evaluated in the ephemeris axes.
         let state = AeroState {
-            center: r,
-            velocity: v,
-            rotation: (q.conjugate() * self.rotation).normalize(),
+            center: position,
+            velocity: air.airspeed,
+            rotation: self.rotation,
             // Match the current game's force-only scope; no aerodynamic torque or spin damping.
             angular_velocity: DVec3::ZERO,
         };
-        let force = aerodynamic_forces(
-            &self.elements,
-            &state,
-            &self.atmosphere.sample(altitude),
-            DVec3::ZERO,
-            &NEUTRAL,
-        )
-        .force;
-        q * force / mass
+        aerodynamic_forces(&self.elements, &state, &air.air, DVec3::ZERO, &NEUTRAL).force / mass
     }
 }
-impl FleetEnvironment for FleetAir {
+impl PartForces for FleetAir {
     fn sample(
         &self,
+        environment: &Arc<Environment>,
         ephemeris: &dyn EphemerisSource,
         time: f64,
         vessel: &VesselSnapshot,
-        parts: &[EnvironmentPart],
+        parts: &[ForcePart],
         connections: &[Connection],
-    ) -> EnvironmentSample {
-        let body = ephemeris.bodies()[self.body_index].clone();
-        let (centre, centre_velocity) = ephemeris.body_state(BodyId(self.body_index), time);
-        let altitude = (vessel.position - centre).length() - body.radius_meters;
-        let pressure = if altitude < self.atmosphere.ceiling_meters() {
-            self.atmosphere.sample(altitude).pressure_pa
-        } else {
-            0.0
+    ) -> ForceSample {
+        let state = State {
+            position: vessel.position,
+            velocity: vessel.velocity,
         };
+        let pressure = air_at(environment, ephemeris, time, state, self.body_index)
+            .map_or(0.0, |air| air.air.pressure_pa);
         let mut thrust_scales = HashMap::new();
         let mut elements = Vec::new();
         for part in parts {
@@ -144,13 +149,10 @@ impl FleetEnvironment for FleetAir {
                 }),
             });
         }
-        EnvironmentSample {
+        ForceSample {
             air: Some(Arc::new(CraftAir {
-                atmosphere: self.atmosphere.clone(),
-                body,
-                epoch: time,
-                centre,
-                centre_velocity,
+                environment: environment.clone(),
+                body: self.body_index,
                 rotation: vessel.rotation,
                 elements,
             })),

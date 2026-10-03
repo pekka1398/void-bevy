@@ -10,7 +10,7 @@ fn planet_frame_is_environment_gravity_plus_its_frame_terms() {
     let (mut e, b) = planet_ephemeris(&planet_by_id("aurelia"));
     e.extend_to(100_000.0);
     let frame = PlanetFrame::new(&e, b);
-    let env = Environment::new(e.bodies());
+    let env = Environment::new(&e);
     let frames = SystemFrames::new(&e);
     let (surface, origin) = (frames.surface[b], frames.origin);
     let radius = e.bodies()[b].radius_meters;

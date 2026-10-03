@@ -73,15 +73,11 @@ impl FlightCheckpoint {
         let (mut ephemeris, home) = void_landing::planet_ephemeris(&planet);
         // Rebuild only the massive-body samples. This is not a replay of ships or pilot actions.
         ephemeris.extend_to(self.ephemeris_end);
-        let environment = self.initial.air_enabled.then(|| {
-            Arc::new(FleetAir::earth(
-                home,
-                self.initial
-                    .air_density_scale
-                    .expect("world checkpoint: missing air density"),
-            )) as Arc<dyn void_vessels::FleetEnvironment>
-        });
-        let fleet = Fleet::from_checkpoint(ephemeris, self.fleet.clone(), environment);
+        let air = self.initial.air_enabled;
+        let environment = crate::world_environment(&planet, &ephemeris, home, air);
+        let forces =
+            air.then(|| Arc::new(FleetAir::new(home)) as Arc<dyn void_vessels::PartForces>);
+        let fleet = Fleet::from_checkpoint(ephemeris, environment, self.fleet.clone(), forces);
         let mut sim = FleetFlight {
             fleet,
             planet,

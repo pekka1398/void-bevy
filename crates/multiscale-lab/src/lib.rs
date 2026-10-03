@@ -5,7 +5,7 @@ use void_frames::{BodyId, BodyStates};
 use void_landing::FrameState;
 use void_multiscale::{FrameEphemeris, SharedWorld};
 use void_orbit::EphemerisSource;
-use void_vessels::{Fleet, FleetOptions, pod_tank};
+use void_vessels::{Environment, Fleet, FleetOptions, pod_tank};
 
 pub struct Encounter {
     pub world: SharedWorld,
@@ -35,7 +35,8 @@ impl Encounter {
             position: p + DVec3::X * radius,
             velocity: v + DVec3::Y * (planet.gm / radius).sqrt(),
         };
-        let mut fleet = Fleet::new(ephemeris, 0.0, vec![], FleetOptions::default());
+        let environment = std::sync::Arc::new(Environment::new(&ephemeris));
+        let mut fleet = Fleet::new(ephemeris, environment, 0.0, vec![], FleetOptions::default());
         let first = fleet.launch(
             &pod_tank("Near collision A"),
             state,

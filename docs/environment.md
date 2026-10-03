@@ -160,6 +160,7 @@ pub struct SeaSample  { pub depth: f64 }                                      //
 | --- | --- | --- |
 | 1. 重力定律 | `void_orbit::gravity`：`pull`、`add_pull`（累加形式）、`body_pull`、`oblateness`。積分器 `Field::gravity`、orbit-lab 起始圓軌道速度的徑向重力、`PlanetFrame` 的本體與潮汐都改用它。測試：極點與赤道的解析值、等於 J2 位能的負梯度、隨軸旋轉、多天體加總與 lab 寫法逐位元相同 | 見下 |
 | 2. `void-environment` | 大氣模型從 aero 搬來（`git mv`，aero 重新匯出 `Air`、`Atmosphere`、`EarthAtmosphere`、`smooth`、`validate_air`，aero 的 golden 不受影響）。`Environment::new(bodies).with(body, BodyEnvironment)`；查詢分成 `gravity`、`surroundings`、兩者合併的 `sample` | 從星球設定建環境的函式移到第 3 步：environment 不能依賴 landing（landing 之後要用它） |
+| 3. Fleet／fleet-flight | `Fleet::new(ephemeris, environment, …)`：世界的 `Arc<Environment>` 由呼叫者建立，`GroundSpec` 不再帶地形，接觸 tile、發射位置、離地高度都讀環境的地形；`clearance_over` 改用 `Environment::ground`。`FleetEnvironment` 改名 `PartForces`（`ForceSample`、`ForcePart`、`set_forces`），`sample` 多拿環境。`FleetAir` 的引擎背壓與 `CraftAir` 的空氣都經 `surroundings` 取；`AirSource::acceleration` 多拿星曆。fleet-flight 的 `world_environment` 是新飛行與存檔還原共用的世界描述。`MODEL_VERSION` 4 → 5 | 新增只查地形的 `Environment::ground`：離地檢查不能因為大氣模型的 −5 km 定義域而 panic。阻力在星曆軸算（只跟氣流與姿態有關），不再先轉到地表軸。存檔格式不變：仍存地形設定，還原時檢查與環境的地形相同。海平面還沒進 `FleetFlight`（`GamePlanet` 的海在 app，等「待決定」第 2 項） |
 
 第 1 步的差異：
 
@@ -177,6 +178,16 @@ pub struct SeaSample  { pub depth: f64 }                                      //
 | 發射台上方 150 m：大氣高度、地形高、離地、海深、airspeed、up | 地表與場景座標系 ≤ 1.2e-9 m（6.4e6 m 的一個間距左右）；從 origin 7.6e-6 m；`Air` 與 `Atmosphere::sample` 完全相同 |
 | 大氣頂以上、沒有描述的天體 | None |
 | panic：天體中心、未知天體、非有限輸入、低於大氣定義域、重複描述、地形不在天體球面上、大氣零點非有限 | 都會 panic |
+
+第 3 步的差異（同一個 build 裡，用舊的線性外推 `CraftAir` 副本和新的 `FleetAir` 飛同一段；兩者重跑都逐位元相同）：
+
+| 起點與時間 | 位置差 | 速度差 |
+| --- | --- | --- |
+| 10 km、100 m/s，60 s | 9.4e-9 m | 5.0e-11 m/s |
+| 30 km、2 km/s，120 s | 7.4e-7 m | 2.7e-8 m/s |
+| 80 km、7.6 km/s，600 s | 9.3e-10 m | 3.8e-12 m/s |
+
+`clearance_over` 的離地高度與改之前逐位元相同（同樣的減法順序）；新檢查 `grounds_and_checkpoints_need_the_environments_terrain`：地面所在天體在環境裡沒有地形、存檔還原到地形不同的環境，都會 panic。
 
 不在範圍：
 

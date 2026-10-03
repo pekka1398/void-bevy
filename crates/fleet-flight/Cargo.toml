@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 glam.workspace = true
 void-assembly.workspace = true
+void-environment.workspace = true
 void-aero.workspace = true
 void-vessels.workspace = true
 void-landing.workspace = true

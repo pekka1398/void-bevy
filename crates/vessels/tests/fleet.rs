@@ -498,12 +498,13 @@ fn ground_launch_coasts_back_into_contact_and_rails_catches_descent() {
         sleeping: true,
     };
     let time = s.fleet.time();
+    let environment = s.fleet.environment().clone();
     let mut f = Fleet::new(
         s.fleet.ephemeris,
+        environment,
         time,
         vec![GroundSpec {
             body_index: s.body_index,
-            terrain: s.planet.terrain.clone(),
             tiles,
             band_enter_meters: 200.0,
             band_exit_meters: 400.0,
@@ -538,7 +539,14 @@ fn connected_engines_share_tanks_and_drain_proportionally() {
     craft.parts[4].stage = Some(0);
     let s = create_lab_scene(Scenario::Separate);
     let initial = state(&s.fleet.snapshot("v1"));
-    let mut fleet = Fleet::new(s.fleet.ephemeris, 0.0, vec![], FleetOptions::default());
+    let environment = s.fleet.environment().clone();
+    let mut fleet = Fleet::new(
+        s.fleet.ephemeris,
+        environment,
+        0.0,
+        vec![],
+        FleetOptions::default(),
+    );
     let id = fleet.launch(&craft, initial, DQuat::IDENTITY, DVec3::ZERO);
     fleet.stage(&id);
     fleet.set_control(
@@ -598,7 +606,8 @@ fn vessel_frames_follow_their_physics_owner() {
     s.fleet.advance(1.0);
     check_landed(&s.fleet);
     let (ephemeris, _) = void_landing::planet_ephemeris(&void_landing::pebble());
-    let restored = Fleet::from_checkpoint(ephemeris, s.fleet.checkpoint(), None);
+    let environment = s.fleet.environment().clone();
+    let restored = Fleet::from_checkpoint(ephemeris, environment, s.fleet.checkpoint(), None);
     check_landed(&restored);
     for id in s.fleet.vessel_ids() {
         assert_eq!(
@@ -631,4 +640,61 @@ fn vessel_frames_follow_their_physics_owner() {
         Some(f.origin_frame())
     );
     assert!(!f.frame_tree().contains(bubble) && !f.frame_tree().contains(floating));
+}
+
+/// Terrain belongs to the world's environment: a ground needs it there, and a checkpoint only
+/// restores into an environment with the terrain it was saved with.
+#[test]
+fn grounds_and_checkpoints_need_the_environments_terrain() {
+    let panics =
+        |f: &mut dyn FnMut()| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).is_err();
+    let s = create_lab_scene(Scenario::Launch);
+    let ground = GroundSpec {
+        body_index: s.body_index,
+        tiles: void_landing::ContactWorldOptions {
+            step_seconds: 1.0 / 60.0,
+            tile_level: 8,
+            tile_resolution: 33,
+            tile_reach_meters: 300.0,
+            tile_keep_meters: 600.0,
+            recenter_meters: 5000.0,
+            sleeping: true,
+        },
+        band_enter_meters: 200.0,
+        band_exit_meters: 400.0,
+    };
+    let fresh = || void_landing::planet_ephemeris(&void_landing::pebble()).0;
+    assert!(panics(&mut || {
+        let e = fresh();
+        let gravity_only = std::sync::Arc::new(Environment::new(&e));
+        Fleet::new(
+            e,
+            gravity_only,
+            0.0,
+            vec![ground.clone()],
+            FleetOptions::default(),
+        );
+    }));
+    let saved = s.fleet.checkpoint();
+    assert!(panics(&mut || {
+        let e = fresh();
+        let gravity_only = std::sync::Arc::new(Environment::new(&e));
+        Fleet::from_checkpoint(e, gravity_only, saved.clone(), None);
+    }));
+    let other = std::sync::Arc::new(void_terrain::Terrain::from_config(
+        &void_terrain::TerrainConfig::Layered(void_terrain::LayeredOptions {
+            radius_meters: s.planet.terrain.radius_meters,
+            ..void_terrain::DEFAULT_LAYERED
+        }),
+    ));
+    assert!(panics(&mut || {
+        let e = fresh();
+        let elsewhere = std::sync::Arc::new(
+            Environment::new(&e).with(s.body_index, BodyEnvironment::airless(other.clone())),
+        );
+        Fleet::from_checkpoint(e, elsewhere, saved.clone(), None);
+    }));
+    let e = fresh();
+    let same = s.fleet.environment().clone();
+    Fleet::from_checkpoint(e, same, saved, None);
 }

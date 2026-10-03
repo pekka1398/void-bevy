@@ -5,6 +5,7 @@
 use glam::{DQuat, DVec3};
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 use void_assembly::{Craft, demo_craft};
 use void_frames::{BodyId, BodyStates};
 use void_landing::{
@@ -22,8 +23,9 @@ fn check(name: &str, ok: bool, detail: String) {
 /// Aurelia in the full Sol system: the Sun's and Selene's tides and J2 all act.
 fn sol_fleet() -> (Fleet, usize) {
     let (ephemeris, index) = planet_ephemeris(&aurelia());
+    let environment = Arc::new(Environment::new(&ephemeris));
     (
-        Fleet::new(ephemeris, 0.0, vec![], FleetOptions::default()),
+        Fleet::new(ephemeris, environment, 0.0, vec![], FleetOptions::default()),
         index,
     )
 }
@@ -665,9 +667,12 @@ fn rails_stop_short_at_a_new_encounter() {
 /// A landable planet with landing's collision tiles (300 m, 33²) and a height band.
 fn landable(planet: &LandingPlanet, enter: f64, exit: f64) -> (Fleet, usize, GroundSpec) {
     let (ephemeris, body_index) = planet_ephemeris(planet);
+    let environment = Arc::new(
+        Environment::new(&ephemeris)
+            .with(body_index, BodyEnvironment::airless(planet.terrain.clone())),
+    );
     let ground = GroundSpec {
         body_index,
-        terrain: planet.terrain.clone(),
         band_enter_meters: enter,
         band_exit_meters: exit,
         tiles: ContactWorldOptions {
@@ -682,6 +687,7 @@ fn landable(planet: &LandingPlanet, enter: f64, exit: f64) -> (Fleet, usize, Gro
     };
     let fleet = Fleet::new(
         ephemeris,
+        environment,
         0.0,
         vec![ground.clone()],
         FleetOptions::default(),
@@ -833,8 +839,8 @@ fn hop_hands_off_and_matches_rapier() {
 #[test]
 fn landed_vessels_share_ground_scenes() {
     let planet = pebble();
-    let (mut fleet, body, ground) = landable(&planet, 200.0, 400.0);
-    let r = ground.terrain.radius_meters;
+    let (mut fleet, body, _) = landable(&planet, 200.0, 400.0);
+    let r = planet.terrain.radius_meters;
     let site = flat_site(&planet);
     let a = fleet.launch_landed(&pod_tank("A"), body, site);
     let b = fleet.launch_landed(&pod_tank("B"), body, nearby_site(site, 50.0, r));
@@ -850,7 +856,7 @@ fn landed_vessels_share_ground_scenes() {
         format!("scenes {scenes:?}; {} ground scenes", fleet.ground_count()),
     );
     let drop_at = nearby_site(site, 100.0, r);
-    let g = ground.terrain.height(drop_at);
+    let g = planet.terrain.height(drop_at);
     let frame = PlanetFrame::new(&fleet.ephemeris, body);
     let start = frame.to_inertial(
         &fleet.ephemeris,
@@ -917,7 +923,14 @@ fn staged_halves_change_owner_and_rails_stop_at_the_band() {
         ),
     );
     let time = fleet.time();
-    let mut rails = Fleet::new(fleet.ephemeris, time, vec![ground], FleetOptions::default());
+    let environment = fleet.environment().clone();
+    let mut rails = Fleet::new(
+        fleet.ephemeris,
+        environment,
+        time,
+        vec![ground],
+        FleetOptions::default(),
+    );
     let descending = rails.launch(
         &pod_tank("coast descent"),
         state(&upper),
