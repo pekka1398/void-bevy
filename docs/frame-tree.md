@@ -49,7 +49,7 @@ Galaxy（根，非旋轉；所有恆星系共用此軸）
 
 ## 步驟（每步全部測試通過才往下）
 
-進度：1–4 完成（4 的 app 畫面待使用者視窗驗收）。相機不是存在樹裡的節點，而是每次繪圖時掛在焦點座標系（選中船的零件座標系，或聚焦天體的 BodyInertial）下的子座標系（`Transform::into_child`）：船會被 join、換 owner，相機若存進樹會擋住這些生命週期；每次算一次則沒有這個問題，精度一樣由共同祖先決定。零件、碰撞網格、地形 tile 都帶自己的座標系（`frame` + 局部位姿），app 直接轉到相機座標系。船的節點掛在場景的接觸座標系（地面＝BodySurface），不是浮動原點下：Rapier 的位置本來就以接觸座標系記錄，掛在這裡不必多一次相減；浮動原點是同層的節點，給繪圖用。
+進度：1–5 完成（4 的 app 畫面待使用者視窗驗收）。view 的 PathFrame 是星曆樹上的 BodyInertial／BodySurface；地表座標系的軌道取樣改用唯一的 `Spin::body_axes`（golden 比對改為對 lab 公式的重現，原門檻不變，native 的精確角度另外量差異）。相機不是存在樹裡的節點，而是每次繪圖時掛在焦點座標系（選中船的零件座標系，或聚焦天體的 BodyInertial）下的子座標系（`Transform::into_child`）：船會被 join、換 owner，相機若存進樹會擋住這些生命週期；每次算一次則沒有這個問題，精度一樣由共同祖先決定。零件、碰撞網格、地形 tile 都帶自己的座標系（`frame` + 局部位姿），app 直接轉到相機座標系。船的節點掛在場景的接觸座標系（地面＝BodySurface），不是浮動原點下：Rapier 的位置本來就以接觸座標系記錄，掛在這裡不必多一次相減；浮動原點是同層的節點，給繪圖用。
 
 1. **frames 核心**：`SplitPosition` 移入 `void-frames`；根改為 Galaxy，新增 System 節點與根層精確相減；節點可移除（id 不重用）；`Spin` 提供唯一的天體軸公式，orbit 的 `body_orientation` 改用它。
 2. **來源**：星曆提供恆星系資訊，`Ephemeris`（單系統）與 `FrameEphemeris`（多系統）都能建樹。

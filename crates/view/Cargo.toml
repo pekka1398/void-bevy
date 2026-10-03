@@ -9,6 +9,7 @@ publish = false
 glam.workspace = true
 void-math.workspace = true
 void-orbit.workspace = true
+void-frames.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

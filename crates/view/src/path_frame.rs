@@ -10,7 +10,8 @@
 //! drawing turns frame coordinates back into ecliptic axes with the frame's orientation now.
 
 use glam::DVec3;
-use void_orbit::{CelestialBody, EphemerisSource, body_orientation, osculating_orbit};
+use void_frames::FrameId;
+use void_orbit::{CelestialBody, EphemerisSource, SystemFrames, osculating_orbit};
 
 use crate::conic::ellipse_points_in_time;
 
@@ -41,7 +42,7 @@ pub type Basis = [DVec3; 3];
 /// The frame's axes in the ecliptic at time t.
 pub fn frame_axes(kind: PathFrameKind, body: &CelestialBody, t: f64) -> Basis {
     match kind {
-        PathFrameKind::Surface => body_orientation(&body.rotation, t),
+        PathFrameKind::Surface => body.rotation.body_axes(t),
         PathFrameKind::Inertial => body.rotation.equatorial_basis(),
     }
 }
@@ -55,32 +56,40 @@ pub fn frame_to_ecliptic(axes: &Basis, v: DVec3) -> DVec3 {
     )
 }
 
-fn dot(a: DVec3, b: DVec3) -> f64 {
-    a.x * b.x + a.y * b.y + a.z * b.z
-}
-
+/// The plotting frame is the reference body's inertial or surface frame in the ephemeris' tree.
 #[derive(Clone, Debug)]
 pub struct PathFrame {
     pub kind: PathFrameKind,
     pub reference: usize,
     body: CelestialBody,
+    frames: SystemFrames,
+    frame: FrameId,
 }
 
 impl PathFrame {
     pub fn new(ephemeris: &dyn EphemerisSource, kind: PathFrameKind, reference: usize) -> Self {
+        let frames = SystemFrames::new(ephemeris);
+        let frame = match kind {
+            PathFrameKind::Inertial => frames.inertial[reference],
+            PathFrameKind::Surface => frames.surface[reference],
+        };
         Self {
             kind,
             reference,
             body: ephemeris.bodies()[reference].clone(),
+            frames,
+            frame,
         }
     }
 
-    /// A barycentric point at time t, in frame coordinates. Needs the ephemeris at t.
+    /// A point of the ephemeris' physics view (its origin system) at time t, in frame
+    /// coordinates. Needs the ephemeris at t.
     pub fn at(&self, ephemeris: &dyn EphemerisSource, t: f64, barycentric: DVec3) -> DVec3 {
-        let origin = ephemeris.body_position(self.reference, t);
-        let axes = self.axes_at(t);
-        let d = barycentric - origin;
-        DVec3::new(dot(d, axes[0]), dot(d, axes[1]), dot(d, axes[2]))
+        self.frames
+            .tree
+            .at(t, ephemeris)
+            .transform(self.frames.origin, self.frame)
+            .apply_point(barycentric)
     }
 
     /// The frame's axes in the ecliptic at time t, without the ephemeris.
@@ -109,24 +118,14 @@ pub fn orbit_in_surface_frame(
         .clamp(MIN_ORBIT_SAMPLES, MAX_ORBIT_SAMPLES);
     let (points, period_seconds) =
         ellipse_points_in_time(relative_position, relative_velocity, gm, count);
-    // body_orientation at each time, written out: the body-fixed axes are the equatorial ones
-    // turned about the pole, so a point's body-fixed coordinates are its equatorial ones turned
-    // back.
-    let [node, quadrature, pole] = frame_body.rotation.equatorial_basis();
-    let spin = 2.0 * std::f64::consts::PI / frame_body.rotation.period_seconds;
+    // Each point in the body's surface axes at its own time: the one body-axes formula.
     (0..=count)
         .map(|i| {
             let v = parent_offset + points[i % count];
-            let along = v.x * node.x + v.y * node.y + v.z * node.z;
-            let across = v.x * quadrature.x + v.y * quadrature.y + v.z * quadrature.z;
-            let angle = frame_body.rotation.angle_at_epoch_radians
-                + spin * (now + period_seconds * i as f64 / count as f64);
-            let (c, s) = (angle.cos(), angle.sin());
-            DVec3::new(
-                c * along + s * across,
-                -s * along + c * across,
-                v.x * pole.x + v.y * pole.y + v.z * pole.z,
-            )
+            let axes = frame_body
+                .rotation
+                .body_axes(now + period_seconds * i as f64 / count as f64);
+            DVec3::new(v.dot(axes[0]), v.dot(axes[1]), v.dot(axes[2]))
         })
         .collect()
 }

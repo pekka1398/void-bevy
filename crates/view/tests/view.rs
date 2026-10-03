@@ -15,6 +15,38 @@ use void_view::{
     ellipse_points_in_time, frame_to_ecliptic, orbit_in_surface_frame, rotate, view_state,
 };
 
+/// The orbit lab's surface-frame orbit, angle = epoch + (2π / period) · t. Past the first turn
+/// this rounds where the native `Spin::angle` (exact remainder) does not; the golden data is
+/// checked against this reproduction, and the native function against it within the rounding.
+fn lab_orbit_in_surface_frame(
+    frame_body: &void_orbit::CelestialBody,
+    now: f64,
+    parent_offset: DVec3,
+    relative_position: DVec3,
+    relative_velocity: DVec3,
+    gm: f64,
+    count: usize,
+) -> Vec<DVec3> {
+    let (points, period_seconds) =
+        ellipse_points_in_time(relative_position, relative_velocity, gm, count);
+    let [node, quadrature, pole] = frame_body.rotation.equatorial_basis();
+    let spin = 2.0 * std::f64::consts::PI / frame_body.rotation.period_seconds;
+    (0..=count)
+        .map(|i| {
+            let v = parent_offset + points[i % count];
+            let along = v.x * node.x + v.y * node.y + v.z * node.z;
+            let across = v.x * quadrature.x + v.y * quadrature.y + v.z * quadrature.z;
+            let angle = frame_body.rotation.angle_at_epoch_radians
+                + spin * (now + period_seconds * i as f64 / count as f64);
+            let (c, s) = (angle.cos(), angle.sin());
+            DVec3::new(
+                c * along + s * across,
+                -s * along + c * across,
+                v.x * pole.x + v.y * pole.y + v.z * pole.z,
+            )
+        })
+        .collect()
+}
 fn golden() -> Value {
     let path = format!("{}/tests/golden/view.json", env!("CARGO_MANIFEST_DIR"));
     serde_json::from_str(&std::fs::read_to_string(&path).expect(&path)).expect(&path)
@@ -179,7 +211,7 @@ fn surface_frame_orbits_and_path_frames_match_the_lab() {
     let n = bodies.len();
     let (mut p, mut v) = (vec![DVec3::ZERO; n], vec![DVec3::ZERO; n]);
     eph.states_at(now, &mut p, Some(&mut v));
-    let mut worst = 0.0_f64;
+    let (mut worst, mut native) = (0.0_f64, 0.0_f64);
     for o in g["surfaceOrbits"].as_array().unwrap() {
         let b = o["body"].as_u64().unwrap() as usize;
         let parent = bodies[b].parent_index.unwrap();
@@ -197,6 +229,15 @@ fn surface_frame_orbits_and_path_frames_match_the_lab() {
             "{}",
             bodies[b].id
         );
+        let lab_points = lab_orbit_in_surface_frame(
+            &bodies[home],
+            now,
+            p[parent] - p[home],
+            p[b] - p[parent],
+            v[b] - v[parent],
+            bodies[parent].gm + bodies[b].gm,
+            points.len() - 1,
+        );
         let scale = (p[b] - p[home]).length() + (p[b] - p[parent]).length();
         for (k, lab) in o["kept"]
             .as_array()
@@ -204,14 +245,21 @@ fn surface_frame_orbits_and_path_frames_match_the_lab() {
             .iter()
             .zip(triples(&o["points"]))
         {
-            worst = worst.max(relative(points[k.as_u64().unwrap() as usize], lab, scale));
+            let k = k.as_u64().unwrap() as usize;
+            worst = worst.max(relative(lab_points[k], lab, scale));
+        }
+        for (a, b) in points.iter().zip(&lab_points) {
+            native = native.max(relative(*a, *b, scale));
         }
     }
     println!(
-        "surface-frame orbits of {} bodies within {worst:.1e} (relative)",
+        "surface-frame orbits of {} bodies: lab formula within {worst:.1e}, native exact angle within {native:.1e} of it (relative)",
         bodies.len() - 1
     );
     assert!(worst < 1e-11);
+    // A year of a fast-turning frame is thousands of turns; the lab's 2π t / P loses about
+    // turns · 2π · 2⁻⁵³ of angle, which the exact remainder keeps.
+    assert!(native < 1e-9, "{native:e}");
 
     for c in g["paths"].as_array().unwrap() {
         let kind = if c["kind"] == "surface" {
