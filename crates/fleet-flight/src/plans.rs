@@ -75,7 +75,7 @@ impl FleetFlight {
             mass_kg: ship.mass_kg,
         })
     }
-    fn refresh_plan(&mut self, id: &str) -> Result<(), String> {
+    pub(crate) fn refresh_plan(&mut self, id: &str) -> Result<(), String> {
         if self.plans.get(id).is_some_and(|p| p.executing) {
             return Err("Abort the executing maneuver before editing".into());
         }
@@ -98,6 +98,7 @@ impl FleetFlight {
         Ok(())
     }
     pub fn add_maneuver(&mut self, id: &str, spec: ManeuverSpec) -> Result<(), String> {
+        self.cancel_maneuver_warp("maneuver edited");
         self.refresh_plan(id)?;
         let p = self.plans.get_mut(id).unwrap();
         p.selected = p.plan.add(spec);
@@ -109,6 +110,7 @@ impl FleetFlight {
         index: usize,
         spec: ManeuverSpec,
     ) -> Result<(), String> {
+        self.cancel_maneuver_warp("maneuver edited");
         self.refresh_plan(id)?;
         let p = self.plans.get_mut(id).unwrap();
         p.plan.replace(index, spec);
@@ -116,6 +118,7 @@ impl FleetFlight {
         Ok(())
     }
     pub fn remove_maneuver(&mut self, id: &str, index: usize) -> Result<(), String> {
+        self.cancel_maneuver_warp("maneuver edited");
         self.refresh_plan(id)?;
         let p = self.plans.get_mut(id).unwrap();
         p.plan.remove(index);
@@ -128,6 +131,7 @@ impl FleetFlight {
         index: usize,
         kind: void_orbit::ApsisKind,
     ) -> Result<(), String> {
+        self.cancel_maneuver_warp("maneuver edited");
         self.refresh_plan(id)?;
         let time = self.fleet.time();
         let p = self.plans.get_mut(id).unwrap();
@@ -146,6 +150,7 @@ impl FleetFlight {
         p.selected = index;
     }
     pub fn execute_maneuver(&mut self, id: &str) -> Result<(), String> {
+        self.cancel_maneuver_warp("maneuver armed");
         self.refresh_plan(id)?;
         // Auto references follow the predicted ignition point, not today's position.
         let count = self.plans[id].plan.count();
@@ -182,6 +187,7 @@ impl FleetFlight {
         Ok(())
     }
     pub fn abort_maneuver(&mut self, id: &str) {
+        self.cancel_maneuver_warp("pilot aborted maneuver");
         self.fleet.cancel_guidance(id, "pilot aborted maneuver");
         self.update_plans();
     }

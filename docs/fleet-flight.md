@@ -121,3 +121,11 @@ Fleet 在軌道積分 leg 內切開燃燒起止時刻，因此另一艘地面船
 模型版本提高到 2、Fleet native checkpoint schema 提高到 2，舊版本明確拒絕，目前沒有跨版本遷移。headless 檢查涵蓋非整步燃燒與獨立軌道速度對照、armed／running 直接存讀後逐步完整狀態一致、切船保留機動、手動／分級／contact 中止、計畫與 journal replay，以及主程式按鍵接線（無 WindowPlugin／renderer）。
 
 逐船機動這批 workspace 全 target 回歸：253 passed、0 failed、3 ignored；workspace Clippy（-D warnings）及 fmt 通過。整體 A／B 仍有 ab-progress.md 列出的缺口，尚未宣稱全部完成。
+
+## 機動前快轉
+
+Z 開始或取消機動前快轉；第一個有效機動須在 30 秒之後，且 Fleet 允許 coasting rails。main／lab 都沿用各船高度對倍率的限制，Advance 在核心內最多只走到開始時間前 30 秒，再切回 1x；一次大 wall delta 或讀檔後續玩也不能跨過此邊界。這一步不點火，仍由 B 啟動機動。Tab 切船不改快轉目標，手動控制、分級、編輯、執行或取消機動會中止；新交會、高度帶或 target 的 contact 所有權也會停下。
+
+目標 vessel ID、開始／停止時間及中止原因納入直接 checkpoint、Action journal 和完整 world mark。模型版本為 3。headless 測試涵蓋大步長精確停止、中途保存／載入／重播、切船保留目標、手動操作取消，以及新交會先於燃燒前邊界中止。
+
+機動前快轉這批 workspace 全 target 回歸：256 passed、0 failed、3 ignored；後續新增的視窗時間／按鍵接線測試連同 app library 13 項全數通過。workspace Clippy（-D warnings）與 fmt 通過。

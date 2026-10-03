@@ -640,6 +640,7 @@ fn controls(
             site,
         });
     }
+    let warp_was_active = lab.session.sim().maneuver_warp.active();
     let id = lab.session.sim().selected.clone();
     let commanded = lab.session.sim().fleet.part_snapshots(&id).iter().any(|p| {
         p.definition
@@ -693,6 +694,9 @@ fn controls(
         lab.prediction = Some(lab.session.predict(600.0));
     }
     plan_controls(lab, &keys);
+    if warp_was_active && !lab.session.sim().maneuver_warp.active() {
+        lab.rate = 0;
+    }
     view_controls(lab, &keys, &buttons, &motion, &scroll);
 }
 fn plan_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
@@ -815,6 +819,18 @@ fn plan_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
             },
         );
     }
+    if keys.just_pressed(KeyCode::KeyZ) {
+        if lab.session.sim().maneuver_warp.active() {
+            run(lab, Action::CancelManeuverWarp);
+            lab.rate = 0;
+        } else {
+            run(lab, Action::BeginManeuverWarp);
+            if lab.session.sim().maneuver_warp.active() {
+                lab.rate = RATES.len() - 1;
+                lab.paused = false;
+            }
+        }
+    }
     if keys.just_pressed(KeyCode::KeyB) {
         run(lab, Action::ExecuteManeuver);
     }
@@ -825,7 +841,7 @@ fn plan_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
 fn plan_description(lab: &Lab) -> String {
     let sim = lab.session.sim();
     let Some(p) = sim.plans.get(&sim.selected) else {
-        return "M add maneuver | B execute first | Esc abort".into();
+        return "M add maneuver | Z warp before burn | B execute first | Esc abort".into();
     };
     let mut text = format!(
         "Plan: {} maneuvers, {} completed | {}",
@@ -851,7 +867,7 @@ fn plan_description(lab: &Lab) -> String {
             status
         ));
     }
-    text.push_str("\nM add | [] select | arrows prograde/normal | PgUp/Dn radial | Home/End time | Y/U apsis | V reference | Del remove | B execute first | Esc abort");
+    text.push_str("\nM add | [] select | arrows prograde/normal | PgUp/Dn radial | Home/End time | Y/U apsis | V reference | Del remove | Z warp | B execute first | Esc abort");
     text
 }
 
@@ -954,6 +970,10 @@ fn simulate_inner(time: &Time, window: &Window, lab: &mut Lab) {
         }
         return;
     }
+    let maneuver_warp = lab.session.sim().maneuver_warp.active();
+    if maneuver_warp {
+        lab.rate = RATES.len() - 1;
+    }
     if lab.rate > 2 {
         let f = &lab.session.sim().fleet;
         let radius = lab.session.sim().planet.terrain.radius_meters;
@@ -974,6 +994,14 @@ fn simulate_inner(time: &Time, window: &Window, lab: &mut Lab) {
         seconds: time.delta_secs_f64().min(0.05) * rate,
         rails: rate > 4.0,
     });
+    if maneuver_warp && !lab.session.sim().maneuver_warp.active() {
+        lab.rate = 0;
+        if let void_fleet_flight::warp::ManeuverWarp::Stopped { message } =
+            &lab.session.sim().maneuver_warp
+        {
+            lab.notice = message.clone();
+        }
+    }
     if lab.frames.is_multiple_of(60) {
         lab.session.mark();
     }
@@ -1503,6 +1531,54 @@ mod tests {
                 .bottom_radius,
             planet.planet.terrain.radius_meters as f32
         );
+    }
+
+    #[test]
+    fn warp_key_and_window_step_resume_one_x_before_ignition() {
+        let planet = void_landing::earth_size();
+        let pod = void_vessels::pod_tank("Resting pod");
+        let craft = demo_craft();
+        let mut session = FlightSession::new(InitialWorld::new(
+            &planet,
+            &pod,
+            void_vessels::flat_site(&planet),
+            false,
+        ));
+        session.execute(Action::Advance {
+            seconds: 20.0,
+            rails: false,
+        });
+        let Outcome::Spawned(id) = session.execute(Action::LaunchOrbit {
+            craft: craft.clone(),
+            offset: DVec3::ZERO,
+        }) else {
+            panic!("launch")
+        };
+        session.execute(Action::Select { vessel: id });
+        session.execute(Action::Stage);
+        let start = session.sim().fleet.time() + 200.037;
+        session.execute(Action::AddManeuver {
+            spec: void_orbit::ManeuverSpec {
+                start_time: start,
+                reference_body: session.sim().home,
+                reference_mode: void_orbit::ReferenceMode::Fixed,
+                prograde: 10.0,
+                normal: 0.0,
+                radial: 0.0,
+            },
+        });
+        let mut lab = new_lab(session, craft);
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::KeyZ);
+        plan_controls(&mut lab, &keys);
+        assert!(lab.session.sim().maneuver_warp.active());
+        assert!(!lab.paused);
+        let mut time = Time::<()>::default();
+        time.advance_by(std::time::Duration::from_secs(1));
+        simulate_inner(&time, &Window::default(), &mut lab);
+        assert_eq!(lab.rate, 0);
+        assert_eq!(lab.session.sim().fleet.time(), start - 30.0);
+        assert!(lab.notice.contains("30 seconds"));
     }
 
     #[test]

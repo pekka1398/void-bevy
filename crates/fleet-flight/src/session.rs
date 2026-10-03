@@ -16,7 +16,7 @@ use void_vessels::VesselControl;
 
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 2;
+pub const MODEL_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -103,6 +103,8 @@ pub enum Action {
         index: usize,
         apsis: void_orbit::ApsisKind,
     },
+    BeginManeuverWarp,
+    CancelManeuverWarp,
     ExecuteManeuver,
     AbortManeuver,
     Stage,
@@ -177,6 +179,14 @@ impl Action {
                     Ok(()) => Outcome::Applied,
                     Err(e) => Outcome::Refused(e),
                 }
+            }
+            Self::BeginManeuverWarp => match sim.begin_maneuver_warp(&sim.selected.clone()) {
+                Ok(()) => Outcome::Applied,
+                Err(e) => Outcome::Refused(e),
+            },
+            Self::CancelManeuverWarp => {
+                sim.cancel_maneuver_warp("pilot cancelled warp");
+                Outcome::Applied
             }
             Self::ExecuteManeuver => match sim.execute_maneuver(&sim.selected.clone()) {
                 Ok(()) => Outcome::Applied,
@@ -287,7 +297,7 @@ pub fn world_mark(sim: &FleetFlight) -> serde_json::Value {
         })
         .collect();
     json!({ "time":sim.fleet.time(), "pending":sim.fleet.pending_seconds(),
-        "selected":sim.selected, "ships":ships, "scenes":scenes,
+        "selected":sim.selected, "maneuverWarp":sim.maneuver_warp, "ships":ships, "scenes":scenes,
         "connections":connections, "bodies":bodies, "plans":sim.plan_checkpoints() })
 }
 

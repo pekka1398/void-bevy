@@ -5,7 +5,7 @@
 | 要求 | 目前證據 | 尚缺 |
 | --- | --- | --- |
 | A：assembly 船在 Fleet 多船世界飛行 | fleet-flight core／lab、自訂 craft、分級、切船、SAS、air、owner／warp 測試 | 主遊戲已改用共享 Fleet runtime；舊 PartJointRocket 場景保留為 legacy_flight 回歸 example |
-| A：保留主遊戲能力 | docs/fleet-flight.md 的缺口盤點 | main／lab 共用存讀、錄放、任意零件繪圖及逐船控制；main 接回 navball／多天體 map／scenery；live PlanEngine 已接。逐船計畫保存／機動執行已接入；仍缺撞擊毀損與 warp-to-maneuver 操作 |
+| A：保留主遊戲能力 | docs/fleet-flight.md 的缺口盤點 | main／lab 共用存讀、錄放、任意零件繪圖及逐船控制；main 接回 navball／多天體 map／scenery；live PlanEngine 已接。逐船計畫保存／機動執行已接入；warp-to-maneuver 已接入保存／重播與攔截；仍缺撞擊毀損 |
 | A：保存完整飛行世界並續玩 | 直接 Fleet checkpoint（graph＋native owner caches）、atomic file write、跨程序驗證、載入後完整狀態續玩對照；journal 錄放可從 checkpoint 開始 | 逐船計畫／active burn 已加入直接 checkpoint 與 journal；持續核對其餘主遊戲能力 |
 | B：操作可重現且會檢查回歸 | 舊主遊戲 input／session；Fleet Action journal、完整 world mark、incremental playback、--verify | Fleet 相機／純視覺操作；崩潰前逐條持久化；共享 runtime 已接主遊戲；仍需視覺操作與逐條持久化 |
 | B：profiling 量測與可分析輸出 | 舊主遊戲 LabLog；void-diagnostics p50／p95、CPU 系統 trace、Fleet lab --profile 與 --verify --profile、native perf wrapper | GPU／draw-call 與 rendered benchmark；main 已接共享 CPU profile；本機 native perf 因 paranoid=4 未能實測 |

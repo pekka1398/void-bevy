@@ -21,6 +21,7 @@ pub struct FlightCheckpoint {
     pub initial: InitialWorld,
     fleet: FleetCheckpoint,
     selected: String,
+    maneuver_warp: crate::warp::ManeuverWarp,
     plans: std::collections::BTreeMap<String, crate::plans::SavedVesselPlan>,
     ephemeris_end: f64,
     mark: serde_json::Value,
@@ -42,6 +43,7 @@ impl FlightCheckpoint {
             initial,
             fleet: sim.fleet.checkpoint(),
             selected: sim.selected.clone(),
+            maneuver_warp: sim.maneuver_warp.clone(),
             plans: sim.plan_checkpoints(),
             ephemeris_end: sim.fleet.ephemeris.end_time(),
             mark: world_mark(sim),
@@ -83,10 +85,12 @@ impl FlightCheckpoint {
             planet,
             home,
             selected: self.selected.clone(),
+            maneuver_warp: self.maneuver_warp.clone(),
             launch_site: self.initial.launch_site,
             plans: std::collections::BTreeMap::new(),
         };
         sim.restore_plans(self.plans.clone());
+        sim.validate_warp();
         assert_eq!(
             world_mark(&sim),
             self.mark,

@@ -3,6 +3,7 @@ mod air;
 pub mod checkpoint;
 pub mod plans;
 pub mod session;
+pub mod warp;
 pub use air::FleetAir;
 use glam::{DQuat, DVec3};
 use std::sync::Arc;
@@ -19,6 +20,7 @@ pub struct FleetFlight {
     pub home: usize,
     pub selected: String,
     pub launch_site: DVec3,
+    pub maneuver_warp: warp::ManeuverWarp,
     pub plans: std::collections::BTreeMap<String, plans::VesselPlan>,
 }
 impl FleetFlight {
@@ -55,6 +57,7 @@ impl FleetFlight {
             selected,
             launch_site: site,
             plans: std::collections::BTreeMap::new(),
+            maneuver_warp: warp::ManeuverWarp::Idle,
         }
     }
     pub fn select(&mut self, id: &str) {
@@ -62,10 +65,12 @@ impl FleetFlight {
         self.selected = id.into();
     }
     pub fn control(&mut self, control: VesselControl) {
+        self.cancel_maneuver_warp("manual control");
         self.fleet.set_control(&self.selected, control);
         self.update_plans();
     }
     pub fn stage(&mut self) -> Vec<String> {
+        self.cancel_maneuver_warp("staging");
         let children = self.fleet.stage(&self.selected);
         self.fleet.advance(0.0);
         self.update_plans();
@@ -76,16 +81,23 @@ impl FleetFlight {
     }
     /// High warp is coast-only. A rejected request is explicit; the UI may tell the pilot why.
     pub fn advance(&mut self, seconds: f64, rails: bool) -> Result<bool, String> {
-        if rails {
+        assert!(
+            seconds.is_finite() && seconds >= 0.0,
+            "flight: invalid duration"
+        );
+        let seconds = self.warp_duration(seconds)?;
+        let done = if rails {
             if let Some(reason) = self.fleet.rails_blocker() {
                 return Err(reason);
             }
-            Ok(self.fleet.advance_on_rails(seconds))
+            self.fleet.advance_on_rails(seconds)
         } else {
             self.fleet.advance(seconds);
-            self.update_plans();
-            Ok(true)
-        }
+            true
+        };
+        self.finish_warp_step(done);
+        self.update_plans();
+        Ok(done)
     }
     /// Vacuum coast, as the current game's cyan line. No engine or atmosphere in the prediction.
     pub fn predict(&mut self, horizon: f64) -> CoastPrediction {
