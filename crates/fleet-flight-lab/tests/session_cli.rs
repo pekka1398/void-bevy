@@ -10,7 +10,8 @@ fn saved_fleet_verifies_in_a_fresh_process_and_changed_inputs_fail() {
     let planet = void_landing::earth_size();
     let craft = demo_craft();
     let mut session =
-        FlightSession::new(InitialWorld::new(&planet, &craft, flat_site(&planet), true));
+        FlightSession::new(InitialWorld::new(&planet, &craft, flat_site(&planet), true))
+            .with_recording();
     session.execute(Action::Sas { enabled: true });
     session.execute(Action::Control {
         throttle: 0.7,
@@ -87,7 +88,8 @@ fn direct_world_save_loads_in_a_fresh_process_without_the_input_journal() {
     let planet = void_landing::earth_size();
     let craft = demo_craft();
     let mut session =
-        FlightSession::new(InitialWorld::new(&planet, &craft, flat_site(&planet), true));
+        FlightSession::new(InitialWorld::new(&planet, &craft, flat_site(&planet), true))
+            .with_recording();
     session.execute(Action::LaunchOrbit {
         craft: craft.clone(),
         offset: DVec3::ZERO,
@@ -128,7 +130,7 @@ fn direct_world_save_loads_in_a_fresh_process_without_the_input_journal() {
         String::from_utf8_lossy(&result.stderr)
     );
     assert!(String::from_utf8_lossy(&result.stdout).contains("Verified Fleet world save"));
-    let mut restored = FlightSession::load_checkpoint(&path);
+    let mut restored = FlightSession::load_checkpoint(&path).with_recording();
     for live in [&mut session, &mut restored] {
         live.execute(Action::Advance {
             seconds: 0.43,

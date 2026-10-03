@@ -12,6 +12,7 @@ fn session(air: bool) -> FlightSession {
         flat_site(&planet),
         air,
     ))
+    .with_recording()
 }
 fn exercise(s: &mut FlightSession) {
     s.execute(Action::Sas { enabled: true });
@@ -68,7 +69,7 @@ fn a_live_multivessel_world_round_trips_and_continues_after_reload() {
         let path =
             std::env::temp_dir().join(format!("void-fleet-save-{}-{air}.json", std::process::id()));
         original.save(&path);
-        let mut restored = FlightSession::load(&path);
+        let mut restored = FlightSession::load(&path).with_recording();
         assert_eq!(world_mark(restored.sim()), world_mark(original.sim()));
         // Future controls, pending substep, SAS and fuel must continue as the unsaved world does.
         for s in [&mut original, &mut restored] {
@@ -90,7 +91,7 @@ fn a_live_multivessel_world_round_trips_and_continues_after_reload() {
         }
         assert_eq!(world_mark(restored.sim()), world_mark(original.sim()));
         restored.save(&path); // Atomically replace an existing save.
-        let again = FlightSession::load(&path);
+        let again = FlightSession::load(&path).with_recording();
         assert_eq!(world_mark(again.sim()), world_mark(restored.sim()));
         std::fs::remove_file(path).unwrap();
     }
@@ -109,7 +110,8 @@ fn changed_controls_are_rejected_by_the_recorded_world_marks() {
         })
         .map(|throttle| *throttle = 0.1)
         .unwrap();
-    let failed = std::panic::catch_unwind(|| FlightSession::from_recording(record));
+    let failed =
+        std::panic::catch_unwind(|| FlightSession::from_recording(record).with_recording());
     assert!(failed.is_err());
 }
 #[test]
@@ -138,11 +140,16 @@ fn an_empty_checkpoint_and_long_sleeping_rails_are_reconstructable() {
         &craft,
         flat_site(&planet),
         false,
-    ));
+    ))
+    .with_recording();
     let initial = s.recording();
     assert_eq!(
         world_mark(s.sim()),
-        world_mark(FlightSession::from_recording(initial).sim())
+        world_mark(
+            FlightSession::from_recording(initial)
+                .with_recording()
+                .sim()
+        )
     );
     s.execute(Action::Advance {
         seconds: 30.0,
@@ -163,7 +170,7 @@ fn an_empty_checkpoint_and_long_sleeping_rails_are_reconstructable() {
     let record = s.recording();
     assert_eq!(
         world_mark(s.sim()),
-        world_mark(FlightSession::from_recording(record).sim())
+        world_mark(FlightSession::from_recording(record).with_recording().sim())
     );
 }
 
@@ -194,4 +201,81 @@ fn incremental_window_playback_matches_headless_reload_and_continues() {
         });
     }
     assert_eq!(world_mark(s.sim()), world_mark(replayed.sim()));
+}
+
+#[test]
+fn recording_is_opt_in_and_stopping_releases_history_without_stopping_the_world() {
+    let planet = earth_size();
+    let initial = InitialWorld::new(&planet, &demo_craft(), flat_site(&planet), false);
+    let mut live = FlightSession::new(initial);
+    for _ in 0..2000 {
+        live.execute(Action::EndFrame {
+            paused: true,
+            rate: 0,
+        });
+        live.mark();
+    }
+    assert_eq!(live.retained_counts(), (0, 0));
+    let saved = void_fleet_flight::checkpoint::FlightCheckpoint::capture(
+        live.sim(),
+        live.recording_initial().clone(),
+    );
+    let restored = FlightSession::from_checkpoint(saved);
+    assert_eq!(restored.retained_counts(), (0, 0));
+    let path = std::env::temp_dir().join(format!("void-opt-in-{}.jsonl", std::process::id()));
+    live.begin_stream(&path);
+    live.execute(Action::Stage);
+    live.execute(Action::Advance {
+        seconds: 0.031,
+        rails: false,
+    });
+    live.execute(Action::EndFrame {
+        paused: false,
+        rate: 0,
+    });
+    assert_eq!(live.retained_counts().0, 3);
+    let recorded_mark = world_mark(live.sim());
+    live.finish_stream();
+    assert_eq!(live.retained_counts(), (0, 0));
+    let recording = void_fleet_flight::session::Recording::read(&path);
+    assert_eq!(
+        recording.entries.len(),
+        3,
+        "unrecorded earlier frames must not be included"
+    );
+    let verified = FlightSession::from_recording(recording.clone());
+    assert_eq!(world_mark(verified.sim()), recorded_mark);
+    assert_eq!(verified.retained_counts(), (0, 0));
+    let (mut playback, mut replay) = void_fleet_flight::session::Playback::new(recording);
+    while playback.next_frame(&mut replay) {}
+    assert_eq!(replay.retained_counts(), (0, 0));
+    for _ in 0..2000 {
+        live.execute(Action::EndFrame {
+            paused: true,
+            rate: 0,
+        });
+        live.mark();
+    }
+    live.execute(Action::Advance {
+        seconds: 0.031,
+        rails: false,
+    });
+    assert!(live.sim().fleet.time() > verified.sim().fleet.time());
+    assert_eq!(live.retained_counts(), (0, 0));
+    // Starting a second stream captures the current world, not prior commands.
+    let second = path.with_extension("second.jsonl");
+    live.begin_stream(&second);
+    live.execute(Action::EndFrame {
+        paused: true,
+        rate: 0,
+    });
+    live.finish_stream();
+    let second_record = void_fleet_flight::session::Recording::read(&second);
+    assert_eq!(second_record.entries.len(), 1);
+    assert_eq!(
+        world_mark(FlightSession::from_recording(second_record).sim()),
+        world_mark(live.sim())
+    );
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_file(second).unwrap();
 }

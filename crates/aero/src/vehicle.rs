@@ -506,16 +506,18 @@ pub fn assembly_rocket(compiled: &CompiledCraft) -> Vehicle {
                 })
             };
             let cone = d.shape == void_assembly::Shape::Cone;
-            let shape = if cone {
-                PartShape::Cone {
+            let shape = match d.shape {
+                void_assembly::Shape::Cone => PartShape::Cone {
                     radius: d.radius,
                     length: d.height,
-                }
-            } else {
-                PartShape::Cylinder {
+                },
+                void_assembly::Shape::Cylinder => PartShape::Cylinder {
                     radius: d.radius,
                     length: d.height,
-                }
+                },
+                void_assembly::Shape::Box => PartShape::Box {
+                    size: DVec3::new(2.0 * d.radius, d.height, 2.0 * d.radius),
+                },
             };
             Part {
                 id: p.instance.id.clone(),

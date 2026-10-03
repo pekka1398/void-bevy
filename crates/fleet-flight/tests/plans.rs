@@ -14,7 +14,8 @@ fn fixture() -> FlightSession {
         &craft,
         flat_site(&planet),
         false,
-    ));
+    ))
+    .with_recording();
     let Outcome::Spawned(id) = session.execute(Action::LaunchOrbit {
         craft,
         offset: DVec3::ZERO,
@@ -60,7 +61,7 @@ fn per_ship_plan_edits_execution_and_checkpoint_are_deterministic() {
     let saved = FlightCheckpoint::capture(original.sim(), original.recording_initial().clone());
     let decoded: FlightCheckpoint =
         serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
-    let mut loaded = FlightSession::from_checkpoint(decoded);
+    let mut loaded = FlightSession::from_checkpoint(decoded).with_recording();
     for action in [
         Action::Advance {
             seconds: 0.3,
@@ -79,7 +80,7 @@ fn per_ship_plan_edits_execution_and_checkpoint_are_deterministic() {
         (original.sim().fleet.snapshot(&id).mass_kg - expected_burn.mass_after_kg).abs() < 1e-8
     );
     let record = loaded.recording();
-    let replay = FlightSession::from_recording(record);
+    let replay = FlightSession::from_recording(record).with_recording();
     assert_eq!(world_mark(loaded.sim()), world_mark(replay.sim()));
 }
 #[test]
@@ -104,6 +105,6 @@ fn rejected_plan_and_manual_abort_do_not_complete_a_burn() {
     assert_eq!(p.plan.completed_count, 0);
     assert!(p.message.contains("manual control"));
     let before = world_mark(session.sim());
-    let replay = FlightSession::from_recording(session.recording());
+    let replay = FlightSession::from_recording(session.recording()).with_recording();
     assert_eq!(before, world_mark(replay.sim()));
 }

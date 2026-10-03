@@ -14,12 +14,13 @@ fn make(air: bool) -> FlightSession {
         flat_site(&planet),
         air,
     ))
+    .with_recording()
 }
 fn compare_and_continue(original: &mut FlightSession) {
     let saved = FlightCheckpoint::capture(original.sim(), original.recording_initial().clone());
     let bytes = serde_json::to_vec(&saved).unwrap();
     let decoded: FlightCheckpoint = serde_json::from_slice(&bytes).unwrap();
-    let mut restored = FlightSession::from_checkpoint(decoded);
+    let mut restored = FlightSession::from_checkpoint(decoded).with_recording();
     assert_eq!(world_mark(original.sim()), world_mark(restored.sim()));
     for action in [
         Action::Advance {
@@ -48,7 +49,7 @@ fn compare_and_continue(original: &mut FlightSession) {
     // A recording that starts from the loaded checkpoint must not replay its old launch history.
     let record = restored.recording();
     assert!(record.base.is_some());
-    let after = FlightSession::from_recording(record);
+    let after = FlightSession::from_recording(record).with_recording();
     assert_eq!(world_mark(original.sim()), world_mark(after.sim()));
 }
 #[test]
@@ -103,7 +104,8 @@ fn sleeping_save_load_can_resume_a_day_on_rails() {
         &craft,
         flat_site(&planet),
         false,
-    ));
+    ))
+    .with_recording();
     original.execute(Action::Advance {
         seconds: 30.0,
         rails: false,
@@ -112,7 +114,8 @@ fn sleeping_save_load_can_resume_a_day_on_rails() {
     let mut restored = FlightSession::from_checkpoint(FlightCheckpoint::capture(
         original.sim(),
         original.recording_initial().clone(),
-    ));
+    ))
+    .with_recording();
     for s in [&mut original, &mut restored] {
         s.execute(Action::Advance {
             seconds: 86400.0,

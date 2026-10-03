@@ -21,7 +21,13 @@ impl FleetAir {
         Self {
             body_index,
             atmosphere: Atmosphere::Earth(EarthAtmosphere::new(density_scale)),
-            nozzle_areas: [("engine-large".into(), 0.12), ("engine-small".into(), 0.15)].into(),
+            nozzle_areas: [
+                ("engine-large".into(), 0.12),
+                ("engine-small".into(), 0.15),
+                ("flight-booster-engine".into(), 0.12),
+                ("flight-upper-engine".into(), 0.15),
+            ]
+            .into(),
         }
     }
 }

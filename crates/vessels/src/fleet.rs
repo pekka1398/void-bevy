@@ -621,9 +621,14 @@ impl Fleet {
             .iter()
             .map(|p| {
                 let ay = (p.pose.rotation * DVec3::Y).y;
-                p.pose.position.y
-                    - ay.abs() * p.definition.height / 2.0
-                    - p.definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
+                let radial = if p.definition.shape == Shape::Box {
+                    p.definition.radius
+                        * ((p.pose.rotation * DVec3::X).y.abs()
+                            + (p.pose.rotation * DVec3::Z).y.abs())
+                } else {
+                    p.definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
+                };
+                p.pose.position.y - ay.abs() * p.definition.height / 2.0 - radial
             })
             .fold(f64::INFINITY, f64::min);
         let g = &self.grounds[self.ground_index(body)];
@@ -1025,6 +1030,9 @@ impl Fleet {
                 let d = self.parts[id].definition;
                 Piece {
                     shape: match d.shape {
+                        Shape::Box => SimpleShape::Box {
+                            half_extents: DVec3::new(d.radius, d.height / 2.0, d.radius),
+                        },
                         Shape::Cone => SimpleShape::Cone {
                             radius: d.radius,
                             half_height: d.height / 2.0,
@@ -1140,7 +1148,12 @@ impl Fleet {
             .iter()
             .map(|(id, p)| {
                 let d = self.parts[id].definition;
-                p.position.length() + (d.height / 2.0).hypot(d.radius)
+                p.position.length()
+                    + (d.height / 2.0).hypot(if d.shape == Shape::Box {
+                        d.radius * 2.0_f64.sqrt()
+                    } else {
+                        d.radius
+                    })
             })
             .fold(0.0, f64::max);
         r - ground.frame.body.radius_meters - ground.spec.terrain.height(p / r) - reach

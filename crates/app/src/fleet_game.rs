@@ -12,7 +12,7 @@ use bevy::{
 };
 use glam::DVec3;
 use std::collections::{HashMap, HashSet};
-use void_assembly::{Craft, Module, demo_craft, import_craft};
+use void_assembly::{Craft, Module, import_craft};
 use void_assembly_lab::parts::RenderAssets;
 use void_fleet_flight::session::{
     Action, FlightSession, InitialWorld, Outcome, Playback, Recording,
@@ -200,7 +200,7 @@ pub fn run(main_game: bool) {
     }
     let id = argument("--planet").unwrap_or("aurelia".into());
     let planet = game_planet_by_id(&id, argument("--terrain").as_deref());
-    let craft = argument("--craft").map_or_else(demo_craft, |path| {
+    let craft = argument("--craft").map_or_else(void_assembly::flight_rocket, |path| {
         import_craft(&std::fs::read_to_string(path).expect("read craft")).expect("invalid craft")
     });
     let site = planet
@@ -1643,11 +1643,13 @@ fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use void_assembly::demo_craft;
     fn initialized_scene(main_game: bool) -> App {
         let planet = game_planet_by_id(if main_game { "aurelia" } else { "pebble" }, None);
-        let craft = demo_craft();
+        let craft = void_assembly::flight_rocket();
         let site = demo_rocket(&planet.planet.terrain).launch_site.normalize();
-        let sim = FlightSession::new(InitialWorld::new(&planet.planet, &craft, site, false));
+        let sim = FlightSession::new(InitialWorld::new(&planet.planet, &craft, site, false))
+            .with_recording();
         let mut lab = new_lab(sim, craft);
         lab.main_game = main_game;
         lab.session.execute(Action::View {
@@ -1729,12 +1731,12 @@ mod tests {
         let mut lab = app.world_mut().non_send_mut::<Lab>();
         assert_eq!(lab.prediction_generation, 5);
         assert!(lab.prediction.as_ref().unwrap().points.len() > 3);
-        let mut replay = FlightSession::from_recording(lab.session.recording());
+        let mut replay = FlightSession::from_recording(lab.session.recording()).with_recording();
         let saved = void_fleet_flight::checkpoint::FlightCheckpoint::capture(
             lab.session.sim(),
             lab.session.recording_initial().clone(),
         );
-        let mut loaded = FlightSession::from_checkpoint(saved);
+        let mut loaded = FlightSession::from_checkpoint(saved).with_recording();
         let expected = void_fleet_flight::session::world_mark(lab.session.sim());
         assert_eq!(
             void_fleet_flight::session::world_mark(replay.sim()),
@@ -1801,7 +1803,7 @@ mod tests {
                 recording.entries.last().unwrap().action,
                 Action::EndFrame { paused: true, .. }
             ));
-            let replay = FlightSession::from_recording(recording);
+            let replay = FlightSession::from_recording(recording).with_recording();
             let expected = void_fleet_flight::session::world_mark(lab.session.sim());
             assert_eq!(
                 void_fleet_flight::session::world_mark(replay.sim()),
@@ -1865,7 +1867,8 @@ mod tests {
         {
             let mut lab = app.world_mut().non_send_mut::<Lab>();
             lab.session =
-                FlightSession::new(InitialWorld::new(&planet.planet, &craft, site, false));
+                FlightSession::new(InitialWorld::new(&planet.planet, &craft, site, false))
+                    .with_recording();
             lab.dirty = true;
         }
         app.update();
@@ -1888,7 +1891,8 @@ mod tests {
             &pod,
             void_vessels::flat_site(&planet),
             false,
-        ));
+        ))
+        .with_recording();
         session.execute(Action::Advance {
             seconds: 20.0,
             rails: false,
@@ -1971,7 +1975,7 @@ mod tests {
             .session
             .recording_initial()
             .clone();
-        let mut flown = FlightSession::new(initial);
+        let mut flown = FlightSession::new(initial).with_recording();
         flown.execute(Action::Control {
             throttle: 0.0,
             turn: DVec3::X * 0.25,

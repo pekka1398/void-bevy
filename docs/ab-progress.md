@@ -26,3 +26,7 @@
 A／B 的程式與上述驗證已完成。使用者 GUI 驗收仍未替代：手動飛行、不同 edge cases、線框可見性／對齊、外觀／拖曳／不同 GPU／平台。這些依原要求之後補做；發現問題後可使用 journal、direct checkpoint 與 seam corpus 重現並加入回歸。
 
 後續對接／RCS、EVA、車輛、視覺精修、效能優化、科技樹／主線等，不是本次 A／B 的完成條件。存檔與驗收工具現在可供那些功能直接使用。
+
+後續修正：main／Fleet lab 預設船已換為 assembly 格式的原 7620 kg／9.6 km/s 火箭。命令 journal 改為 opt-in：沒有 `--record` 就不保留命令／marks，F8 後釋放紀錄，詳見 [fleet-flight.md](fleet-flight.md)。
+
+本次修正驗證：workspace all-targets 283 passed、0 failed、4 ignored；最終新預設船的 app library 15 項全通過；workspace all-target Clippy（`-D warnings`）與 fmt 通過。GUI 驗收及 commit／push 留待使用者後續安排。

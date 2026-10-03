@@ -11,6 +11,7 @@ fn fixture() -> FlightSession {
         void_vessels::flat_site(&planet),
         false,
     ))
+    .with_recording()
 }
 fn path(name: &str) -> std::path::PathBuf {
     let directory =
@@ -37,7 +38,7 @@ fn completed_stream_replays_the_same_world_and_does_not_overwrite_files() {
     });
     s.finish_stream();
     let record = Recording::read(&path);
-    let replay = FlightSession::from_recording(record);
+    let replay = FlightSession::from_recording(record).with_recording();
     assert_eq!(world_mark(s.sim()), world_mark(replay.sim()));
     let bytes = fs::read(&path).unwrap();
     assert!(
@@ -94,7 +95,7 @@ fn crashing_command_survives_in_a_separate_process() {
         seconds: 0.113,
         rails: false,
     });
-    let replay = FlightSession::from_recording(recovered.recording);
+    let replay = FlightSession::from_recording(recovered.recording).with_recording();
     assert_eq!(world_mark(expected.sim()), world_mark(replay.sim()));
     fs::remove_file(path).unwrap();
 }
@@ -125,7 +126,11 @@ fn torn_eof_requires_explicit_recovery_and_retains_the_pending_intent() {
     assert!(recovered.recording.entries.is_empty());
     assert_eq!(
         world_mark(fixture().sim()),
-        world_mark(FlightSession::from_recording(recovered.recording).sim())
+        world_mark(
+            FlightSession::from_recording(recovered.recording)
+                .with_recording()
+                .sim()
+        )
     );
     fs::remove_file(path).unwrap();
 }
@@ -167,7 +172,8 @@ fn reset_and_foreign_world_load_stay_in_the_same_stream_and_save_the_current_wor
         &void_assembly::demo_craft(),
         void_vessels::flat_site(&planet),
         false,
-    ));
+    ))
+    .with_recording();
     let checkpoint = void_fleet_flight::checkpoint::FlightCheckpoint::capture(
         foreign.sim(),
         foreign.recording_initial().clone(),
@@ -180,7 +186,7 @@ fn reset_and_foreign_world_load_stay_in_the_same_stream_and_save_the_current_wor
         rails: false,
     });
     s.finish_stream();
-    let replay = FlightSession::from_recording(Recording::read(&path));
+    let replay = FlightSession::from_recording(Recording::read(&path)).with_recording();
     assert_eq!(world_mark(s.sim()), world_mark(replay.sim()));
     assert_eq!(replay.recording_initial().body_id, planet.body_id);
     let saved = void_fleet_flight::checkpoint::FlightCheckpoint::capture(
@@ -196,7 +202,7 @@ fn pretty_printed_portable_recordings_remain_readable() {
     let mut s = fixture();
     s.execute(Action::Stage);
     fs::write(&path, serde_json::to_string_pretty(&s.recording()).unwrap()).unwrap();
-    let replay = FlightSession::from_recording(Recording::read(&path));
+    let replay = FlightSession::from_recording(Recording::read(&path)).with_recording();
     assert_eq!(world_mark(s.sim()), world_mark(replay.sim()));
     fs::remove_file(path).unwrap();
 }

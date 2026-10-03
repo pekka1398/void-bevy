@@ -11,7 +11,8 @@ fn main_game_verifies_direct_world_saves_and_recordings_without_a_window() {
         &craft,
         void_vessels::flat_site(&planet),
         false,
-    ));
+    ))
+    .with_recording();
     session.execute(Action::LaunchOrbit {
         craft,
         offset: glam::DVec3::ZERO,
@@ -55,7 +56,8 @@ fn recovery_is_an_explicit_no_window_command_and_retains_uncommitted_input() {
         &craft,
         void_vessels::flat_site(&planet),
         false,
-    ));
+    ))
+    .with_recording();
     let directory = std::env::temp_dir().join(format!("void-main-recovery-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
     let input = directory.join("crash.jsonl");

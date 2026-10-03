@@ -44,12 +44,14 @@ pub enum Category {
     Tank,
     Engine,
     Decoupler,
+    Structure,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Shape {
     Cylinder,
     Cone,
+    Box,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -174,6 +176,10 @@ pub fn actionable(part: &PartDefinition) -> bool {
         .any(|m| matches!(m, Module::Engine { .. } | Module::Decoupler { .. }))
 }
 pub fn part_inertia_per_kg(part: &PartDefinition) -> DVec3 {
+    if part.shape == Shape::Box {
+        let side = (4.0 * part.radius.powi(2) + part.height.powi(2)) / 12.0;
+        return DVec3::new(side, 2.0 * part.radius.powi(2) / 3.0, side);
+    }
     let side = (3.0 * part.radius * part.radius + part.height * part.height) / 12.0;
     DVec3::new(side, part.radius * part.radius / 2.0, side)
 }
@@ -615,4 +621,9 @@ pub fn import_craft(text: &str) -> ModelResult<Craft> {
 pub fn export_craft(craft: &Craft) -> ModelResult<String> {
     compile(craft)?;
     serde_json::to_string_pretty(craft).map_err(|e| e.to_string())
+}
+
+/// The main game's original 7620 kg, 9.6 km/s rocket, in the editor's portable craft format.
+pub fn flight_rocket() -> Craft {
+    import_craft(include_str!("../data/flight-rocket.json")).expect("authored flight rocket")
 }

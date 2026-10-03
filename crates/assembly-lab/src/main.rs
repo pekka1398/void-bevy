@@ -481,16 +481,8 @@ fn setup(
             button(p, "Two-stage demo", Action::Demo);
             label(p, "PART LIBRARY", 12.0);
             for d in catalog() {
-                let text = match d.id.as_str() {
-                    "pod" => "Command pod / 300 kg",
-                    "tank-small" => "Short tank / 700 kg fuel",
-                    "tank-large" => "Long tank / 2800 kg fuel",
-                    "engine-small" => "Upper engine / 30 kN",
-                    "engine-large" => "Booster engine / 90 kN",
-                    "decoupler" => "Stack decoupler / top cut",
-                    _ => panic!("catalog UI label"),
-                };
-                button(p, text, Action::Palette(d.id.clone()));
+                // Labels are authored part data, including the flight rocket catalog.
+                button(p, &d.name, Action::Palette(d.id.clone()));
             }
             p.spawn((Text::new(""), font(12.0), PendingLabel));
             button(p, "Switch new part's node", Action::ChildNode);

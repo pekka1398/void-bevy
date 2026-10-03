@@ -284,5 +284,506 @@
         "impulseNs": 100
       }
     ]
+  },
+  {
+    "id": "flight-pod",
+    "name": "Flight command cone",
+    "category": "command",
+    "description": "Flight command cone",
+    "dryMassKg": 50,
+    "height": 1,
+    "radius": 0.9,
+    "shape": "cone",
+    "color": "#cbd4dc",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.5,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 2
+      }
+    ],
+    "modules": [
+      {
+        "kind": "command"
+      }
+    ]
+  },
+  {
+    "id": "flight-upper-tank",
+    "name": "Flight upper tank / 1470 kg",
+    "category": "tank",
+    "description": "Flight upper tank / 1470 kg",
+    "dryMassKg": 200,
+    "height": 1.75,
+    "radius": 1.05,
+    "shape": "cylinder",
+    "color": "#cbd4dc",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.875,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 2
+      },
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.875,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 2
+      }
+    ],
+    "modules": [
+      {
+        "kind": "tank",
+        "capacityKg": 1470
+      }
+    ]
+  },
+  {
+    "id": "flight-upper-engine",
+    "name": "Flight upper engine / 20 kN",
+    "category": "engine",
+    "description": "Flight upper engine / 20 kN",
+    "dryMassKg": 50,
+    "height": 0.37,
+    "radius": 0.43,
+    "shape": "cone",
+    "color": "#cbd4dc",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.185,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 2
+      },
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.185,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 2
+      }
+    ],
+    "modules": [
+      {
+        "kind": "engine",
+        "thrustNewtons": 20000,
+        "ispSeconds": 340,
+        "direction": [
+          0,
+          1,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "id": "flight-decoupler",
+    "name": "Flight stage separator",
+    "category": "decoupler",
+    "description": "Flight stage separator",
+    "dryMassKg": 20,
+    "height": 0.1,
+    "radius": 1.05,
+    "shape": "cylinder",
+    "color": "#cbd4dc",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.05,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 2
+      },
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.05,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 2
+      }
+    ],
+    "modules": [
+      {
+        "kind": "decoupler",
+        "nodeId": "top",
+        "impulseNs": 100
+      }
+    ]
+  },
+  {
+    "id": "flight-booster-tank",
+    "name": "Flight booster tank / 5350 kg",
+    "category": "tank",
+    "description": "Flight booster tank / 5350 kg",
+    "dryMassKg": 220,
+    "height": 2.35,
+    "radius": 1.25,
+    "shape": "cylinder",
+    "color": "#cbd4dc",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          1.175,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 2
+      },
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -1.175,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 2
+      },
+      {
+        "id": "leg0",
+        "position": [
+          -0.72,
+          -0.125,
+          -0.72
+        ],
+        "direction": [
+          -0.3444214219565286,
+          -0.8733543199611974,
+          -0.3444214219565286
+        ],
+        "size": 1
+      },
+      {
+        "id": "leg1",
+        "position": [
+          -0.72,
+          -0.125,
+          0.72
+        ],
+        "direction": [
+          -0.3444214219565286,
+          -0.8733543199611974,
+          0.3444214219565286
+        ],
+        "size": 1
+      },
+      {
+        "id": "leg2",
+        "position": [
+          0.72,
+          -0.125,
+          -0.72
+        ],
+        "direction": [
+          0.3444214219565286,
+          -0.8733543199611974,
+          -0.3444214219565286
+        ],
+        "size": 1
+      },
+      {
+        "id": "leg3",
+        "position": [
+          0.72,
+          -0.125,
+          0.72
+        ],
+        "direction": [
+          0.3444214219565286,
+          -0.8733543199611974,
+          0.3444214219565286
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "tank",
+        "capacityKg": 5350
+      }
+    ]
+  },
+  {
+    "id": "flight-booster-engine",
+    "name": "Flight booster engine / 120 kN",
+    "category": "engine",
+    "description": "Flight booster engine / 120 kN",
+    "dryMassKg": 180,
+    "height": 0.37,
+    "radius": 0.58,
+    "shape": "cone",
+    "color": "#cbd4dc",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.185,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 2
+      },
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.185,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 2
+      }
+    ],
+    "modules": [
+      {
+        "kind": "engine",
+        "thrustNewtons": 120000,
+        "ispSeconds": 310,
+        "direction": [
+          0,
+          1,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "id": "flight-landing-strut",
+    "name": "Landing strut",
+    "description": "Original booster landing strut",
+    "category": "structure",
+    "dryMassKg": 15,
+    "height": 1.6259151269362127,
+    "radius": 0.1,
+    "shape": "cylinder",
+    "color": "#677887",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.8129575634681063,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1
+      },
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.8129575634681063,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": []
+  },
+  {
+    "id": "flight-foot-0",
+    "name": "Landing foot 1",
+    "description": "Original 0.42 m square booster foot",
+    "category": "structure",
+    "dryMassKg": 5,
+    "height": 0.1,
+    "radius": 0.21,
+    "shape": "box",
+    "color": "#677887",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0.3444214219565286,
+          0.8733543199611974,
+          0.3444214219565286
+        ],
+        "size": 1
+      }
+    ],
+    "modules": []
+  },
+  {
+    "id": "flight-foot-1",
+    "name": "Landing foot 2",
+    "description": "Original 0.42 m square booster foot",
+    "category": "structure",
+    "dryMassKg": 5,
+    "height": 0.1,
+    "radius": 0.21,
+    "shape": "box",
+    "color": "#677887",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0.3444214219565286,
+          0.8733543199611974,
+          -0.3444214219565286
+        ],
+        "size": 1
+      }
+    ],
+    "modules": []
+  },
+  {
+    "id": "flight-foot-2",
+    "name": "Landing foot 3",
+    "description": "Original 0.42 m square booster foot",
+    "category": "structure",
+    "dryMassKg": 5,
+    "height": 0.1,
+    "radius": 0.21,
+    "shape": "box",
+    "color": "#677887",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          -0.3444214219565286,
+          0.8733543199611974,
+          0.3444214219565286
+        ],
+        "size": 1
+      }
+    ],
+    "modules": []
+  },
+  {
+    "id": "flight-foot-3",
+    "name": "Landing foot 4",
+    "description": "Original 0.42 m square booster foot",
+    "category": "structure",
+    "dryMassKg": 5,
+    "height": 0.1,
+    "radius": 0.21,
+    "shape": "box",
+    "color": "#677887",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          -0.3444214219565286,
+          0.8733543199611974,
+          -0.3444214219565286
+        ],
+        "size": 1
+      }
+    ],
+    "modules": []
   }
 ]

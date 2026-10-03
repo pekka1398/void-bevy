@@ -452,7 +452,7 @@ impl Recording {
 pub struct FlightSession {
     sim: FleetFlight,
     current_initial: InitialWorld,
-    recording: Recording,
+    recording: Option<Recording>,
     stream: Option<durable::Writer>,
 }
 impl FlightSession {
@@ -466,27 +466,46 @@ impl FlightSession {
     pub fn new(initial: InitialWorld) -> Self {
         let sim = initial.build();
         let current_initial = initial.clone();
-        let recording = Recording {
-            format_version: FORMAT_VERSION,
-            model_version: MODEL_VERSION,
-            catalog: serde_json::to_value(catalog()).unwrap(),
-            initial,
-            base: None,
-            entries: vec![],
-            marks: vec![Mark {
-                after_actions: 0,
-                state: world_mark(&sim),
-            }],
-        };
         Self {
             sim,
             current_initial,
-            recording,
+            recording: None,
             stream: None,
         }
     }
+    /// Explicit opt-in for headless regression scripts. Live games use --record/begin_stream.
+    pub fn with_recording(mut self) -> Self {
+        self.enable_recording();
+        self
+    }
+    fn enable_recording(&mut self) {
+        assert!(
+            self.recording.is_none(),
+            "session: recording already enabled"
+        );
+        let base =
+            crate::checkpoint::FlightCheckpoint::capture(&self.sim, self.current_initial.clone());
+        self.recording = Some(Recording {
+            format_version: FORMAT_VERSION,
+            model_version: MODEL_VERSION,
+            catalog: serde_json::to_value(catalog()).unwrap(),
+            initial: self.current_initial.clone(),
+            base: Some(base),
+            entries: vec![],
+            marks: vec![Mark {
+                after_actions: 0,
+                state: world_mark(&self.sim),
+            }],
+        });
+    }
+    /// Number of commands and full state marks retained in memory. Disabled means exactly zero.
+    pub fn retained_counts(&self) -> (usize, usize) {
+        self.recording
+            .as_ref()
+            .map_or((0, 0), |r| (r.entries.len(), r.marks.len()))
+    }
     pub fn execute(&mut self, action: Action) -> Outcome {
-        let index = self.recording.entries.len();
+        let index = self.retained_counts().0;
         if let Some(stream) = &mut self.stream {
             stream.intent(index, &action);
         }
@@ -497,17 +516,22 @@ impl FlightSession {
         if let Some(stream) = &mut self.stream {
             stream.commit(index, &outcome);
         }
-        self.recording.entries.push(Entry {
-            action,
-            outcome: outcome.clone(),
-        });
+        if let Some(recording) = &mut self.recording {
+            recording.entries.push(Entry {
+                action,
+                outcome: outcome.clone(),
+            });
+        }
         outcome
     }
     pub fn recording_initial(&self) -> &InitialWorld {
         &self.current_initial
     }
     pub fn mark(&mut self) {
-        let n = self.recording.entries.len();
+        let Some(recording) = &mut self.recording else {
+            return;
+        };
+        let n = recording.entries.len();
         let mark = Mark {
             after_actions: n,
             state: world_mark(&self.sim),
@@ -515,40 +539,43 @@ impl FlightSession {
         if let Some(stream) = &mut self.stream {
             stream.mark(mark.clone());
         }
-        if self
-            .recording
-            .marks
-            .last()
-            .is_some_and(|m| m.after_actions == n)
-        {
-            *self.recording.marks.last_mut().unwrap() = mark;
+        if recording.marks.last().is_some_and(|m| m.after_actions == n) {
+            *recording.marks.last_mut().unwrap() = mark;
         } else {
-            self.recording.marks.push(mark);
+            recording.marks.push(mark);
         }
     }
     pub fn begin_stream(&mut self, path: impl AsRef<Path>) {
         assert!(self.stream.is_none(), "journal: recording already active");
+        if self.recording.is_none() {
+            self.enable_recording();
+        }
         let recording = self.recording();
         self.stream = Some(durable::Writer::create(path.as_ref(), recording));
     }
     pub fn finish_stream(&mut self) {
         assert!(self.stream.is_some(), "journal: recording not active");
         self.mark();
-        self.stream
-            .take()
-            .unwrap()
-            .finish(self.recording.entries.len());
+        let count = self.retained_counts().0;
+        self.stream.take().unwrap().finish(count);
+        self.recording = None;
     }
     pub fn streaming(&self) -> bool {
         self.stream.is_some()
     }
     pub fn save(&mut self, path: impl AsRef<Path>) {
         self.mark();
-        self.recording.write(path);
+        self.recording
+            .as_ref()
+            .expect("session: recording is disabled")
+            .write(path);
     }
     pub fn recording(&mut self) -> Recording {
         self.mark();
-        self.recording.clone()
+        self.recording
+            .as_ref()
+            .expect("session: recording is disabled")
+            .clone()
     }
     pub fn from_recording(recording: Recording) -> Self {
         recording.validate();
@@ -582,7 +609,7 @@ impl FlightSession {
         Self {
             sim,
             current_initial,
-            recording,
+            recording: None,
             stream: None,
         }
     }
@@ -599,22 +626,10 @@ impl FlightSession {
     pub fn from_checkpoint(base: crate::checkpoint::FlightCheckpoint) -> Self {
         let sim = base.restore();
         let current_initial = base.initial.clone();
-        let recording = Recording {
-            format_version: FORMAT_VERSION,
-            model_version: MODEL_VERSION,
-            catalog: serde_json::to_value(catalog()).unwrap(),
-            initial: base.initial.clone(),
-            base: Some(base),
-            entries: vec![],
-            marks: vec![Mark {
-                after_actions: 0,
-                state: world_mark(&sim),
-            }],
-        };
         Self {
             sim,
             current_initial,
-            recording,
+            recording: None,
             stream: None,
         }
     }

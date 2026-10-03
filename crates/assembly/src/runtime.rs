@@ -159,6 +159,9 @@ impl AssemblyFlight {
             let p = self.compiled.part(id);
             let d = p.definition;
             let builder = match d.shape {
+                Shape::Box => {
+                    ColliderBuilder::cuboid(d.radius as f32, d.height as f32 / 2.0, d.radius as f32)
+                }
                 Shape::Cone => ColliderBuilder::cone(d.height as f32 / 2.0, d.radius as f32),
                 Shape::Cylinder => {
                     ColliderBuilder::cylinder(d.height as f32 / 2.0, d.radius as f32)

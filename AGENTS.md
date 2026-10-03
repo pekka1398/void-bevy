@@ -11,3 +11,4 @@
 - `void-app` 保持不依賴 assembly；assembly、aero、vessels、multiscale 的獨立 lab 不必為了搬遷而整合入主遊戲。
 - 修改後測試所屬 crate 與受影響整合場景。跨核心變更使用 `cargo test --workspace --all-targets`，lint 使用 `cargo clippy --workspace --all-targets -- -D warnings`。
 - 舊 `void` 為參考封存，後續程式開發與提交在此 repository。搬遷來源與歷史對應見 `docs/migration.md`。
+pgrep pkill絕對不可以用任何字串比對 你必須主動的獲取進程id並且以id來處理進程 

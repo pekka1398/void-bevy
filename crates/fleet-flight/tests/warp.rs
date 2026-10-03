@@ -14,7 +14,8 @@ fn fixture() -> FlightSession {
         &pod_tank("Sleepable pod"),
         flat_site(&planet),
         false,
-    ));
+    ))
+    .with_recording();
     s.execute(Action::Advance {
         seconds: 20.0,
         rails: false,
@@ -70,7 +71,7 @@ fn maneuver_approach_clips_large_steps_restores_and_replays_exactly() {
         FlightCheckpoint::capture(original.sim(), original.recording_initial().clone());
     let decoded: FlightCheckpoint =
         serde_json::from_slice(&serde_json::to_vec(&checkpoint).unwrap()).unwrap();
-    let mut loaded = FlightSession::from_checkpoint(decoded);
+    let mut loaded = FlightSession::from_checkpoint(decoded).with_recording();
     let step = Action::Advance {
         seconds: 10_000.0,
         rails: true,
@@ -81,7 +82,7 @@ fn maneuver_approach_clips_large_steps_restores_and_replays_exactly() {
     assert_eq!(original.sim().fleet.time(), start - 30.0);
     assert!(!original.sim().maneuver_warp.active());
     assert_eq!(original.sim().fleet.snapshot(&id).mass_kg, mass);
-    let replay = FlightSession::from_recording(loaded.recording());
+    let replay = FlightSession::from_recording(loaded.recording()).with_recording();
     assert_eq!(world_mark(original.sim()), world_mark(replay.sim()));
 }
 #[test]
@@ -101,7 +102,7 @@ fn manual_edits_and_controls_cancel_the_saved_intent() {
             s.sim().maneuver_warp,
             ManeuverWarp::Stopped { .. }
         ));
-        let replay = FlightSession::from_recording(s.recording());
+        let replay = FlightSession::from_recording(s.recording()).with_recording();
         assert_eq!(world_mark(s.sim()), world_mark(replay.sim()));
     }
 }

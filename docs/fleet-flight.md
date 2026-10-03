@@ -28,7 +28,7 @@ cargo run -p void-fleet-flight-lab -- --planet pebble
 cargo run -p void-fleet-flight-lab -- --planet aurelia --vacuum
 ```
 
-預設 Aurelia＋主遊戲 layered terrain，暫停開始。示範船是 assembly 的 craft（4590 kg、下級 90 kN），不是主遊戲的 7620 kg／120 kN 火箭。因此不以主遊戲軌跡相同或必須能進低軌道作這輪判準。外觀使用 assembly-lab 的實際資產；地形暫用 StandardMaterial，沒有複製完整 scenery 管線。
+預設 Aurelia＋主遊戲 layered terrain，暫停開始。預設船現為 `crates/assembly/data/flight-rocket.json`：原主遊戲 7620 kg／120 kN、理想 Δv 9.6 km/s 的兩級火箭，以 assembly craft 表示。舊 4590 kg demo 保留為 assembly 原有 lab／golden fixture。外觀使用 assembly-lab 的實際資產；地形暫用 StandardMaterial，沒有複製完整 scenery 管線。
 
 - P 暫停；Space 分級；Shift／Ctrl 節流，X 關閉；WASD QE 轉向；T SAS。
 - Tab 切船（保留每船油門／SAS，清除離開船的手動轉向）；沒有 command 零件的船不提供轉向／SAS。
@@ -102,7 +102,7 @@ cargo run -p void-app -- --record lab-log/fleet-session.json --profile lab-log/f
 cargo run -p void-app --example legacy_flight
 ```
 
-主遊戲預設 assembly 的 demo craft（4590 kg），可直接用 assembly 匯出的其他 craft，並非先前固定 7620 kg 火箭的逐零件映射；原來火箭與原數值回歸保留在 legacy example。主遊戲新開世界開始運行，lab／載入世界暫停開始。Tab 切船，Shift+Tab 循環天體焦點；map 標籤可點，G 切 inertial／surface path，K／L 切高度／速度读數。時間倍率沿用主遊戲九檔與高度限制；接觸、交會、燃燒阻擋由整個 Fleet 判斷。
+主遊戲與 Fleet lab 預設使用 assembly 格式的原主遊戲兩級火箭（7620 kg）：上級乾重 300 kg／燃料 1470 kg／20 kN／Isp 340 s，助推級乾重 500 kg（含分離器）／燃料 5350 kg／120 kN／Isp 310 s。分成指令艙、上下級箱／引擎、分離器，以及四支斜腳／四個腳墊共十四個零件，保持原質量與引擎額定值；assembly 的簡化 collider 與零件外觀並非舊 compound collider 的逐形狀複製。可用 `--craft` 指定其他船，原 PartJointRocket 回歸仍在 legacy example。主遊戲新開世界開始運行，lab／載入世界暫停開始。Tab 切船，Shift+Tab 循環天體焦點；map 標籤可點，G 切 inertial／surface path，K／L 切高度／速度读數。時間倍率沿用主遊戲九檔與高度限制；接觸、交會、燃燒阻擋由整個 Fleet 判斷。
 
 獨立場景與主遊戲材料／儀表／map 的 headless Bevy 初始化檢查通過，含 Aurelia → Luna 世界替換；不建立 WindowPlugin 或 renderer。主遊戲 binary 另有獨立程序 --verify-save／--verify 檢查。GPU 畫面仍留給使用者驗收。逐船機動計畫保存／執行與撞擊毀損尚未完成，A／B 持續進行。
 
@@ -184,3 +184,13 @@ cargo test -p void-app --test render_benchmark --features render-metrics -- --ig
 實際原生 GPU 檢查也驗證從 preset 保存、跨程序載入後 world mark 相同，且大氣／UI pass 存在、render errors 為空。此檢查使用 Image，不操作使用者視窗。首次真實渲染揭露共享 main runtime 漏註冊 SceneryPlugin 的啟動問題；已補回正式 main 啟動路徑，避免只註冊測試用 Assets 掩蓋缺口。
 
 本批驗證：workspace all-targets **273 passed、0 failed、4 ignored**（新增一項 opt-in native GPU test）；workspace 與 render-metrics feature 的 Clippy（-D warnings）、fmt 通過。另明確執行 native GPU test，orbit 場景與 saved-scene 重測均通過；surface／map preset 也在 RTX 5060 Laptop／Vulkan 上離屏完成，含實際 UI／大氣 pass。這些檢查證明本機管線和報告接線可用，不當作不同 GPU 平台或視覺品質的驗收。
+
+## 預設火箭與 opt-in 錄製修正
+
+`cargo run -p void-assembly-lab -- --craft crates/assembly/data/flight-rocket.json` 可直接編輯／試飛主遊戲預設船；`cargo run -p void-app` 與 Fleet lab 不再默認使用低 Δv assembly demo。新增零件定義保留舊 catalog 定義的數值與 golden fixture。完整 catalog 驗證仍嚴格執行，因此本次新增零件後，舊 catalog 的存檔／錄影會明確拒絕，不做隱性遷移。
+
+只有 `--record <新檔名>` 啟用操作紀錄。普通新遊戲、直接讀檔、verify 與 replay 後續玩，都不保留新增命令或 state marks；定期 mark 在關閉時直接返回。F8 將最後 mark／End 寫入後釋放記憶體紀錄，後續遊玩不再累積。重設與讀檔在已啟用 stream 內仍有記錄。headless 回歸腳本須顯式 `.with_recording()`，要求未啟用的 session 匯出 recording 會報錯。新 stream 以當下 checkpoint 為基底，沒有補錄啟用之前的命令。
+
+新增檢查核對 legacy 火箭的各級質量、燃料、推力與 Isp、assembly 試飛／Fleet 分級、理想 Δv，以及新 engine 的大氣 nozzle 接線；紀錄檢查涵蓋關閉時數千幀零保留、F8 後續玩、跨 checkpoint、重播與第二段錄製。
+
+降落腳已補回原 booster 的四支半徑 0.1 m 斜撐與四個 0.42 × 0.1 × 0.42 m 方形腳墊，節點編譯位置／姿態對照原 `booster_pieces()`。它們是 assembly 零件，有實際 Rapier collider 與外觀，分級後留在助推級。80 kg 從助推箱乾重轉配到腳，助推級乾重仍為 500 kg，起飛仍為 7620 kg／9.6 km/s。

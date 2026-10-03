@@ -790,6 +790,26 @@ fn visuals(
             let centre = s.position - focus;
             let top = d.height / 2.0;
             let color = Color::srgb_u8(255, 192, 95);
+            if d.shape == void_assembly::Shape::Box {
+                let h = DVec3::new(d.radius, top, d.radius);
+                for axis in 0..3 {
+                    for a in [-1.0, 1.0] {
+                        for b in [-1.0, 1.0] {
+                            let mut p = h;
+                            p[(axis + 1) % 3] *= a;
+                            p[(axis + 2) % 3] *= b;
+                            let mut end = p;
+                            end[axis] = -end[axis];
+                            gizmos.line(
+                                (centre + q * p).as_vec3(),
+                                (centre + q * end).as_vec3(),
+                                color,
+                            );
+                        }
+                    }
+                }
+                continue;
+            }
             for i in 0..32 {
                 let a = i as f64 * std::f64::consts::TAU / 32.0;
                 let b = (i + 1) as f64 * std::f64::consts::TAU / 32.0;

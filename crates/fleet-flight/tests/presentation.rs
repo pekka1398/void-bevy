@@ -14,6 +14,7 @@ fn session() -> FlightSession {
         flat_site(&planet),
         false,
     ))
+    .with_recording()
 }
 fn view(s: &mut FlightSession, command: ViewCommand) {
     s.execute(Action::View { command });
@@ -51,7 +52,7 @@ fn paused_visual_frames_replay_one_at_a_time_and_resume_from_checkpoint() {
     original.mark();
     let second = world_mark(original.sim());
     let saved = FlightCheckpoint::capture(original.sim(), original.recording_initial().clone());
-    let mut loaded = FlightSession::from_checkpoint(saved);
+    let mut loaded = FlightSession::from_checkpoint(saved).with_recording();
     assert_eq!(world_mark(loaded.sim()), second);
     for s in [&mut original, &mut loaded] {
         view(s, ViewCommand::Focus { body: Some(0) });
@@ -82,7 +83,11 @@ fn paused_visual_frames_replay_one_at_a_time_and_resume_from_checkpoint() {
     assert!(!replay.next_frame(&mut restored));
     assert_eq!(world_mark(restored.sim()), world_mark(original.sim()));
     assert_eq!(
-        world_mark(FlightSession::from_recording(recording).sim()),
+        world_mark(
+            FlightSession::from_recording(recording)
+                .with_recording()
+                .sim()
+        ),
         world_mark(original.sim())
     );
 }
@@ -98,7 +103,10 @@ fn changing_one_camera_input_fails_visual_marks_without_changing_physics() {
     recording.entries[0].action = Action::View {
         command: ViewCommand::Drag { x: 29.0, y: 2.0 },
     };
-    assert!(std::panic::catch_unwind(|| FlightSession::from_recording(recording)).is_err());
+    assert!(
+        std::panic::catch_unwind(|| FlightSession::from_recording(recording).with_recording())
+            .is_err()
+    );
 }
 #[test]
 fn camera_sampling_is_read_only_at_any_render_cadence() {
@@ -156,7 +164,11 @@ fn switching_vessel_resets_body_focus_and_plain_camera_replays() {
     );
     let recording = s.recording();
     assert_eq!(
-        world_mark(FlightSession::from_recording(recording).sim()),
+        world_mark(
+            FlightSession::from_recording(recording)
+                .with_recording()
+                .sim()
+        ),
         world_mark(s.sim())
     );
 }
