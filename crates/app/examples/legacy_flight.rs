@@ -296,7 +296,12 @@ impl Game {
             self.demo.options,
             self.demo.launch_site,
         );
-        rocket.set_air_field(RocketAir::for_planet(&self.planet.planet, &self.demo));
+        rocket.set_air_field(RocketAir::for_planet(
+            &self.planet.planet,
+            &self.ephemeris,
+            self.home,
+            &self.demo,
+        ));
         rocket
     }
 
@@ -847,7 +852,12 @@ fn new_game(planet_id: &str, terrain: Option<&str>) -> Game {
         demo.options,
         demo.launch_site,
     );
-    rocket.set_air_field(RocketAir::for_planet(&planet.planet, &demo));
+    rocket.set_air_field(RocketAir::for_planet(
+        &planet.planet,
+        &ephemeris,
+        home,
+        &demo,
+    ));
     // Start looking at the rocket from the side, a little above the horizon.
     let start = rocket.frame.to_inertial(
         &ephemeris,

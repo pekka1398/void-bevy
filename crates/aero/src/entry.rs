@@ -3,14 +3,16 @@
 //! orbit's Dormand–Prince stepper; heat and ablator change only after an accepted step.
 
 use glam::{DQuat, DVec3};
+use void_environment::{BodyEnvironment, Environment};
+use void_frames::State;
 use void_landing::{ContactFrame, PlanetFrame, earth_size, planet_ephemeris};
 use void_math::{cos, pow, sin};
 use void_orbit::{Dopri5, Ephemeris};
 
 use crate::{
-    AeroState, Atmosphere, DEG, NEUTRAL, Vehicle, VehicleLoads, VehicleResources, advance_heat,
-    align, evaluate_vehicle, finite, inverse, length, mass_properties, quat_multiply, resources,
-    rotate, unit,
+    AeroState, Air, Atmosphere, DEG, NEUTRAL, Vehicle, VehicleLoads, VehicleResources,
+    advance_heat, align, evaluate_vehicle, finite, inverse, length, mass_properties, quat_multiply,
+    resources, rotate, unit,
 };
 use void_math::hypot;
 
@@ -40,7 +42,8 @@ const BACKGROUND_K: f64 = 180.0;
 pub struct EntryFlight {
     pub vehicle: Vehicle,
     pub options: EntryOptions,
-    pub atmosphere: Atmosphere,
+    /// Terra's gravity and the chosen atmosphere; air is read at the body-fixed state.
+    pub environment: Environment,
     pub ephemeris: Ephemeris,
     pub frame: PlanetFrame,
     pub resources: VehicleResources,
@@ -64,7 +67,7 @@ pub struct EntryFlight {
 struct Model<'a> {
     vehicle: &'a Vehicle,
     resources: &'a VehicleResources,
-    atmosphere: &'a Atmosphere,
+    environment: &'a Environment,
     ephemeris: &'a Ephemeris,
     frame: &'a PlanetFrame,
 }
@@ -90,8 +93,10 @@ impl Model<'_> {
                 angular_velocity: rotate(rotation, DVec3::new(y[10], y[11], y[12])) - spin,
             },
             &self
-                .atmosphere
-                .sample(length(position) - self.frame.body.radius_meters),
+                .environment
+                .surroundings_local(self.frame.body.index, State { position, velocity })
+                .air
+                .map_or(Air::VACUUM, |a| a.air),
             DVec3::ZERO,
             &NEUTRAL,
             BACKGROUND_K,
@@ -149,6 +154,15 @@ impl EntryFlight {
         let resources = resources(&vehicle);
         let (ephemeris, body_index) = planet_ephemeris(&earth_size());
         let frame = PlanetFrame::new(&ephemeris, body_index);
+        let environment = Environment::new(&ephemeris).with(
+            body_index,
+            BodyEnvironment {
+                atmosphere: Some(atmosphere),
+                air_datum_meters: 0.0,
+                terrain: None,
+                sea_level_meters: None,
+            },
+        );
         assert!(
             options.altitude_meters >= 1000.0
                 && options.speed > 0.0
@@ -174,7 +188,7 @@ impl EntryFlight {
         let loads = Model {
             vehicle: &vehicle,
             resources: &resources,
-            atmosphere: &atmosphere,
+            environment: &environment,
             ephemeris: &ephemeris,
             frame: &frame,
         }
@@ -182,7 +196,7 @@ impl EntryFlight {
         Self {
             vehicle,
             options,
-            atmosphere,
+            environment,
             ephemeris,
             frame,
             resources,
@@ -236,7 +250,7 @@ impl EntryFlight {
             let model = Model {
                 vehicle: &self.vehicle,
                 resources: &self.resources,
-                atmosphere: &self.atmosphere,
+                environment: &self.environment,
                 ephemeris: &self.ephemeris,
                 frame: &self.frame,
             };
@@ -280,7 +294,7 @@ impl EntryFlight {
             self.loads = Model {
                 vehicle: &self.vehicle,
                 resources: &self.resources,
-                atmosphere: &self.atmosphere,
+                environment: &self.environment,
                 ephemeris: &self.ephemeris,
                 frame: &self.frame,
             }

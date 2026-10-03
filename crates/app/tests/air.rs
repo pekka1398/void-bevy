@@ -33,7 +33,7 @@ fn ascend(with_air: bool) -> Ascent {
         demo.launch_site,
     );
     if with_air {
-        let air = RocketAir::for_planet(&planet.planet, &demo);
+        let air = RocketAir::for_planet(&planet.planet, &ephemeris, index, &demo);
         assert!(air.is_some(), "Aurelia is an Earth analogue and has air");
         rocket.set_air_field(air);
     }
@@ -58,9 +58,10 @@ fn ascend(with_air: bool) -> Ascent {
 #[test]
 fn an_airless_world_has_no_air_field() {
     let planet = pebble();
+    let (ephemeris, index) = planet_ephemeris(&planet);
     let demo = demo_rocket(&planet.terrain);
     assert!(
-        RocketAir::for_planet(&planet, &demo).is_none(),
+        RocketAir::for_planet(&planet, &ephemeris, index, &demo).is_none(),
         "Pebble is airless, so it must have no field at all rather than a field of zeroes"
     );
 }
@@ -92,10 +93,11 @@ fn air_costs_the_ascent_speed_and_height() {
 #[test]
 fn there_is_no_drag_above_the_atmosphere() {
     let planet = void_app::flight::game_planet_by_id("aurelia", None);
-    let (ephemeris, _) = planet_ephemeris(&planet.planet);
+    let (ephemeris, index) = planet_ephemeris(&planet.planet);
     let _: &Ephemeris = &ephemeris;
     let demo = demo_rocket(&planet.planet.terrain);
-    let air = RocketAir::for_planet(&planet.planet, &demo).expect("Aurelia has air");
+    let air =
+        RocketAir::for_planet(&planet.planet, &ephemeris, index, &demo).expect("Aurelia has air");
     let radius = planet.planet.terrain.radius_meters;
     let fast = DVec3::new(0.0, 7800.0, 0.0);
     let high = void_landing::FrameState {
@@ -132,8 +134,10 @@ fn there_is_no_drag_above_the_atmosphere() {
 #[test]
 fn ambient_pressure_drives_the_nozzle() {
     let planet = void_app::flight::game_planet_by_id("aurelia", None);
+    let (ephemeris, index) = planet_ephemeris(&planet.planet);
     let demo = demo_rocket(&planet.planet.terrain);
-    let air = RocketAir::for_planet(&planet.planet, &demo).expect("Aurelia has air");
+    let air =
+        RocketAir::for_planet(&planet.planet, &ephemeris, index, &demo).expect("Aurelia has air");
     let radius = planet.planet.terrain.radius_meters;
     let at = |altitude: f64| air.pressure_pa(DVec3::new(radius + altitude, 0.0, 0.0));
     assert!(

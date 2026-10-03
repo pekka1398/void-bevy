@@ -9,38 +9,11 @@ pub use air::FleetAir;
 use glam::DVec3;
 use std::sync::Arc;
 use void_assembly::Craft;
-use void_environment::{Atmosphere, BodyEnvironment, EarthAtmosphere, Environment};
 use void_landing::{
     CoastPrediction, ContactWorldOptions, FrameState, LandingPlanet, PlanetFrame,
     level_for_tile_size, planet_ephemeris, predict_coast,
 };
-use void_orbit::EphemerisSource;
 use void_vessels::{Fleet, FleetOptions, GroundSpec, VesselControl, VesselMode};
-
-/// The world's environment: every body's gravity, and the home planet's terrain and, when the
-/// flight simulates air, its atmosphere (altitude from the terrain's reference sphere).
-pub fn world_environment(
-    planet: &LandingPlanet,
-    ephemeris: &dyn EphemerisSource,
-    home: usize,
-    air: bool,
-) -> Arc<Environment> {
-    let atmosphere = air.then(|| {
-        let scale = planet
-            .air_density_scale
-            .expect("fleet flight: requested air on an airless planet");
-        Atmosphere::Earth(EarthAtmosphere::new(scale))
-    });
-    Arc::new(Environment::new(ephemeris).with(
-        home,
-        BodyEnvironment {
-            atmosphere,
-            air_datum_meters: 0.0,
-            terrain: Some(planet.terrain.clone()),
-            sea_level_meters: None,
-        },
-    ))
-}
 
 pub struct FleetFlight {
     pub presentation: presentation::Presentation,
@@ -55,7 +28,7 @@ pub struct FleetFlight {
 impl FleetFlight {
     pub fn new(planet: LandingPlanet, craft: &Craft, site: DVec3, air: bool) -> Self {
         let (ephemeris, home) = planet_ephemeris(&planet);
-        let environment = world_environment(&planet, &ephemeris, home, air);
+        let environment = void_landing::planet_environment(&planet, &ephemeris, home, air);
         let ground = GroundSpec {
             body_index: home,
             band_enter_meters: 200.0,

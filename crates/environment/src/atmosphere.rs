@@ -93,14 +93,16 @@ fn layer_pressure(p0: f64, t0: f64, t: f64, lapse: f64, dh: f64) -> f64 {
     }
 }
 
-fn vacuum_air() -> Air {
-    Air {
+impl Air {
+    /// What the model gives above its ceiling and in `Atmosphere::Vacuum`: no gas, and the 3 K
+    /// background as temperature.
+    pub const VACUUM: Air = Air {
         density: 0.0,
         pressure_pa: 0.0,
         temperature_k: 3.0,
         sound_speed: 0.0,
         viscosity: 0.0,
-    }
+    };
 }
 
 /// The lab's two atmospheres: Earth's air, and vacuum for comparison.
@@ -126,14 +128,14 @@ impl Atmosphere {
     pub fn sample(&self, altitude: f64) -> Air {
         finite(altitude, "altitude");
         let Self::Earth(earth) = self else {
-            return vacuum_air();
+            return Air::VACUUM;
         };
         assert!(
             altitude >= -5000.0,
             "Atmosphere: altitude below configured -5 km domain"
         );
         if altitude >= EarthAtmosphere::CEILING_METERS {
-            return vacuum_air();
+            return Air::VACUUM;
         }
         let h = GEOPOTENTIAL_RADIUS * altitude / (GEOPOTENTIAL_RADIUS + altitude);
         let mut i = 0;

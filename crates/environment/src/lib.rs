@@ -201,7 +201,16 @@ impl Environment {
         state: State,
         body: usize,
     ) -> Surroundings {
-        let place = self.in_body(at, frames, from, state, body);
+        self.read(body, &self.in_body(at, frames, from, state, body))
+    }
+
+    /// `surroundings` for a state already in `body`'s surface frame (body-fixed, turning with
+    /// it); no tree is needed and the answer is in that frame's axes.
+    pub fn surroundings_local(&self, body: usize, local: State) -> Surroundings {
+        self.read(body, &self.local(body, local, DQuat::IDENTITY))
+    }
+
+    fn read(&self, body: usize, place: &InBody) -> Surroundings {
         let (b, local, radius) = (&self.bodies[body], place.local, place.radius);
         let described = self.places[body].as_ref();
         let air = described.and_then(|p| {
@@ -223,7 +232,7 @@ impl Environment {
             up: place.back * place.direction,
             radius,
             air,
-            ground: self.ground_under(body, &place),
+            ground: self.ground_under(body, place),
             sea,
         }
     }
@@ -262,23 +271,32 @@ impl Environment {
         state: State,
         body: usize,
     ) -> InBody {
-        let b = self
-            .bodies
-            .get(body)
-            .unwrap_or_else(|| panic!("environment: unknown body {body}"));
+        assert!(body < self.bodies.len(), "environment: unknown body {body}");
         assert!(
             state.position.is_finite() && state.velocity.is_finite(),
             "environment: state {state:?}"
         );
         let to = at.transform(from, frames.surface[body]);
-        let local = to.apply_state(state);
+        self.local(body, to.apply_state(state), to.rotation().inverse())
+    }
+
+    /// A body-fixed state, with `back` turning surface axes to the query's.
+    fn local(&self, body: usize, local: State, back: DQuat) -> InBody {
+        let b = self
+            .bodies
+            .get(body)
+            .unwrap_or_else(|| panic!("environment: unknown body {body}"));
+        assert!(
+            local.position.is_finite() && local.velocity.is_finite(),
+            "environment: state {local:?}"
+        );
         let radius = local.position.length();
         assert!(radius > 0.0, "environment: at the centre of {}", b.id);
         InBody {
             local,
             radius,
             direction: local.position / radius,
-            back: to.rotation().inverse(),
+            back,
         }
     }
 

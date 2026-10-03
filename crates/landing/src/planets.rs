@@ -4,9 +4,10 @@
 use std::f64::consts::PI;
 use std::sync::Arc;
 
+use void_environment::{Atmosphere, BodyEnvironment, EarthAtmosphere, Environment};
 use void_orbit::{
-    BodySpec, Ephemeris, EphemerisOptions, GRAVITATIONAL_CONSTANT, RotationSpec, SpinSpec,
-    SystemSpec, build_system, suggested_step_seconds,
+    BodySpec, Ephemeris, EphemerisOptions, EphemerisSource, GRAVITATIONAL_CONSTANT, RotationSpec,
+    SpinSpec, SystemSpec, build_system, suggested_step_seconds,
 };
 use void_terrain::{HillsOptions, Terrain, TerrainConfig};
 
@@ -235,6 +236,31 @@ pub fn planet_by_id(id: &str) -> LandingPlanet {
             "planets: unknown planet {other:?}; valid: pebble, luna, terra, aurelia, aurelia-fast"
         ),
     }
+}
+
+/// The world around the planet: every body's gravity, the planet's terrain and, with `air`, its
+/// atmosphere at the planet's density scale (altitude from the terrain's reference sphere).
+pub fn planet_environment(
+    planet: &LandingPlanet,
+    ephemeris: &dyn EphemerisSource,
+    body: usize,
+    air: bool,
+) -> Arc<Environment> {
+    let atmosphere = air.then(|| {
+        let scale = planet
+            .air_density_scale
+            .unwrap_or_else(|| panic!("planets: air requested on airless {}", planet.label));
+        Atmosphere::Earth(EarthAtmosphere::new(scale))
+    });
+    Arc::new(Environment::new(ephemeris).with(
+        body,
+        BodyEnvironment {
+            atmosphere,
+            air_datum_meters: 0.0,
+            terrain: Some(planet.terrain.clone()),
+            sea_level_meters: None,
+        },
+    ))
 }
 
 /// The planet's system integrated as an ephemeris, and the planet's index in it. A lone planet has

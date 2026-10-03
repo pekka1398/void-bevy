@@ -35,14 +35,14 @@ TS 主遊戲在真空飛行，aero 只在它自己的 lab 裡。這裡把 aero �
 
 - 行星帶 `air_density_scale`（`void-landing`）：Aurelia 與 Terra 是 `Some(1.0)`，Pebble 與 Luna 是 None，也就是完全沒有空氣場，不是處處為零的場。Aurelia 在 `sol.json` 裡就是地球（5.9722e24 kg、6371 km），所以用地球大氣不需要任何調整。
 - 大氣模型是 aero 的 `EarthAtmosphere`，即 US standard 分層。0–50 km 與 ISA 表逐項相符（地面 1.2250、5 km 0.73643、10 km 0.41351 kg/m³）；86 km 以上是等溫近似，105–120 km 收到真空。模型只吃海拔，不含地形高度。
-- 施力路徑：`void-orbit` 的 `AirSource`（自由飛行，Dopri5 每個 stage 都問）與 contact step 的既有外力 hook（Rapier，每個剛體各自問）。`void-landing` 不認識 aero，只負責把本體座標的力轉成慣性加速度（`PlanetAir`）；`void-app` 的 `aero_field.rs` 才接上 aero。沒有設定空氣場時行為與先前完全相同。
+- 施力路徑：`void-orbit` 的 `AirSource`（自由飛行，Dopri5 每個 stage 都問）與 contact step 的既有外力 hook（Rapier，每個剛體各自問）。`void-landing` 不認識 aero，只負責把本體座標的力轉成慣性加速度（`PlanetAir`，經座標樹在每個 stage 的時刻轉換）；`void-app` 的 `aero_field.rs` 才接上 aero，空氣取自世界的 `Environment`（[environment.md](environment.md)）。沒有設定空氣場時行為與先前完全相同。
 - 每一級是一個圓柱氣動體（front_cd 0.6、rear_cd 0.8、side_cd 1.1，照 aero lab 的火箭）。兩級相接時互相遮住對接面，但助推級較粗（半徑 1.5 m vs 1.05 m），露出的那圈肩部仍然吃阻力。
 - **只有力，還沒有力矩**：火箭不會自己對準氣流（風標效應），氣動阻尼也還沒有。要補的話需要在這個 trait 上加力矩，並讓 contact step 與飛行姿態積分各開一條路。
 - demo 火箭原本是照「無大氣」調的（8581 m/s Δv，起飛 TWR 2.07），對有大氣的地球尺寸行星不夠用；地球到低軌道手動飛大約需要 9400–9600 m/s。燃料因此加到 booster 5350 kg、upper 1470 kg，Δv 3682 + 5918 = **9600 m/s**，起飛 7620 kg、TWR 1.61（上面級點火時 1.15）。引擎、乾質量與外型都沒動，所以碰撞形狀與繪圖不受影響；油箱在同樣的殼裡裝更多，是刻意的取捨。
 - 高 TWR 在有大氣時反而吃虧（低空衝太快，max-Q 與阻力損失都更大），所以 2.07 → 1.61 是改善而不是退步。
 - 推力與比衝隨環境壓力變化：`LanderSpec` 的 `thrust_newtons`／`specific_impulse_seconds` 是**真空**額定，再減掉噴嘴出口面積乘以環境壓力（`nozzle_exit_area_m2`，壓力由同一個 `AirField` 提供）。booster 出口 0.12 m²，海平面 107.8 kN、Isp 279 s，是真空的 89.9%（Merlin 1D 為 90.7%）；upper 是真空噴嘴 0.15 m²，海平面只剩 24%，所以它本來就不該在低空點。出口面積 0.0 表示完全不隨壓力變化，等同加入空氣之前的行為。過度膨脹到推力為負時流動會分離，模型停在零而不是倒推。
-- 自由飛行時壓力在每段起點取樣並在該段內維持不變（與整個 control 的處理一致）；contact step 則每步都讀。
-- 垂直全推力的助推級熄火：真空 2366 m/s、116.4 km；有空氣 1631 m/s、65.9 km（`tests/air.rs`）。
+- 自由飛行時壓力在每段起點取樣並在該段內維持不變（與整個 control 的處理一致）；contact step 則每步都讀，位置是引擎在本體座標的位置。（環境介面第 4 步以前，contact step 傳的是相對浮動原點的 Rapier 位置，算出約 −6400 km 的高度，被舊欄位「低於 −5 km 就沒有空氣」的截斷吞掉，發射台上一直是真空推力。）
+- 垂直全推力的助推級熄火：真空 2366 m/s、116.4 km；有空氣 1613 m/s、64.8 km（`tests/air.rs`；修正 contact step 的壓力位置之前是 1631 m/s、65.9 km）。
 - 滑行預測（`predict_coast`，HUD 的青色線）照舊不含空氣：它畫的是純彈道的滑行，在大氣層內實際落點會比線上的近。阻力會讓它差多少，是留給玩家自己判斷的事，不是要補的缺口。
 
 ## 檢查（`tests/flight.rs`）

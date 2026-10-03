@@ -28,7 +28,7 @@ pub use lander::{
 pub use planet_frame::{ContactFrame, FrameState, PlanetFrame};
 pub use planets::{
     LandingPlanet, aurelia, aurelia_fast, earth_size, landing_lod_options, level_for_tile_size,
-    moon_size, pebble, planet_by_id, planet_ephemeris,
+    moon_size, pebble, planet_by_id, planet_environment, planet_ephemeris,
 };
 pub use rocket::{
     AttitudeSample, Crash, PARTS, PartJointRocket, PhysicsMode, RocketModeChange, RocketPart,

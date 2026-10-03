@@ -8,10 +8,9 @@
 use std::sync::Arc;
 
 use glam::{DQuat, DVec3};
-use void_frames::BodyId;
-use void_orbit::{AirSource, CelestialBody, EphemerisSource, body_orientation};
+use void_orbit::{AirSource, EphemerisSource, body_orientation};
 
-use crate::planet_frame::FrameState;
+use crate::planet_frame::{FrameState, PlanetFrame};
 use crate::rocket::RocketPart;
 
 /// Rapier stores attitudes in f32, so one read back as f64 is a unit quaternion only to about
@@ -49,42 +48,28 @@ pub trait AirField: Send + Sync {
 }
 
 /// An `AirField` seen from the inertial frame the orbit propagator integrates in, for one unit of
-/// parts at a fixed attitude. The owner rebuilds it whenever the unit, its attitude or the chunk
-/// changes; it is a pure function of its arguments while it lives, as `AirSource` requires.
+/// parts at a fixed attitude. The owner rebuilds it whenever the unit or its attitude changes; it
+/// is a pure function of its arguments while it lives, as `AirSource` requires. Each stage's
+/// state goes to the body-fixed frame through the frame tree, at that stage's time.
 pub struct PlanetAir {
     field: Arc<dyn AirField>,
-    body: CelestialBody,
-    omega: f64,
+    frame: PlanetFrame,
     parts: Vec<RocketPart>,
     rotation: DQuat,
-    /// The planet's centre at `epoch`, and its velocity there. Within one flight chunk the centre
-    /// moves along that straight line to well under a metre: the propagator only ever asks about
-    /// times inside the chunk it was built for.
-    epoch: f64,
-    centre: DVec3,
-    centre_velocity: DVec3,
 }
 
 impl PlanetAir {
     pub fn new(
         field: Arc<dyn AirField>,
-        body: &CelestialBody,
-        omega: f64,
+        frame: &PlanetFrame,
         parts: &[RocketPart],
         rotation: DQuat,
-        ephemeris: &dyn EphemerisSource,
-        epoch: f64,
     ) -> Self {
-        let (centre, centre_velocity) = ephemeris.body_state(BodyId(body.index), epoch);
         Self {
-            field: field.clone(),
-            body: body.clone(),
-            omega,
+            field,
+            frame: frame.clone(),
             parts: parts.to_vec(),
             rotation: unit(rotation),
-            epoch,
-            centre,
-            centre_velocity,
         }
     }
 }
@@ -92,28 +77,21 @@ impl PlanetAir {
 impl AirSource for PlanetAir {
     fn acceleration(
         &self,
-        _: &dyn EphemerisSource,
+        ephemeris: &dyn EphemerisSource,
         t: f64,
         position: DVec3,
         velocity: DVec3,
         mass_kg: f64,
     ) -> DVec3 {
-        let axes = body_orientation(&self.body.rotation, t);
-        let centre = self.centre + self.centre_velocity * (t - self.epoch);
-        let dp = position - centre;
-        let du = velocity - self.centre_velocity;
-        let project = |v: DVec3| DVec3::new(v.dot(axes[0]), v.dot(axes[1]), v.dot(axes[2]));
-        let (r, u) = (project(dp), project(du));
-        let local = FrameState {
-            position: r,
-            // The same −ω × r as PlanetFrame::to_body_fixed, about body-fixed +z.
-            velocity: DVec3::new(u.x + self.omega * r.y, u.y - self.omega * r.x, u.z),
-        };
+        let local = self
+            .frame
+            .to_body_fixed(ephemeris, t, FrameState { position, velocity });
         let force = self.field.force(&self.parts, local, self.rotation, mass_kg);
         if force == DVec3::ZERO {
             return DVec3::ZERO;
         }
         // Body axes back to the ecliptic, as PlanetFrame does.
+        let axes = body_orientation(&self.frame.body.rotation, t);
         let world = DVec3::new(
             force.x * axes[0].x + force.y * axes[1].x + force.z * axes[2].x,
             force.x * axes[0].y + force.y * axes[1].y + force.z * axes[2].y,

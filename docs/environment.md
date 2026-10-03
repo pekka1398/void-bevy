@@ -153,6 +153,7 @@ pub struct SeaSample  { pub depth: f64 }                                      //
 | 4. landing 與 aero | `PlanetAir`／`RocketAir`、`EntryFlight` 的大氣經環境取樣 | 不改；`EntryFlight` golden 門檻不放寬 |
 | 5. 待決定項目 | 依使用者決定：大氣零點、海 | 改（若決定要改） |
 | 6. 文件 | 本頁、aero.md、landing.md、fleet-flight.md、status.md | 無 |
+| 4. landing、app、aero | landing 提供 `planet_environment`（fleet-flight 的新飛行與存檔還原、舊火箭共用）。`PlanetAir` 改存 `PlanetFrame`，每個 stage 經座標樹換到本體座標，不再線性外推；app 的 `RocketAir` 經 `Environment::surroundings_local` 取空氣。`EntryFlight` 以選定的大氣建自己的環境，經 `surroundings_local` 取空氣，沒有空氣時用模型本來的真空狀態（新的 `Air::VACUUM`） | 新增 `surroundings_local`：本體座標的狀態不需要樹。修正舊火箭 contact step 的壓力位置（見下） |
 
 ### 進度
 
@@ -160,7 +161,7 @@ pub struct SeaSample  { pub depth: f64 }                                      //
 | --- | --- | --- |
 | 1. 重力定律 | `void_orbit::gravity`：`pull`、`add_pull`（累加形式）、`body_pull`、`oblateness`。積分器 `Field::gravity`、orbit-lab 起始圓軌道速度的徑向重力、`PlanetFrame` 的本體與潮汐都改用它。測試：極點與赤道的解析值、等於 J2 位能的負梯度、隨軸旋轉、多天體加總與 lab 寫法逐位元相同 | 見下 |
 | 2. `void-environment` | 大氣模型從 aero 搬來（`git mv`，aero 重新匯出 `Air`、`Atmosphere`、`EarthAtmosphere`、`smooth`、`validate_air`，aero 的 golden 不受影響）。`Environment::new(bodies).with(body, BodyEnvironment)`；查詢分成 `gravity`、`surroundings`、兩者合併的 `sample` | 從星球設定建環境的函式移到第 3 步：environment 不能依賴 landing（landing 之後要用它） |
-| 3. Fleet／fleet-flight | `Fleet::new(ephemeris, environment, …)`：世界的 `Arc<Environment>` 由呼叫者建立，`GroundSpec` 不再帶地形，接觸 tile、發射位置、離地高度都讀環境的地形；`clearance_over` 改用 `Environment::ground`。`FleetEnvironment` 改名 `PartForces`（`ForceSample`、`ForcePart`、`set_forces`），`sample` 多拿環境。`FleetAir` 的引擎背壓與 `CraftAir` 的空氣都經 `surroundings` 取；`AirSource::acceleration` 多拿星曆。fleet-flight 的 `world_environment` 是新飛行與存檔還原共用的世界描述。`MODEL_VERSION` 4 → 5 | 新增只查地形的 `Environment::ground`：離地檢查不能因為大氣模型的 −5 km 定義域而 panic。阻力在星曆軸算（只跟氣流與姿態有關），不再先轉到地表軸。存檔格式不變：仍存地形設定，還原時檢查與環境的地形相同。海平面還沒進 `FleetFlight`（`GamePlanet` 的海在 app，等「待決定」第 2 項） |
+| 3. Fleet／fleet-flight | `Fleet::new(ephemeris, environment, …)`：世界的 `Arc<Environment>` 由呼叫者建立，`GroundSpec` 不再帶地形，接觸 tile、發射位置、離地高度都讀環境的地形；`clearance_over` 改用 `Environment::ground`。`FleetEnvironment` 改名 `PartForces`（`ForceSample`、`ForcePart`、`set_forces`），`sample` 多拿環境。`FleetAir` 的引擎背壓與 `CraftAir` 的空氣都經 `surroundings` 取；`AirSource::acceleration` 多拿星曆。新飛行與存檔還原用同一個函式建世界的環境（第 4 步移到 landing 的 `planet_environment`）。`MODEL_VERSION` 4 → 5 | 新增只查地形的 `Environment::ground`：離地檢查不能因為大氣模型的 −5 km 定義域而 panic。阻力在星曆軸算（只跟氣流與姿態有關），不再先轉到地表軸。存檔格式不變：仍存地形設定，還原時檢查與環境的地形相同。海平面還沒進 `FleetFlight`（`GamePlanet` 的海在 app，等「待決定」第 2 項） |
 
 第 1 步的差異：
 
@@ -188,6 +189,12 @@ pub struct SeaSample  { pub depth: f64 }                                      //
 | 80 km、7.6 km/s，600 s | 9.3e-10 m | 3.8e-12 m/s |
 
 `clearance_over` 的離地高度與改之前逐位元相同（同樣的減法順序）；新檢查 `grounds_and_checkpoints_need_the_environments_terrain`：地面所在天體在環境裡沒有地形、存檔還原到地形不同的環境，都會 panic。
+
+第 4 步的差異：
+
+- **`EntryFlight` golden（門檻不變：相對 1e-9、accepted steps 完全相同）。** 高度從 lab 的 `hypot` 改為環境的 √(x²+y²+z²)，差一個 ulp。最差相對差 3.1e-10 → 4.1e-10；陡峭再入翻轉後（翻轉放大 ulp，改用物理門檻 1 m）與 lab 相距 0.390 m → 0.067 m。
+- **舊火箭 contact step 的壓力位置是錯的。** 它把相對浮動原點的 Rapier 位置當成本體座標傳給 `pressure_pa`，算出約 −6400 km 的高度；舊 `RocketAir` 遇到低於 −5 km 就回傳沒有空氣，所以發射台上一直用真空推力。環境沒有這個截斷，直接 panic（`air_costs_the_ascent_speed_and_height`），因此改成傳引擎的本體座標位置（`ContactWorld::position`）。結果：有空氣的熄火 1631 m/s、65.9 km → 1613 m/s、64.8 km（真空不變，2366 m/s、116.4 km）。
+- `PlanetAir` 不再外推天體中心，和第 3 步相同性質的差異；舊火箭的檢查都在原門檻內。
 
 不在範圍：
 

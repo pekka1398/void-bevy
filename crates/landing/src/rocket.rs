@@ -813,12 +813,12 @@ impl PartJointRocket {
         let engine = self.slot(engine_part).clone();
         let (mut burned, mut push) = (0.0, DVec3::ZERO);
         if let Some(body) = engine.body {
+            // Ambient pressure at the engine's body-fixed position (Rapier's translation is
+            // relative to the world's floating origin).
             let (thrust_newtons, ve) = self.engine_output(
                 engine_part,
-                v64(self
-                    .world_ref(engine.world.expect("the engine part is in a world"))
-                    .body(body)
-                    .translation()),
+                self.world_ref(engine.world.expect("the engine part is in a world"))
+                    .position(body),
             );
             burned = engine
                 .fuel_kg
@@ -1080,12 +1080,9 @@ impl PartJointRocket {
         let air = self.air.clone().map(|field| {
             Arc::new(PlanetAir::new(
                 field,
-                &self.frame.body,
-                self.frame.omega,
+                &self.frame,
                 parts,
                 self.part_orientation(parts[0]),
-                ephemeris,
-                run.time,
             )) as Arc<dyn AirSource>
         });
         self.propagator.set_air_source(air);
