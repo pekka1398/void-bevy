@@ -28,6 +28,9 @@ pub enum Module {
         thrust_newtons: f64,
         #[serde(rename = "ispSeconds")]
         isp_seconds: f64,
+        /// F = F_vac − area × ambient pressure.
+        #[serde(rename = "nozzleExitAreaM2")]
+        nozzle_exit_area_m2: f64,
         direction: DVec3,
     },
     Decoupler {

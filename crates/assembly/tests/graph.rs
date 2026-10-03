@@ -167,3 +167,41 @@ fn invalid_graph_operations_panic() {
         graph.clone().insert(lit.clone());
     }));
 }
+
+/// Every engine in the catalog rates its own nozzle: the back pressure the flight's air takes
+/// from its vacuum thrust.
+#[test]
+fn every_catalog_engine_rates_its_nozzle() {
+    let engines: Vec<_> = void_assembly::catalog()
+        .iter()
+        .filter(|d| d.category == Category::Engine)
+        .collect();
+    assert_eq!(engines.len(), 4);
+    for d in engines {
+        let mut graph = PartGraph::new();
+        graph.insert(void_assembly::Part {
+            id: "e".into(),
+            definition: d,
+            fuel_kg: 0.0,
+            stage: None,
+            staged: false,
+            lit: false,
+            pose: void_assembly::PartPose {
+                position: glam::DVec3::ZERO,
+                rotation: glam::DQuat::IDENTITY,
+            },
+        });
+        let rating = graph.part("e").engine().expect("an engine module");
+        assert!(
+            rating.nozzle_exit_area_m2.is_finite() && rating.nozzle_exit_area_m2 > 0.0,
+            "{}",
+            d.id
+        );
+        // At one atmosphere every engine keeps some thrust.
+        assert!(
+            rating.nozzle_exit_area_m2 * 101_325.0 < rating.thrust_newtons,
+            "{}",
+            d.id
+        );
+    }
+}

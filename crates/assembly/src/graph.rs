@@ -29,6 +29,8 @@ pub struct Part {
 pub struct EngineRating {
     pub thrust_newtons: f64,
     pub isp_seconds: f64,
+    /// Back pressure costs this area times the ambient pressure of the vacuum thrust.
+    pub nozzle_exit_area_m2: f64,
     /// Thrust direction in the part's axes.
     pub direction: DVec3,
 }
@@ -48,10 +50,12 @@ impl Part {
             Module::Engine {
                 thrust_newtons,
                 isp_seconds,
+                nozzle_exit_area_m2,
                 direction,
             } => Some(EngineRating {
                 thrust_newtons: *thrust_newtons,
                 isp_seconds: *isp_seconds,
+                nozzle_exit_area_m2: *nozzle_exit_area_m2,
                 direction: *direction,
             }),
             _ => None,

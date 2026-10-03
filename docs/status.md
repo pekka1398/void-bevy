@@ -72,6 +72,6 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 ## 已知缺口與限制
 
 - 主遊戲沒有 scenery 開關與曝光調整（scenery example 有）。
-- 噴嘴面積是 fleet-flight 內以 engine ID 對照的表，不是 catalog 的正式欄位。
+- 噴嘴面積在 master 上是 fleet-flight 內以 engine ID 對照的表，不是 catalog 的正式欄位；branch `claude/part-graph` 已移到 catalog（`nozzleExitAreaM2`）。
 - 搬遷時列出、仍未補的觀察工具：`lod` example 的 preset 選擇、vessels-lab 的歷史軌跡、multiscale encounter 的任意天體／船選取。詳見 [port-audit.md](port-audit.md)（歷史頁）。
 - 存檔與錄影綁定模型版本、catalog 與 Rapier 版本，版本不同時直接拒絕，沒有遷移。
