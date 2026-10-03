@@ -4,7 +4,7 @@
 
 | TS | Rust |
 | --- | --- |
-| `SplitPosition.ts` | `split.rs`：`SplitPosition`，每軸整數格（2^32 m）加 float64 offset。lab 的格是 bigint，這裡是 `i128`（±1.7e38 格） |
+| `SplitPosition.ts` | `void-frames` 的 `split.rs`（座標樹統一時從本 crate 移過去，根層精確相減也用它）：`SplitPosition`，每軸整數格（2^32 m）加 float64 offset。lab 的格是 bigint，這裡是 `i128`（±1.7e38 格） |
 | `CoupledWorld.ts` | `world.rs`：`CoupledWorld`，多個恆星系在同一個直接 N 體世界；系統質心用 split 位置，天體用局部 float64；Yoshida-8 與五次 Hermite 取自 `void-orbit` |
 | `Frames.ts` | `traveller.rs`：`FramedState`、`absolute`、`reframe`、`nearest_frame`（5% 遲滯） |
 | `Traveller.ts` | `traveller.rs`：`Traveller`，無質量探針滑行，Dopri5，每步從 split anchor 起算 |
@@ -13,6 +13,8 @@
 為此 `void-orbit` 的 `HermiteBasis` 加上 `acceleration`，`yoshida8_sequence` 改為公開。
 
 `FrameEphemeris` 已移植到 `ephemeris.rs`：多個 view 共用 `Rc<RefCell<CoupledWorld>>` 的歷史，輸出相對選定系統質心的天體位置／速度與原點加速度，包含所有系統的引力來源。`void-orbit::EphemerisSource` 是共用介面，VesselPropagator、ContactWorld、PlanetFrame 與 Fleet 接受此來源；一般 Ephemeris 的積分方法不變。Fleet 持有 `Box<dyn EphemerisSource>`。歷史裁剪只能由共用 world 的擁有者執行，adapter 的 `forget_before` 明確 panic。
+
+座標樹：`CoupledWorld` 本身是 `void-frames::FrameSource`（每個系統的 split 質心、每個天體相對自己的系統），`frames(origin)` 建出所有系統與天體的座標系；`FrameEphemeris` 的樹視角轉給它。example 與 multiscale-lab 經樹畫到掛在焦點下的相機。見 [frames.md](frames.md)。
 
 `Encounter` 位於獨立的 `void-multiscale-lab`（`src/lib.rs`），用同一個 Fleet 進行碰撞與合併。`void-multiscale` 核心不依賴 vessels／assembly，既有 void-app 範例不因這個場景引入 assembly。
 

@@ -1,106 +1,115 @@
-# frames：樹狀座標系
+# frames：座標樹
 
-實作在 `crates/frames`（`void-frames`），檢查在 `crates/frames/tests/frames.rs`。
+實作在 `crates/frames`（`void-frames`），檢查在 `crates/frames/tests/frames.rs`。這次統一的過程與取捨見 [frame-tree.md](frame-tree.md)。
 
-太空遊戲的位置不可能用單一座標表達。`frames` 把「位置屬於哪個座標系」做成一棵樹，所有物理量都是「(座標系, f64 區域值)」；只有送 GPU 的最後一步才變成相對相機的 f32。
+遊戲裡的位置都屬於某個座標系：銀河、恆星系、天體、地面場景、船、相機。`frames` 把這些座標系做成一棵樹，所有位置都是「(座標系, f64 區域值)」。轉換只走到兩個座標系的最近共同祖先；只有在跨恆星系、兩者在根相遇時，才用 split 位置（整數格加 f64）精確相減。最後送 GPU 時才變成相對相機的 f32。
 
 這個 crate 不依賴 Bevy，只用 glam 的 f64 型別（`DVec3`、`DQuat`，與 Bevy 0.19.1 同為 glam 0.32）。
 
 ## 精度：每一層只需要該層尺度的 f64
 
-f64 的相對精度約 1.1e-16，誤差隨「到該層原點的距離」成長：
-
 | 層 | 典型距離 | f64 解析度 |
 | --- | --- | --- |
-| tile 相對 tile 中心 | 1e4 m | 1e-12 m |
-| 船／tile 中心相對天體 | 7e6 m | 1e-9 m |
+| 船／零件相對相機 | 1e1 ～ 1e4 m | 1e-15 ～ 1e-12 m |
+| 船、tile 相對天體 | 7e6 m | 1e-9 m |
 | 天體相對恆星系質心 | 1.5e11 m（1 AU）～ 4.5e12 m（30 AU） | 3e-5 ～ 1e-3 m |
-| 恆星系相對銀心 | 2.5e20 m | 3e4 m |
+| 恆星系相對銀河 | 3e20 m（30,000 光年） | `SplitPosition`：i128 格（2³² m）＋ f64 偏移，精確 |
 
-銀河層 30 km 的誤差只影響「恆星系在銀河的哪裡」，系統內部完全不經過那一層，所以 **每層 f64 就夠，不需要 i128 或更寬的型別**。前提是下面的第 2 條規則。
+規則：
 
-## 規則
-
-1. **位置永遠帶著座標系。** `FramePoint { frame, position: DVec3 }`；需要速度時是 `FrameState { frame, position, velocity }`。沒有「全域座標」這種東西。
-2. **轉換只走到最近共同祖先（LCA）。** 船到 tile 只經過天體自轉系，誤差是 1e-9 m 等級；若繞到恆星系質心再回來，會白白損失到 1e-5 m。根節點只在真的跨恆星系時才會經過。
-3. **座標系是時間的函數。** 每個節點描述「相對父節點的剛體運動」，在時間 t 求值。
-4. **f32 只在渲染邊界出現。** 物理與遊戲邏輯一律 f64。
+1. **位置永遠帶著座標系。** 對外的快照（零件、碰撞網格、地形 tile）都附帶 `frame` 和區域位姿；「慣性座標」只是物理視角所在恆星系（`origin_frame`）裡的座標。
+2. **轉換只走到最近共同祖先。** 船到相機、船到 tile 都不經過 1 AU 的那一層。
+3. **座標系是時間的函數。** 每個節點描述相對父節點的剛體運動，在時間 t 求值。
+4. **f32 只在渲染邊界出現。**
 
 ## 節點
 
-每個節點存相對父節點的運動，求值得到 `Motion`：
+每個節點求值得到相對父節點的 `Motion`（平移、原點速度、旋轉、角速度，對應 Principia 的 `RigidMotion`）。
+
+| 種類 | 父節點 | 運動 |
+| --- | --- | --- |
+| `Root`（銀河） | 無 | 非旋轉；所有恆星系共用它的軸 |
+| `System(s)` | 根 | 恆星系質心，`FrameSource::system_state` 給 split 位置與速度 |
+| `BodyInertial(b)` | 天體所屬恆星系 | 天體中心（`body_in_system`）；軸固定為赤道軸 |
+| `BodySurface(b)` | 該天體的 `BodyInertial` | 繞極軸自轉；角度是 `Spin::angle` |
+| `TwoBody(p, s)` | 兩天體所屬恆星系 | 兩體質心；x 由主天體指向副天體，z 沿相對角動量；角速度取 \|r × v\| / r² 繞 z（與 orbit lab 的週期定義一致，平面本身的緩慢轉動不計） |
+| `Fixed(motion)` | 恆星系以下任意節點 | 常數剛體變換 |
+| `Free` | 恆星系以下任意節點 | 由模擬寫入，只在寫入的時間有效 |
+| `Dynamic(key)` | 恆星系以下任意節點 | 每次求值都向來源要 `dynamic_motion(key, t)`，所以永遠跟著擁有者的即時狀態 |
+
+節點可以移除（只能移除葉節點，id 不會再發出）；Free、Fixed、Dynamic 可以換父節點（換到別處的 Free 必須重新寫入）。
+
+## 來源
 
 ```rust
-pub struct Motion {
-    pub translation: DVec3,      // 本座標系原點，在父座標系中
-    pub velocity: DVec3,         // 原點的速度，在父座標系中
-    pub rotation: DQuat,         // 本座標系軸 → 父座標系軸
-    pub angular_velocity: DVec3, // 本座標系相對父的角速度，在父座標系中
+pub trait FrameSource {
+    fn system_state(&self, system: SystemId, t: f64) -> (SplitPosition, DVec3);
+    fn body_in_system(&self, body: BodyId, t: f64) -> (DVec3, DVec3);
+    fn dynamic_motion(&self, key: u64, t: f64) -> Motion; // 預設 panic
 }
 ```
 
-帶速度和角速度，是因為「地表速度 vs 軌道速度」、自轉系下的路徑、之後的 Krakensbane 都要轉換速度，不只轉換位置（對應 Principia 的 `RigidMotion`）。
+- **星曆**（`void-orbit::EphemerisSource: BodyStates + FrameSource`）同時有兩種視角：物理積分用的「全部天體相對 `origin_system` 質心」（`BodyStates`、`states_at`），和樹用的「每個天體相對自己的恆星系」。兩者來自同一份狀態，測試確認樹的 inertial → origin 轉換等於 `body_state`。單一恆星系的 `Ephemeris` 是位於銀河原點的一個 System。
+- **`SystemFrames`**（orbit）從任何星曆建出樹的固定部分：每個恆星系、每個天體的 inertial／surface，以及物理視角所在的 `origin`。
+- **`CoupledWorld`**（multiscale）本身是 `FrameSource`；`frames(origin)` 建出所有恆星系與天體。
+- **`Fleet`**（vessels）本身是 `FrameSource`：氣泡的自由落體原點、場景的浮動原點、船的零件座標系都是 Dynamic 節點，只在 Fleet 的時間有效。地面場景的接觸座標系就是該天體的 `BodySurface`。
 
-節點種類，第一版：
+天體軸只有一份公式：`Spin::body_axes`（`void-orbit::body_orientation` 直接呼叫它）。
 
-| 種類 | 父節點 | 運動 | 對應 TS |
-| --- | --- | --- | --- |
-| `Root` | 無 | 恆等。暫定是恆星系質心、黃道軸；有銀河層時改掛在銀河之下 | `barycentric` |
-| `BodyInertial(body)` | 質心系 | 原點 = 星曆給的天體位置與速度；軸固定為赤道軸 | `body-inertial`，`equatorialAxes` |
-| `BodySurface(body)` | 該天體的 `BodyInertial` | 原點不動；軸繞極軸以 ω 旋轉 | `body-surface`，`bodyOrientation` |
-| `Fixed(motion)` | 任意 | 常數剛體變換（tile、發射台） | 無 |
-| `Free` | 任意 | 由模擬每步寫入（船、Krakensbane 的移動座標系） | 無 |
-
-之後加入：`TwoBodyRotating(primary, secondary)`（TS 已有）、恆星系相對銀心。
-
-**星曆不放在這個 crate**：`BodyInertial` 透過一個 trait 取得天體狀態，orbit crate 實作它，測試則用解析的 Kepler 軌道代替。
+## 求值
 
 ```rust
-pub trait BodyStates {
-    /// 天體在質心系的位置、速度，時間 t。t 超出星曆範圍要 panic，不能外插。
-    fn body_state(&self, body: BodyId, t: f64) -> (DVec3, DVec3);
-}
+let snapshot = tree.at(t, &source);            // 每幀（或每個樣本）一次
+let m = snapshot.transform(from, to);          // 經最近共同祖先
+let p = m.apply_point(p_in_from);
+let s = m.apply_state(state_in_from);          // 含 ω × r
+let camera = m.into_child(&camera_motion);     // 到一個不存在樹裡、掛在 to 下的座標系
+let q = snapshot.from_galaxy(&split, to);      // 銀河 split 位置進出座標系
+let g = snapshot.to_galaxy(from, p);
 ```
 
-## 求值：每個時間點一份快照
+- `Transform` 分兩段：`from` 往上到共同祖先，再往下到 `to`；往下時先減後轉（`R⁻¹(p − T)`），和 orbit lab 的 `toFrame` 一樣。需要繼續合成時用 `to_motion()`，那會失去先減後轉的精度。
+- 共同祖先是根時，兩個恆星系的 split 位置精確相減（`bridge`），再接 f64。`transform_via_root` 故意全程 f64，只給檢查用。
+- 自轉角用 `t.rem_euclid(period)` 先去掉整圈再乘 2π：第一圈內與 lab 的 `2πt/period` 逐位元相同，之後保留 lab 公式丟掉的精度。
+- 沒有快取，每次重新求值。
 
-```rust
-let snapshot = tree.at(t, &ephemeris);          // 每幀（或每個預測樣本）一次
-let m = snapshot.transform(from, to);           // 經 LCA
-let p_in_to = m.apply_point(p_in_from);
-let s_in_to = m.apply_state(state_in_from);     // 含 ω × r 項
-```
+## 渲染邊界
 
-- `Transform` 分兩段：`from` 往上到 LCA，再從 LCA 往下到 `to`。往下時先減後轉，即 `R⁻¹(p − T)`，和 orbit lab 的 `toFrame` 一樣；若預先合成成一個 `Motion` 再套用，會變成 `R⁻¹p − R⁻¹T`，兩個 1.5e11 量級的數相減，對照 TS 時相對誤差從 2.5e-13 變差到 5.2e-12。需要繼續合成時用 `to_motion()`。
-- 目前沒有任何快取，每次都重新求值。等實際使用情況量出瓶頸再加。
-- 樹的深度不到 10 層，LCA 直接往上走就好，不需要額外的資料結構。
-- 自轉角用 `t.rem_euclid(period)` 先去掉整圈，再乘 2π。f64 的取餘是精確運算，所以 t 再大也不損失角度精度。最初設想的 `fract(t / period)` 沒有用，因為誤差在除法時就產生了。剩下的極限是 t 本身的間距：t = 1e9 s 時為 1.2e-7 s，相當於地表移動約 0.06 mm。
-- `Free` 座標系記錄寫入時間，快照的時間必須完全相同，否則 panic。
+相機不是存在樹裡的節點，而是每次繪圖時掛在焦點座標系下的子座標系（`Transform::into_child`）：
 
-## 渲染邊界（在 Bevy 那層，不在本 crate）
+- 焦點是選中船的零件座標系（點在質心），或聚焦天體的 `BodyInertial`。相機原點在眼睛，軸是畫面要用的軸（主遊戲用母星的地表軸）。
+- 每個要畫的東西從自己的座標系轉進相機座標系，再轉 f32。船上零件到相機的共同祖先是船所在的場景或船本身，不經過 1 AU 那層。
+- 相機若存進樹，會擋住船的 join、換 owner、移除這些生命週期；每次算一次就沒有這個問題，精度一樣由共同祖先決定。
+- 地圖尺度的對數深度和距離壓縮屬於 view，不在 frames 內處理。
 
-- 相機屬於某個座標系，也有自己的區域位置。
-- 每個「錨點」實體（天體、tile、船）帶 `Anchor { frame, position, orientation }`。每幀把它轉進相機的座標系，減掉相機位置後轉成 f32，寫進頂層實體的 `Transform`。相機永遠在原點。
-- 錨點底下的子實體（tile 頂點、零件）照常使用 Bevy 的 f32 階層，因為它們的 offset 本來就小。
-- 這和目前 TS 版以焦點為中心繪製的做法相同，只是把它變成通用機制。
-- 地圖尺度（1e13 m）的對數深度和距離壓縮，屬於 view 的工作，不在 frames 內處理。
+## 誰用它
+
+| 使用者 | 怎麼用 |
+| --- | --- |
+| `Fleet` | 場景座標轉換（`to_inertial`／`scene_local`／`axes`）、快照、發射、地面淨空都走樹；`frames()`、`vessel_frame`、`scene_frames`、`body_frames`、`origin_frame` 對外 |
+| fleet-flight／app | `CameraSample::to_camera`；零件、碰撞網格、tile、計畫軌跡經樹畫；HUD、navball、scenery、map 的軸從樹取 |
+| view | `PathFrame` 是星曆樹上的 BodyInertial／BodySurface |
+| orbit-lab | `FrameEvaluator` 的四種繪圖座標系都是樹上的節點 |
+| landing | `PlanetFrame::to_body_fixed`／`to_inertial` 經星曆樹（舊火箭、著陸器、滑行預測因此一併使用） |
+| multiscale example／lab | 經樹畫到掛在焦點下的相機；探測器的 `FramedState` 仍是相對恆星系的 split 物理狀態 |
+
+物理定律不搬進樹：`PlanetFrame` 的重力／離心／Coriolis／潮汐、`FreeFallFrame` 的潮汐加速度是「在這個座標系裡的運動方程」，仍在各自的 crate。
 
 ## 檢查（`cargo test -p void-frames`）
 
 | 檢查 | 結果 |
 | --- | --- |
-| 對照 orbit lab：`golden/frames.ts` 用 `BodyRotation.ts` 和 `toFrame` 產生 `tests/golden/frames.json`，涵蓋 4 種自轉 × 6 個時間 | 軸 2.8e-13，點 2.5e-13（相對） |
-| 天體在 1 AU，地表 tile 和距它 1 m 的船：經 LCA vs 繞根節點 | 4.2e-10 m vs 2.9e-5 m |
+| 對照 orbit lab：`golden/frames.ts` 用 `BodyRotation.ts` 和 `toFrame` 產生 `tests/golden/frames.json`，4 種自轉 × 6 個時間 | 軸 2.8e-13，點 2.5e-13（相對） |
+| 天體在 1 AU，地表 tile 和距它 1 m 的船：經共同祖先 vs 繞根 | 4.2e-10 m vs 2.9e-5 m |
+| 兩個恆星系在 30,000 光年外：跨銀河精確相減 vs 繞根 f64；銀河 split 位置進出座標系 | 0 m vs 1.2e3 m；進出與 bridge 相同 |
 | 地表靜止點轉到慣性系，速度 = ω × r | 0 |
-| 月球上發射台的點轉到地球表面系，速度和位置有限差分的比較（同時檢查 `then` 與 `inverse`） | 4.9e-10（相對） |
+| 月球上發射台的點轉到地球表面系，速度和位置有限差分的比較 | 4.9e-10（相對） |
 | 經過月球來回轉換；直接轉換和分段合成的比較 | 6.4e-8、6.7e-8 m |
-| t = 1e9 s 的自轉角：取餘法 vs 精確值，以及原本 `2πt/period` 的誤差 | 0 vs 1.0e-11 rad |
-| 會 panic 的情況：Free 座標系未寫入就使用、寫入時間不符、旋轉四元數非單位長度、自轉參數無效 | 都會 panic |
+| t = 1e9 s 的自轉角：取餘法 vs 原本 `2πt/period` | 5.6e-17 vs 1.0e-11 rad |
+| 不在樹裡的子座標系（相機）保有共同祖先的精度 | < 1e-8 m |
+| 節點移除、換父節點、Dynamic 向來源取值 | 通過 |
+| 會 panic 的情況：Free 未寫入或時間不符、非單位四元數、自轉參數無效、移除有子節點的節點、使用已移除的節點、沒有 Dynamic 的來源被問 Dynamic | 都會 panic |
+
+其他 crate 的對應檢查：orbit `system_frames_agree_with_the_ephemeris`、multiscale `system_frames_agree_with_the_physics_view`（跨恆星系，含地表軸）、vessels `vessel_frames_follow_their_physics_owner`（場景、氣泡、join、存檔還原）、fleet-flight `the_camera_frame_agrees_with_the_inertial_eye`、landing `planet_frame_matches_the_landing_lab`、orbit `four_frames_match_ts`。
 
 golden data 要重新產生時，從 repo 根目錄執行 `python3 tools/regenerate-golden.py --reference-root ../void frames`。
-
-## 待決定
-
-- 根節點是太陽系質心。銀河層之後再加。
-- `Free` 座標系由誰寫入、什麼時候寫入，等到船的物理移植時再定，屆時參考 Krakensbane。
-- 雙體旋轉繪圖座標系（`two-body-rotating`）由 `void-orbit::FrameEvaluator` 提供，見 [orbit-lab](orbit-lab.md)；不屬於此樹狀框架 API。

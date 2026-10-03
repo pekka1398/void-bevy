@@ -16,7 +16,7 @@
 | `Simulation.ts`（時間、船的控制、預測、撞擊；view lab 用它） | `simulation.rs`，見 [view.md](view.md) |
 
 沒有移植的部分：
-- `ReferenceFrames.ts`：`FrameEvaluator` 提供 barycentric、body-inertial、body-surface、two-body-rotating 四種繪圖框架；樹狀框架仍由 `void-frames` 提供。
+- `ReferenceFrames.ts`：`FrameEvaluator` 提供 barycentric、body-inertial、body-surface、two-body-rotating 四種繪圖框架，都是星曆座標樹上的節點（雙體旋轉是 `void-frames` 的 `TwoBody` 節點），見 [frames.md](frames.md)。
 - `frameAccelerationAt`：目前一律回傳 0。`lab/multiscale` 的 `FrameEphemeris` 會覆寫它，等移植 multiscale 時再改成 trait。
 
 Rust 的介面和 TS 有兩點不同：
