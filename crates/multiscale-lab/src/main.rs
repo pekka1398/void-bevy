@@ -1,6 +1,7 @@
 //! Distant-system two-vessel encounter. P pause, N fixed step, F +10 s, J join,
 //! T +40 s, V 1x/4x, R reset, O origin/30,000 ly placement, 1 ships, 2 planet, 3 system, 4 cluster.
-//! Drag to orbit; wheel to zoom. Render positions are split differences before f32.
+//! Drag to orbit; wheel to zoom. Everything is drawn through the fleet's frame tree into a camera
+//! hung on the focus's frame; systems meet at the galaxy with exact split subtraction.
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit},
     prelude::*,
@@ -8,7 +9,7 @@ use bevy::{
 use glam::DVec3;
 use std::{cell::RefCell, rc::Rc};
 use void_assembly_lab::parts::RenderAssets;
-use void_frames::SplitPosition;
+use void_frames::{FrameId, Motion, SplitPosition};
 use void_multiscale::*;
 use void_multiscale_lab::Encounter;
 
@@ -64,16 +65,16 @@ impl Lab {
             notice: String::new(),
         }
     }
-    fn centre(&self) -> SplitPosition {
-        let e = &self.encounter;
-        let world = e.world.borrow();
-        let states = world.at(e.time());
+    /// The frame the camera hangs on, and the focus point in it.
+    fn focus_frame(&self) -> (FrameId, DVec3) {
+        let f = &self.encounter.fleet;
         match self.focus {
-            1 => states[world.system_index(&e.system)]
-                .origin
-                .translate(e.fleet.snapshot(&e.first).position),
-            2 => world.body_position(e.planet_index, &states),
-            3 | 4 => states[world.system_index(&e.system)].origin,
+            1 => (
+                f.vessel_frame(&self.encounter.first),
+                f.centre_of_mass_local(&self.encounter.first),
+            ),
+            2 => (f.body_frames(self.encounter.planet_index).0, DVec3::ZERO),
+            3 | 4 => (f.origin_frame(), DVec3::ZERO),
             _ => panic!("unknown focus"),
         }
     }
@@ -287,7 +288,13 @@ fn draw(
     mut gizmos: Gizmos,
 ) {
     let e = &lab.encounter;
-    let centre = lab.centre();
+    let f = &e.fleet;
+    let frames = f.frames();
+    let (focus, local) = lab.focus_frame();
+    // The camera frame: at the focus, in the galaxy's axes (the origin system's).
+    let turn = frames.transform(focus, f.origin_frame()).rotation();
+    let camera_frame = Motion::fixed(local, turn.inverse());
+    let into = |from: FrameId| frames.transform(from, focus).into_child(&camera_frame);
     let scale = (lab.distance / 1000.0).max(1.0);
     let direction = DVec3::new(
         lab.elevation.cos() * lab.azimuth.cos(),
@@ -297,8 +304,6 @@ fn draw(
     **camera = Transform::from_translation((direction * (lab.distance / scale)).as_vec3())
         .looking_at(Vec3::ZERO, Vec3::Z);
     let world = e.world.borrow();
-    let states = world.at(e.time());
-    let origin = states[world.system_index(&e.system)].origin;
     for (visual, mut transform) in &mut visuals {
         *transform = match visual {
             Visual::Part { id, local } => {
@@ -309,23 +314,23 @@ fn draw(
                     .into_iter()
                     .find(|p| &p.id == id)
                     .expect("rendered part exists");
-                let position = origin.translate(p.position).relative(&centre);
+                let to = into(p.frame);
+                let at = p.local_position + p.local_rotation * local.translation.as_dvec3();
                 Transform {
-                    translation: ((position + p.rotation * local.translation.as_dvec3()) / scale)
-                        .as_vec3(),
-                    rotation: p.rotation.as_quat() * local.rotation,
+                    translation: (to.apply_point(at) / scale).as_vec3(),
+                    rotation: (to.rotation() * p.local_rotation).as_quat() * local.rotation,
                     scale: local.scale / scale as f32,
                 }
             }
             Visual::Body(i) => Transform::from_translation(
-                (world.body_position(*i, &states).relative(&centre) / scale).as_vec3(),
+                (into(f.body_frames(*i).0).apply_point(DVec3::ZERO) / scale).as_vec3(),
             )
             .with_scale(Vec3::splat((world.bodies[*i].radius_meters / scale) as f32)),
         };
     }
     for (i, body) in world.bodies.iter().enumerate() {
         if body.radius_meters / scale < 1.0 {
-            let p = (world.body_position(i, &states).relative(&centre) / scale).as_vec3();
+            let p = (into(f.body_frames(i).0).apply_point(DVec3::ZERO) / scale).as_vec3();
             let colour = Color::from(Srgba::hex(&body.color).expect("body colour"));
             for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
                 gizmos.line(p - axis, p + axis, colour);
@@ -333,7 +338,8 @@ fn draw(
         }
     }
     if let Some((a, b)) = lab.nodes() {
-        let point = |p| (origin.translate(p).relative(&centre) / scale).as_vec3();
+        let to = into(f.origin_frame());
+        let point = |p| (to.apply_point(p) / scale).as_vec3();
         gizmos.line(point(a), point(b), Color::srgb(0.2, 1.0, 0.5));
     }
     let mut text = format!(

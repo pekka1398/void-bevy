@@ -3,7 +3,7 @@
 
 use void_frames::{BodyId, FrameId, FrameTree, SystemId};
 
-use crate::EphemerisSource;
+use crate::{CelestialBody, EphemerisSource};
 
 #[derive(Clone, Debug)]
 pub struct SystemFrames {
@@ -20,22 +20,36 @@ pub struct SystemFrames {
 
 impl SystemFrames {
     pub fn new(ephemeris: &dyn EphemerisSource) -> Self {
+        Self::build(
+            ephemeris.system_count(),
+            ephemeris.bodies(),
+            |i| ephemeris.system_of(i),
+            ephemeris.origin_system(),
+        )
+    }
+
+    /// The same frames from a description: `bodies` in index order, each in `system_of(index)`.
+    pub fn build(
+        system_count: usize,
+        bodies: &[CelestialBody],
+        system_of: impl Fn(usize) -> SystemId,
+        origin: SystemId,
+    ) -> Self {
         let mut tree = FrameTree::new();
-        let systems: Vec<_> = (0..ephemeris.system_count())
+        let systems: Vec<_> = (0..system_count)
             .map(|s| tree.add_system(SystemId(s)))
             .collect();
         assert!(!systems.is_empty(), "system frames: no systems");
-        let (inertial, surface) = ephemeris
-            .bodies()
+        let (inertial, surface) = bodies
             .iter()
             .enumerate()
             .map(|(i, body)| {
                 assert_eq!(body.index, i, "system frames: bodies out of order");
-                let system = systems[ephemeris.system_of(i).0];
+                let system = systems[system_of(i).0];
                 tree.add_body(system, BodyId(i), body.rotation)
             })
             .unzip();
-        let origin = systems[ephemeris.origin_system().0];
+        let origin = systems[origin.0];
         Self {
             tree,
             systems,

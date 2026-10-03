@@ -375,6 +375,24 @@ impl<S: FrameSource + ?Sized> Snapshot<'_, S> {
         }
     }
 
+    /// A galaxy position in `to`'s coordinates: split subtraction from `to`'s system first.
+    pub fn from_galaxy(&self, position: &SplitPosition, to: FrameId) -> DVec3 {
+        let system = self.tree.system_of(to);
+        let (origin, _) = self.top(system);
+        self.to_ancestor(to, system.unwrap_or(FrameTree::ROOT))
+            .unapply_point(position.relative(&origin))
+    }
+
+    /// A point of `from` as a galaxy position, exactly from its system's split position.
+    pub fn to_galaxy(&self, from: FrameId, p: DVec3) -> SplitPosition {
+        let system = self.tree.system_of(from);
+        let (origin, _) = self.top(system);
+        origin.translate(
+            self.to_ancestor(from, system.unwrap_or(FrameTree::ROOT))
+                .apply_point(p),
+        )
+    }
+
     /// As `transform`, but always through the root in float64. For checks that measure what the
     /// common ancestor saves.
     pub fn transform_via_root(&self, from: FrameId, to: FrameId) -> Transform {

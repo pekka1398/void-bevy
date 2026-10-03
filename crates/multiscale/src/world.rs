@@ -4,9 +4,9 @@ use std::collections::VecDeque;
 
 use glam::DVec3;
 use void_math::hypot;
-use void_orbit::{BuiltSystem, CelestialBody, HermiteBasis, yoshida8_sequence};
+use void_orbit::{BuiltSystem, CelestialBody, HermiteBasis, SystemFrames, yoshida8_sequence};
 
-use void_frames::SplitPosition;
+use void_frames::{BodyId, FrameSource, SplitPosition, SystemId};
 
 /// A system to place in the world: its built bodies (barycentric), where its barycentre is and
 /// how fast it moves.
@@ -469,5 +469,37 @@ impl CoupledWorld {
             out.z += d.z * f;
         }
         out
+    }
+}
+
+/// The frame tree's view: each system at its split barycentre, each body relative to its own
+/// system.
+impl FrameSource for CoupledWorld {
+    fn system_state(&self, system: SystemId, t: f64) -> (SplitPosition, DVec3) {
+        let states = self.at(t);
+        let s = states
+            .get(system.0)
+            .unwrap_or_else(|| panic!("coupled world: unknown {system:?}"));
+        (s.origin, s.velocity)
+    }
+    fn body_in_system(&self, body: BodyId, t: f64) -> (DVec3, DVec3) {
+        let m = self
+            .membership
+            .get(body.0)
+            .expect("coupled world: unknown body");
+        let g = &self.at(t)[m.system];
+        (g.body_position(m.local), g.body_velocity(m.local))
+    }
+}
+
+impl CoupledWorld {
+    /// Every system and body as frames; `origin` names the system fleet states would be in.
+    pub fn frames(&self, origin: &str) -> SystemFrames {
+        SystemFrames::build(
+            self.ids.len(),
+            &self.bodies,
+            |i| SystemId(self.membership[i].system),
+            SystemId(self.system_index(origin)),
+        )
     }
 }

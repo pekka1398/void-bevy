@@ -67,10 +67,12 @@ impl Encounter {
     pub fn advance(&mut self, seconds: f64) {
         self.fleet.advance(seconds);
     }
+    /// A vessel's centre of mass as a galaxy position, from its frame up the tree.
     pub fn position(&self, id: &str) -> SplitPosition {
-        let world = self.world.borrow();
-        let origin = world.at(self.time())[world.system_index(&self.system)].origin;
-        origin.translate(self.fleet.snapshot(id).position)
+        self.fleet.frames().to_galaxy(
+            self.fleet.vessel_frame(id),
+            self.fleet.centre_of_mass_local(id),
+        )
     }
     pub fn join(&mut self) -> String {
         let a = format!("{}/p2", self.first);

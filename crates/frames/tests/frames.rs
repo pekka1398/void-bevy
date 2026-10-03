@@ -384,6 +384,14 @@ fn systems_meet_at_the_galaxy_without_losing_centimetres() {
         .transform(b, probe)
         .apply_point(snapshot.transform(probe, b).apply_point(point));
     assert!((back - point).length() < 1e-3, "round trip {back:?}");
+    // Galaxy positions in and out of frames, exactly as the bridge.
+    let galactic = snapshot.to_galaxy(probe, point);
+    assert_eq!(
+        galactic,
+        SplitPosition::new(DVec3::new(0.75, 0.25, 0.0), [FAR, 0, 0])
+    );
+    assert!((snapshot.from_galaxy(&galactic, b) - expected).length() < 1e-3);
+    assert!((snapshot.from_galaxy(&galactic, probe) - point).length() < 1e-12);
 }
 
 #[test]

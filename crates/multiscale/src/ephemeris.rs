@@ -52,21 +52,10 @@ impl BodyStates for FrameEphemeris {
 /// relative to its own system (unlike `BodyStates`, which is relative to the selected system).
 impl FrameSource for FrameEphemeris {
     fn system_state(&self, system: SystemId, t: f64) -> (SplitPosition, DVec3) {
-        let world = self.world.borrow();
-        let states = world.at(t);
-        let s = states
-            .get(system.0)
-            .unwrap_or_else(|| panic!("frame ephemeris: unknown {system:?}"));
-        (s.origin, s.velocity)
+        self.world.borrow().system_state(system, t)
     }
     fn body_in_system(&self, body: BodyId, t: f64) -> (DVec3, DVec3) {
-        let world = self.world.borrow();
-        let m = world
-            .membership
-            .get(body.0)
-            .expect("frame ephemeris: unknown body");
-        let g = &world.at(t)[m.system];
-        (g.body_position(m.local), g.body_velocity(m.local))
+        self.world.borrow().body_in_system(body, t)
     }
 }
 

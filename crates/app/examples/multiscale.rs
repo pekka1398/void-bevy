@@ -1,7 +1,8 @@
 //! lab/multiscale's page, interstellar scene: three star systems a few light-years apart, placed
 //! 30,000 light-years out, and a probe coasting from Aster to Beryl. One continuous world from
-//! metres to light-years: each frame subtracts the focus's split position first, then scales to
-//! a render unit of a thousandth of the camera distance, and only then goes to f32.
+//! metres to light-years: everything is drawn through the frame tree into a camera hung on the
+//! focus's frame (systems meet at the galaxy with exact split subtraction), then scaled to a
+//! render unit of a thousandth of the camera distance, and only then goes to f32.
 //!
 //! P: run / pause | R: reset | N: one day | Y: +1 year | T: +10 years | 1 cluster, 2 system,
 //! 3 planet, 4 beside the probe | Up / Down pick a setting, Left / Right change it | drag: orbit,
@@ -15,8 +16,9 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseSc
 use bevy::prelude::*;
 use glam::DVec3;
 use void_app::map::color as css;
-use void_frames::SplitPosition;
+use void_frames::{FrameId, Motion, SplitPosition};
 use void_multiscale::*;
+use void_orbit::SystemFrames;
 use void_view::{OrbitCamera, ellipse_points};
 
 fn main() {
@@ -85,6 +87,7 @@ const SETTINGS: [Setting; 5] = [
 #[derive(Resource)]
 struct Lab {
     world: CoupledWorld,
+    frames: SystemFrames,
     probe: Traveller,
     placement: usize,
     speed: usize,
@@ -105,8 +108,10 @@ impl Lab {
     fn new() -> Self {
         let world = wide_world(default_galaxy());
         let probe = transfer(&world, 0.02);
+        let frames = world.frames(&world.ids[0]);
         let mut lab = Self {
             world,
+            frames,
             probe,
             placement: 0,
             speed: 4,
@@ -134,6 +139,7 @@ impl Lab {
             SplitPosition::ORIGIN
         };
         self.world = wide_world(galaxy);
+        self.frames = self.world.frames(&self.world.ids[0]);
         self.probe = transfer(&self.world, SPEEDS[self.speed]);
         self.running = false;
         self.pending = 0.0;
@@ -166,12 +172,15 @@ impl Lab {
         }
     }
 
-    fn focus_position(&self) -> SplitPosition {
-        let t = self.now();
+    /// The frame the camera hangs on, and the focus point in it.
+    fn focus_frame(&self) -> (FrameId, DVec3) {
         match self.focus {
-            Focus::Probe => self.probe.position(&self.world),
-            Focus::System(i) => self.world.at(t)[i].origin,
-            Focus::Body(i) => self.world.body_position(i, &self.world.at(t)),
+            Focus::Probe => (
+                self.frames.systems[self.world.system_index(&self.probe.state.frame)],
+                self.probe.state.position.vector(),
+            ),
+            Focus::System(i) => (self.frames.systems[i], DVec3::ZERO),
+            Focus::Body(i) => (self.frames.inertial[i], DVec3::ZERO),
         }
     }
 
@@ -556,10 +565,24 @@ fn draw(
     let world = &lab.world;
     let t = lab.now();
     let states = world.at(t);
-    let anchor = lab.focus_position();
-    // The render unit follows the zoom; split positions are subtracted before any f32.
+    let frames = lab.frames.tree.at(t, world);
+    // The camera frame: at the focus, in the galaxy's axes (shared by every system).
+    let (focus, local) = lab.focus_frame();
+    let turn = frames.transform(focus, lab.frames.systems[0]).rotation();
+    let camera_frame = Motion::fixed(local, turn.inverse());
+    // The render unit follows the zoom; the tree subtracts before any f32.
     let u = (lab.orbit.distance / 1000.0).max(1.0);
-    let to_render = |p: &SplitPosition| (p.relative(&anchor) / u).as_vec3();
+    let render = |from: FrameId, p: DVec3| {
+        (frames
+            .transform(from, focus)
+            .into_child(&camera_frame)
+            .apply_point(p)
+            / u)
+            .as_vec3()
+    };
+    let to_render = |p: &SplitPosition| {
+        (camera_frame.unapply_point(frames.from_galaxy(p, focus)) / u).as_vec3()
+    };
     let (cam, transform, projection) = &mut *camera;
     let eye = (lab.orbit.direction * (lab.orbit.distance / u)).as_vec3();
     **transform = Transform::from_translation(eye).looking_at(Vec3::ZERO, Vec3::Z);
@@ -576,7 +599,7 @@ fn draw(
     let mut placed: Vec<(Focus, Option<Vec2>, bool)> = vec![];
     for (BodyMesh(i), mut tf, mut visibility) in &mut bodies {
         let body = &world.bodies[*i];
-        let at = to_render(&world.body_position(*i, &states));
+        let at = render(lab.frames.inertial[*i], DVec3::ZERO);
         tf.translation = at;
         tf.scale = Vec3::splat((body.radius_meters / u) as f32);
         let projected = body.radius_meters / (f64::from(at.distance(eye)) * u).max(1.0) * height;
@@ -589,7 +612,7 @@ fn draw(
         let mut position = screen(at);
         // At light-year zoom a planet shares its star's pixel: keep the star's label.
         if let (Some(parent), Some(p)) = (body.parent_index, position) {
-            let centre = to_render(&world.body_position(parent, &states));
+            let centre = render(lab.frames.inertial[parent], DVec3::ZERO);
             if screen(centre).is_some_and(|c| c.distance(p) < 24.0) {
                 position = None;
             }
@@ -604,14 +627,15 @@ fn draw(
             let g = &states[m.system];
             let r = g.body_position(m.local) - g.body_position(pm.local);
             let v = g.body_velocity(m.local) - g.body_velocity(pm.local);
-            let centre = world.body_position(parent, &states).relative(&anchor);
+            let centre = g.body_position(pm.local);
             let points = ellipse_points(r, v, body.gm + world.bodies[parent].gm, 128);
             let color = css(&body.color).with_alpha(0.25);
+            let system = lab.frames.systems[m.system];
             gizmos.linestrip(
                 points
                     .iter()
                     .chain(std::iter::once(&points[0]))
-                    .map(|p| ((centre + *p) / u).as_vec3()),
+                    .map(|p| render(system, centre + *p)),
                 color,
             );
         }
