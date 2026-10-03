@@ -207,6 +207,34 @@ fn frame_changes_change_neither_gravity_nor_axes() {
     assert!((world.gravity_at(50.0, &pa) - world.gravity_at(50.0, &pb)).length() < 1e-15);
 }
 
+/// The world's gravity is orbit's one law (point masses here) in the multiscale lab's arithmetic.
+#[test]
+fn gravity_is_the_shared_law() {
+    let mut world = CoupledWorld::new(compact_seeds(huge()), 10.0, 8192);
+    world.extend_to(100.0, 100_000);
+    let state = world.at(50.0);
+    for offset in [
+        DVec3::new(8e8, 1e9, 2e8),
+        DVec3::new(-3e9, 4e8, -1e8),
+        DVec3::new(2e7, -6e6, 1e6),
+    ] {
+        let p = state[0].origin.translate(offset);
+        let (mut law, mut scale) = (DVec3::ZERO, 0.0);
+        for (i, body) in world.bodies.iter().enumerate() {
+            let r = -world.body_position(i, &state).relative(&p);
+            let a = void_orbit::gravity::body_pull(body, r);
+            law += a;
+            scale += a.length();
+        }
+        // Rounding only: a few ulps of each body's pull, which partly cancel in the sum.
+        let g = world.gravity_in(&state, &p);
+        assert!(
+            (g - law).length() <= 4.0 * f64::EPSILON * scale,
+            "{g} vs {law}"
+        );
+    }
+}
+
 #[test]
 fn flight_from_a_to_b_matches_direct_n_body_through_the_hand_off() {
     let seeds = compact_seeds(SplitPosition::ORIGIN);

@@ -7,6 +7,7 @@ use glam::DVec3;
 use crate::apsides::{ApsisKind, DominanceTree};
 use crate::ephemeris::{Ephemeris, EphemerisOptions, suggested_step_seconds};
 use crate::flight_plan::{BurnSchedule, FlightPlan, ManeuverSpec, PlanEngine, ReferenceMode};
+use crate::gravity;
 use crate::kepler::{EllipticElements, state_from_elements};
 use crate::propagator::{
     AdvanceOutcome, AttitudeLaw, Control, Impact, PropagationRun, ThrustControl, Tolerances,
@@ -708,16 +709,9 @@ impl Simulation {
         };
         let position = to_ecliptic(&axes, local_position);
         // Circular speed for the home body's actual radial pull at the start point, bulge
-        // included: g = GM/r² − 1.5 J2 GM R² (3 sin²(lat) − 1) / r⁴.
+        // included (GM/r² − 1.5 J2 GM R² (3 sin²(lat) − 1) / r⁴).
         let r = position.length();
-        let sin_lat = position.dot(body.rotation.axis()) / r;
-        let g = body.gm / r.powi(2)
-            - 1.5
-                * body.j2
-                * body.gm
-                * body.j2_reference_radius_meters.powi(2)
-                * (3.0 * sin_lat.powi(2) - 1.0)
-                / r.powi(4);
+        let g = -gravity::body_pull(&body, position).dot(position) / r;
         let velocity = to_ecliptic(&axes, local_velocity);
         let velocity = velocity * ((g * r).sqrt() / velocity.length());
         let run = PropagationRun::new(VesselState {

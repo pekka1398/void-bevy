@@ -456,7 +456,9 @@ impl CoupledWorld {
         self.gravity_in(&self.at(t), p)
     }
 
-    /// Gravity of every body in `state` at `p`.
+    /// Gravity of every body in `state` at `p`: the point-mass case of `void_orbit::gravity::pull`
+    /// (this world requires J2 = 0), written in the multiscale lab's arithmetic (`hypot`, r·r·r)
+    /// because its golden checks are bit-exact.
     pub fn gravity_in(&self, state: &[SystemState], p: &SplitPosition) -> DVec3 {
         let mut out = DVec3::ZERO;
         for (i, body) in self.bodies.iter().enumerate() {

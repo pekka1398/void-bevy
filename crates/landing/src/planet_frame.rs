@@ -3,7 +3,7 @@
 
 use glam::DVec3;
 use void_frames::{FrameId, State};
-use void_orbit::{CelestialBody, EphemerisSource, SystemFrames, body_orientation};
+use void_orbit::{CelestialBody, EphemerisSource, SystemFrames, body_orientation, gravity};
 
 /// A position and velocity in one frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -120,19 +120,8 @@ impl ContactFrame for PlanetFrame {
 
     fn acceleration(&self, ephemeris: &dyn EphemerisSource, t: f64, r: DVec3, v: DVec3) -> DVec3 {
         let b = &self.body;
-        let r2 = r.x * r.x + r.y * r.y + r.z * r.z;
-        let rl = r2.sqrt();
-        // Own gravity: point mass plus J2 about +z (the vessel propagator's law).
-        let s = -b.gm / (r2 * rl);
-        let (mut ax, mut ay, mut az) = (r.x * s, r.y * s, r.z * s);
-        if b.j2 != 0.0 {
-            let c = 1.5 * b.j2 * b.gm * b.j2_reference_radius_meters.powi(2);
-            let f = c / (r2 * r2 * rl);
-            let radial = f * ((5.0 * r.z * r.z) / r2 - 1.0);
-            ax += radial * r.x;
-            ay += radial * r.y;
-            az += radial * r.z - 2.0 * f * r.z;
-        }
+        // Own gravity, in body-fixed axes where the spin axis is +z.
+        let mut a = gravity::pull(b.gm, gravity::oblateness(b), DVec3::Z, r);
         // Other bodies: their pull here minus their pull on the planet's centre.
         let bodies = ephemeris.bodies();
         if bodies.len() > 1 {
@@ -142,28 +131,17 @@ impl ContactFrame for PlanetFrame {
             let c = positions[b.index];
             // The particle in inertial axes, relative to the planet's centre.
             let p = to_ecliptic(&axes, r);
-            let (mut tx, mut ty, mut tz) = (0.0, 0.0, 0.0);
+            let mut tide = DVec3::ZERO;
             for (k, o) in bodies.iter().enumerate() {
                 if k == b.index {
                     continue;
                 }
-                let (ox, oy, oz) = (
-                    positions[k].x - c.x,
-                    positions[k].y - c.y,
-                    positions[k].z - c.z,
-                );
-                let (dx, dy, dz) = (ox - p.x, oy - p.y, oz - p.z);
-                let d2 = dx * dx + dy * dy + dz * dz;
-                let o2 = ox * ox + oy * oy + oz * oz;
-                let (sd, so) = (o.gm / (d2 * d2.sqrt()), o.gm / (o2 * o2.sqrt()));
-                tx += dx * sd - ox * so;
-                ty += dy * sd - oy * so;
-                tz += dz * sd - oz * so;
+                let centre = c - positions[k];
+                tide += gravity::body_pull(o, centre + p) - gravity::body_pull(o, centre);
             }
-            ax += tx * axes[0].x + ty * axes[0].y + tz * axes[0].z;
-            ay += tx * axes[1].x + ty * axes[1].y + tz * axes[1].z;
-            az += tx * axes[2].x + ty * axes[2].y + tz * axes[2].z;
+            a += DVec3::new(axes[0].dot(tide), axes[1].dot(tide), axes[2].dot(tide));
         }
+        let (mut ax, mut ay, az) = (a.x, a.y, a.z);
         // Centrifugal ω² (x, y, 0) and Coriolis −2 ω × v with ω = (0, 0, ω).
         let w = self.omega;
         ax += w * w * r.x + 2.0 * w * v.y;

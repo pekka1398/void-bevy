@@ -119,9 +119,9 @@ pub struct SeaSample  { pub depth: f64 }                                      //
 
 ### 熱路徑
 
-軌道積分每個 Dopri stage 都要重力，不能每次建 snapshot 再逐一轉換。積分器保留批次取天體位置的寫法，但每個天體的拉力改呼叫同一個 `pull`。
+軌道積分每個 Dopri stage 都要重力，不能每次建 snapshot 再逐一轉換。積分器保留批次取天體位置的寫法，但每個天體的拉力改呼叫同一個定律（`add_pull`）。
 
-`PlanetFrame` 的本體與潮汐、`FreeFallFrame`、multiscale 也都呼叫 `pull`，再各自加上自己座標系的項。
+`PlanetFrame` 的本體與潮汐、`FreeFallFrame`（經積分器的 `gravity_at`）也都用它，再各自加上自己座標系的項。multiscale 是同一條點質量定律，但保留自己 lab 的捨入（見下方進度）。
 
 空氣只在大氣內才需要，所以積分器裡的 `AirSource` 改走環境取樣。
 
@@ -153,6 +153,18 @@ pub struct SeaSample  { pub depth: f64 }                                      //
 | 4. landing 與 aero | `PlanetAir`／`RocketAir`、`EntryFlight` 的大氣經環境取樣 | 不改；`EntryFlight` golden 門檻不放寬 |
 | 5. 待決定項目 | 依使用者決定：大氣零點、海 | 改（若決定要改） |
 | 6. 文件 | 本頁、aero.md、landing.md、fleet-flight.md、status.md | 無 |
+
+### 進度
+
+| 步驟 | 結果 | 與原計畫的差異 |
+| --- | --- | --- |
+| 1. 重力定律 | `void_orbit::gravity`：`pull`、`add_pull`（累加形式）、`body_pull`、`oblateness`。積分器 `Field::gravity`、orbit-lab 起始圓軌道速度的徑向重力、`PlanetFrame` 的本體與潮汐都改用它。測試：極點與赤道的解析值、等於 J2 位能的負梯度、隨軸旋轉、多天體加總與 lab 寫法逐位元相同 | 見下 |
+
+第 1 步的差異：
+
+- **累加順序是定律的一部分。** 先把每個天體的點質量與 J2 合成一個向量再加總，會讓 orbit lab 的撞擊時間 golden 從 1e-6 s 內變成差 2.8e-5 s。撞擊時間是 1e-4 s 解析度的二分法，golden 能對到 1e-6 s，靠的就是和 lab 同樣的捨入。所以積分器用 `add_pull`：先加點質量、再加 J2，和 lab 逐位元相同。門檻沒有放寬。
+- **multiscale 保留 lab 的算術。** 它的 golden 是逐位元比對；multiscale lab 用 `hypot` 和 r·r·r，orbit lab 用 r²·√r²，同一條定律的兩種捨入無法同時重現。`gravity_in` 註明它是 `pull` 的點質量情形；新測試 `gravity_is_the_shared_law` 確認兩者差在各天體拉力的 4 個 ulp 內。
+- **`PlanetFrame` 的潮汐多了其他天體的 J2。** 主遊戲的 Aurelia（sol，每個天體都有 J2）地表 100 m，四個時刻、四個方向：最多 1.1e-14 m/s²。對照點質量潮汐 1.3e-6 m/s²、地表重力 9.82 m/s²，屬於捨入等級。
 
 不在範圍：
 
