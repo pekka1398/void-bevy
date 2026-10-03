@@ -1,5 +1,6 @@
 //! Optional, engine-free timing collection. Durations are system wall time, not process CPU time
 //! or GPU time. Reports distinguish those quantities and never fabricate GPU statistics.
+pub mod render;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, fs, path::Path, time::Instant};
 

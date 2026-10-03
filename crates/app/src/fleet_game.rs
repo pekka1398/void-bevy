@@ -88,6 +88,9 @@ impl Ground {
     fn finish_builds(&mut self) {
         ground_call!(self, f => f.finish_builds());
     }
+    fn readiness(&self) -> (usize, usize, usize, usize) {
+        ground_call!(self, f => (f.building_count(), f.last_requests, f.drawn_count(), f.lod.cached_mesh_bytes()))
+    }
     fn max_level(&self) -> u32 {
         ground_call!(self, f => f.lod.options.max_level)
     }
@@ -245,11 +248,80 @@ pub fn run(main_game: bool) {
     }
     lab.profile =
         argument("--profile").map(|path| (void_diagnostics::Profiler::new(), path.into()));
+    let benchmark_path = argument("--render-benchmark");
+    let render_path = argument("--render-profile");
+    assert!(
+        benchmark_path.is_none() || render_path.is_none(),
+        "choose --render-benchmark or --render-profile"
+    );
+    assert!(
+        benchmark_path.is_none() || (lab.playback.is_none() && lab.record_path.is_none()),
+        "benchmark cannot record or replay pilot input"
+    );
+    let benchmark = benchmark_path
+        .as_ref()
+        .map(|_| RenderBenchmark::from_arguments());
+    if let Some(config) = &benchmark {
+        lab.paused = true;
+        if argument("--load").is_some() {
+            assert!(
+                argument("--benchmark-scenario").is_none(),
+                "benchmark: saved scene cannot also apply a preset"
+            );
+        } else if config.scenario == "orbit" {
+            let Outcome::Spawned(vessel) = lab.session.execute(Action::LaunchOrbit {
+                craft: lab.craft.clone(),
+                offset: DVec3::ZERO,
+            }) else {
+                panic!("benchmark orbit spawn")
+            };
+            lab.session.execute(Action::Select { vessel });
+        } else if config.scenario == "map" {
+            lab.session.execute(Action::View {
+                command: ViewCommand::Focus {
+                    body: Some(lab.session.sim().home),
+                },
+            });
+        }
+        lab.session.execute(Action::EndFrame {
+            paused: true,
+            rate: 0,
+        });
+        let checkpoint_path =
+            std::path::PathBuf::from(benchmark_path.as_ref().unwrap()).with_extension("world.json");
+        lab.session.save_checkpoint(&checkpoint_path);
+        if lab.profile.is_none() {
+            let path = std::path::PathBuf::from(benchmark_path.as_ref().unwrap())
+                .with_extension("cpu.json");
+            lab.profile = Some((void_diagnostics::Profiler::new(), path));
+        }
+    }
     let mut app = App::new();
-    app.add_plugins((
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: Some(Window {
+    if let Some(path) = benchmark_path.as_ref().or(render_path.as_ref()) {
+        app.insert_resource(crate::render_metrics::RenderMetrics::new(
+            path.into(),
+            benchmark.as_ref().map(|b| b.frames),
+        ));
+    }
+    let mut plugins = DefaultPlugins
+        .set(bevy::log::LogPlugin {
+            custom_layer: crate::render_metrics::error_layer,
+            fmt_layer: crate::render_metrics::quiet_draw_formatter,
+            filter: if benchmark_path.is_some() || render_path.is_some() {
+                format!(
+                    "{},bevy_render::render_phase::draw_state=trace,void_draw_submission=trace",
+                    bevy::log::DEFAULT_FILTER
+                )
+            } else {
+                bevy::log::DEFAULT_FILTER.into()
+            },
+            ..default()
+        })
+        .set(WindowPlugin {
+            primary_window: if benchmark.is_some() {
+                None
+            } else {
+                Some(Window {
                     title: if main_game {
                         "VOID"
                     } else {
@@ -257,46 +329,206 @@ pub fn run(main_game: bool) {
                     }
                     .into(),
                     ..default()
-                }),
+                })
+            },
+            exit_condition: if benchmark.is_some() {
+                bevy::window::ExitCondition::DontExit
+            } else {
+                bevy::window::ExitCondition::OnAllClosed
+            },
+            ..default()
+        })
+        .set(bevy::render::RenderPlugin {
+            render_creation: WgpuSettings {
+                features: WgpuFeatures::POLYGON_MODE_LINE,
                 ..default()
-            })
-            .set(bevy::render::RenderPlugin {
-                render_creation: WgpuSettings {
-                    features: WgpuFeatures::POLYGON_MODE_LINE,
-                    ..default()
-                }
-                .into(),
-                ..default()
-            }),
-        WireframePlugin::default(),
-    ))
-    .insert_resource(ClearColor(if main_game {
-        Color::BLACK
+            }
+            .into(),
+            ..default()
+        });
+    if benchmark.is_some() {
+        plugins = plugins
+            .disable::<bevy::winit::WinitPlugin>()
+            .disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>();
+    }
+    app.add_plugins((plugins, WireframePlugin::default()))
+        .insert_resource(ClearColor(if main_game {
+            Color::BLACK
+        } else {
+            Color::srgb(0.02, 0.025, 0.04)
+        }))
+        .insert_resource(GlobalAmbientLight {
+            brightness: if main_game { 40.0 } else { 100.0 },
+            color: Color::srgb_u8(0xcb, 0xe7, 0xff),
+            ..default()
+        })
+        .insert_non_send(lab)
+        .add_systems(Startup, (setup, setup_scenery).chain())
+        .add_systems(
+            Update,
+            (
+                begin_profile_frame,
+                controls,
+                simulate,
+                refresh_scenery,
+                draw,
+                draw_map,
+                instruments,
+                update_scenery,
+            )
+                .chain(),
+        );
+    if main_game {
+        app.add_plugins(crate::scenery::SceneryPlugin);
+    }
+    if benchmark_path.is_some() || render_path.is_some() {
+        app.add_plugins(crate::render_metrics::RenderMetricsPlugin);
+        if benchmark.is_none() {
+            app.world_mut()
+                .resource_mut::<crate::render_metrics::RenderFrameTag>()
+                .measure = true;
+        }
+    }
+    if let Some(config) = benchmark {
+        app.world_mut().spawn(Window {
+            resolution: bevy::window::WindowResolution::new(config.width, config.height),
+            ..default()
+        });
+        app.insert_resource(config)
+            .add_plugins(bevy::app::ScheduleRunnerPlugin::run_loop(
+                std::time::Duration::from_millis(1),
+            ))
+            .add_systems(
+                PostUpdate,
+                benchmark_tick.after(crate::render_metrics::collect),
+            );
+    }
+    app.run();
+}
+#[derive(Resource)]
+struct RenderBenchmark {
+    width: u32,
+    height: u32,
+    frames: usize,
+    settle: usize,
+    scenario: String,
+    updates: usize,
+    stable: usize,
+    phase: u8,
+    drain: usize,
+    run_updates: usize,
+    timeout: f64,
+}
+impl RenderBenchmark {
+    fn from_arguments() -> Self {
+        let number = |key: &str, default: &str| {
+            argument(key)
+                .unwrap_or(default.into())
+                .parse::<usize>()
+                .expect("benchmark: expected positive integer")
+        };
+        let scenario = argument("--benchmark-scenario").unwrap_or("surface".into());
+        assert!(
+            ["surface", "orbit", "map"].contains(&scenario.as_str()),
+            "benchmark: unknown scenario"
+        );
+        let width = u32::try_from(number("--width", "640")).unwrap();
+        let height = u32::try_from(number("--height", "360")).unwrap();
+        let frames = number("--benchmark-frames", "120");
+        let settle = number("--benchmark-settle", "60");
+        assert!(
+            width > 0 && height > 0 && frames > 0 && settle > 0,
+            "benchmark: zero extent or phase duration"
+        );
+        Self {
+            width,
+            height,
+            frames,
+            settle,
+            scenario,
+            updates: 0,
+            stable: 0,
+            phase: 0,
+            drain: 0,
+            run_updates: 0,
+            timeout: 180.0,
+        }
+    }
+}
+fn benchmark_tick(
+    mut config: ResMut<RenderBenchmark>,
+    mut metrics: ResMut<crate::render_metrics::RenderMetrics>,
+    mut tag: ResMut<crate::render_metrics::RenderFrameTag>,
+    ground: Res<Ground>,
+    mut lab: NonSendMut<Lab>,
+    mut exit: MessageWriter<bevy::app::AppExit>,
+) {
+    assert!(
+        metrics.started.elapsed().as_secs_f64() < config.timeout,
+        "benchmark: renderer did not settle/complete before timeout"
+    );
+    assert!(
+        metrics.errors.lock().unwrap().is_empty(),
+        "benchmark: render errors; inspect the log"
+    );
+    config.updates += 1;
+    if config.phase == 0 {
+        let (building, requests, drawn, bytes) = ground.readiness();
+        let air_ready = !lab.main_game
+            || metrics
+                .last_paths
+                .iter()
+                .any(|p| p.ends_with("void_air/elapsed_cpu"));
+        let ready = building == 0
+            && requests == 0
+            && drawn > 0
+            && metrics.last_pending_pipelines == Some(0)
+            && air_ready
+            && metrics.last_paths.contains("render/ui/elapsed_cpu");
+        config.stable = if ready { config.stable + 1 } else { 0 };
+        if config.updates >= config.settle && config.stable >= 5 {
+            config.phase = 1;
+            tag.measure = true;
+            if let Some((profile, _)) = &mut lab.profile {
+                *profile = void_diagnostics::Profiler::new();
+            }
+            metrics.benchmark = Some(
+                serde_json::json!({"scenario":config.scenario,"renderer":"offscreen Image target; Winit disabled",
+                "main_game_shaders":lab.main_game,"width":config.width,"height":config.height,
+                "settle_updates":config.updates,"stable_ready_updates":config.stable,
+                "drawn_tiles_at_run":drawn,"pending_tiles_at_run":building,"cached_mesh_bytes_at_run":bytes,
+                "requested_delivered_frames":config.frames,
+                "world_checkpoint":std::path::PathBuf::from(argument("--render-benchmark").unwrap()).with_extension("world.json"),
+                "scene_source":if argument("--load").is_some() { "saved checkpoint" } else { "preset" },
+                "model_version":void_fleet_flight::session::MODEL_VERSION}),
+            );
+        }
+    } else if config.phase == 1 {
+        config.run_updates += 1;
+        if metrics.capture.frames() >= config.frames {
+            config.phase = 2;
+            tag.measure = false;
+            if let Some((profile, path)) = lab.profile.take() {
+                profile.write(path);
+            }
+        }
     } else {
-        Color::srgb(0.02, 0.025, 0.04)
-    }))
-    .insert_resource(GlobalAmbientLight {
-        brightness: if main_game { 40.0 } else { 100.0 },
-        color: Color::srgb_u8(0xcb, 0xe7, 0xff),
-        ..default()
-    })
-    .insert_non_send(lab)
-    .add_systems(Startup, (setup, setup_scenery).chain())
-    .add_systems(
-        Update,
-        (
-            begin_profile_frame,
-            controls,
-            simulate,
-            refresh_scenery,
-            draw,
-            draw_map,
-            instruments,
-            update_scenery,
-        )
-            .chain(),
-    )
-    .run();
+        config.drain += 1;
+        if config.drain >= 20 {
+            let report = metrics.benchmark.as_mut().unwrap().as_object_mut().unwrap();
+            report.insert("run_main_updates".into(), config.run_updates.into());
+            report.insert("drain_updates".into(), config.drain.into());
+            metrics.write();
+            println!(
+                "Rendered benchmark: {} delivered frames, {}x{}, {} scenario",
+                metrics.capture.frames(),
+                config.width,
+                config.height,
+                config.scenario
+            );
+            exit.write(bevy::app::AppExit::Success);
+        }
+    }
 }
 fn new_lab(session: FlightSession, craft: Craft) -> Lab {
     let f = &session.sim().fleet;
@@ -337,6 +569,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     window: Single<&Window>,
+    benchmark: Option<Res<RenderBenchmark>>,
 ) {
     let assets = RenderAssets::new(&mut meshes, &mut materials);
     commands.insert_resource(assets);
@@ -354,7 +587,25 @@ fn setup(
         )),
         material,
     ));
-    commands.spawn((Camera3d::default(), Transform::default(), LabCamera));
+    let target = benchmark
+        .as_ref()
+        .map(|b| {
+            let image = Image::new_target_texture(
+                b.width,
+                b.height,
+                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                None,
+            );
+            bevy::camera::RenderTarget::Image(images.add(image).into())
+        })
+        .unwrap_or_default();
+    commands.spawn((
+        Camera3d::default(),
+        target,
+        Transform::default(),
+        bevy::ui::IsDefaultUiCamera,
+        LabCamera,
+    ));
     commands.spawn((
         SceneSun,
         DirectionalLight {
