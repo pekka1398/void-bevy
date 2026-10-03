@@ -5544,6 +5544,7 @@ dependencies = [
  "void-orbit",
  "void-terrain",
  "void-vessels",
+ "void-view",
 ]
 
 [[package]]

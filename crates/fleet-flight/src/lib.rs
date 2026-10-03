@@ -2,6 +2,7 @@
 mod air;
 pub mod checkpoint;
 pub mod plans;
+pub mod presentation;
 pub mod session;
 pub mod warp;
 pub use air::FleetAir;
@@ -15,6 +16,7 @@ use void_landing::{
 use void_vessels::{Fleet, FleetOptions, GroundSpec, VesselControl, VesselMode};
 
 pub struct FleetFlight {
+    pub presentation: presentation::Presentation,
     pub fleet: Fleet,
     pub planet: LandingPlanet,
     pub home: usize,
@@ -50,7 +52,14 @@ impl FleetFlight {
         }
         let selected = fleet.launch_landed(craft, home, site);
         fleet.advance(0.0);
+        let ship = fleet.snapshot(&selected);
+        let presentation = presentation::Presentation::new(
+            ship.position,
+            fleet.ephemeris.body_position(home, fleet.time()),
+            fleet.time(),
+        );
         Self {
+            presentation,
             fleet,
             planet,
             home,

@@ -146,3 +146,14 @@ cargo run -p void-app -- --verify lab-log/recovered.json
 恢復重跑已 Commit 的前綴，檢查所有命令結果與現有 Mark，補上重建狀態的最後 Mark。只允許捨棄未以換行完成的 EOF 尾端，並在 `<output>.recovery.json` 記錄捨棄位元組數、原 stream 是否正常結束、已確認命令數，以及尚未 Commit 的完整命令（若有）。未完成命令不猜測是否成功，也不自動執行；原始 crash stream 保留。中間的 malformed line、序號跳號、未知版本、結果／狀態差异都直接失敗。
 
 headless 驗證包括獨立程序真實觸發控制斷言後留下命令、EOF 撕裂與中間損毀的區分、正常錄製重播、重設／跨世界載入後再存檔，以及實際 main binary 的恢復／驗證入口。相機與純視覺操作仍是 B 的下一個缺口。
+
+
+## 相機與觀察操作的錄放
+
+Fleet journal 現在也包含 `View` 命令：滑鼠拖曳（pixels）、滾輪（統一成 pixels）、語意化的天體／船焦點，以及 F2–F5、K、L、G 的疊圖／讀數／路徑框架切換。main 和 plain lab 的相機模式都保存在 `Presentation`；checkpoint 直接保存這份狀態，world mark 同時核對它。相機跟隨天體自轉在命令執行時更新，`draw` 只讀取相機取樣，不再修改方向或縮放，因此不同繪圖頻率不會改變重播結果。
+
+視窗每一幀都寫 `EndFrame { paused, rate }`，包括完全暫停或失去視窗焦點的幀。重播以它為邊界，能逐幀重現暫停中的縮放與拖曳；純 core journal 若沒有 frame 標記，仍以 `Advance` 作為增量播放邊界。`P` 在重播時控制播放器暫停，live 滑鼠／觀察按鍵不會污染已錄製的相機狀態。點擊標籤記成 resolved body index，避免重播依赖視窗解析度與字型命中測試。
+
+simulation model version 已升到 **4**；先前 model 3 的錄製／checkpoint 明確拒絕載入，不默默補相機狀態。此版五個 core 檢查涵蓋暫停逐幀錄放、checkpoint 接續、改一筆相機輸入必定使 mark 失敗、不同 camera sample 次數不改狀態，以及 plain lab 模式與切船焦點。app 的 renderer-free 檢查另從真實 keyboard/mouse controls 接到暫停幀，再核對 headless 重播與重複繪圖沒有修改 world mark。OS 視窗的視覺驗收由使用者之後補做。
+
+本批驗證：`cargo test --workspace --all-targets -j2` **270 passed、0 failed、3 ignored**；workspace all-target Clippy (`-D warnings`)、`cargo fmt --all -- --check` 與 diff whitespace check 通過。

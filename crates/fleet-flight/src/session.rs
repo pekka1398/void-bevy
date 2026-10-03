@@ -18,7 +18,7 @@ pub mod durable;
 
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 3;
+pub const MODEL_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -78,6 +78,13 @@ impl InitialWorld {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum Action {
+    View {
+        command: crate::presentation::ViewCommand,
+    },
+    EndFrame {
+        paused: bool,
+        rate: usize,
+    },
     ResetWorld {
         initial: Box<InitialWorld>,
     },
@@ -153,9 +160,21 @@ impl Action {
         }
     }
     fn apply(&self, sim: &mut FleetFlight) -> Outcome {
-        match self {
+        let outcome = match self {
+            Self::View { command } => {
+                sim.view_command(command);
+                Outcome::Applied
+            }
+            Self::EndFrame { paused, rate } => {
+                assert!(*rate < 9, "view: invalid frame rate");
+                sim.presentation.paused = *paused;
+                sim.presentation.rate = *rate;
+                Outcome::Applied
+            }
             Self::ResetWorld { initial } => {
+                let main_camera = sim.presentation.main_camera;
                 *sim = initial.build();
+                sim.view_command(&crate::presentation::ViewCommand::Configure { main_camera });
                 Outcome::Applied
             }
             Self::LoadWorld { checkpoint } => {
@@ -164,6 +183,7 @@ impl Action {
             }
             Self::Select { vessel } => {
                 sim.select(vessel);
+                sim.view_command(&crate::presentation::ViewCommand::Focus { body: None });
                 Outcome::Applied
             }
             Self::Control { throttle, turn } => {
@@ -250,7 +270,9 @@ impl Action {
                 sim.update_plans();
                 Outcome::Spawned(id)
             }
-        }
+        };
+        sim.update_presentation();
+        outcome
     }
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -263,6 +285,7 @@ pub struct Entry {
 /// Ordered full-state observations, not a hash of just the focused vessel. Sorted IDs preserve
 /// deterministic output while recording graph edges, fuel, owners, controls and SAS targets.
 pub fn world_mark(sim: &FleetFlight) -> serde_json::Value {
+    sim.presentation.validate(sim);
     use serde_json::json;
     assert!(
         sim.fleet.time().is_finite() && sim.fleet.pending_seconds().is_finite(),
@@ -320,7 +343,7 @@ pub fn world_mark(sim: &FleetFlight) -> serde_json::Value {
         })
         .collect();
     json!({ "time":sim.fleet.time(), "pending":sim.fleet.pending_seconds(),
-        "selected":sim.selected, "maneuverWarp":sim.maneuver_warp, "ships":ships, "scenes":scenes,
+        "selected":sim.selected, "presentation":sim.presentation, "maneuverWarp":sim.maneuver_warp, "ships":ships, "scenes":scenes,
         "connections":connections, "bodies":bodies, "plans":sim.plan_checkpoints() })
 }
 
@@ -597,12 +620,14 @@ impl FlightSession {
     }
 }
 
-/// Incremental playback for a window. A frame ends at its recorded Advance action, never at
-/// the playback machine's wall-clock delta. Non-simulation controls remain the UI's concern.
+/// Incremental playback for a window. UI recordings use explicit EndFrame commands, including
+/// paused frames with no physics. Core-only journals without frame markers step at Advance.
+/// Neither path depends on the playback machine's wall-clock delta.
 pub struct Playback {
     recording: Recording,
     cursor: usize,
     mark_cursor: usize,
+    explicit_frames: bool,
 }
 impl Playback {
     pub fn new(recording: Recording) -> (Self, FlightSession) {
@@ -612,7 +637,12 @@ impl Playback {
         } else {
             FlightSession::new(recording.initial.clone())
         };
+        let explicit_frames = recording
+            .entries
+            .iter()
+            .any(|e| matches!(e.action, Action::EndFrame { .. }));
         let mut playback = Self {
+            explicit_frames,
             recording,
             cursor: 0,
             mark_cursor: 0,
@@ -639,7 +669,11 @@ impl Playback {
     /// Returns false after the final frame. The restored session can then continue normally.
     pub fn next_frame(&mut self, session: &mut FlightSession) -> bool {
         while let Some(entry) = self.recording.entries.get(self.cursor) {
-            let frame_end = matches!(entry.action, Action::Advance { .. });
+            let frame_end = if self.explicit_frames {
+                matches!(entry.action, Action::EndFrame { .. })
+            } else {
+                matches!(entry.action, Action::Advance { .. })
+            };
             assert_eq!(
                 session.execute(entry.action.clone()),
                 entry.outcome,

@@ -21,19 +21,15 @@ use void_landing::{FrameState, PlanetFrame, demo_rocket, landing_lod_options};
 use void_lod::{LodCamera, LodView};
 use void_vessels::nearby_site;
 
+use void_fleet_flight::presentation::{Toggle, ViewCommand};
+
 const RATES: [f64; 9] = crate::flight::TIME_RATES;
 struct Lab {
     main_game: bool,
     pointer_over_label: bool,
-    speed_surface: bool,
-    altitude_agl: bool,
-    camera: void_view::OrbitCamera,
     view: Option<void_view::ViewState>,
-    focus_body: Option<usize>,
-    path_frame: void_view::PathFrameKind,
     eye: DVec3,
     focus_position: DVec3,
-    last_view_time: f64,
     orbits: void_view::MapOrbits,
     path: void_view::MapPath,
     plan_path: void_view::MapPath,
@@ -49,13 +45,6 @@ struct Lab {
     craft: Craft,
     paused: bool,
     rate: usize,
-    yaw: f64,
-    pitch: f64,
-    distance: f64,
-    colliders: bool,
-    bounds: bool,
-    wire: bool,
-    terrain: bool,
     dirty: bool,
     notice: String,
     spawned: u32,
@@ -229,6 +218,17 @@ pub fn run(main_game: bool) {
     let mut lab = new_lab(session, craft);
     lab.main_game = main_game;
     lab.paused = !main_game || argument("--load").is_some();
+    if argument("--load").is_none() && replay_path.is_none() {
+        lab.session.execute(Action::View {
+            command: ViewCommand::Configure {
+                main_camera: main_game,
+            },
+        });
+        lab.session.execute(Action::EndFrame {
+            paused: lab.paused,
+            rate: lab.rate,
+        });
+    }
     if let Some(path) = replay_path {
         let (playback, session) = Playback::new(Recording::read(path));
         lab.session = session;
@@ -300,28 +300,13 @@ pub fn run(main_game: bool) {
 }
 fn new_lab(session: FlightSession, craft: Craft) -> Lab {
     let f = &session.sim().fleet;
-    let ship = f.snapshot(&session.sim().selected);
-    let radial =
-        (ship.position - f.ephemeris.body_position(session.sim().home, f.time())).normalize();
-    let side = if radial.x.hypot(radial.y) > 1e-9 {
-        DVec3::new(-radial.y, radial.x, 0.0).normalize()
-    } else {
-        DVec3::X
-    };
-    let camera = void_view::OrbitCamera::new((side + 0.3 * radial).normalize(), 40.0);
     let orbits = void_view::MapOrbits::new(f.ephemeris.bodies());
     Lab {
         main_game: false,
         pointer_over_label: false,
-        speed_surface: true,
-        altitude_agl: true,
-        camera,
         view: None,
-        focus_body: None,
-        path_frame: void_view::PathFrameKind::Inertial,
         eye: DVec3::ZERO,
         focus_position: DVec3::ZERO,
-        last_view_time: 0.0,
         orbits,
         path: void_view::MapPath::new(),
         plan_path: void_view::MapPath::new(),
@@ -337,13 +322,6 @@ fn new_lab(session: FlightSession, craft: Craft) -> Lab {
         craft,
         paused: true,
         rate: 0,
-        yaw: 0.4,
-        pitch: 0.25,
-        distance: 40.0,
-        colliders: false,
-        bounds: false,
-        wire: false,
-        terrain: true,
         dirty: false,
         notice: String::new(),
         spawned: 0,
@@ -481,7 +459,7 @@ fn instruments(
         up: (ship.position - fleet.ephemeris.body_position(reference, fleet.time())).normalize(),
         pole: frame.body.rotation.axis(),
         prime_meridian: axes[0],
-        velocity: if lab.speed_surface {
+        velocity: if lab.session.sim().presentation.speed_surface {
             q * local.velocity
         } else {
             ship.velocity
@@ -519,9 +497,11 @@ fn controls(
     let lab = &mut *lab;
     let (over_label, clicked) =
         crate::map::label_click(&markers, &buttons, lab.view.map_or(0.0, |s| s.map_weight));
-    if let Some(kind) = clicked {
+    if lab.playback.is_none()
+        && let Some(kind) = clicked
+    {
         let bodies = lab.session.sim().fleet.ephemeris.bodies();
-        lab.focus_body = match kind {
+        let body = match kind {
             void_view::LabelKind::Body(i) => Some(i),
             void_view::LabelKind::Star => Some(
                 bodies
@@ -532,9 +512,9 @@ fn controls(
             ),
             void_view::LabelKind::Vessel | void_view::LabelKind::Apsis => None,
         };
-        lab.camera.distance = lab
-            .focus_body
-            .map_or(40.0, |i| bodies[i].radius_meters * 4.0);
+        lab.session.execute(Action::View {
+            command: ViewCommand::Focus { body },
+        });
     }
     lab.pointer_over_label = over_label;
     if !window.focused {
@@ -553,7 +533,6 @@ fn controls(
         if keys.just_pressed(KeyCode::KeyP) {
             lab.paused = !lab.paused;
         }
-        view_controls(lab, &keys, &buttons, &motion, &scroll);
         return;
     }
     if keys.just_pressed(KeyCode::F6) {
@@ -608,14 +587,14 @@ fn controls(
         && keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
     {
         let bodies = lab.session.sim().fleet.ephemeris.bodies();
-        lab.focus_body = match lab.focus_body {
+        let body = match lab.session.sim().presentation.focus_body {
             None => Some(0),
             Some(i) if i + 1 < bodies.len() => Some(i + 1),
             Some(_) => None,
         };
-        lab.camera.distance = lab
-            .focus_body
-            .map_or(40.0, |i| bodies[i].radius_meters * 4.0);
+        lab.session.execute(Action::View {
+            command: ViewCommand::Focus { body },
+        });
     } else if keys.just_pressed(KeyCode::Tab) {
         let old = lab.session.sim().selected.clone();
         let ids = lab.session.sim().fleet.vessel_ids();
@@ -635,8 +614,6 @@ fn controls(
             vessel: ids[(i + 1) % ids.len()].clone(),
         });
         lab.prediction = None;
-        lab.focus_body = None;
-        lab.camera.distance = 40.0;
     }
     if keys.just_pressed(KeyCode::KeyO) {
         let Outcome::Spawned(id) = lab.session.execute(Action::LaunchOrbit {
@@ -646,9 +623,6 @@ fn controls(
             unreachable!()
         };
         lab.session.execute(Action::Select { vessel: id });
-        lab.distance = 40.0;
-        lab.camera.distance = 40.0;
-        lab.focus_body = None;
     }
     if keys.just_pressed(KeyCode::KeyN) {
         lab.spawned += 1;
@@ -900,57 +874,39 @@ fn view_controls(
     motion: &AccumulatedMouseMotion,
     scroll: &AccumulatedMouseScroll,
 ) {
-    if keys.just_pressed(KeyCode::F2) {
-        lab.wire = !lab.wire;
-    }
-    if keys.just_pressed(KeyCode::F3) {
-        lab.bounds = !lab.bounds;
-    }
-    if keys.just_pressed(KeyCode::F4) {
-        lab.colliders = !lab.colliders;
-    }
-    if keys.just_pressed(KeyCode::F5) {
-        lab.terrain = !lab.terrain;
-    }
-    if lab.main_game {
-        if keys.just_pressed(KeyCode::KeyK) {
-            lab.altitude_agl = !lab.altitude_agl;
+    for (key, setting) in [
+        (KeyCode::F2, Toggle::Wire),
+        (KeyCode::F3, Toggle::Bounds),
+        (KeyCode::F4, Toggle::Colliders),
+        (KeyCode::F5, Toggle::Terrain),
+        (KeyCode::KeyK, Toggle::AltitudeAgl),
+        (KeyCode::KeyL, Toggle::SpeedSurface),
+        (KeyCode::KeyG, Toggle::PathFrame),
+    ] {
+        if keys.just_pressed(key) {
+            lab.session.execute(Action::View {
+                command: ViewCommand::Toggle { setting },
+            });
         }
-        if keys.just_pressed(KeyCode::KeyL) {
-            lab.speed_surface = !lab.speed_surface;
-        }
-        if let Some(state) = lab.view {
-            if buttons.pressed(MouseButton::Left) && !lab.pointer_over_label {
-                lab.camera.drag(
-                    f64::from(motion.delta.x),
-                    f64::from(motion.delta.y),
-                    state.up,
-                );
-            }
-            let pixels = match scroll.unit {
-                bevy::input::mouse::MouseScrollUnit::Line => f64::from(scroll.delta.y) * 40.0,
-                bevy::input::mouse::MouseScrollUnit::Pixel => f64::from(scroll.delta.y),
-            };
-            lab.camera.zoom(
-                (-pixels * 0.002).exp(),
-                state.min_distance,
-                state.max_distance,
-            );
-        }
-        if keys.just_pressed(KeyCode::KeyG) {
-            lab.path_frame = if lab.path_frame == void_view::PathFrameKind::Inertial {
-                void_view::PathFrameKind::Surface
-            } else {
-                void_view::PathFrameKind::Inertial
-            };
-        }
-        return;
     }
-    if buttons.pressed(MouseButton::Left) {
-        lab.yaw -= f64::from(motion.delta.x) * 0.006;
-        lab.pitch = (lab.pitch + f64::from(motion.delta.y) * 0.006).clamp(-1.5, 1.5);
+    if buttons.pressed(MouseButton::Left) && !lab.pointer_over_label && motion.delta != Vec2::ZERO {
+        lab.session.execute(Action::View {
+            command: ViewCommand::Drag {
+                x: f64::from(motion.delta.x),
+                y: f64::from(motion.delta.y),
+            },
+        });
     }
-    lab.distance = (lab.distance * (-f64::from(scroll.delta.y) * 0.12).exp()).clamp(2.0, 2e8);
+    let pixels = f64::from(scroll.delta.y)
+        * match scroll.unit {
+            bevy::input::mouse::MouseScrollUnit::Line => 40.0,
+            bevy::input::mouse::MouseScrollUnit::Pixel => 1.0,
+        };
+    if pixels != 0.0 {
+        lab.session.execute(Action::View {
+            command: ViewCommand::Zoom { pixels },
+        });
+    }
 }
 
 fn begin_profile_frame(time: Res<Time>, mut lab: NonSendMut<Lab>) {
@@ -981,6 +937,12 @@ fn simulate(time: Res<Time>, window: Single<&Window>, mut lab: NonSendMut<Lab>) 
 }
 fn simulate_inner(time: &Time, window: &Window, lab: &mut Lab) {
     if lab.paused || !window.focused {
+        if lab.playback.is_none() {
+            lab.session.execute(Action::EndFrame {
+                paused: lab.paused,
+                rate: lab.rate,
+            });
+        }
         return;
     }
     if let Some(mut playback) = lab.playback.take() {
@@ -1030,9 +992,6 @@ fn simulate_inner(time: &Time, window: &Window, lab: &mut Lab) {
             lab.notice = message.clone();
         }
     }
-    if lab.frames.is_multiple_of(60) {
-        lab.session.mark();
-    }
     match outcome {
         Outcome::Advanced(true) => {}
         Outcome::Advanced(false) => {
@@ -1044,6 +1003,13 @@ fn simulate_inner(time: &Time, window: &Window, lab: &mut Lab) {
             lab.notice = format!("Warp refused: {reason}");
         }
         other => panic!("unexpected advance outcome: {other:?}"),
+    }
+    lab.session.execute(Action::EndFrame {
+        paused: lab.paused,
+        rate: lab.rate,
+    });
+    if lab.frames.is_multiple_of(60) {
+        lab.session.mark();
     }
 }
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -1077,8 +1043,6 @@ fn draw(
         lab.collision.clear();
         lab.orbits = void_view::MapOrbits::new(lab.session.sim().fleet.ephemeris.bodies());
         lab.path = void_view::MapPath::new();
-        lab.focus_body = None;
-        lab.last_view_time = lab.session.sim().fleet.time();
         for entity in &tile_entities {
             commands.entity(entity).despawn();
         }
@@ -1099,98 +1063,29 @@ fn draw(
         },
     );
     let up = state.position.normalize();
-    let east = if up.x.hypot(up.y) > 1e-9 {
-        DVec3::new(-up.y, up.x, 0.0).normalize()
-    } else {
-        DVec3::X
-    };
-    let north = up.cross(east);
-    let direction = east * (lab.yaw.cos() * lab.pitch.cos())
-        + north * (lab.yaw.sin() * lab.pitch.cos())
-        + up * lab.pitch.sin();
-    let eye = if lab.main_game {
-        let mut positions = vec![DVec3::ZERO; f.ephemeris.bodies().len()];
-        f.ephemeris.positions_at(f.time(), &mut positions);
-        let bodies = f.ephemeris.bodies();
-        let reference = lab.focus_body.unwrap_or_else(|| {
-            void_orbit::DominanceTree::new(bodies).dominant(&positions, selected.position)
-        });
-        let body = &bodies[reference];
-        let radius = body.radius_meters;
-        let radial = (selected.position - positions[reference]).normalize();
-        let geometry = void_view::FocusGeometry {
-            kind: if lab.focus_body.is_some() {
-                void_view::FocusKind::Body
-            } else {
-                void_view::FocusKind::Vessel
-            },
-            radial: lab.focus_body.is_none().then_some(radial),
-            north: body.rotation.axis(),
-            reference_radius: radius,
-            altitude: if lab.focus_body.is_none() {
-                (selected.position - positions[reference]).length() - radius
-            } else {
-                0.0
-            },
-            focus_radius: if lab.focus_body.is_some() {
-                radius
-            } else {
-                0.0
-            },
-        };
-        let view = void_view::view_state(
-            void_view::ViewMode::Single,
-            false,
-            &geometry,
-            lab.camera.distance,
-        );
-        lab.camera.distance =
-            lab.camera
-                .clamp_distance(lab.camera.distance, view.min_distance, view.max_distance);
-        let navigation =
-            void_orbit::DominanceTree::new(bodies).dominant(&positions, selected.position);
-        let spin = void_view::camera_spin(&view, lab.path_frame, reference, navigation);
-        let elapsed = f.time() - lab.last_view_time;
-        if elapsed >= 0.0 && spin.1 > 0.0 {
-            lab.camera.corotate(
-                bodies[spin.0].rotation.axis(),
-                bodies[spin.0].rotation.rate() * elapsed * spin.1,
-            );
-        }
-        lab.last_view_time = f.time();
-        lab.camera.clamp_to_up(view.up);
-        lab.focus_position = lab.focus_body.map_or(selected.position, |i| positions[i]);
-        let eye_inertial = lab.focus_position + lab.camera.direction * lab.camera.distance;
-        let eye = frame
+    let sample = lab.session.sim().presentation.sample(lab.session.sim());
+    let local = |position| {
+        frame
             .to_body_fixed(
                 &f.ephemeris,
                 f.time(),
                 FrameState {
-                    position: eye_inertial,
+                    position,
                     velocity: DVec3::ZERO,
                 },
             )
-            .position;
-        let focus = frame
-            .to_body_fixed(
-                &f.ephemeris,
-                f.time(),
-                FrameState {
-                    position: lab.focus_position,
-                    velocity: DVec3::ZERO,
-                },
-            )
-            .position;
-        **camera = Transform::default()
-            .looking_to((focus - eye).as_vec3(), (q.conjugate() * view.up).as_vec3());
-        lab.view = Some(view);
-        lab.distance = lab.camera.distance;
-        eye
-    } else {
-        let eye = state.position + direction * lab.distance;
-        **camera = Transform::default().looking_to((state.position - eye).as_vec3(), up.as_vec3());
-        eye
+            .position
     };
+    let eye = local(sample.eye);
+    let focus = local(sample.focus);
+    let camera_up = if lab.session.sim().presentation.main_camera {
+        q.conjugate() * sample.view.up
+    } else {
+        up
+    };
+    **camera = Transform::default().looking_to((focus - eye).as_vec3(), camera_up.as_vec3());
+    lab.focus_position = sample.focus;
+    lab.view = Some(sample.view);
     lab.eye = eye;
     let snapshots = f
         .vessel_ids()
@@ -1307,16 +1202,16 @@ fn draw(
         distance_scale: 1.0,
         horizon_culling: true,
     });
-    ground.set_wireframe(&mut commands, lab.wire);
+    ground.set_wireframe(&mut commands, lab.session.sim().presentation.wire);
     ground.draw(&mut commands, &mut meshes, &mut tiles, eye);
     for mut v in &mut tile_visibility {
-        *v = if lab.terrain {
+        *v = if lab.session.sim().presentation.terrain {
             Visibility::Inherited
         } else {
             Visibility::Hidden
         };
     }
-    if lab.bounds {
+    if lab.session.sim().presentation.bounds {
         for line in ground.boundaries(eye) {
             gizmos.linestrip(line, Color::srgb(1.0, 0.2, 0.2));
         }
@@ -1327,7 +1222,7 @@ fn draw(
         .map(|t| (t.scene, t.tile.clone()))
         .collect::<HashSet<_>>();
     lab.collision.retain(|key, _| live.contains(key));
-    if lab.colliders {
+    if lab.session.sim().presentation.colliders {
         for collider in f.vessel_collider_meshes() {
             let origin = frame
                 .to_body_fixed(
@@ -1425,12 +1320,13 @@ fn draw(
             velocity: selected.velocity,
         },
     );
-    let altitude = if lab.altitude_agl && navigation == lab.session.sim().home {
-        f.clearance(&lab.session.sim().selected, navigation)
-    } else {
-        r.length() - body.radius_meters
-    };
-    let speed = if lab.speed_surface {
+    let altitude =
+        if lab.session.sim().presentation.altitude_agl && navigation == lab.session.sim().home {
+            f.clearance(&lab.session.sim().selected, navigation)
+        } else {
+            r.length() - body.radius_meters
+        };
+    let speed = if lab.session.sim().presentation.speed_surface {
         surface.velocity.length()
     } else {
         v.length()
@@ -1450,16 +1346,28 @@ fn draw(
         selected.name,
         lab.session.sim().selected,
         selected.mode,
-        if lab.paused { "paused" } else { "running" },
-        RATES[lab.rate],
+        if if lab.playback.is_some() {
+            lab.session.sim().presentation.paused
+        } else {
+            lab.paused
+        } {
+            "paused"
+        } else {
+            "running"
+        },
+        RATES[if lab.playback.is_some() {
+            lab.session.sim().presentation.rate
+        } else {
+            lab.rate
+        }],
         f.time(),
-        if lab.altitude_agl && navigation == lab.session.sim().home {
+        if lab.session.sim().presentation.altitude_agl && navigation == lab.session.sim().home {
             "AGL"
         } else {
             "ALT"
         },
         altitude,
-        if lab.speed_surface {
+        if lab.session.sim().presentation.speed_surface {
             "surface"
         } else {
             "orbit"
@@ -1491,6 +1399,11 @@ mod tests {
         let sim = FlightSession::new(InitialWorld::new(&planet.planet, &craft, site, false));
         let mut lab = new_lab(sim, craft);
         lab.main_game = main_game;
+        lab.session.execute(Action::View {
+            command: ViewCommand::Configure {
+                main_camera: main_game,
+            },
+        });
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
             .insert_resource(Assets::<Mesh>::default())
@@ -1511,10 +1424,26 @@ mod tests {
         app.update();
         {
             let mut lab = app.world_mut().non_send_mut::<Lab>();
-            lab.colliders = true;
-            lab.bounds = true;
-            lab.wire = true;
-            lab.terrain = false;
+            lab.session.execute(Action::View {
+                command: ViewCommand::Toggle {
+                    setting: Toggle::Colliders,
+                },
+            });
+            lab.session.execute(Action::View {
+                command: ViewCommand::Toggle {
+                    setting: Toggle::Bounds,
+                },
+            });
+            lab.session.execute(Action::View {
+                command: ViewCommand::Toggle {
+                    setting: Toggle::Wire,
+                },
+            });
+            lab.session.execute(Action::View {
+                command: ViewCommand::Toggle {
+                    setting: Toggle::Terrain,
+                },
+            });
         }
         app.update();
         let lab = app.world().non_send::<Lab>();
@@ -1522,6 +1451,81 @@ mod tests {
         assert!(!lab.collision.is_empty());
         app
     }
+    #[test]
+    fn paused_window_inputs_replay_camera_and_rendering_does_not_change_marks() {
+        let mut app = initialized_scene(true);
+        let initial_direction = app
+            .world()
+            .non_send::<Lab>()
+            .session
+            .sim()
+            .presentation
+            .direction;
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(AccumulatedMouseMotion {
+                delta: Vec2::new(14.0, -8.0),
+            })
+            .insert_resource(AccumulatedMouseScroll {
+                unit: bevy::input::mouse::MouseScrollUnit::Line,
+                delta: Vec2::new(0.0, -2.0),
+            })
+            .add_systems(Update, (controls, simulate).chain().before(draw));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyL);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.update();
+        let expected = {
+            let mut lab = app.world_mut().non_send_mut::<Lab>();
+            assert_ne!(lab.session.sim().presentation.direction, initial_direction);
+            assert!(!lab.session.sim().presentation.speed_surface);
+            assert_eq!(lab.session.sim().fleet.time(), 0.0);
+            let recording = lab.session.recording();
+            assert!(matches!(
+                recording.entries.last().unwrap().action,
+                Action::EndFrame { paused: true, .. }
+            ));
+            let replay = FlightSession::from_recording(recording);
+            let expected = void_fleet_flight::session::world_mark(lab.session.sim());
+            assert_eq!(
+                void_fleet_flight::session::world_mark(replay.sim()),
+                expected
+            );
+            expected
+        };
+        // Disable input/physics systems for repeated presentation-only updates by loading the
+        // completed recording into playback and pausing its host. No OS window is involved.
+        {
+            let mut lab = app.world_mut().non_send_mut::<Lab>();
+            let recording = lab.session.recording();
+            let (playback, _) = Playback::new(recording);
+            lab.playback = Some(playback);
+            lab.paused = true;
+        }
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::ZERO;
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseScroll>()
+            .delta = Vec2::ZERO;
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(
+            void_fleet_flight::session::world_mark(app.world().non_send::<Lab>().session.sim()),
+            expected
+        );
+    }
+
     #[test]
     fn integration_scene_initializes_and_draws_without_a_window_or_renderer() {
         let _ = initialized_scene(false);
@@ -2053,7 +2057,7 @@ fn draw_map(
         vessel: ship.position,
         vessel_velocity: ship.velocity,
         plotting: void_view::PlottingFrame {
-            kind: lab.path_frame,
+            kind: lab.session.sim().presentation.path_frame(),
             reference,
         },
         // Simulation time makes refresh cadence independent of replay rendering speed.
@@ -2117,7 +2121,7 @@ fn draw_map(
     let wanted = void_view::map_labels(
         bodies,
         &frame,
-        lab.focus_body,
+        lab.session.sim().presentation.focus_body,
         &lab.path.apsis_positions(&frame),
     );
     let (camera, transform) = *camera;
