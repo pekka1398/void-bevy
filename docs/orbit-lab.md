@@ -26,4 +26,4 @@ cargo run -p void-orbit-lab -- --system binary
 
 對照資料由 `golden/reference_frames.ts` 與 `golden/orbit_scene.ts` 產生；重產需舊 TS 專案與 Node 依賴，Rust tests 直接使用已存 JSON。SceneView 對照使用 headless DOM 標記 stub，不開 GUI。
 
-Bevy 場景使用簡單球體與方向光；這是力學觀察場景，沒有搬入 scenery。光照不是 TS point-light 的逐像素複製。面板與字型、滑鼠選取／拖曳、視覺外觀仍由使用者執行視窗驗收；本次沒有開啟或操作 GUI。
+Bevy 場景使用簡單球體與方向光；這是力學觀察場景，沒有搬入 scenery。光照不是 TS point-light 的逐像素複製。面板與字型、滑鼠選取／拖曳、視覺外觀由使用者在本機執行視窗驗收；agent 實作時沒有開啟或操作 GUI。

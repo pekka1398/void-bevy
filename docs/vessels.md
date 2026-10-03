@@ -1,6 +1,6 @@
 # vessels：多船、交會與物理交接
 
-`void-vessels` 移植 `lab/vessels` 的 Fleet；不依賴 Bevy。`void-vessels-lab` 是獨立 Bevy 驗收程式，不接入 `void-app`，也不依賴 aero。主遊戲原本的 `PartJointRocket` 尚未替換。
+`void-vessels` 移植 `lab/vessels` 的 Fleet；不依賴 Bevy。主遊戲 `void-app` 已經透過 `void-fleet-flight` 改用 Fleet，原本的 `PartJointRocket` 只留在 `legacy_flight` example。為此 Fleet 新增了可選的 `FleetEnvironment`（空氣）、逐船機動導引、直接 checkpoint，介面與驗證見 [fleet-flight.md](fleet-flight.md)。`void-vessels-lab` 仍是保留原 lab 六個場景的獨立 Bevy 驗收程式，不依賴 aero。
 
 ```sh
 cd void-bevy
@@ -61,4 +61,4 @@ python3 tools/regenerate-golden.py --reference-root ../void vessels
 
 `tests/fleet.rs` 另有：五個 owning TS 場景的姿態／位置／速度／零件對照、600 s bubble 滑行與獨立軌道比較、交會進出事件、旋轉分離動量及零件保留、接觸後合併動量與姿態、兩擁有者的燃燒、耗盡與分級、共用供油群、SAS、rails、地面睡眠及一日不漂移、地面→軌道→地面跳躍、rails 高度帶攔截、耗油後 live 重心／接點。另有 Bevy 系統存取、生成／切船／分級／重設及 debug join 檢查。
 
-保留 TS 的範圍：沒有船撞擊毀損、gimbal、SAS 順行等模式或規劃姿態律；高速交會氣泡在存在期間不重新錨定速度。主遊戲整合與真正 docking 留到各自工作。
+保留 TS 的範圍：沒有船撞擊毀損、gimbal、SAS 順行等模式；高速交會氣泡在存在期間不重新錨定速度。逐船機動的理想軌道導引是主遊戲整合時新增的，見 [fleet-flight.md](fleet-flight.md)。主遊戲整合已完成；真正 docking／RCS 尚未進入 master。

@@ -37,7 +37,7 @@ cargo build --workspace --bins --examples
 
 所有 local path dependency 都位於本 workspace，Cargo.lock、系統 preset、模型資料、WGSL、golden JSON／bin 一併保留。Bevy／Rapier 用 crates.io，日常編譯與測試不用舊 TS 或 Node。沿用既有編譯快取的搬遷驗證不代表全新環境從零下載測試。視窗驗收由使用者進行。
 
-移植現況與剩餘缺口見 `port-audit.md`；獨立專案不代表所有 TS lab 觀察工具均已搬齊，也不要求把原本獨立的 labs 先整合進主遊戲。
+搬遷時的移植盤點與當時缺口見 `port-audit.md`，目前狀態見 `status.md`；獨立專案不代表所有 TS lab 觀察工具均已搬齊，也不要求把原本獨立的 labs 先整合進主遊戲。
 
 ## 重產 TS golden
 

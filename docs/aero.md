@@ -1,6 +1,6 @@
 # aero：空氣動力、加熱與再入
 
-`crates/aero`（`void-aero`）移植 `lab/aerodynamics` 的物理，不依賴 Bevy。TS 主遊戲沒有用到這個 lab；這裡也還沒接進 `void-app`。
+`crates/aero`（`void-aero`）移植 `lab/aerodynamics` 的物理，不依賴 Bevy。TS 主遊戲沒有用到這個 lab。Rust 主遊戲則用了其中一部分：`void-fleet-flight` 的 `FleetAir` 以這裡的 `Atmosphere` 與 `aerodynamic_forces` 求各零件阻力並計算噴嘴氣壓，`legacy_flight` example 的 `aero_field.rs` 也用它。主遊戲只施加力（force-only），氣動力矩、熱、燒蝕與翼面仍只在 `void-aero-lab`。見 [fleet-flight.md](fleet-flight.md)。
 
 | TS | Rust |
 | --- | --- |
@@ -49,7 +49,7 @@
 
 ## 頁面 `void-aero-lab`
 
-`cargo run -p void-aero-lab`：lab 的三個場景。和 `void-assembly-lab` 一樣是獨立的程式：`void-aero` 讀 assembly 的火箭，而 `void-app` 不依賴 assembly。lab 的表單換成左側的設定清單，資料面板是純文字，圖表與 lab 的 `Plots.ts` 相同（各軸有單位、範圍含零、不平滑）。
+`cargo run -p void-aero-lab`：lab 的三個場景。和 `void-assembly-lab` 一樣是獨立的程式：`void-aero` 讀 assembly 的火箭。lab 的表單換成左側的設定清單，資料面板是純文字，圖表與 lab 的 `Plots.ts` 相同（各軸有單位、範圍含零、不平滑）。
 
 - 1 風洞、2 飛機、3 再入。Up/Down 選設定，Left/Right 調整（按住會連續，超過一秒每次十步）。標 `*` 的設定（飛行器、空油箱、起始場景、物理大氣）改了會重新載入，和 lab 相同；再入的初始條件按 R 才套用。
 - R 重新載入、Space 暫停、F 置中視角；左鍵拖曳環繞、滾輪縮放。

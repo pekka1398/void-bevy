@@ -11,11 +11,11 @@ cargo test                 # 全部 crate 的檢查
 
 Bevy 固定在 0.19.1（需要 Rust 1.95 以上），編譯使用 crates.io。API 可查 Cargo registry 的同版原始碼；舊專案的 `vendor/bevy`／`vendor/rapier` 僅是參考，不是此 workspace 的編譯依賴。
 
-開發規則見 [AGENTS.md](AGENTS.md)，原筆記保留於 [NOTE.md](NOTE.md)。來源歷史、搬遷與 golden 重產方式見 [docs/migration.md](docs/migration.md)。
+**目前做到哪裡、還缺什麼見 [docs/status.md](docs/status.md)。** 開發規則見 [AGENTS.md](AGENTS.md)，原筆記保留於 [NOTE.md](NOTE.md)。來源歷史、搬遷與 golden 重產方式見 [docs/migration.md](docs/migration.md)。
 
 ## crate
 
-- `app`（`void-app`）：Bevy 遊戲本體。`cargo run -p void-app` 是主遊戲（TS 主遊戲 `src/main.ts` 的移植），分步進行，見 [docs/game.md](docs/game.md)。各 lab 的視覺驗收是它的 example（`crates/app/examples/`），用 `cargo run -p void-app --example NAME` 執行。
+- `app`（`void-app`）：Bevy 遊戲本體。`cargo run -p void-app` 是主遊戲：assembly 船在 Fleet runtime（`src/fleet_game.rs`，與 `void-fleet-flight-lab` 共用）上飛行，含存讀檔、錄放、機動計畫與量測，見 [docs/fleet-flight.md](docs/fleet-flight.md)。原本移植自 TS `src/main.ts` 的 PartJointRocket 主遊戲保留為 `cargo run -p void-app --example legacy_flight`，見 [docs/game.md](docs/game.md)。各 lab 的視覺驗收是它的 example（`crates/app/examples/`），用 `cargo run -p void-app --example NAME` 執行。
 - `frames`（`void-frames`）：樹狀座標系，不依賴 Bevy。設計與檢查結果見 [docs/frames.md](docs/frames.md)；對照資料由 `golden/frames.ts` 從 orbit lab 產生。
 - `orbit`（`void-orbit`）：整個 orbit lab 的力學：Kepler、`buildSystem`、N 體星曆（Yoshida 8 階、Kahan、quintic Hermite，實作 `frames` 的 `BodyStates`）、船的傳播器（Dopri5、J2、推力、撞擊）、拱點、dominance、飛行計畫。見 [docs/orbit.md](docs/orbit.md)。
 - `lod`（`void-lod`）：LOD lab 的立方體球四分樹：tile key 與相鄰、tile mesh、接縫縫合、選擇（含水平線剔除、相機像素限制、鄰居平衡、淘汰），以及 lab 自己的地形 `DemoTerrain`（`presets/planets.json` 的參數）。與 lab 逐位元相同，見 [docs/lod.md](docs/lod.md)。
@@ -27,9 +27,9 @@ Bevy 固定在 0.19.1（需要 Rust 1.95 以上），編譯使用 crates.io。AP
 - `navball`（`void-navball`）：navball lab 的姿態球幾何與繪圖（RGBA 緩衝區），見 [docs/navball.md](docs/navball.md)。
 - `view`（`void-view`）：view lab 的相機規則（地圖淡入、up 轉向、co-rotation、single／split）、密切軌道、繪圖座標系與地圖狀態，見 [docs/view.md](docs/view.md)。`void-orbit` 另有 orbit lab 的 `Simulation`。
 - `math`（`void-math`）：和 V8 一致的 `hypot` 與 fdlibm 函數，供各 crate 共用。
-- `assembly`（`void-assembly`）：零件、堆疊接點、供油、分級、JSON 存檔與平地 Rapier 試飛。Bevy 編輯器在獨立的 `assembly-lab`（`void-assembly-lab`），用 `cargo run -p void-assembly-lab` 開啟；開發期間不讓 `void-app` 依賴 assembly。見 [docs/assembly.md](docs/assembly.md)。
-- `aero`（`void-aero`）：aerodynamics lab 的大氣、機身與翼面氣動力、零件加熱與燒蝕、三種試驗飛行器、Rapier 飛機與防熱艙再入。頁面在獨立的 `aero-lab`（`void-aero-lab`），用 `cargo run -p void-aero-lab` 開啟。見 [docs/aero.md](docs/aero.md)。
-- `vessels`（`void-vessels`）：多船、軌道／交會氣泡／地面接觸交接、推力、分離與合併、SAS 和時間加速。獨立驗收程式 `cargo run -p void-vessels-lab`，六個場景；不接入 `void-app`。見 [docs/vessels.md](docs/vessels.md)。
+- `assembly`（`void-assembly`）：零件、堆疊接點、供油、分級、JSON 存檔與平地 Rapier 試飛。Bevy 編輯器在獨立的 `assembly-lab`（`void-assembly-lab`），用 `cargo run -p void-assembly-lab` 開啟。主遊戲讀取 assembly craft，預設船是 `crates/assembly/data/flight-rocket.json`。見 [docs/assembly.md](docs/assembly.md)。
+- `aero`（`void-aero`）：aerodynamics lab 的大氣、機身與翼面氣動力、零件加熱與燒蝕、三種試驗飛行器、Rapier 飛機與防熱艙再入。頁面在獨立的 `aero-lab`（`void-aero-lab`），用 `cargo run -p void-aero-lab` 開啟。主遊戲只用到它的大氣與零件阻力（force-only），熱、燒蝕、翼面與氣動力矩仍只在 lab。見 [docs/aero.md](docs/aero.md)。
+- `vessels`（`void-vessels`）：多船、軌道／交會氣泡／地面接觸交接、推力、分離與合併、SAS 和時間加速。主遊戲的多船物理就是它；原 lab 的六個場景另有獨立程式 `cargo run -p void-vessels-lab`。見 [docs/vessels.md](docs/vessels.md)。
 - `multiscale`（`void-multiscale`）：multiscale lab 的 split 座標（整數格加 float64）、多恆星系耦合 N 體世界、隨系統質心的座標系與光年航行探針，與 lab 逐位元相同。頁面是 example `multiscale`（`cargo run -p void-app --example multiscale`）；兩船相撞場景是獨立的 `void-multiscale-lab`。見 [docs/multiscale.md](docs/multiscale.md)。
 - `void-multiscale-lab`：遠方恆星系的雙船碰撞與合併，`cargo run -p void-multiscale-lab`；使用共用 world 的 FrameEphemeris 與 vessels Fleet，見 [docs/multiscale.md](docs/multiscale.md)。
 - example `lod`：LOD 四分樹，預設在分層地形上（`-- --terrain lod` 是 LOD lab 自己的大陸，`-- --terrain sphere` 是依層級著色的光滑球）。操作照 lab/lod：左鍵拖曳平移、右鍵拖曳繞行星中心、Shift+左鍵轉視角、滾輪縮放；P 把相機移到探測器上方，方向鍵／PageUp／PageDown 移動探測器，`,` `.` 調整探測器的最小格像素（0 為關閉），V、H、B 切換相機 LOD、地平線剔除、線框。
@@ -54,6 +54,9 @@ Bevy 固定在 0.19.1（需要 Rust 1.95 以上），編譯使用 crates.io。AP
 日常編譯與測試不需舊 TS。對照資料要重新產生時，從此 repo 根目錄執行 `python3 tools/regenerate-golden.py --reference-root ../void <name>`（舊參考需已安裝 Node 依賴）；詳見 [搬遷說明](docs/migration.md)。serde_json 開了 `float_roundtrip`：預設的解析器可能差一個 ulp，golden 檢查看得出來。
 
 - `void-orbit-lab`：Sol／binary、四種繪圖框架、歷史／預測／機動計畫／目標路徑，以及燃燒編輯與自動執行。`cargo run -p void-orbit-lab`，操作見 [docs/orbit-lab.md](docs/orbit-lab.md)。
-- 詳細移植盤點與尚存缺口見 [docs/port-audit.md](docs/port-audit.md)。
+- 搬遷時的移植盤點（歷史紀錄）見 [docs/port-audit.md](docs/port-audit.md)；目前狀態見 [docs/status.md](docs/status.md)。
 
-- `void-fleet-flight`／`void-fleet-flight-lab`：assembly 船在主遊戲行星／地形上，以 Fleet 執行空氣、分級、多船、SAS、warp 與滑行預測的第一輪獨立整合；`cargo run -p void-fleet-flight-lab`，調查結果與尚缺介面見 [docs/fleet-flight.md](docs/fleet-flight.md)。尚未替換主遊戲。
+- `void-fleet-flight`／`void-fleet-flight-lab`：主遊戲的飛行核心：assembly 船在行星／地形上以 Fleet 執行空氣、分級、多船、SAS、warp、滑行預測、逐船機動、直接存讀檔與 journal 錄放。主遊戲與 `cargo run -p void-fleet-flight-lab` 共用同一 runtime，lab 使用簡化地形材質。見 [docs/fleet-flight.md](docs/fleet-flight.md)。
+- `diagnostics`（`void-diagnostics`）：CPU 系統 wall time 量測（p50／p95、traceEvents）與 GPU RenderDiagnostics 報告；主遊戲的 `--profile`、F9、`--render-profile`、`--render-benchmark` 使用它。見 [docs/fleet-flight.md](docs/fleet-flight.md)。
+- `seam-check`（`void-seam-check`）：跨系統接縫的 headless 案例掃描（Fleet 分離／合併、owner 交接、frame、星系交接），失敗案例存檔可重跑。`cargo run -p void-seam-check -- --count 200 --seed 24301`，見 [docs/seam-check.md](docs/seam-check.md)。
+- example `legacy_flight`：搬遷時的 PartJointRocket 主遊戲，保留作為回歸場景，見 [docs/game.md](docs/game.md)。

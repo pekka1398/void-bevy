@@ -1,6 +1,6 @@
 # assembly：零件組裝與本地試飛
 
-`crates/assembly`（`void-assembly`）移植 TS `lab/assembly` 的資料模型與試飛物理，不依賴 Bevy。獨立的 `crates/assembly-lab`（`void-assembly-lab`）提供 Bevy 編輯器與試飛畫面，不依賴 `void-app`，`void-app` 也不依賴 assembly。
+`crates/assembly`（`void-assembly`）移植 TS `lab/assembly` 的資料模型與試飛物理，不依賴 Bevy。獨立的 `crates/assembly-lab`（`void-assembly-lab`）提供 Bevy 編輯器與試飛畫面，不依賴 `void-app`。主遊戲 `void-app` 依賴 assembly：船是 assembly craft（預設 `data/flight-rocket.json`，可用 `--craft` 指定匯出的 JSON），零件外觀共用 `void-assembly-lab` 的 `RenderAssets`，見 [fleet-flight.md](fleet-flight.md)。
 
 從新 workspace 根目錄執行：
 
@@ -54,7 +54,9 @@ Launch 使用當下的自訂組裝建立 Rapier compound bodies，不是另一�
 
 `crossfeed_tanks(&[CrossfeedPart { id, definition }], &connections, engine_id)` 是獨立供油查詢 API，不需要 `Craft` 或 `CompiledCraft`，可處理任意連接圖（包含環路）。只穿過兩端都允許 crossfeed 的連接，回傳燃料箱 ID，順序沿用輸入零件順序；外部零件的連接會略過，呼叫端在分離後傳入仍有效的連接。重複 ID 或無效引擎會 panic。`CompiledCraft::fuel_sources()` 過濾已切斷連接後共用此 API。獨立圖測試涵蓋環路、阻斷、外部端點、分離與無效輸入。
 
-六種零件的 authored data 直接從 TS catalog 匯出到 `data/catalog.json`。對照資料由 `golden/assembly.ts` 產生，沒有在 Rust 手抄一份不同的火箭參數。
+原本的六種零件（pod、tank-small／large、engine-small／large、decoupler）的 authored data 直接從 TS catalog 匯出到 `data/catalog.json`。對照資料由 `golden/assembly.ts` 產生，沒有在 Rust 手抄一份不同的火箭參數。
+
+主遊戲整合時在同一 catalog 新增 11 個 `flight-*` 零件（指令艙、上級箱／引擎、分離器、助推箱／引擎、斜撐、四個腳墊），組成主遊戲預設船 `data/flight-rocket.json`（7620 kg、理想 Δv 9.6 km/s，共 14 個零件）。原六種零件的數值與 golden fixture 不變；catalog 改變後，舊 catalog 的存檔／錄影會被明確拒絕。詳見 [fleet-flight.md](fleet-flight.md)。
 
 ```sh
 # repo 根目錄
@@ -66,4 +68,4 @@ python3 tools/regenerate-golden.py --reference-root ../void assembly_visuals
 
 原 assembly lab 的範圍維持不變：堆疊接點與單一推進劑，質心在零件原點，慣量用外接圓柱近似；尚無表面接合、對稱、自由位移、結構彎曲／破壞或完整供油優先序。非預期狀態 panic；使用者的資料與操作錯誤顯示原因。
 
-程式測試與建置通過，Bevy 畫面與操作待使用者驗收。建議先驗收範例的分級，再從 New 自己組一艘船、匯出／匯入並試飛；另外比較反向接合、空燃料與 unset 級數。
+程式測試與建置通過，Bevy 畫面與操作由使用者在本機驗收。驗收時建議先看範例的分級，再從 New 自己組一艘船、匯出／匯入並試飛；另外比較反向接合、空燃料與 unset 級數。

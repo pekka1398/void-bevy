@@ -3,12 +3,12 @@
 目前 `void-app` 已改用 assembly／Fleet 的共享 runtime，控制、存檔、錄放與量測入口見 [fleet-flight.md](fleet-flight.md)。本頁下方原 PartJointRocket 的移植對照、火箭參數和舊錄放格式保留為歷史及 `cargo run -p void-app --example legacy_flight` 的說明；不是新主程式的格式。逐船機動執行已接回；撞擊毀損是舊 main 未啟用的後續功能。A／B 完成核對見 [ab-progress.md](ab-progress.md)。
 
 
-`cargo run -p void-app` 是 VOID 本體，移植 TS 主遊戲（repo 根目錄的 `src/main.ts`，lab/flight 跑的就是它）。各功能 crate 已各自對照過 lab，這裡只負責接線。
+以下說明的程式在搬遷時是 `cargo run -p void-app`，現在是 `legacy_flight` example：移植 TS 主遊戲（repo 根目錄的 `src/main.ts`，lab/flight 跑的就是它）。各功能 crate 已各自對照過 lab，這裡只負責接線。
 
 ```sh
-cargo run -p void-app                                   # Aurelia（Sol 系統）、分層地形
-cargo run -p void-app -- --planet terra --terrain hills # 其他行星與地形
-cargo test -p void-app --test flight                    # lab/flight 的接線檢查
+cargo run -p void-app --example legacy_flight                                   # Aurelia（Sol 系統）、分層地形
+cargo run -p void-app --example legacy_flight -- --planet terra --terrain hills # 其他行星與地形
+cargo test -p void-app --test flight                                            # lab/flight 的接線檢查（PartJointRocket）
 ```
 
 ## 分步
@@ -66,8 +66,8 @@ lab/flight 的 `flight-check.ts`，門檻相同：
 
 飛行推進集中到 `step(&mut Game, &Input)`：使用相同初始狀態與輸入重播，飛行結果由 mark 檢查。相機拖曳、縮放與焦點切換也使用同一份輸入，在 step 中處理。視窗用鍵盤餵它，錄影檔用當時的鍵盤記錄餵它 —— 這就是兩者會一致的原因。`Game` 的建構也抽成 `new_game(planet, terrain)`，不碰任何 Bevy 資產，所以 headless 測試能直接建一個遊戲。
 
-- `cargo run -p void-app -- --record <檔案>` 一邊飛一邊寫
-- `cargo run -p void-app -- --replay <檔案>` 把它飛回來，放完自動結束。星球與地形由檔案的 header 決定，`--planet` 不會覆蓋它 —— 同樣的輸入在另一顆星球上是另一次飛行
+- `cargo run -p void-app --example legacy_flight -- --record <檔案>` 一邊飛一邊寫
+- `cargo run -p void-app --example legacy_flight -- --replay <檔案>` 把它飛回來，放完自動結束。星球與地形由檔案的 header 決定，`--planet` 不會覆蓋它 —— 同樣的輸入在另一顆星球上是另一次飛行
 - 兩個旗標不能同時給：那等於錄一份加了視窗時序雜訊的副本
 
 格式是每行一個 JSON 物件（跟 lab session log 一樣，可以用手讀和改）：一行 header、每格一行 frame、每約 60 格一行 mark。
@@ -77,7 +77,7 @@ lab/flight 的 `flight-check.ts`，門檻相同：
 - **重現**：frame。足以把遊戲放回出問題的情境去看。光有錄影就只有這個 —— 重播一次 bug 再發生一次，然後沒有任何東西說話。
 - **回歸**：mark。錄的時候每約 60 格寫一次狀態摘要（上級在行星固定框架中的位置、速度、質量、級數），重播時逐一比對。這才是讓一次飛行變成會自己失敗的檢查。
 
-`crates/app/src/main.rs` 的測試兩件都驗：
+`crates/app/examples/legacy_flight.rs` 的測試兩件都驗（原在舊 `main.rs`）：
 
 | 測試 | 內容 |
 | --- | --- |
