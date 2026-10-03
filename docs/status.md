@@ -40,6 +40,7 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 
 - **座標樹統一**（branch `claude/adoring-darwin-qogeug`，尚未合入 master）：所有座標都走同一棵 `void-frames` 樹，從銀河、恆星系、天體、地面場景到船與相機；主遊戲的零件、碰撞線與 tile 直接從自己的座標系轉到相機，不再繞經 1 AU 的質心系。八步都完成，workspace 測試 296 passed、0 failed、4 ignored，clippy 無警告。主遊戲與 multiscale example／lab 的畫面需要視窗驗收。見 [frame-tree.md](frame-tree.md)、[frames.md](frames.md)。
 - **環境介面**（branch `claude/environment-interface`，從座標樹 branch 開出，尚未合入）：重力只剩一條定律（`void_orbit::gravity`）；新 crate `void-environment`（大氣模型從 aero 搬來）在樹上任一座標系查重力、大氣、地形、海。Fleet 收世界的 `Environment`，零件施力（`PartForces`，原 `FleetEnvironment`）、舊火箭與再入 lab 的空氣都經它取樣，積分器裡不再線性外推天體中心。六步都完成，workspace 測試 309 passed、0 failed、4 ignored，clippy 無警告。依使用者決定，有海的地形（layered）大氣從海平面起算，畫面的散射大氣底跟著移；發射台的空氣從 60% 變成海平面的量，主遊戲火箭垂直熄火 1623 → 1005 m/s（`MODEL_VERSION` 6）。海平面與深度已在環境裡，水的物理之後做。順帶修正舊火箭在發射台一直用真空推力的錯誤。合入前照例需要視窗驗收（包括能否手動入軌）。見 [environment.md](environment.md)。
+- **零件圖**（branch `claude/part-graph`，從環境介面 branch 開出，尚未合入）：零件圖（`void_assembly::PartGraph`）是 Fleet 唯一的零件紀錄，燃料、分級、點火、pose 都在零件上，船是它的一個連通分量加上物理擁有者；分離、對接是零件圖的操作。每個零件是座標樹上的節點，接點位置與對接捕獲經樹；噴嘴出口面積進 catalog。物理逐位元相同（前後 probe 對照），只有回報的零件慣性位置差一個 ulp。五步都完成，workspace 測試 316 passed、0 failed、4 ignored，clippy 無警告。存檔格式改變（`MODEL_VERSION` 7）。零件模組、舊表示法退場與每個零件一個剛體在後面，另行決定。見 [part-graph.md](part-graph.md)。
 - **RCS／對接**：噴嘴分配、捕獲判定、接點吸附、解除對接、單推進劑與 RCS 零件，以及對接 lab 場景，尚未合入 master。合入前需要視窗驗收。
 
 ## 對照 NOTE.md 的願望清單

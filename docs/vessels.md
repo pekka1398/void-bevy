@@ -11,7 +11,7 @@ cargo test -p void-vessels -p void-vessels-lab
 
 ## 所有權與 API
 
-`Fleet` 擁有全部零件和連接。船是連通群；分離移除一條邊，合併新增一條邊。每艘船的 `Owner` 只允許一種推進方式：
+`Fleet` 的零件圖（`void_assembly::PartGraph`，[part-graph.md](part-graph.md)）是零件與連接唯一的紀錄：燃料、分級、點火、在船上的 pose 都存在零件上。船是零件圖的一個連通分量，只記成員順序（質量、慣量、推力照這個順序加總）和物理擁有者；分離移除一條邊，合併新增一條邊，分船、合船時重新以質心為原點，改的是成員的 pose。每個零件是座標樹上的節點，掛在所屬船的零件座標系下，運動就是它的 pose；分離、對接時節點換到新船之下。每艘船的 `Owner` 只允許一種推進方式：
 
 - Orbit：`void-orbit::VesselPropagator` 推進 float64 質心，`void-rotation` 推進姿態。
 - Bubble：附近船在一個 `void-landing::ContactWorld` 裡碰撞；原點由 `FreeFallFrame` 沿自由落體軌道移動，船只承受重力差。
@@ -23,12 +23,13 @@ cargo test -p void-vessels -p void-vessels-lab
 
 | API | 能力 |
 | --- | --- |
-| `launch` / `launch_landed` | 任意 assembly craft；加 vessel 前綴防止零件 ID 衝突 |
+| `launch` / `launch_landed` | 任意 assembly craft；加 vessel 前綴防止零件 ID 衝突（前綴是發射時的船；分離出去的零件不改名） |
+| `parts` / `part_frame` | 零件圖本身；零件在座標樹上的節點 |
 | `snapshot` / `part_snapshots` / `scene_snapshots` | 目前物理擁有者的船、零件姿態、燃料和 scene 診斷 |
 | `relative` | 同 scene 時先用局部 float64 求相對位置、速度，避免相減 AU 尺度座標 |
 | `set_control` / `control` / `set_sas` / `sas_phase` | 各船獨立且持續保留的油門與 SAS；轉向需要 command 模組 |
 | `stage` / `stages_left` / `decouple` | 級數小的先執行，同級先分離再點火；分離出去的船油門歸零 |
-| `free_nodes` / `node_frame` / `join` | 連接圖操作；合併不吸附、不旋轉對齊，保留相對姿態與線／角動量 |
+| `free_nodes` / `node_frame` / `node_in` / `node_gap` / `join` | 連接圖操作；接點位置經座標樹（`node_in` 給任一座標系，`node_gap` 在第二個零件的座標系裡量兩個接點）；合併不吸附、不旋轉對齊，保留相對姿態與線／角動量 |
 | `inertia` / `fuel` / `thrust` | 即時質量分布、供油與推力 |
 | `clearance` / `body_fixed_state` | 地面高度帶判斷及相對地表的狀態 |
 | `terrain_tiles` / `terrain_geometry` | 直接讀已載入的碰撞網格供繪圖 |
@@ -42,7 +43,7 @@ cargo test -p void-vessels -p void-vessels-lab
 
 預設暫停。P 開始／暫停，R 重設；1–6 換場景，Tab 或點船切換選取，Space 分級，T SAS，Shift/Ctrl 油門、X 關閉，W/S A/D Q/E 轉向。切船保留油門和 SAS，清除前一船手動轉向。左鍵拖曳相機，滾輪縮放，F 聚焦選取船，G 取景全部船，B collider 輪廓，O scene 原點。
 
-按鈕提供單步、10/60 s 物理推進、附近生成（照 TS 頁面，每艘再遠一些：軌道上 25 m、地面 15 m 遞增）、直接分離（選一個接點仍連著的分離器）、debug join 與倍率。分級、分離、合併後立刻 `advance(0)` 更新擁有者。1/2/4x 為物理時間，20/100/1000x 為 rails。Debug join 只允許同 scene 的空接點、相同尺寸、距離不超過 0.25 m；core `join` 提供結構與動量操作，捕獲距離屬於呼叫端的政策。沒有 docking 磁吸、RCS 或自動捕獲。
+按鈕提供單步、10/60 s 物理推進、附近生成（照 TS 頁面，每艘再遠一些：軌道上 25 m、地面 15 m 遞增）、直接分離（選一個接點仍連著的分離器）、debug join 與倍率。分級、分離、合併後立刻 `advance(0)` 更新擁有者。1/2/4x 為物理時間，20/100/1000x 為 rails。Debug join 只允許同 scene 的空接點、相同尺寸、距離不超過 0.25 m（`node_gap`，在其中一個零件的座標系裡量，不受慣性座標的捨入影響）；core `join` 提供結構與動量操作，捕獲距離屬於呼叫端的政策。沒有 docking 磁吸、RCS 或自動捕獲。
 
 零件外觀直接共用 `void-assembly-lab::parts::RenderAssets`（新增 library target，assembly 本身也改用它），沒有重寫模型。每幀先將慣性座標減去選取船的位置，再轉成 f32。地形畫 ContactWorld 的已載入三角網格。HUD 顯示船與 scene、相對距離／速度、燃料、控制、級數、交接事件；滑行與交會場景包含獨立軌道積分的取樣最大誤差。
 
@@ -59,6 +60,6 @@ python3 tools/regenerate-golden.py --reference-root ../void vessels
 
 `tests/checks.rs` 是 lab 的 `vessels-check.ts` 全部 38 項，門檻照 lab。Rapier 一邊是 native、一邊是 WASM，接觸相關的數字不逐位元相同，但印出的數值幾乎都和 lab 一致（交會 196／652 s、最近 40.3 m、分離 0.1128 m/s、熄火 94.58 s、跳躍高度 14.18 km、助推級 306 s 落地等）。只有 pebble 上的兩級火箭立地一項標為 `#[ignore]`，並已結案為非缺陷：發射點在有坡度的地形上，細長火箭順著當地坡度傾倒本來就是預期行為，native 約 5.0° 與 TS 的 1.5° 只是落點坡度不同，原 3° 門檻量到的是場地坡度而不是接觸求解品質，因此不再追這個差異，也沒有放寬或保留該門檻。保留 ignored 而不刪除，是為了需要時仍能跑它的沉降／睡眠／rails 部分；平地上的對應覆蓋是 Aurelia 的 pod 一項。先前寫的「30 s 增加 190 J」結論一併撤回：重新用 body-fixed 動能、重力與離心有效位能量測，1/60 s 步長在 30 s 的總能量是減少 190.46 J，1/120、1/240 s 也都是淨損失，量測可執行 `cargo run -p void-vessels --example contact_energy_audit`。
 
-`tests/fleet.rs` 另有：五個 owning TS 場景的姿態／位置／速度／零件對照、600 s bubble 滑行與獨立軌道比較、交會進出事件、旋轉分離動量及零件保留、接觸後合併動量與姿態、兩擁有者的燃燒、耗盡與分級、共用供油群、SAS、rails、地面睡眠及一日不漂移、地面→軌道→地面跳躍、rails 高度帶攔截、耗油後 live 重心／接點。另有 Bevy 系統存取、生成／切船／分級／重設及 debug join 檢查。
+`tests/fleet.rs` 另有：五個 owning TS 場景的姿態／位置／速度／零件對照、600 s bubble 滑行與獨立軌道比較、交會進出事件、旋轉分離動量及零件保留、接觸後合併動量與姿態、兩擁有者的燃燒、耗盡與分級、共用供油群、SAS、rails、地面睡眠及一日不漂移、地面→軌道→地面跳躍、rails 高度帶攔截、耗油後 live 重心／接點、各船是零件圖的連通分量且存檔還原後零件狀態逐位元相同、零件節點掛在自己的船下。另有 Bevy 系統存取、生成／切船／分級／重設及 debug join 檢查。
 
 保留 TS 的範圍：沒有船撞擊毀損、gimbal、SAS 順行等模式；高速交會氣泡在存在期間不重新錨定速度。逐船機動的理想軌道導引是主遊戲整合時新增的，見 [fleet-flight.md](fleet-flight.md)。主遊戲整合已完成；真正 docking／RCS 尚未進入 master。

@@ -76,6 +76,8 @@ impl Fleet {
     pub fn parts(&self) -> &PartGraph;
     pub fn part_frame(&self, part: &str) -> FrameId;  // 在船的零件座標系之下，運動是零件的 pose
     pub fn node_frame(&self, part: &str, node: &str) -> (DVec3, DVec3); // 經樹，不再自己乘
+    pub fn node_in(&self, part: &str, node: &str, frame: FrameId) -> (DVec3, DVec3); // 任一座標系
+    pub fn node_gap(&self, a: &str, node_a: &str, b: &str, node_b: &str) -> f64; // 在 b 的座標系裡量
 }
 ```
 
@@ -119,6 +121,7 @@ impl Fleet {
 | 2. Fleet 存零件圖 | `Fleet::parts` 是 `PartGraph`，燃料、分級、點火、pose 都在零件上；`Vessel` 只剩名字、根零件、成員順序與物理擁有者。`lit`、`staged`、`PropulsionPart`、`Vessel::poses` 與 Fleet 自己的 `connections` 退場。`decouple` 先 `disconnect`，再依 `components` 分船；`join` 合船後 `connect`。分船、合船、軌道上燒完一段時重新以質心為原點，改的是成員的 pose。`propulsion`、`burn` 直接讀寫零件圖。`FleetCheckpoint` 版本 2 → 3：零件存分級、點火、pose，不再有 lit／staged 清單，連接經 `restore_connections` 檢查後依原順序還原。`MODEL_VERSION` 6 → 7。probe 的劇本：主遊戲上升、分級、rails；交會；旋轉分離；對接；存檔還原。它印出 927 行逐位元的狀態，改前改後 md5 相同。新測試：分級、分離後，每艘船是零件圖的一個連通分量；存檔還原後，每個零件的燃料（逐位元）、分級、點火、pose，以及連接的順序都相同。workspace 測試 313 passed、0 failed、4 ignored，clippy 無警告 | 原計畫的第 2、3 步合併：狀態進零件和 pose 進零件改的是同一批函式（分離、對接、重新置中），分開做要先寫一份過渡的同步。對接的接點檢查改由 `PartGraph::check_connection` 在 settle 之前做，panic 訊息改成零件圖的。存檔還原多檢查「點火的零件必須已分級」 |
 | 3. 零件座標系 | 每個零件有一個 `Dynamic::Part` 節點（`Fleet::part_frame`），掛在船的零件座標系下，運動就是零件的 pose，所以不必同步。`put` 把成員的節點掛到船下；對接時先把 b 的零件節點移到 a 之下，再拿掉 b 的節點；存檔還原時重建。`node_frame` 改成經樹計算；新的 `node_in(part, node, frame)` 給出接點在任一座標系的位置。`PartSnapshot` 的慣性位置與姿態也經樹。新的 `node_gap` 是兩個接點在第二個零件座標系裡的距離；vessels lab、multiscale lab 的對接捕獲，以及 seam-check 與測試的接近迴圈都改用它。probe：物理逐位元相同（船的狀態、推力、燃料、連接、分級）。零件與接點的慣性位置最多差 3.05e-5 m：座標約 1.44e11 m，相對差 2.1e-16，也就是一個 ulp。姿態四元數的分量最多差 2.2e-16。Join 場景在捕獲前（間隙 0.0795 m），經樹量的間隙和慣性座標相減的結果差 1.9e-5 m，這就是慣性座標的捨入。新測試：子樹移動（frames）；零件節點在自己的船之下、位置就是 pose；接點在自己座標系裡的位置；對接、分離、還原之後節點的父節點。workspace 測試 315 passed、0 failed、4 ignored，clippy 無警告 | void-frames 的 `reparent` 原本不能移動有子節點的節點，現在連同子樹一起移，子樹的深度跟著更新：船的零件座標系每次換擁有者都要移動（原計畫沒有列）。`free_nodes` 沒有位置欄位，不用改。新增 `node_in`、`node_gap`。主遊戲與 lab 的繪圖仍用 `frame`＋`local_position` |
 | 4. 噴嘴面積進 catalog | catalog 的引擎模組加上 `nozzleExitAreaM2`（必填，`Module::Engine::nozzle_exit_area_m2`，`EngineRating` 也帶著它）：engine-large、flight-booster-engine 0.12 m²，engine-small、flight-upper-engine 0.15 m²，和原本的表相同。`FleetAir` 不再有 `nozzle_areas`，直接讀零件定義。probe 輸出和第 3 步完全相同。新測試：catalog 的四個引擎都有出口面積，而且在一大氣壓下仍有推力。workspace 測試 316 passed、0 failed、4 ignored，clippy 無警告 | catalog 改變，所以舊錄影照例以「catalog changed」拒絕；模擬規則沒變，`MODEL_VERSION` 不動。`AssemblyFlight`（assembly lab）不讀出口面積 |
+| 5. 文件 | 本頁；vessels.md（所有權、API、測試）；assembly.md（`graph.rs`、`nozzleExitAreaM2`）；fleet-flight.md（噴嘴氣壓、`MODEL_VERSION` 7）；frames.md（換父節點時子樹一起移）；status.md（branch 狀態）。暫時的 probe 在提交前刪除，沒有進 repository | 多改了 frames.md（第 3 步動到 void-frames） |
 
 ## 之後（不在本 branch，另行決定）
 
