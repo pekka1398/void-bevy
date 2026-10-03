@@ -87,7 +87,7 @@ fn planet_frame_matches_the_landing_lab() {
                 .max(f(&planet["stepSeconds"])),
         );
         let (mut transform, mut round_trip, mut acceleration) = (0.0_f64, 0.0_f64, 0.0_f64);
-        let (mut later, mut lab_angle) = (0.0_f64, 0.0_f64);
+        let (mut later, mut lab_angle, mut own_trip) = (0.0_f64, 0.0_f64, 0.0_f64);
         let spin = frame.body.rotation;
         for c in cases {
             let t = f(&c["t"]);
@@ -113,10 +113,21 @@ fn planet_frame_matches_the_landing_lab() {
                 lab_angle = lab_angle.max(relative_error(reproduced, lab));
                 later = later.max(relative_error(inertial, lab));
             }
-            let back = frame.to_body_fixed(&ephemeris, t, inertial);
+            // The lab's `back` is its to_body_fixed of its own inertial state, so it gets the
+            // same input here; our inertial state differs from the lab's in the last bit at 1 AU.
+            let back = frame.to_body_fixed(&ephemeris, t, lab);
             round_trip = round_trip
                 .max((back.position - v3(&c["back"]["position"])).length())
                 .max((back.velocity - v3(&c["back"]["velocity"])).length());
+            // Our own round trip loses only the inertial coordinates' spacing.
+            let ours = frame.to_body_fixed(&ephemeris, t, inertial);
+            let spacing = inertial
+                .position
+                .abs()
+                .max_element()
+                .max(local.position.length())
+                * f64::EPSILON;
+            own_trip = own_trip.max((ours.position - local.position).length() / spacing);
             let a = frame.acceleration(&ephemeris, t, local.position, local.velocity);
             let lab_a = v3(&c["acceleration"]);
             acceleration = acceleration.max((a - lab_a).length() / lab_a.length());
@@ -134,5 +145,9 @@ fn planet_frame_matches_the_landing_lab() {
             "{id}: transform {transform:e}, acceleration {acceleration:e}"
         );
         assert!(round_trip < 1e-6, "{id}: round trip {round_trip:e}");
+        println!(
+            "{id}: own round trip within {own_trip:.2} spacings of the larger of the inertial and body-fixed scales"
+        );
+        assert!(own_trip < 4.0, "{id}: own round trip {own_trip} spacings");
     }
 }

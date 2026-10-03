@@ -42,6 +42,13 @@ enum Kind {
     BodyInertial { body: BodyId, axes: DQuat },
     /// Turning with the body about its spin axis. Parent: the body's inertial frame.
     BodySurface { spin: Spin },
+    /// Centred on two bodies' barycentre; x from the primary to the secondary, z along their
+    /// relative angular momentum. Parent: the bodies' system. `weights` are the bodies' GM.
+    TwoBody {
+        primary: BodyId,
+        secondary: BodyId,
+        weights: (f64, f64),
+    },
     /// A constant motion relative to the parent.
     Fixed(Motion),
     /// Written by the simulation; valid only at the time it was written.
@@ -133,6 +140,43 @@ impl FrameTree {
         );
         let surface = self.add(inertial, Kind::BodySurface { spin });
         (inertial, surface)
+    }
+
+    /// A frame turning with two bodies of `system` about their barycentre (the orbit lab's
+    /// two-body rotating frame). Its angular velocity is the line's rate in the bodies' plane,
+    /// |r × v| / |r|² about z; the plane's own slow turn is left out, as the lab's period is.
+    pub fn add_two_body(
+        &mut self,
+        system: FrameId,
+        primary: (BodyId, f64),
+        secondary: (BodyId, f64),
+    ) -> FrameId {
+        assert!(
+            matches!(self.node(system).kind, Kind::System(_)),
+            "{system:?} is not a system frame"
+        );
+        assert_ne!(primary.0, secondary.0, "a two-body frame needs two bodies");
+        for (body, _) in [primary, secondary] {
+            assert!(
+                self.nodes.iter().flatten().any(|n| n.parent == Some(system)
+                    && matches!(n.kind, Kind::BodyInertial { body: b, .. } if b == body)),
+                "{body:?} is not a body of {system:?}"
+            );
+        }
+        assert!(
+            primary.1 > 0.0 && secondary.1 > 0.0 && (primary.1 + secondary.1).is_finite(),
+            "two-body weights {} {}",
+            primary.1,
+            secondary.1
+        );
+        self.add(
+            system,
+            Kind::TwoBody {
+                primary: primary.0,
+                secondary: secondary.0,
+                weights: (primary.1, secondary.1),
+            },
+        )
     }
 
     pub fn add_fixed(&mut self, parent: FrameId, motion: Motion) -> FrameId {
@@ -255,6 +299,15 @@ impl FrameTree {
     }
 }
 
+fn unit(v: DVec3) -> DVec3 {
+    let length = v.length();
+    assert!(
+        length > 0.0 && length.is_finite(),
+        "frame has a degenerate axis: {v}"
+    );
+    v / length
+}
+
 /// The tree evaluated at one time. Nothing is cached yet; add caching where measurements ask for it.
 pub struct Snapshot<'a, S: FrameSource + ?Sized> {
     tree: &'a FrameTree,
@@ -290,6 +343,26 @@ impl<S: FrameSource + ?Sized> Snapshot<'_, S> {
                 rotation: DQuat::from_rotation_z(spin.angle(self.t)),
                 angular_velocity: DVec3::new(0.0, 0.0, spin.rate()),
             },
+            Kind::TwoBody {
+                primary,
+                secondary,
+                weights: (m1, m2),
+            } => {
+                let (p, pv) = self.source.body_in_system(*primary, self.t);
+                let (s, sv) = self.source.body_in_system(*secondary, self.t);
+                let (r, v) = (s - p, sv - pv);
+                let h = r.cross(v);
+                let x = unit(r);
+                let z = unit(h);
+                let y = z.cross(x);
+                let total = m1 + m2;
+                Motion::new(
+                    (*m1 * p + *m2 * s) / total,
+                    (*m1 * pv + *m2 * sv) / total,
+                    DQuat::from_mat3(&glam::DMat3::from_cols(x, y, z)).normalize(),
+                    z * (h.length() / r.length_squared()),
+                )
+            }
             Kind::Fixed(motion) => *motion,
             Kind::Dynamic(key) => {
                 let motion = self.source.dynamic_motion(*key, self.t);

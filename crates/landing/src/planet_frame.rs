@@ -2,8 +2,8 @@
 //! `lab/landing/src/physics/PlanetFrame.ts`.
 
 use glam::DVec3;
-use void_frames::BodyId;
-use void_orbit::{CelestialBody, EphemerisSource, body_orientation};
+use void_frames::{FrameId, State};
+use void_orbit::{CelestialBody, EphemerisSource, SystemFrames, body_orientation};
 
 /// A position and velocity in one frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -36,10 +36,8 @@ pub struct PlanetFrame {
     pub body: CelestialBody,
     /// Spin rate about body-fixed +z, rad/s.
     pub omega: f64,
-}
-
-fn dot(a: DVec3, b: DVec3) -> f64 {
-    a.x * b.x + a.y * b.y + a.z * b.z
+    /// The ephemeris' frame tree; this frame is the body's surface frame in it.
+    frames: SystemFrames,
 }
 
 /// Body axes to ecliptic: a.x X + a.y Y + a.z Z with the axes as columns, in the lab's order.
@@ -59,47 +57,58 @@ impl PlanetFrame {
             .unwrap_or_else(|| panic!("planet frame: body {body_index}"))
             .clone();
         let omega = 2.0 * std::f64::consts::PI / body.rotation.period_seconds;
-        Self { body, omega }
+        Self {
+            body,
+            omega,
+            frames: SystemFrames::new(ephemeris),
+        }
     }
 
-    /// Barycentric inertial state to body-fixed: r = Rᵀ (p − c), v = Rᵀ (u − c′) − ω × r.
+    fn surface(&self) -> FrameId {
+        self.frames.surface[self.body.index]
+    }
+
+    /// The ephemeris' physics-view state (its origin system) to body-fixed, through the tree.
     pub fn to_body_fixed(
         &self,
         ephemeris: &dyn EphemerisSource,
         t: f64,
         inertial: FrameState,
     ) -> FrameState {
-        let axes = body_orientation(&self.body.rotation, t);
-        let (cp, cv) = ephemeris.body_state(BodyId(self.body.index), t);
-        let (dp, du) = (inertial.position - cp, inertial.velocity - cv);
-        let r = DVec3::new(dot(dp, axes[0]), dot(dp, axes[1]), dot(dp, axes[2]));
-        let u = DVec3::new(dot(du, axes[0]), dot(du, axes[1]), dot(du, axes[2]));
-        let w = self.omega;
+        let s = self
+            .frames
+            .tree
+            .at(t, ephemeris)
+            .transform(self.frames.origin, self.surface())
+            .apply_state(State {
+                position: inertial.position,
+                velocity: inertial.velocity,
+            });
         FrameState {
-            position: r,
-            velocity: DVec3::new(u.x + w * r.y, u.y - w * r.x, u.z),
+            position: s.position,
+            velocity: s.velocity,
         }
     }
 
-    /// Body-fixed state to barycentric inertial: p = c + R r, u = c′ + R (v + ω × r).
+    /// Body-fixed state to the ephemeris' physics view, through the tree.
     pub fn to_inertial(
         &self,
         ephemeris: &dyn EphemerisSource,
         t: f64,
         local: FrameState,
     ) -> FrameState {
-        let axes = body_orientation(&self.body.rotation, t);
-        let (cp, cv) = ephemeris.body_state(BodyId(self.body.index), t);
-        let (r, w) = (local.position, self.omega);
-        let v = DVec3::new(
-            local.velocity.x - w * r.y,
-            local.velocity.y + w * r.x,
-            local.velocity.z,
-        );
-        let (p, q) = (to_ecliptic(&axes, r), to_ecliptic(&axes, v));
+        let s = self
+            .frames
+            .tree
+            .at(t, ephemeris)
+            .transform(self.surface(), self.frames.origin)
+            .apply_state(State {
+                position: local.position,
+                velocity: local.velocity,
+            });
         FrameState {
-            position: cp + p,
-            velocity: cv + q,
+            position: s.position,
+            velocity: s.velocity,
         }
     }
 }
