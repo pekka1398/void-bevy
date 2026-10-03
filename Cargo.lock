@@ -5695,6 +5695,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-seam-check"
+version = "0.0.0"
+dependencies = [
+ "glam 0.32.1",
+ "serde",
+ "serde_json",
+ "void-assembly",
+ "void-frames",
+ "void-landing",
+ "void-multiscale",
+ "void-orbit",
+ "void-vessels",
+]
+
+[[package]]
 name = "void-terrain"
 version = "0.0.0"
 dependencies = [

@@ -10,7 +10,7 @@
 | B：操作可重現且會檢查回歸 | 舊主遊戲 input／session；Fleet Action journal、完整 world mark、incremental playback、--verify | Intent／Commit／Mark stream 已逐條 sync，含獨立程序崩潰與恢復入口；ResetWorld／LoadWorld 仍留在同一 journal。Fleet 相機／觀察操作與暫停逐幀錄放已接入 checkpoint／mark；core 及 renderer-free 視窗控制檢查，GUI 驗收之後補做 |
 | B：profiling 量測與可分析輸出 | 舊主遊戲 LabLog；void-diagnostics p50／p95、CPU 系統 trace、Fleet lab --profile 與 --verify --profile、native perf wrapper | main／lab 已接 RenderDiagnostics 與來源幀標記、GPU indirect count-buffer 回讀、完整主場景離屏 settle／run／drain benchmark、場景 checkpoint 與跨程序重測；CPU／GPU／draw／pipeline 指標分列。本機 native perf 因 paranoid=4 未能實測；GUI 驗收之後補做 |
 | B：碰撞體與地形疊圖 | 主遊戲及 landing F4 真實 collider 線；Fleet lab 地形與船體均讀回 native collider；形狀／local transform 故意變更的觀察測試 | 主遊戲／lab 現在共用此疊圖；GUI 驗收由使用者之後補做 |
-| B：接縫差分與不變量 | landing/seams：frame／origin／rails／handoff；assembly 分離掃描；Fleet flight 三 owner 阻力與步長收斂 | Fleet／multiscale 交接與合併／分離掃描、保存失敗案例與重跑入口，依目前測試實際涵蓋確認 |
+| B：接縫差分與不變量 | landing/seams：frame／origin／rails／handoff；assembly 分離掃描；Fleet flight 三 owner 阻力與步長收斂 | void-seam-check 已接六家族掃描：Fleet 分離／本地 join／FrameEphemeris 遠方 join／orbit-bubble-orbit／split-frame／Traveller-direct N-body；1200 案例通過，保留既有門檻。完整輸入／失敗持久保存、單檔／corpus CLI、跨程序失敗重跑檢查；範圍與證據見 [seam-check.md](seam-check.md) |
 
 本表以 current source／command output 為準；不以「有 lab」或「有測試」直接宣稱整項完成。每個缺口完成時更新對應證據，最後再逐項核對 A／B 全部要求。
 

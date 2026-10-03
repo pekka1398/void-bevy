@@ -2,21 +2,21 @@
 
 此工作依序調查 assembly／Fleet 承接主遊戲的缺口，建立獨立核心 `void-fleet-flight` 與 Bevy 程式 `void-fleet-flight-lab`。使用者已要求先完成 A／B，視窗驗收之後補做；主遊戲現已引用 Fleet runtime 與 assembly 零件；舊固定兩級火箭移到 `void-app --example legacy_flight` 保存回歸場景。
 
-## 調查結果
+## 原有缺口與目前接線
 
-| 項目 | 原本能否直接承接 | 第一輪處理／後續缺口 |
+| 項目 | 原本能否直接承接 | 目前處理／限制 |
 | --- | --- | --- |
 | 自訂船、供油、分級、多船 | Fleet 已引用 assembly graph，並有部件／接點快照 | lab 直接讀 assembly 匯出的 craft JSON，以同一艘船建立地面與軌道實體；不是重寫固定兩級火箭 |
 | 行星地形、ground／orbit／bubble | Fleet 已有 owner 交接與地形串流 | 使用主遊戲 GamePlanet 的行星／terrain 設定，獨立畫 LOD 地形與從 Fleet 讀回的碰撞線 |
 | SAS | Fleet 已有逐船控制器，能跨 owner 重設框架 | 直接使用既有 SAS；沒有新增順行、目標等模式 |
-| 時間加速 | Fleet 有 rails blocker、交會／高度帶攔截 | lab 提供 1／2／4 倍 physics、20／100／1000 倍 rails；阻擋時顯示原因，攔截後回 1 倍；尚未搬主遊戲依高度細分的 warp 上限 |
+| 時間加速 | Fleet 有 rails blocker、交會／高度帶攔截 | main／lab 共用主遊戲依高度細分的九級 warp gates、rails／交會攔截與 warp-to-maneuver；阻擋顯示原因，攔截回 1 倍 |
 | 空氣施力 | Fleet 原本完全沒有 AirSource／AirField 接線 | 新增可選 FleetEnvironment；新核心提供各零件阻力，Orbit 每個 Dopri stage 評估、接觸世界逐步評估，bubble 與 ground 都有施力；rails 也保留空氣 |
 | 噴嘴氣壓 | assembly catalog 的 Engine 只有真空 thrust／Isp，沒有出口面積 | 第一輪在 FleetAir 用顯式 engine ID → nozzle area 表，large 0.12 m²、small 0.15 m²；壓力降低引擎力、真空質量流率保持不變。未修改既有 catalog／golden；未評為正式零件資料模型定案 |
 | 滑行預測 | predict_coast 原本只接受具體 Ephemeris，但 Fleet 持有 EphemerisSource | 改為接受既有 trait，可共用預測；與主遊戲一樣畫真空滑行。lab 的 C 是當下 600 s 預測快照，非持續刷新 |
 | 有限燃燒機動 | FlightPlan 與 Fleet staged engine 已可共用 | 已接逐船計畫、編輯／apsis／參考天體、第一個機動的理想軌道導引、存檔／重播；第一 fuel-group flameout 為規劃上限。手動控制、分級、進入 contact physics 明確中止，切船不取消 |
-| 撞擊毀損 | PartJointRocket 有 Crash，Fleet 沒有等價船／零件毀損政策 | 尚未接。這也是主遊戲替換前需要保留或明確重設的行為 |
-| navball／map／scenery | renderer 部分可共用，但主遊戲 Game 持有大量固定上級／兩級假設 | 第一輪只共用地形 tile 與零件資產；沒有完整 navball／多天體 map／scenery 外觀 |
-| 錄放 | 現有 session 格式只記兩級火箭的 mark，Game／step 在 app binary | 已提供 Fleet Action journal、逐船／零件／owner 完整 mark、增量視窗 playback 與獨立程序 headless verify；相機與純視覺操作尚未列入 Fleet 紀錄 |
+| 撞擊毀損 | PartJointRocket 有 Crash，Fleet 沒有等價船／零件毀損政策 | 舊主遊戲從未啟用 opt-in crash_detection（預設 false）；毀損仍是後續新功能，不是此次整合遺失的行為 |
+| navball／map／scenery | renderer 部分可共用，但主遊戲 Game 持有大量固定上級／兩級假設 | 主遊戲已接回 navball／多天體 map／scenery，與 lab 共用 Fleet runtime；離屏 GPU 檢查也使用主遊戲材質與 HUD |
+| 錄放 | 現有 session 格式只記兩級火箭的 mark，Game／step 在 app binary | Fleet Action journal、逐船／零件／owner／camera／presentation 完整 mark、增量 playback 與跨程序 headless verify；Intent／Commit stream 同步保存並可恢復中斷錄製 |
 | 存檔／checkpoint | craft JSON 只保存組裝，Fleet live graph、owners、controls、lit／staged、pending time 沒有存讀介面 | 已能以初始完整行星／terrain／craft 與操作紀錄重建並續玩，保留原 solver／SAS 歷史、錄放保留初始操作歷史；另有直接 checkpoint 保存 live 狀態與完整 native owner cache，不必重播船的操作 |
 
 ## 已建立的驗收入口
@@ -57,7 +57,7 @@ cargo run -p void-fleet-flight-lab -- --replay lab-log/fleet-session.json
 cargo run -p void-fleet-flight-lab -- --verify lab-log/fleet-session.json
 ```
 
-F6 保存，F7 載入並暫停；路徑由 `--save <file>` 指定，預設 `lab-log/fleet-save.json`。`--record` 會在正常關閉視窗或按 F8 時完成寫檔；F8 後仍能繼續遊戲。現在的錄製不是逐條刷入硬碟，崩潰途中尚未寫出的部分不保留，這個缺口列在 A／B 進度中。
+F6 保存，F7 載入並暫停；路徑由 `--save <file>` 指定，預設 `lab-log/fleet-save.json`。`--record` 會在正常關閉視窗或按 F8 時完成寫檔；F8 後仍能繼續遊戲。錄製使用下述同步 Intent／Commit stream，崩潰會保留已持久化的輸入與已提交操作；未完成的操作不會被恢復入口自動執行。
 
 F6／F7 與 `--load` 現在使用直接世界 checkpoint：完整行星設定、live graph／燃料／控制／SAS／pending substep、orbit 傳播歷史、ground／bubble 的 native 接觸世界與 frame／半步狀態。native handles 與它們所屬的完整 arenas／contact caches 一起序列化，帶 Rapier ABI 版本檢查；不是把單獨 handle 當成持久化零件 ID。星曆依初始 SystemSpec 重建到原取樣邊界；船不重播操作。載入先驗證 graph／owner／native handles，再比對完整 world mark。
 
