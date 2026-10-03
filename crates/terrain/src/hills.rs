@@ -2,11 +2,11 @@
 //! shaped into rolling hills. The landing planets (Pebble, Luna, Terra, Aurelia) use it.
 
 use glam::DVec3;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::noise::perlin;
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HillsOptions {
     pub name: String,

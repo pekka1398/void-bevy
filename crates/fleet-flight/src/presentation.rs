@@ -1,0 +1,282 @@
+//! Camera and observation controls share the command journal with physics. Rendering only reads
+//! these decisions: camera spin must never depend on how often a renderer happens to run.
+use crate::FleetFlight;
+use glam::DVec3;
+use serde::{Deserialize, Serialize};
+use void_view::{FocusGeometry, FocusKind, OrbitCamera, PathFrameKind, ViewMode, ViewState};
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Presentation {
+    pub main_camera: bool,
+    pub direction: DVec3,
+    pub distance: f64,
+    pub yaw: f64,
+    pub pitch: f64,
+    pub focus_body: Option<usize>,
+    pub surface_path: bool,
+    pub speed_surface: bool,
+    pub altitude_agl: bool,
+    pub colliders: bool,
+    pub bounds: bool,
+    pub wire: bool,
+    pub terrain: bool,
+    pub last_time: f64,
+    pub paused: bool,
+    pub rate: usize,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum Toggle {
+    Colliders,
+    Bounds,
+    Wire,
+    Terrain,
+    SpeedSurface,
+    AltitudeAgl,
+    PathFrame,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", deny_unknown_fields)]
+pub enum ViewCommand {
+    Configure { main_camera: bool },
+    Focus { body: Option<usize> },
+    Drag { x: f64, y: f64 },
+    Zoom { pixels: f64 },
+    Toggle { setting: Toggle },
+}
+pub struct CameraSample {
+    pub eye: DVec3,
+    pub focus: DVec3,
+    pub view: ViewState,
+}
+impl Presentation {
+    pub fn new(position: DVec3, centre: DVec3, time: f64) -> Self {
+        let radial = (position - centre).normalize();
+        let side = if radial.x.hypot(radial.y) > 1e-9 {
+            DVec3::new(-radial.y, radial.x, 0.0).normalize()
+        } else {
+            DVec3::X
+        };
+        Self {
+            main_camera: true,
+            direction: (side + 0.3 * radial).normalize(),
+            distance: 40.0,
+            yaw: 0.4,
+            pitch: 0.25,
+            focus_body: None,
+            surface_path: false,
+            speed_surface: true,
+            altitude_agl: true,
+            colliders: false,
+            bounds: false,
+            wire: false,
+            terrain: true,
+            last_time: time,
+            paused: true,
+            rate: 0,
+        }
+    }
+    pub fn validate(&self, sim: &FleetFlight) {
+        assert!(
+            self.direction.is_finite() && (self.direction.length() - 1.0).abs() < 1e-9,
+            "view: invalid direction"
+        );
+        assert!(
+            self.distance.is_finite()
+                && self.distance > 0.0
+                && self.yaw.is_finite()
+                && self.pitch.is_finite()
+                && self.last_time.is_finite()
+                && self.last_time <= sim.fleet.time()
+                && self.rate < 9,
+            "view: invalid state"
+        );
+        if let Some(body) = self.focus_body {
+            assert!(
+                body < sim.fleet.ephemeris.bodies().len(),
+                "view: unknown focus body"
+            );
+        }
+    }
+    pub fn path_frame(&self) -> PathFrameKind {
+        if self.surface_path {
+            PathFrameKind::Surface
+        } else {
+            PathFrameKind::Inertial
+        }
+    }
+    fn geometry(&self, sim: &FleetFlight) -> (FocusGeometry, usize, usize, DVec3) {
+        let f = &sim.fleet;
+        let ship = f.snapshot(&sim.selected);
+        let mut positions = vec![DVec3::ZERO; f.ephemeris.bodies().len()];
+        f.ephemeris.positions_at(f.time(), &mut positions);
+        let bodies = f.ephemeris.bodies();
+        let navigation = void_orbit::DominanceTree::new(bodies).dominant(&positions, ship.position);
+        let reference = self.focus_body.unwrap_or(navigation);
+        let body = bodies.get(reference).expect("view: unknown focus body");
+        let radial = ship.position - positions[reference];
+        (
+            FocusGeometry {
+                kind: if self.focus_body.is_some() {
+                    FocusKind::Body
+                } else {
+                    FocusKind::Vessel
+                },
+                radial: self.focus_body.is_none().then(|| radial.normalize()),
+                north: body.rotation.axis(),
+                reference_radius: body.radius_meters,
+                altitude: if self.focus_body.is_none() {
+                    radial.length() - body.radius_meters
+                } else {
+                    0.0
+                },
+                focus_radius: if self.focus_body.is_some() {
+                    body.radius_meters
+                } else {
+                    0.0
+                },
+            },
+            reference,
+            navigation,
+            self.focus_body.map_or(ship.position, |i| positions[i]),
+        )
+    }
+    fn camera(&self) -> OrbitCamera {
+        OrbitCamera::new(self.direction, self.distance)
+    }
+    pub fn apply(&mut self, sim: &FleetFlight, command: &ViewCommand) {
+        match *command {
+            ViewCommand::Configure { main_camera } => self.main_camera = main_camera,
+            ViewCommand::Focus { body } => {
+                self.focus_body = body;
+                self.distance = body.map_or(40.0, |i| {
+                    sim.fleet
+                        .ephemeris
+                        .bodies()
+                        .get(i)
+                        .expect("view: unknown focus body")
+                        .radius_meters
+                        * 4.0
+                });
+            }
+            ViewCommand::Drag { x, y } => {
+                assert!(x.is_finite() && y.is_finite(), "view: invalid drag");
+                if self.main_camera {
+                    let (geometry, _, _, _) = self.geometry(sim);
+                    let state =
+                        void_view::view_state(ViewMode::Single, false, &geometry, self.distance);
+                    let mut camera = self.camera();
+                    camera.drag(x, y, state.up);
+                    self.direction = camera.direction;
+                } else {
+                    self.yaw -= x * 0.006;
+                    self.pitch = (self.pitch + y * 0.006).clamp(-1.5, 1.5);
+                }
+            }
+            ViewCommand::Zoom { pixels } => {
+                assert!(pixels.is_finite(), "view: invalid zoom");
+                // Clamp the resulting distance, including extremely long but finite wheel input.
+                let distance =
+                    self.distance * (-pixels * if self.main_camera { 0.002 } else { 0.003 }).exp();
+                let (min, max) = if self.main_camera {
+                    let (geometry, _, _, _) = self.geometry(sim);
+                    let state =
+                        void_view::view_state(ViewMode::Single, false, &geometry, self.distance);
+                    (state.min_distance, state.max_distance)
+                } else {
+                    (2.0, 2e8)
+                };
+                self.distance = distance.clamp(min, max);
+            }
+            ViewCommand::Toggle { setting } => {
+                let flag = match setting {
+                    Toggle::Colliders => &mut self.colliders,
+                    Toggle::Bounds => &mut self.bounds,
+                    Toggle::Wire => &mut self.wire,
+                    Toggle::Terrain => &mut self.terrain,
+                    Toggle::SpeedSurface => &mut self.speed_surface,
+                    Toggle::AltitudeAgl => &mut self.altitude_agl,
+                    Toggle::PathFrame => &mut self.surface_path,
+                };
+                *flag = !*flag;
+            }
+        }
+        self.update(sim);
+    }
+    pub fn update(&mut self, sim: &FleetFlight) {
+        assert!(
+            self.last_time.is_finite() && self.yaw.is_finite() && self.pitch.is_finite(),
+            "view: invalid state"
+        );
+        assert!(self.rate < 9, "view: invalid rate");
+        let (geometry, reference, navigation, _) = self.geometry(sim);
+        let view = void_view::view_state(ViewMode::Single, false, &geometry, self.distance);
+        let mut camera = self.camera();
+        if self.main_camera {
+            camera.distance =
+                camera.clamp_distance(camera.distance, view.min_distance, view.max_distance);
+            let (body, weight) =
+                void_view::camera_spin(&view, self.path_frame(), reference, navigation);
+            let elapsed = sim.fleet.time() - self.last_time;
+            assert!(elapsed >= 0.0, "view: world clock moved backwards");
+            if elapsed > 0.0 && weight > 0.0 {
+                let rotation = &sim.fleet.ephemeris.bodies()[body].rotation;
+                camera.corotate(rotation.axis(), rotation.rate() * elapsed * weight);
+            }
+            camera.clamp_to_up(view.up);
+            self.direction = camera.direction;
+            self.distance = camera.distance;
+        }
+        self.last_time = sim.fleet.time();
+    }
+    pub fn sample(&self, sim: &FleetFlight) -> CameraSample {
+        let (geometry, _, _, focus) = self.geometry(sim);
+        let view = void_view::view_state(ViewMode::Single, false, &geometry, self.distance);
+        let direction = if self.main_camera {
+            self.direction
+        } else {
+            let ship = sim.fleet.snapshot(&sim.selected);
+            let frame = void_landing::PlanetFrame::new(&sim.fleet.ephemeris, sim.home);
+            let axes = void_orbit::body_orientation(&frame.body.rotation, sim.fleet.time());
+            let q = glam::DQuat::from_mat3(&glam::DMat3::from_cols(axes[0], axes[1], axes[2]))
+                .normalize();
+            let up = frame
+                .to_body_fixed(
+                    &sim.fleet.ephemeris,
+                    sim.fleet.time(),
+                    void_landing::FrameState {
+                        position: ship.position,
+                        velocity: ship.velocity,
+                    },
+                )
+                .position
+                .normalize();
+            let east = if up.x.hypot(up.y) > 1e-9 {
+                DVec3::new(-up.y, up.x, 0.0).normalize()
+            } else {
+                DVec3::X
+            };
+            let north = up.cross(east);
+            q * (east * (self.yaw.cos() * self.pitch.cos())
+                + north * (self.yaw.sin() * self.pitch.cos())
+                + up * self.pitch.sin())
+        };
+        CameraSample {
+            eye: focus + direction * self.distance,
+            focus,
+            view,
+        }
+    }
+}
+impl FleetFlight {
+    pub fn view_command(&mut self, command: &ViewCommand) {
+        let mut view = self.presentation.clone();
+        view.apply(self, command);
+        self.presentation = view;
+    }
+    pub fn update_presentation(&mut self) {
+        let mut view = self.presentation.clone();
+        view.update(self);
+        self.presentation = view;
+    }
+}

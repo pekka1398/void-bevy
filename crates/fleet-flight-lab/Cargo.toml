@@ -1,0 +1,17 @@
+[package]
+name = "void-fleet-flight-lab"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+void-app = { path = "../app" }
+
+[dev-dependencies]
+glam.workspace = true
+void-fleet-flight = { path = "../fleet-flight" }
+void-assembly.workspace = true
+void-vessels.workspace = true
+void-landing.workspace = true
+serde_json.workspace = true

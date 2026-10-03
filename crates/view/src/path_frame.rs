@@ -10,7 +10,7 @@
 //! drawing turns frame coordinates back into ecliptic axes with the frame's orientation now.
 
 use glam::DVec3;
-use void_orbit::{CelestialBody, Ephemeris, body_orientation, osculating_orbit};
+use void_orbit::{CelestialBody, EphemerisSource, body_orientation, osculating_orbit};
 
 use crate::conic::ellipse_points_in_time;
 
@@ -67,7 +67,7 @@ pub struct PathFrame {
 }
 
 impl PathFrame {
-    pub fn new(ephemeris: &Ephemeris, kind: PathFrameKind, reference: usize) -> Self {
+    pub fn new(ephemeris: &dyn EphemerisSource, kind: PathFrameKind, reference: usize) -> Self {
         Self {
             kind,
             reference,
@@ -76,7 +76,7 @@ impl PathFrame {
     }
 
     /// A barycentric point at time t, in frame coordinates. Needs the ephemeris at t.
-    pub fn at(&self, ephemeris: &Ephemeris, t: f64, barycentric: DVec3) -> DVec3 {
+    pub fn at(&self, ephemeris: &dyn EphemerisSource, t: f64, barycentric: DVec3) -> DVec3 {
         let origin = ephemeris.body_position(self.reference, t);
         let axes = self.axes_at(t);
         let d = barycentric - origin;

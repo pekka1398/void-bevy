@@ -1,0 +1,254 @@
+use glam::{DQuat, DVec3};
+use void_assembly::{Craft, demo_craft, export_craft, import_craft};
+use void_fleet_flight::FleetFlight;
+use void_landing::{FrameState, PlanetFrame, earth_size};
+use void_vessels::{SasPhase, VesselControl, VesselMode, flat_site, pod_tank};
+
+fn make(craft: &Craft, air: bool) -> FleetFlight {
+    let planet = earth_size();
+    let site = flat_site(&planet);
+    FleetFlight::new(planet, craft, site, air)
+}
+fn airborne(sim: &mut FleetFlight, craft: &Craft, height: f64, speed: f64, offset: f64) -> String {
+    let frame = PlanetFrame::new(&sim.fleet.ephemeris, sim.home);
+    let direction = DVec3::X;
+    let r = frame.body.radius_meters + sim.planet.terrain.height(direction) + height;
+    let state = frame.to_inertial(
+        &sim.fleet.ephemeris,
+        sim.fleet.time(),
+        FrameState {
+            position: DVec3::new(r, offset, 0.0),
+            velocity: DVec3::Y * speed,
+        },
+    );
+    let a = void_orbit::body_orientation(&frame.body.rotation, sim.fleet.time());
+    let axes = DQuat::from_mat3(&glam::DMat3::from_cols(a[0], a[1], a[2])).normalize();
+    let id = sim.fleet.launch(craft, state, axes, DVec3::ZERO);
+    sim.fleet.advance(0.0);
+    id
+}
+#[test]
+fn exported_custom_craft_stages_and_keeps_each_vessels_controls() {
+    let mut craft = demo_craft();
+    craft.name = "Acceptance craft".into();
+    craft
+        .parts
+        .iter_mut()
+        .find(|p| p.id == "p2")
+        .unwrap()
+        .fuel_kg = 200.0;
+    let loaded = import_craft(&export_craft(&craft).unwrap()).unwrap();
+    let mut sim = make(&loaded, false);
+    assert_eq!(sim.mode(), VesselMode::Ground);
+    assert_eq!(sim.fleet.fuel("v1/p2"), 200.0);
+    sim.sas(true);
+    sim.control(VesselControl {
+        throttle: 0.7,
+        turn: DVec3::ZERO,
+    });
+    assert!(sim.stage().is_empty());
+    let mass = sim.fleet.snapshot("v1").mass_kg;
+    let children = sim.stage();
+    assert_eq!(children.len(), 1);
+    let child = &children[0];
+    assert!(
+        (sim.fleet.snapshot("v1").mass_kg + sim.fleet.snapshot(child).mass_kg - mass).abs() < 1e-9
+    );
+    assert_eq!(sim.fleet.control(child).throttle, 0.0);
+    sim.select(child);
+    sim.control(VesselControl {
+        throttle: 0.2,
+        turn: DVec3::ZERO,
+    });
+    sim.select("v1");
+    assert_eq!(sim.fleet.control("v1").throttle, 0.7);
+    assert_ne!(sim.fleet.sas_phase("v1"), SasPhase::Off);
+}
+#[test]
+fn pressure_reduces_thrust_without_double_charging_fuel() {
+    let craft = demo_craft();
+    let (mut air, mut vacuum) = (make(&craft, true), make(&craft, false));
+    for sim in [&mut air, &mut vacuum] {
+        sim.control(VesselControl {
+            throttle: 1.0,
+            turn: DVec3::ZERO,
+        });
+        sim.stage();
+    }
+    let (a, v) = (air.fleet.thrust("v1"), vacuum.fleet.thrust("v1"));
+    assert!(a.force.length() < v.force.length() && a.force.length() > 0.8 * v.force.length());
+    assert_eq!(a.flow_kg_per_second, v.flow_kg_per_second);
+    air.advance(1.0, false).unwrap();
+    vacuum.advance(1.0, false).unwrap();
+    assert!((air.fleet.fuel("v1/p5") - vacuum.fleet.fuel("v1/p5")).abs() < 1e-9);
+    assert!(
+        air.advance(1.0, true)
+            .unwrap_err()
+            .contains("engine firing")
+    );
+}
+#[test]
+fn air_slows_ground_orbit_and_bubble_owners() {
+    let craft = pod_tank("Coasting air check");
+    for (height, bubble, expected) in [
+        (100.0, false, VesselMode::Ground),
+        (10_000.0, false, VesselMode::Orbit),
+        (10_000.0, true, VesselMode::Bubble),
+    ] {
+        let (mut air, mut vacuum) = (make(&craft, true), make(&craft, false));
+        let (a, v) = (
+            airborne(&mut air, &craft, height, 100.0, 0.0),
+            airborne(&mut vacuum, &craft, height, 100.0, 0.0),
+        );
+        if bubble {
+            airborne(&mut air, &craft, height, 100.0, 30.0);
+            airborne(&mut vacuum, &craft, height, 100.0, 30.0);
+        }
+        assert_eq!(air.fleet.snapshot(&a).mode, expected);
+        air.fleet.advance(1.0);
+        vacuum.fleet.advance(1.0);
+        let ay = air.fleet.body_fixed_state(&a, air.home).velocity.y;
+        let vy = vacuum.fleet.body_fixed_state(&v, vacuum.home).velocity.y;
+        println!("{expected:?}: with air {ay} vs vacuum {vy} m/s");
+        assert!(ay < vy - 0.01, "{expected:?} did not receive drag");
+    }
+}
+#[test]
+fn high_orbit_is_vacuum_and_coast_prediction_does_not_advance_fleet() {
+    let craft = pod_tank("Orbit check");
+    let (mut air, mut vacuum) = (make(&craft, true), make(&craft, false));
+    let a = air.launch_orbital(&craft, DVec3::ZERO);
+    let v = vacuum.launch_orbital(&craft, DVec3::ZERO);
+    air.select(&a);
+    vacuum.select(&v);
+    let time = air.fleet.time();
+    let before = air.fleet.snapshot(&a);
+    let predicted = air.predict(30.0);
+    assert!(predicted.points.len() >= 3);
+    assert_eq!(air.fleet.time(), time);
+    assert_eq!(air.fleet.snapshot(&a).position, before.position);
+    air.advance(30.0, false).unwrap();
+    vacuum.advance(30.0, false).unwrap();
+    assert!((air.fleet.snapshot(&a).position - vacuum.fleet.snapshot(&v).position).length() < 1e-5);
+}
+
+fn air_coast_differential(step_seconds: f64) -> (f64, f64) {
+    let craft = pod_tank("Owner differential");
+    let (mut orbit, mut bubble, mut rails) =
+        (make(&craft, true), make(&craft, true), make(&craft, true));
+    for sim in [&mut orbit, &mut bubble, &mut rails] {
+        // This differential concerns airborne owners only; omit the unrelated launch-pad ship.
+        let (ephemeris, _) = void_landing::planet_ephemeris(&sim.planet);
+        sim.fleet = void_vessels::Fleet::new(
+            ephemeris,
+            0.0,
+            vec![],
+            void_vessels::FleetOptions {
+                step_seconds,
+                ..Default::default()
+            },
+        );
+        sim.fleet.set_environment(Some(std::sync::Arc::new(
+            void_fleet_flight::FleetAir::earth(sim.home, 1.0),
+        )));
+    }
+    let o = airborne(&mut orbit, &craft, 10_000.0, 100.0, 0.0);
+    let b = airborne(&mut bubble, &craft, 10_000.0, 100.0, 0.0);
+    airborne(&mut bubble, &craft, 10_000.0, 100.0, 30.0);
+    let r = airborne(&mut rails, &craft, 10_000.0, 100.0, 0.0);
+    // All three coast for the same elapsed time; the extra bubble neighbour must not touch the
+    // measured vessel.
+    for sim in [&mut orbit, &mut bubble, &mut rails] {
+        sim.fleet.advance(6.0);
+    }
+    assert_eq!(bubble.fleet.snapshot(&b).mode, VesselMode::Bubble);
+    assert!(rails.fleet.rails_blocker().is_none());
+    orbit.fleet.advance(10.0);
+    bubble.fleet.advance(10.0);
+    assert!(rails.fleet.advance_on_rails(10.0));
+    let frame = PlanetFrame::new(&orbit.fleet.ephemeris, orbit.home);
+    let body_fixed = |sim: &FleetFlight, id: &str| {
+        let snapshot = sim.fleet.snapshot(id);
+        frame.to_body_fixed(
+            &sim.fleet.ephemeris,
+            sim.fleet.time(),
+            FrameState {
+                position: snapshot.position,
+                velocity: snapshot.velocity,
+            },
+        )
+    };
+    let reference = body_fixed(&orbit, &o);
+    let mut bubble_error = (0.0, 0.0);
+    for (name, sim, id, budget) in [
+        ("bubble", &bubble, &b, f64::INFINITY),
+        ("rails", &rails, &r, 1e-3),
+    ] {
+        let state = body_fixed(sim, id);
+        let dp = (state.position - reference.position).length();
+        let dv = (state.velocity - reference.velocity).length();
+        println!("air coast {name} vs orbit: {dp:e} m, {dv:e} m/s");
+        if name == "bubble" {
+            bubble_error = (dp, dv);
+        }
+        // Rails and orbit share the adaptive propagator; their outputs must match tightly.
+        assert!(
+            dp < budget && dv < budget / 10.0,
+            "{name}: {dp} m, {dv} m/s"
+        );
+    }
+    bubble_error
+}
+
+#[test]
+fn atmospheric_coast_agrees_across_orbit_bubble_and_rails() {
+    let coarse = air_coast_differential(1.0 / 60.0);
+    let fine = air_coast_differential(1.0 / 240.0);
+    // Velocity-dependent air is sampled once per fixed scene step. Its first-order error must
+    // shrink with the step, rather than conceal an owner mismatch behind a larger tolerance.
+    assert!(fine.0 < 0.1 && fine.1 < 0.01, "refined coast: {fine:?}");
+    assert!(
+        fine.0 < coarse.0 * 0.3 && fine.1 < coarse.1 * 0.3,
+        "four-times finer steps did not converge: coarse {coarse:?}, fine {fine:?}"
+    );
+}
+
+#[test]
+fn fleet_plan_uses_live_staged_engine_and_trait_ephemeris_without_spending_fuel() {
+    let craft = demo_craft();
+    let mut sim = make(&craft, false);
+    assert!(sim.new_plan(&sim.selected, 60.0).is_err()); // Ground ship is not ready.
+    let vessel = sim.launch_orbital(&craft, DVec3::ZERO);
+    sim.select(&vessel);
+    assert!(sim.new_plan(&vessel, 60.0).is_err()); // Unstaged engines are not invented.
+    sim.stage();
+    sim.stage();
+    let before = sim.fleet.snapshot(&vessel);
+    let before_time = sim.fleet.time();
+    let engine = sim.plan_engine(&vessel).unwrap();
+    assert!((engine.exhaust_velocity - 340.0 * void_assembly::G0).abs() < 1e-9);
+    // Only the upper connected tank's 700 kg is reachable after separation, not the detached stage.
+    assert!((before.mass_kg - engine.dry_mass_kg - 700.0).abs() < 1e-9);
+    assert_eq!(sim.fleet.control(&vessel).throttle, 0.0);
+    let mut plan = sim.new_plan(&vessel, 60.0).unwrap();
+    plan.add(void_orbit::ManeuverSpec {
+        start_time: sim.fleet.time() + 20.0,
+        reference_body: sim.home,
+        reference_mode: void_orbit::ReferenceMode::Fixed,
+        prograde: 100.0,
+        normal: 0.0,
+        radial: 0.0,
+    });
+    let burn = *plan.status(0).as_ref().unwrap();
+    let expected = before.mass_kg * (-100.0 / engine.exhaust_velocity).exp();
+    assert!((burn.mass_after_kg - expected).abs() < 1e-9);
+    plan.extend(&mut sim.fleet.ephemeris, 100_000);
+    assert!(plan.complete());
+    assert!(
+        plan.position_at(&mut sim.fleet.ephemeris, burn.end_time)
+            .is_some()
+    );
+    assert_eq!(sim.fleet.time(), before_time);
+    assert_eq!(sim.fleet.snapshot(&vessel).mass_kg, before.mass_kg);
+    assert_eq!(sim.fleet.snapshot(&vessel).position, before.position);
+}

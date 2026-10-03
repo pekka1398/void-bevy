@@ -1,0 +1,20 @@
+[package]
+name = "void-fleet-flight"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+glam.workspace = true
+void-assembly.workspace = true
+void-aero.workspace = true
+void-vessels.workspace = true
+void-landing.workspace = true
+void-orbit.workspace = true
+void-frames.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+void-terrain.workspace = true
+void-view.workspace = true

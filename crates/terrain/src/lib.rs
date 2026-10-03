@@ -7,7 +7,7 @@ mod layered;
 pub mod noise;
 
 use glam::DVec3;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use void_lod::{SurfaceSample, SurfaceSampler};
 use void_math::hypot;
 
@@ -16,7 +16,7 @@ pub use layered::{DEFAULT_LAYERED, Layered, LayeredOptions, MAX_HEIGHT, SEA_LEVE
 
 /// Plain data that builds a terrain, as landing's `TerrainConfig` (the same JSON):
 /// `{"kind": "hills", "options": {...}}` or `{"kind": "layered", "options": {...}}`.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "kind", content = "options", rename_all = "lowercase")]
 pub enum TerrainConfig {
     Hills(HillsOptions),
@@ -36,18 +36,24 @@ pub struct Terrain {
     pub radius_meters: f64,
     pub max_height_meters: f64,
     kind: Kind,
+    config: TerrainConfig,
 }
 
 impl Terrain {
+    pub fn config(&self) -> &TerrainConfig {
+        &self.config
+    }
     pub fn from_config(config: &TerrainConfig) -> Self {
         match config {
             TerrainConfig::Hills(o) => Self {
+                config: config.clone(),
                 name: o.name.clone(),
                 radius_meters: o.radius_meters,
                 max_height_meters: o.max_height_meters,
                 kind: Kind::Hills(Hills::new(o)),
             },
             TerrainConfig::Layered(o) => Self {
+                config: config.clone(),
                 name: "Scenery layered terrain".into(),
                 radius_meters: o.radius_meters,
                 max_height_meters: MAX_HEIGHT,

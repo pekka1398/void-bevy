@@ -1,0 +1,142 @@
+//! Direct world save. Logical state and native owner caches are restored without any pilot replay.
+use crate::{
+    FleetAir, FleetFlight,
+    session::{InitialWorld, MODEL_VERSION, world_mark},
+};
+use serde::{Deserialize, Serialize};
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    path::Path,
+    sync::Arc,
+};
+use void_vessels::{Fleet, FleetCheckpoint};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlightCheckpoint {
+    version: u32,
+    model_version: u32,
+    catalog: serde_json::Value,
+    pub initial: InitialWorld,
+    fleet: FleetCheckpoint,
+    selected: String,
+    presentation: crate::presentation::Presentation,
+    maneuver_warp: crate::warp::ManeuverWarp,
+    plans: std::collections::BTreeMap<String, crate::plans::SavedVesselPlan>,
+    ephemeris_end: f64,
+    mark: serde_json::Value,
+}
+impl FlightCheckpoint {
+    pub fn capture(sim: &FleetFlight, initial: InitialWorld) -> Self {
+        assert_eq!(
+            sim.launch_site, initial.launch_site,
+            "world checkpoint: launch site changed"
+        );
+        assert_eq!(
+            sim.planet.terrain_config, initial.terrain,
+            "world checkpoint: terrain changed"
+        );
+        Self {
+            version: 1,
+            model_version: MODEL_VERSION,
+            catalog: serde_json::to_value(void_assembly::catalog()).unwrap(),
+            initial,
+            fleet: sim.fleet.checkpoint(),
+            selected: sim.selected.clone(),
+            presentation: sim.presentation.clone(),
+            maneuver_warp: sim.maneuver_warp.clone(),
+            plans: sim.plan_checkpoints(),
+            ephemeris_end: sim.fleet.ephemeris.end_time(),
+            mark: world_mark(sim),
+        }
+    }
+    fn validate_header(&self) {
+        assert_eq!(self.version, 1, "world checkpoint: unsupported version");
+        assert_eq!(
+            self.model_version, MODEL_VERSION,
+            "world checkpoint: incompatible model"
+        );
+        assert_eq!(
+            self.catalog,
+            serde_json::to_value(void_assembly::catalog()).unwrap(),
+            "world checkpoint: catalog changed"
+        );
+        assert!(
+            self.ephemeris_end.is_finite(),
+            "world checkpoint: invalid ephemeris bound"
+        );
+    }
+    pub fn restore(&self) -> FleetFlight {
+        self.validate_header();
+        let planet = self.initial.planet();
+        let (mut ephemeris, home) = void_landing::planet_ephemeris(&planet);
+        // Rebuild only the massive-body samples. This is not a replay of ships or pilot actions.
+        ephemeris.extend_to(self.ephemeris_end);
+        let environment = self.initial.air_enabled.then(|| {
+            Arc::new(FleetAir::earth(
+                home,
+                self.initial
+                    .air_density_scale
+                    .expect("world checkpoint: missing air density"),
+            )) as Arc<dyn void_vessels::FleetEnvironment>
+        });
+        let fleet = Fleet::from_checkpoint(ephemeris, self.fleet.clone(), environment);
+        let mut sim = FleetFlight {
+            fleet,
+            planet,
+            home,
+            selected: self.selected.clone(),
+            presentation: self.presentation.clone(),
+            maneuver_warp: self.maneuver_warp.clone(),
+            launch_site: self.initial.launch_site,
+            plans: std::collections::BTreeMap::new(),
+        };
+        sim.restore_plans(self.plans.clone());
+        sim.validate_warp();
+        assert_eq!(
+            world_mark(&sim),
+            self.mark,
+            "world checkpoint: restored state differs"
+        );
+        sim
+    }
+    pub fn read(path: impl AsRef<Path>) -> Self {
+        let saved: Self =
+            serde_json::from_slice(&fs::read(path).expect("world checkpoint: read file"))
+                .expect("world checkpoint: invalid file");
+        saved.validate_header();
+        saved
+    }
+    pub fn write(&self, path: impl AsRef<Path>) {
+        self.validate_header();
+        let path = path.as_ref();
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        fs::create_dir_all(parent).expect("world checkpoint: create directory");
+        let tmp = parent.join(format!(
+            ".{}.{}.tmp",
+            path.file_name()
+                .expect("checkpoint filename")
+                .to_string_lossy(),
+            std::process::id()
+        ));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .expect("world checkpoint: create temp file");
+        serde_json::to_writer(&mut file, self).expect("world checkpoint: encode file");
+        file.write_all(b"\n")
+            .expect("world checkpoint: finish file");
+        file.sync_all().expect("world checkpoint: sync file");
+        drop(file);
+        fs::rename(tmp, path).expect("world checkpoint: replace file");
+        fs::File::open(parent)
+            .expect("world checkpoint: open directory")
+            .sync_all()
+            .expect("world checkpoint: sync directory");
+    }
+}

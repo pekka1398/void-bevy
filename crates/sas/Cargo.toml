@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+serde.workspace = true
 glam.workspace = true
 void-math.workspace = true
 void-rotation.workspace = true

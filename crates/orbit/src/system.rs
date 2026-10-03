@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::f64::consts::FRAC_PI_2;
 
 use glam::DVec3;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use void_frames::Spin;
 
 use crate::kepler::{
@@ -14,7 +14,7 @@ use crate::kepler::{
 pub const GRAVITATIONAL_CONSTANT: f64 = 6.6743e-11;
 
 /// A system as the orbit lab's `SystemSpec` (`lab/orbit/src/orbit/SystemSpec.ts`), read from JSON.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SystemSpec {
     pub name: String,
@@ -27,7 +27,7 @@ impl SystemSpec {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BodySpec {
     pub id: String,
@@ -46,7 +46,7 @@ pub struct BodySpec {
     pub children: Vec<BodySpec>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OrbitPlane {
     Ecliptic,
@@ -54,21 +54,21 @@ pub enum OrbitPlane {
     ParentEquator,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GravityField {
     pub j2: f64,
     pub reference_radius_meters: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum RotationSpec {
     Locked(LockedRotationSpec),
     Spin(SpinSpec),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SpinSpec {
     pub period_seconds: f64,
@@ -95,7 +95,7 @@ impl From<SpinSpec> for Spin {
 ///   in the plane of both (Cassini state 2, like the Moon);
 /// - prime meridian facing the parent's mean direction at t = 0 (true direction minus the
 ///   equation of centre).
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LockedRotationSpec {
     pub kind: Locked,
@@ -104,7 +104,7 @@ pub struct LockedRotationSpec {
     pub obliquity_to_orbit_radians: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Locked {
     Locked,

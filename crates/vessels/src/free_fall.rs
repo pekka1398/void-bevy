@@ -121,3 +121,43 @@ impl ContactFrame for FreeFallFrame {
         DVec3::ZERO
     }
 }
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FreeFallCheckpoint {
+    run: PropagationRun,
+    previous: VesselState,
+}
+impl FreeFallFrame {
+    pub fn checkpoint(&self) -> FreeFallCheckpoint {
+        FreeFallCheckpoint {
+            run: self.run.clone(),
+            previous: self.previous,
+        }
+    }
+    pub fn from_checkpoint(
+        ephemeris: &dyn EphemerisSource,
+        tolerances: Tolerances,
+        saved: FreeFallCheckpoint,
+    ) -> Self {
+        assert!(
+            saved.run.time.is_finite()
+                && saved
+                    .run
+                    .y
+                    .iter()
+                    .chain(&saved.run.dy)
+                    .all(|v| v.is_finite())
+                && saved.previous.time.is_finite()
+                && saved.previous.position.is_finite()
+                && saved.previous.velocity.is_finite()
+                && saved.previous.time <= saved.run.time,
+            "free fall checkpoint: invalid origin"
+        );
+        Self {
+            propagator: RefCell::new(VesselPropagator::new(ephemeris, tolerances)),
+            run: saved.run,
+            previous: saved.previous,
+        }
+    }
+}

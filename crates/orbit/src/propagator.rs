@@ -1,5 +1,6 @@
 //! One vessel through the ephemeris' gravity, as `lab/orbit/src/orbit/VesselPropagator.ts`.
 
+use serde::{Deserialize, Serialize};
 use std::f64::consts::TAU;
 use std::sync::Arc;
 
@@ -10,13 +11,13 @@ use crate::ephemeris::EphemerisSource;
 use crate::trajectory::Trajectory;
 
 /// Per-step absolute error bounds. Mass needs none: its derivative is constant per leg.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Tolerances {
     pub position_meters: f64,
     pub velocity_meters_per_second: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VesselState {
     pub time: f64,
     pub position: DVec3,
@@ -30,7 +31,7 @@ pub struct VesselState {
 ///   relative to the body (prograde), normal = orbit normal r × v, radial = tangent × normal.
 /// - surface: near a rotating body, the normalised combination up × (local vertical) + prograde ×
 ///   (direction of the velocity over the ground, v − v_body − ω × r).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AttitudeLaw {
     Inertial {
         direction: DVec3,
@@ -49,7 +50,7 @@ pub enum AttitudeLaw {
 }
 
 /// Constant for the duration of one advance call.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThrustControl {
     pub thrust_newtons: f64,
     /// Isp × g0, m/s.
@@ -60,14 +61,14 @@ pub struct ThrustControl {
 }
 
 /// Constant inertial force and independent propellant flow, for a multi-engine craft.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ForceControl {
     pub force: DVec3,
     pub mass_flow_kg_per_second: f64,
     pub minimum_mass_kg: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Control {
     Thrust(ThrustControl),
     Force(ForceControl),
@@ -81,7 +82,8 @@ impl Control {
         }
     }
 
-    fn assert_valid(&self, body_count: usize) {
+    /// Validate a control before installing it in a simulation owner.
+    pub fn assert_valid(&self, body_count: usize) {
         match self {
             Control::Thrust(c) => c.assert_valid(body_count),
             Control::Force(c) => {
@@ -156,14 +158,14 @@ impl ThrustControl {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AdvanceOutcome {
     Reached,
     Budget,
     Impact { body: usize },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Impact {
     pub body: usize,
     pub time: f64,
@@ -179,7 +181,7 @@ const IMPACT_TIME_RESOLUTION_SECONDS: f64 = 1e-4;
 
 /// Continuable propagation of one vessel: the state (position, velocity, mass), the integrator's
 /// first-same-as-last derivative and the control it belongs to, and step-size memory.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PropagationRun {
     pub time: f64,
     pub y: [f64; DIM],

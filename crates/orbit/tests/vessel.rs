@@ -313,6 +313,52 @@ fn flight_plan_matches_the_orbit_lab() {
 }
 
 #[test]
+fn partially_computed_plan_restores_and_continues_without_restarting() {
+    let g = golden();
+    let mut eph = ephemeris();
+    let start = state(&g["start"]);
+    eph.extend_to(start.time);
+    let engine = PlanEngine {
+        thrust_newtons: f(&g["engine"]["thrustNewtons"]),
+        exhaust_velocity: f(&g["engine"]["exhaustVelocity"]),
+        dry_mass_kg: f(&g["engine"]["dryMassKg"]),
+    };
+    let mut original = FlightPlan::new(&eph, tolerances(&g), engine, 3000.0);
+    original.rebase(&PropagationRun::new(start));
+    for (after, dv) in [(30.0, 60.0), (200.0, -10.0), (200.1, 1.0)] {
+        original.add(ManeuverSpec {
+            start_time: start.time + after,
+            reference_body: g["home"].as_u64().unwrap() as usize,
+            reference_mode: ReferenceMode::Fixed,
+            prograde: dv,
+            normal: 1.0,
+            radial: 0.0,
+        });
+    }
+    original.extend(&mut eph, 3);
+    assert!(!original.complete());
+    let bytes = serde_json::to_vec(&original.checkpoint()).unwrap();
+    let saved: void_orbit::FlightPlanCheckpoint = serde_json::from_slice(&bytes).unwrap();
+    let mut restored = FlightPlan::from_checkpoint(&eph, saved);
+    assert_eq!(
+        serde_json::to_value(restored.checkpoint()).unwrap(),
+        serde_json::to_value(original.checkpoint()).unwrap()
+    );
+    for _ in 0..10 {
+        original.extend(&mut eph, 13);
+        restored.extend(&mut eph, 13);
+        assert_eq!(
+            serde_json::to_value(restored.checkpoint()).unwrap(),
+            serde_json::to_value(original.checkpoint()).unwrap()
+        );
+    }
+    assert!(
+        original.status(2).is_err(),
+        "the overlapping burn must retain its rejection"
+    );
+}
+
+#[test]
 fn dominance_matches_the_orbit_lab() {
     let g = golden();
     let mut ephemeris = ephemeris();

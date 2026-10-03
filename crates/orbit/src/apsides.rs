@@ -1,10 +1,10 @@
 use glam::DVec3;
 
-use crate::ephemeris::Ephemeris;
+use crate::ephemeris::EphemerisSource;
 use crate::system::CelestialBody;
 use crate::trajectory::Trajectory;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ApsisKind {
     Periapsis,
     Apoapsis,
@@ -27,7 +27,7 @@ const TIME_RESOLUTION_SECONDS: f64 = 1e-3;
 /// refined by bisection on the trajectory's Hermite interpolation.
 pub fn find_apsides(
     trajectory: &Trajectory,
-    ephemeris: &Ephemeris,
+    ephemeris: &dyn EphemerisSource,
     body: usize,
     from_time: f64,
     max_count: usize,

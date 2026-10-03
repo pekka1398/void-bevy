@@ -1,4 +1,6 @@
 //! Multiple vessels, orbital/contact ownership, separation and joining.
+mod environment;
+pub use environment::*;
 mod fleet;
 mod free_fall;
 mod propulsion;

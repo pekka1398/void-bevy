@@ -10,11 +10,11 @@ rust-version = "1.95"
 # Pinned to the source read in vendor/bevy (v0.19.1).
 bevy = "=0.19.1"
 # The f64 types Bevy 0.19.1 uses; engine-free crates depend on glam alone.
-glam = "=0.32.1"
+glam = { version = "=0.32.1", features = ["serde"] }
 # fdlibm, as V8 uses for Math.tan, acos, asin, atan; std calls the system libm, which rounds some inputs differently.
 libm = "0.2"
 # The Rapier lab/landing runs as WebAssembly (vendor/rapier at v0.35.1), here native.
-rapier3d = "=0.35.1"
+rapier3d = { version = "=0.35.1", features = ["serde-serialize"] }
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip: the default parser can be an ulp off, which the golden checks see.
 serde_json = { version = "1", features = ["float_roundtrip"] }

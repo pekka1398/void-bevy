@@ -100,7 +100,7 @@ pub struct Craft {
     pub name: String,
     pub parts: Vec<PartInstance>,
 }
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PartPose {
     pub position: DVec3,
     pub rotation: DQuat,

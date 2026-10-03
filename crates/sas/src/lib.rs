@@ -18,13 +18,14 @@
 //! so "holding" means holding still in that frame.
 
 use glam::{DQuat, DVec3};
+use serde::{Deserialize, Serialize};
 use void_math::{atan2, hypot};
 use void_rotation::{Mat3, matrix};
 
 /// Off: the pilot's command passes through. Pilot: a key is held; SAS stops spin on the other
 /// axes. Damping: keys released, SAS brings the spin down before it locks. Holding: SAS holds the
 /// locked attitude.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SasPhase {
     Off,
     Pilot,
@@ -44,7 +45,7 @@ impl SasPhase {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SasTuning {
     /// Rate loop: the spin error is closed with this time constant, s.
     pub rate_seconds: f64,
@@ -112,7 +113,7 @@ pub fn attitude_error(target: DQuat, current: DQuat) -> DVec3 {
     DVec3::new(r.x / s * angle, r.y / s * angle, r.z / s * angle)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StabilityAssist {
     max_torque: f64,
     tuning: SasTuning,

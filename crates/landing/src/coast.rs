@@ -1,12 +1,13 @@
 //! Coast prediction and the encounter range gate, as `lab/landing/src/vessel/CoastPrediction.ts`
 //! and `EncounterPhysics.ts`.
 
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use glam::DVec3;
 use void_math::hypot;
 use void_orbit::{
-    AdvanceOutcome, Ephemeris, PropagationRun, Tolerances, Trajectory, VesselPropagator,
+    AdvanceOutcome, EphemerisSource, PropagationRun, Tolerances, Trajectory, VesselPropagator,
     VesselState,
 };
 use void_terrain::Terrain;
@@ -33,7 +34,7 @@ fn clearance(position: DVec3, terrain: &Terrain) -> f64 {
 /// Coast from the current state through orbit physics, stopping at the sampled terrain.
 #[allow(clippy::too_many_arguments)]
 pub fn predict_coast(
-    ephemeris: &mut Ephemeris,
+    ephemeris: &mut dyn EphemerisSource,
     frame: &PlanetFrame,
     terrain: &Terrain,
     tolerances: Tolerances,
@@ -115,7 +116,7 @@ pub fn predict_coast(
     result
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EncounterRanges {
     /// Enter detailed, mutually collidable physics inside this distance.
     pub unpack_meters: f64,
@@ -237,5 +238,22 @@ impl EncounterPhysicsGate {
     pub fn remove_vessel(&mut self, vessel_id: &str) {
         self.active
             .retain(|(a, b), _| a != vessel_id && b != vessel_id);
+    }
+}
+
+impl EncounterPhysicsGate {
+    /// Restore hysteresis independently of current pair distance. Recomputing it would change
+    /// ownership for a pair inside the pack/unpack band immediately after loading.
+    pub fn restore_pairs(&mut self, pairs: Vec<(String, String)>) {
+        assert!(
+            self.active.is_empty(),
+            "encounter checkpoint: gate already has pairs"
+        );
+        for (a, b) in pairs {
+            assert!(
+                a < b && self.active.insert((a, b), ()).is_none(),
+                "encounter checkpoint: invalid/duplicate pair"
+            );
+        }
     }
 }

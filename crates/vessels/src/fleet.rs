@@ -1,6 +1,10 @@
-use crate::{FreeFallFrame, Propulsion, PropulsionPart, burn, propulsion, step_thrust};
+use crate::{
+    EnvironmentPart, EnvironmentSample, FleetEnvironment, FreeFallFrame, Propulsion,
+    PropulsionPart, burn, propulsion, step_thrust,
+};
 use glam::{DMat3, DQuat, DVec3};
 use rapier3d::prelude::RigidBodyHandle;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use void_assembly::{
@@ -18,9 +22,12 @@ use void_rotation::{Mat3, rotation_step};
 use void_sas::{SAS_TUNING, SasPhase, StabilityAssist};
 use void_terrain::Terrain;
 
+mod guidance;
+pub use guidance::{GuidanceStatus, GuidedBurn};
+
 type Poses = Vec<(String, PartPose)>;
 type SceneGroup = (Option<usize>, Vec<String>, Vec<(u64, usize)>);
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct FleetOptions {
     pub step_seconds: f64,
     pub tolerances: Tolerances,
@@ -108,7 +115,16 @@ pub struct SceneSnapshot {
     pub asleep: bool,
     pub recenters: u64,
 }
-#[derive(Clone, Copy, Debug, Default)]
+
+/// Actual live collision geometry. Packed orbital ships have no Rapier collider to display.
+#[derive(Clone, Debug)]
+pub struct VesselColliderMesh {
+    pub vessel: String,
+    pub position: DVec3,
+    pub rotation: DQuat,
+    pub mesh: void_landing::BodyColliderMesh,
+}
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct VesselControl {
     pub throttle: f64,
     pub turn: DVec3,
@@ -168,7 +184,7 @@ struct Scene {
     ground: Option<usize>,
     members: Vec<String>,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 enum Owner {
     Orbit {
         run: Box<PropagationRun>,
@@ -181,7 +197,7 @@ enum Owner {
         push: DVec3,
     },
 }
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Vessel {
     id: String,
     name: String,
@@ -189,6 +205,7 @@ struct Vessel {
     poses: Poses,
     owner: Owner,
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Sas {
     assist: StabilityAssist,
     ground: Option<usize>,
@@ -199,12 +216,14 @@ pub struct Fleet {
     pub options: FleetOptions,
     pub events: Vec<FleetEvent>,
     propagator: VesselPropagator,
+    environment: Option<Arc<dyn FleetEnvironment>>,
     grounds: Vec<Ground>,
     parts: HashMap<String, PropulsionPart>,
     connections: Vec<Connection>,
     vessels: BTreeMap<String, Vessel>,
     order: Vec<String>,
     controls: HashMap<String, VesselControl>,
+    guidance: BTreeMap<String, GuidedBurn>,
     lit: HashSet<String>,
     staged: HashSet<String>,
     sas: HashMap<String, Sas>,
@@ -281,12 +300,14 @@ impl Fleet {
             options,
             events: vec![],
             propagator,
+            environment: None,
             grounds,
             parts: HashMap::new(),
             connections: vec![],
             vessels: BTreeMap::new(),
             order: vec![],
             controls: HashMap::new(),
+            guidance: BTreeMap::new(),
             lit: HashSet::new(),
             staged: HashSet::new(),
             sas: HashMap::new(),
@@ -298,8 +319,48 @@ impl Fleet {
             next_scene: 1,
         }
     }
+    pub fn set_environment(&mut self, environment: Option<Arc<dyn FleetEnvironment>>) {
+        self.environment = environment;
+        for vessel in self.vessels.values_mut() {
+            if let Owner::Orbit { run, .. } = &mut vessel.owner {
+                **run = run.restarted();
+            }
+        }
+    }
+    fn environment_sample(&self, v: &Vessel, time: f64) -> Option<EnvironmentSample> {
+        self.environment.as_ref().map(|environment| {
+            let parts = self
+                .centred(&v.poses)
+                .0
+                .into_iter()
+                .map(|(id, pose)| EnvironmentPart {
+                    definition: self.parts[&id].definition,
+                    id,
+                    pose,
+                })
+                .collect::<Vec<_>>();
+            environment.sample(
+                &self.ephemeris,
+                time,
+                &self.snapshot_of(v),
+                &parts,
+                &self.connections,
+            )
+        })
+    }
     pub fn time(&self) -> f64 {
         self.time
+    }
+    /// Substep time already requested but not yet integrated by the fixed-step owners.
+    pub fn pending_seconds(&self) -> f64 {
+        self.pending
+    }
+    pub fn connection_snapshots(&self) -> Vec<Connection> {
+        self.connections.clone()
+    }
+    pub fn sas_target(&self, id: &str) -> Option<DQuat> {
+        self.vessel(id);
+        self.sas.get(id).and_then(|sas| sas.assist.target())
     }
     pub fn vessel_ids(&self) -> Vec<String> {
         self.order.clone()
@@ -364,19 +425,70 @@ impl Fleet {
                 .any(|m| matches!(m, Module::Command))
         })
     }
+    fn propulsion_with_environment(
+        &self,
+        v: &Vessel,
+        sample: Option<&EnvironmentSample>,
+    ) -> Propulsion {
+        self.propulsion_at(v, sample, self.time)
+    }
+    fn propulsion_at(
+        &self,
+        v: &Vessel,
+        sample: Option<&EnvironmentSample>,
+        time: f64,
+    ) -> Propulsion {
+        let parts: Vec<_> = v.poses.iter().map(|(id, _)| &self.parts[id]).collect();
+        let mut p = propulsion(
+            &parts,
+            &v.poses,
+            &self.connections,
+            &self.lit,
+            self.effective_throttle(&v.id, time),
+            self.centred(&v.poses).1,
+        );
+        if let Some(sample) = sample {
+            p.force = DVec3::ZERO;
+            p.torque = DVec3::ZERO;
+            let centre = self.centred(&v.poses).1;
+            for group in &mut p.groups {
+                for engine in &mut group.engines {
+                    let scale = *sample
+                        .thrust_scales
+                        .get(&engine.part_id)
+                        .expect("fleet: environment omitted active engine");
+                    assert!(
+                        scale.is_finite() && (0.0..=1.0).contains(&scale),
+                        "fleet: invalid engine scale"
+                    );
+                    engine.force *= scale;
+                    p.force += engine.force;
+                    p.torque += (engine.point - centre).cross(engine.force);
+                }
+            }
+        }
+        p
+    }
     fn propulsion_of(&self, v: &Vessel) -> Propulsion {
+        let sample = self.environment_sample(v, self.time);
+        self.propulsion_with_environment(v, sample.as_ref())
+    }
+    pub fn thrust(&self, id: &str) -> Propulsion {
+        self.propulsion_of(self.vessel(id))
+    }
+    /// Read-only vacuum rating for planning. Unlike `thrust`, this asks for full throttle even
+    /// when the pilot currently coasts; it does not ignite unstaged engines or mutate controls.
+    pub fn full_throttle_vacuum_thrust(&self, id: &str) -> Propulsion {
+        let v = self.vessel(id);
         let parts: Vec<_> = v.poses.iter().map(|(id, _)| &self.parts[id]).collect();
         propulsion(
             &parts,
             &v.poses,
             &self.connections,
             &self.lit,
-            self.controls[&v.id].throttle,
+            1.0,
             self.centred(&v.poses).1,
         )
-    }
-    pub fn thrust(&self, id: &str) -> Propulsion {
-        self.propulsion_of(self.vessel(id))
     }
     pub fn fuel(&self, id: &str) -> f64 {
         self.parts[id].fuel_kg
@@ -395,6 +507,7 @@ impl Fleet {
             "fleet: no command part"
         );
         self.vessel(id);
+        self.cancel_guidance(id, "manual control");
         self.controls.insert(id.into(), c);
     }
     pub fn set_sas(&mut self, id: &str, on: bool) {
@@ -587,7 +700,9 @@ impl Fleet {
         s
     }
     pub fn snapshot(&self, id: &str) -> VesselSnapshot {
-        let v = self.vessel(id);
+        self.snapshot_of(self.vessel(id))
+    }
+    fn snapshot_of(&self, v: &Vessel) -> VesselSnapshot {
         let (s, q, w, scene) = match &v.owner {
             Owner::Orbit {
                 run,
@@ -617,7 +732,7 @@ impl Fleet {
             }
         };
         VesselSnapshot {
-            id: id.into(),
+            id: v.id.clone(),
             name: v.name.clone(),
             mode: self.mode(v),
             scene,
@@ -783,6 +898,39 @@ impl Fleet {
             .expect("tile not loaded");
         s.world.terrain_collider_mesh(t)
     }
+
+    pub fn vessel_collider_meshes(&self) -> Vec<VesselColliderMesh> {
+        self.order
+            .iter()
+            .flat_map(|id| {
+                let vessel = self.vessel(id);
+                let Owner::Scene { scene, body, .. } = vessel.owner else {
+                    return Vec::new();
+                };
+                let world = &self.scenes[&scene].world;
+                let position = self
+                    .to_inertial(
+                        scene,
+                        FrameState {
+                            position: world.position(body),
+                            velocity: DVec3::ZERO,
+                        },
+                    )
+                    .position;
+                let rotation = self.axes(scene) * quat64(*world.body(body).rotation());
+                world
+                    .body_collider_meshes(body)
+                    .into_iter()
+                    .map(|mesh| VesselColliderMesh {
+                        vessel: id.clone(),
+                        position,
+                        rotation,
+                        mesh,
+                    })
+                    .collect()
+            })
+            .collect()
+    }
     fn new_scene(&mut self, ground: Option<usize>, ids: &[String]) -> u64 {
         let mut c = FrameState {
             position: DVec3::ZERO,
@@ -909,12 +1057,20 @@ impl Fleet {
         v.owner = Owner::Scene { scene, body, push };
     }
     fn move_to(&mut self, id: &str, scene: u64) {
+        self.cancel_guidance(id, "entered contact physics");
         let snap = self.snapshot(id);
         let mut v = self.vessels.remove(id).unwrap();
         let from = self.mode(&v);
         let push = match v.owner {
             Owner::Scene { scene, push, .. } => self.axes(scene) * push,
-            Owner::Orbit { .. } => snap.rotation * self.propulsion_of(&v).force / snap.mass_kg,
+            Owner::Orbit { .. } => {
+                let sample = self.environment_sample(&v, self.time);
+                let thrust = self.propulsion_with_environment(&v, sample.as_ref());
+                let air = sample.and_then(|s| s.air).map_or(DVec3::ZERO, |source| {
+                    source.acceleration(self.time, snap.position, snap.velocity, snap.mass_kg)
+                });
+                snap.rotation * thrust.force / snap.mass_kg + air
+            }
         };
         self.remove_scene_body(&v, false);
         v.poses = self.centred(&v.poses).0;
@@ -1115,6 +1271,7 @@ impl Fleet {
         s
     }
     pub fn stage(&mut self, id: &str) -> Vec<String> {
+        self.cancel_guidance(id, "staging");
         let Some(next) = self.stages_left(id).first().copied() else {
             return vec![];
         };
@@ -1382,6 +1539,7 @@ impl Fleet {
         self.gate.remove_vessel(&b);
         self.controls.remove(&b);
         self.sas.remove(&b);
+        self.guidance.remove(&b);
         self.event(&b, Some(self.scene_mode(scene)), None, Some(scene));
         self.connections.push(Connection {
             a: part_a.into(),
@@ -1426,7 +1584,14 @@ impl Fleet {
         };
         turn * self.options.steering_torque
     }
-    fn propagate(&mut self, run: &mut PropagationRun, end: f64, control: Option<Control>) {
+    fn propagate(
+        &mut self,
+        run: &mut PropagationRun,
+        end: f64,
+        control: Option<Control>,
+        air: Option<Arc<dyn void_orbit::AirSource>>,
+    ) {
+        self.propagator.set_air_source(air);
         let outcome =
             self.propagator
                 .advance(&mut self.ephemeris, run, end, 100_000, None, control);
@@ -1448,25 +1613,100 @@ impl Fleet {
                 panic!("expected orbit")
             };
             let t = run.time;
+            if self
+                .guidance
+                .get(id)
+                .is_some_and(|g| g.status == GuidanceStatus::Armed && t >= g.end_time)
+            {
+                self.guidance.get_mut(id).unwrap().status = GuidanceStatus::Completed;
+                self.controls.get_mut(id).unwrap().throttle = 0.0;
+            }
             if t + 1e-12 >= end {
                 break;
             }
             let q = *rotation;
             let w = *angular_velocity;
-            let p = self.propulsion_of(&v);
+            let environment = self.environment_sample(&v, t);
+            let guide = self
+                .guidance
+                .get(id)
+                .filter(|g| g.status == GuidanceStatus::Armed)
+                .cloned();
+            if let Some(g) = &guide {
+                if t >= g.end_time {
+                    self.guidance.get_mut(id).unwrap().status = GuidanceStatus::Completed;
+                    self.controls.get_mut(id).unwrap().throttle = 0.0;
+                } else {
+                    let rating = self.full_rating_of(&v);
+                    if (rating.force - g.force).length() > 1e-8
+                        || (rating.flow_kg_per_second - g.flow).abs() > 1e-10
+                        || rating.torque.length() > 1e-6
+                    {
+                        self.cancel_guidance(id, "active propulsion group changed");
+                    }
+                }
+            }
+            let guide = self
+                .guidance
+                .get(id)
+                .filter(|g| g.status == GuidanceStatus::Armed)
+                .cloned();
+            let p = self.propulsion_at(&v, environment.as_ref(), t);
             let burning = p.flow_kg_per_second > 0.0;
-            let turning = w != DVec3::ZERO
-                || p.torque != DVec3::ZERO
-                || self.controls[id].turn != DVec3::ZERO
-                || self.sas.contains_key(id);
-            let mut leg = end;
+            let turning = !(burning && guide.is_some())
+                && (w != DVec3::ZERO
+                    || p.torque != DVec3::ZERO
+                    || self.controls[id].turn != DVec3::ZERO
+                    || self.sas.contains_key(id));
+            let mut leg = if self.environment.is_some() {
+                end.min(t + self.options.flight_chunk_seconds)
+            } else {
+                end
+            };
+            if let Some(g) = &guide {
+                leg = leg.min(if t < g.start_time {
+                    g.start_time
+                } else {
+                    g.end_time
+                });
+            }
             if burning && turning {
                 leg = leg.min(t + self.options.step_seconds);
             }
             if burning {
                 leg = leg.min(t + p.seconds_to_flameout);
             }
-            let control = if burning {
+            let control = if burning
+                && let Some(g) = &guide
+                && p.force.length() > 0.0
+            {
+                let direction = self.propagator.thrust_direction(
+                    &self.ephemeris,
+                    &g.attitude,
+                    t,
+                    run.state().position,
+                    run.state().velocity,
+                );
+                let aligned =
+                    (DQuat::from_rotation_arc(q * p.force.normalize(), direction) * q).normalize();
+                let Owner::Orbit {
+                    rotation,
+                    angular_velocity,
+                    ..
+                } = &mut v.owner
+                else {
+                    unreachable!()
+                };
+                *rotation = aligned;
+                *angular_velocity = DVec3::ZERO;
+                Some(Control::Thrust(void_orbit::ThrustControl {
+                    thrust_newtons: p.force.length(),
+                    exhaust_velocity: p.force.length() / p.flow_kg_per_second,
+                    minimum_mass_kg: self.mass(&v.poses)
+                        - p.groups.iter().map(|g| g.fuel_kg).sum::<f64>(),
+                    attitude: g.attitude,
+                }))
+            } else if burning {
                 Some(Control::Force(ForceControl {
                     force: q * p.force,
                     mass_flow_kg_per_second: p.flow_kg_per_second,
@@ -1479,7 +1719,7 @@ impl Fleet {
             let Owner::Orbit { run, .. } = &mut v.owner else {
                 unreachable!()
             };
-            self.propagate(run, leg, control);
+            self.propagate(run, leg, control, environment.and_then(|s| s.air));
             if burning {
                 let duration = if leg == t + p.seconds_to_flameout {
                     p.seconds_to_flameout
@@ -1490,7 +1730,7 @@ impl Fleet {
                 let mass = self.mass(&v.poses);
                 let (poses, c) = self.centred(&v.poses);
                 v.poses = poses;
-                let Owner::Orbit { run, .. } = &mut v.owner else {
+                let Owner::Orbit { run, rotation, .. } = &mut v.owner else {
                     unreachable!()
                 };
                 assert!(
@@ -1499,8 +1739,12 @@ impl Fleet {
                 );
                 run.y[6] = mass;
                 if c != DVec3::ZERO {
-                    let d = q * c;
-                    let u = w.cross(d);
+                    let d = *rotation * c;
+                    let u = if guide.is_some() {
+                        DVec3::ZERO
+                    } else {
+                        w.cross(d)
+                    };
                     for (i, value) in d.to_array().iter().enumerate() {
                         run.y[i] += value;
                     }
@@ -1508,6 +1752,35 @@ impl Fleet {
                         run.y[i + 3] += value;
                     }
                     **run = run.restarted();
+                }
+            }
+            if burning
+                && p.force.length() > 0.0
+                && let Some(g) = &guide
+            {
+                let Owner::Orbit {
+                    run,
+                    rotation,
+                    angular_velocity,
+                } = &mut v.owner
+                else {
+                    unreachable!()
+                };
+                let state = run.state();
+                let direction = self.propagator.thrust_direction(
+                    &self.ephemeris,
+                    &g.attitude,
+                    leg,
+                    state.position,
+                    state.velocity,
+                );
+                *rotation = (DQuat::from_rotation_arc(*rotation * p.force.normalize(), direction)
+                    * *rotation)
+                    .normalize();
+                *angular_velocity = DVec3::ZERO;
+                if leg == g.end_time {
+                    self.guidance.get_mut(id).unwrap().status = GuidanceStatus::Completed;
+                    self.controls.get_mut(id).unwrap().throttle = 0.0;
                 }
             }
             if turning {
@@ -1560,7 +1833,19 @@ impl Fleet {
             let q = quat64(*b.rotation());
             let w = vec64(b.angvel());
             let c = vec64(b.local_center_of_mass());
-            let p = self.propulsion_of(&v);
+            let environment = self.environment_sample(&v, self.time);
+            let p = self.propulsion_with_environment(&v, environment.as_ref());
+            let air = environment.and_then(|s| s.air);
+            let snapshot = self.snapshot_of(&v);
+            let air_acceleration = air.map_or(DVec3::ZERO, |source| {
+                self.axes(scene).conjugate()
+                    * source.acceleration(
+                        self.time,
+                        snapshot.position,
+                        snapshot.velocity,
+                        snapshot.mass_kg,
+                    )
+            });
             let (force, tau, burned) = step_thrust(&p, dt, c);
             let resting =
                 b.is_sleeping() && self.controls[&id].turn == DVec3::ZERO && p.groups.is_empty();
@@ -1569,7 +1854,7 @@ impl Fleet {
             } else {
                 tau + self.steering(&v, q, w, dt)
             };
-            let now = q * force / (self.mass(&v.poses) - burned / 2.0);
+            let now = q * force / (self.mass(&v.poses) - burned / 2.0) + air_acceleration;
             self.scenes
                 .get_mut(&scene)
                 .unwrap()
@@ -1678,6 +1963,13 @@ impl Fleet {
         }
     }
     pub fn rails_blocker(&self) -> Option<String> {
+        if self
+            .guidance
+            .values()
+            .any(|g| g.status == GuidanceStatus::Armed)
+        {
+            return Some("scheduled maneuver: use physics time".into());
+        }
         for id in &self.order {
             if self.propulsion_of(self.vessel(id)).flow_kg_per_second > 0.0 {
                 return Some(format!("engine firing on {id}"));
@@ -1724,8 +2016,13 @@ impl Fleet {
                 done = false;
                 break;
             }
+            let chunk = if self.environment.is_some() {
+                self.options.flight_chunk_seconds
+            } else {
+                self.options.rails_chunk_seconds
+            };
             let end = target
-                .min(self.time + self.options.rails_chunk_seconds)
+                .min(self.time + chunk)
                 .min(self.time + self.band_safe_seconds());
             let ids = self.order.clone();
             for (i, a) in ids.iter().enumerate() {
@@ -1749,6 +2046,8 @@ impl Fleet {
                 }
             }
             for id in ids {
+                let sample = self.environment_sample(self.vessel(&id), self.time);
+                self.propagator.set_air_source(sample.and_then(|s| s.air));
                 if let Owner::Orbit { run, .. } = &mut self.vessels.get_mut(&id).unwrap().owner {
                     let outcome =
                         self.propagator
@@ -1767,3 +2066,7 @@ impl Fleet {
         done
     }
 }
+
+#[path = "checkpoint.rs"]
+mod checkpoint;
+pub use checkpoint::FleetCheckpoint;

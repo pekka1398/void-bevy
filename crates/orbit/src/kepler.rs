@@ -1,10 +1,10 @@
 use std::f64::consts::{PI, TAU};
 
 use glam::DVec3;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Closed elliptic orbit, angles in radians, referred to the ecliptic frame.
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EllipticElements {
     pub semi_major_axis_meters: f64,

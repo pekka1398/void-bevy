@@ -1,5 +1,8 @@
 # 主遊戲（void-app）
 
+目前 `void-app` 已改用 assembly／Fleet 的共享 runtime，控制、存檔、錄放與量測入口見 [fleet-flight.md](fleet-flight.md)。本頁下方原 PartJointRocket 的移植對照、火箭參數和舊錄放格式保留為歷史及 `cargo run -p void-app --example legacy_flight` 的說明；不是新主程式的格式。逐船機動執行與撞擊毀損仍在改接中，見 [ab-progress.md](ab-progress.md)。
+
+
 `cargo run -p void-app` 是 VOID 本體，移植 TS 主遊戲（repo 根目錄的 `src/main.ts`，lab/flight 跑的就是它）。各功能 crate 已各自對照過 lab，這裡只負責接線。
 
 ```sh

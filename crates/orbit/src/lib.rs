@@ -19,7 +19,8 @@ pub use ephemeris::{
     Ephemeris, EphemerisOptions, EphemerisSource, suggested_step_seconds, yoshida8_sequence,
 };
 pub use flight_plan::{
-    BurnSchedule, FlightPlan, ManeuverSpec, ManeuverStatus, PlanEngine, ReferenceMode,
+    BurnSchedule, FlightPlan, FlightPlanCheckpoint, ManeuverSpec, ManeuverStatus, PlanEngine,
+    ReferenceMode,
 };
 pub use hermite::HermiteBasis;
 pub use kepler::{

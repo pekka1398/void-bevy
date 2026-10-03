@@ -1,10 +1,10 @@
 //! Burns at full thrust and the trajectory they give, as `lab/orbit/src/orbit/FlightPlan.ts`.
 
 use glam::DVec3;
-use void_frames::{BodyId, BodyStates};
+use void_frames::BodyId;
 
 use crate::apsides::{ApsisKind, find_apsides};
-use crate::ephemeris::Ephemeris;
+use crate::ephemeris::EphemerisSource;
 use crate::kepler::osculating_orbit;
 use crate::propagator::{
     AdvanceOutcome, AttitudeLaw, Control, Impact, PropagationRun, ThrustControl, Tolerances,
@@ -12,7 +12,7 @@ use crate::propagator::{
 };
 use crate::trajectory::Trajectory;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReferenceMode {
     /// Whoever edits the plan keeps the reference on the body whose sphere of influence holds
     /// the planned trajectory at ignition.
@@ -21,7 +21,7 @@ pub enum ReferenceMode {
 }
 
 /// A planned burn: Δv components along the Frenet axes relative to `reference_body`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ManeuverSpec {
     pub start_time: f64,
     pub reference_body: usize,
@@ -34,7 +34,7 @@ pub struct ManeuverSpec {
     pub radial: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlanEngine {
     pub thrust_newtons: f64,
     pub exhaust_velocity: f64,
@@ -42,7 +42,7 @@ pub struct PlanEngine {
 }
 
 /// A maneuver made concrete: full thrust from `start_time` until the Δv is spent.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BurnSchedule {
     pub start_time: f64,
     pub end_time: f64,
@@ -81,6 +81,9 @@ pub struct FlightPlan {
     run: Option<PropagationRun>,
 }
 
+mod checkpoint;
+pub use checkpoint::FlightPlanCheckpoint;
+
 fn checked_coast(value: f64) -> f64 {
     assert!(
         value > 0.0 && value.is_finite(),
@@ -91,15 +94,18 @@ fn checked_coast(value: f64) -> f64 {
 
 impl FlightPlan {
     pub fn new(
-        ephemeris: &Ephemeris,
+        ephemeris: &dyn EphemerisSource,
         tolerances: Tolerances,
         engine: PlanEngine,
         coast_seconds: f64,
     ) -> Self {
         assert!(
             engine.thrust_newtons > 0.0
+                && engine.thrust_newtons.is_finite()
                 && engine.exhaust_velocity > 0.0
-                && engine.dry_mass_kg > 0.0,
+                && engine.exhaust_velocity.is_finite()
+                && engine.dry_mass_kg > 0.0
+                && engine.dry_mass_kg.is_finite(),
             "flight plan: engine {engine:?}"
         );
         Self {
@@ -116,6 +122,21 @@ impl FlightPlan {
             anchor: None,
             run: None,
         }
+    }
+
+    /// Recheck future burns against the current staged propulsion without losing completion history.
+    pub fn set_engine(&mut self, engine: PlanEngine) {
+        assert!(
+            engine.thrust_newtons.is_finite()
+                && engine.thrust_newtons > 0.0
+                && engine.exhaust_velocity.is_finite()
+                && engine.exhaust_velocity > 0.0
+                && engine.dry_mass_kg.is_finite()
+                && engine.dry_mass_kg > 0.0,
+            "flight plan: invalid engine"
+        );
+        self.engine = engine;
+        self.restart();
     }
 
     pub fn count(&self) -> usize {
@@ -226,7 +247,7 @@ impl FlightPlan {
     }
 
     /// Integrate the planned trajectory further by at most `max_steps` accepted steps.
-    pub fn extend(&mut self, ephemeris: &mut Ephemeris, max_steps: u64) {
+    pub fn extend(&mut self, ephemeris: &mut dyn EphemerisSource, max_steps: u64) {
         if !self.specs.is_empty() {
             self.integrate(ephemeris, self.end_time(), max_steps);
         }
@@ -234,7 +255,7 @@ impl FlightPlan {
 
     /// Barycentric vessel position on the plan at t, integrating that far now. None when the plan
     /// hits a surface before t or t precedes the plan.
-    pub fn position_at(&mut self, ephemeris: &mut Ephemeris, t: f64) -> Option<DVec3> {
+    pub fn position_at(&mut self, ephemeris: &mut dyn EphemerisSource, t: f64) -> Option<DVec3> {
         assert!(self.run.is_some(), "flight plan: no anchor");
         if t < self.trajectory.first_time() {
             return None;
@@ -259,7 +280,7 @@ impl FlightPlan {
         Some(self.trajectory.sample(t).0)
     }
 
-    fn integrate(&mut self, ephemeris: &mut Ephemeris, end: f64, max_steps: u64) {
+    fn integrate(&mut self, ephemeris: &mut dyn EphemerisSource, end: f64, max_steps: u64) {
         let Some(run) = self.run.as_mut() else { return };
         let mut left = max_steps;
         while run.impact.is_none() && run.time < end && left > 0 {
@@ -300,7 +321,7 @@ impl FlightPlan {
     /// burn i − 1, or the anchor), at or after `not_before`.
     pub fn start_at_apsis(
         &mut self,
-        ephemeris: &mut Ephemeris,
+        ephemeris: &mut dyn EphemerisSource,
         i: usize,
         kind: ApsisKind,
         not_before: f64,
