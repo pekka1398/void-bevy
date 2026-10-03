@@ -1812,6 +1812,26 @@ mod tests {
             1
         );
         assert!(app.world().contains_resource::<crate::air::AirTextures>());
+        // Layered Aurelia's sky starts at the sea, where physics' air does, and so do its clouds.
+        let sea = game_planet_by_id("aurelia", None)
+            .planet
+            .terrain
+            .radius_meters
+            + void_terrain::SEA_LEVEL;
+        assert_eq!(
+            app.world()
+                .resource::<SceneryState>()
+                .uniforms
+                .bottom_radius,
+            sea as f32
+        );
+        let sky: Vec<(f32, f32)> = app
+            .world_mut()
+            .query::<&crate::air::AirSettings>()
+            .iter(app.world())
+            .map(|air| (air.bottom_radius, air.sea_level))
+            .collect();
+        assert_eq!(sky, [(sea as f32, 0.0)]);
         // Loading a world with a different terrain replaces shader inputs and the terrain source.
         let planet = game_planet_by_id("luna", None);
         let craft = demo_craft();
@@ -1992,7 +2012,16 @@ fn build_scenery(
     use void_scenery::clouds::*;
     use void_scenery::tables::*;
     let planet = &lab.session.sim().planet;
-    let params = void_scenery::earth_like_atmosphere(planet.terrain.radius_meters);
+    // The sky starts where physics' air does (the sea on layered terrain).
+    let datum = lab
+        .session
+        .sim()
+        .fleet
+        .environment()
+        .body(lab.session.sim().home)
+        .expect("scenery: the home body has no environment")
+        .air_datum_meters;
+    let params = void_scenery::earth_like_atmosphere(planet.terrain.radius_meters + datum);
     let transmittance = build_transmittance_table(&params);
     let multiple = build_multiple_scattering_table(&params, &transmittance, 64, 20);
     let irradiance = build_irradiance_table(&params, &transmittance, &multiple, 128, 24);
@@ -2084,7 +2113,7 @@ fn build_scenery(
     settings.exposure = EXPOSURE;
     settings.enabled = f32::from(u8::from(air));
     settings.clouds_enabled = f32::from(u8::from(air));
-    settings.sea_level = uniforms.sea_level;
+    settings.sea_level = (f64::from(uniforms.sea_level) - datum) as f32;
     settings.sun_disc_enabled = f32::from(u8::from(
         lab.session.sim().fleet.ephemeris.bodies()[lab.session.sim().home]
             .parent_index

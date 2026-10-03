@@ -98,7 +98,8 @@ fn there_is_no_drag_above_the_atmosphere() {
     let demo = demo_rocket(&planet.planet.terrain);
     let air =
         RocketAir::for_planet(&planet.planet, &ephemeris, index, &demo).expect("Aurelia has air");
-    let radius = planet.planet.terrain.radius_meters;
+    // Altitudes are the air's: from the sea on layered Aurelia.
+    let radius = planet.planet.terrain.radius_meters + planet.planet.air_datum_meters();
     let fast = DVec3::new(0.0, 7800.0, 0.0);
     let high = void_landing::FrameState {
         position: DVec3::new(radius + 200_000.0, 0.0, 0.0),
@@ -138,7 +139,8 @@ fn ambient_pressure_drives_the_nozzle() {
     let demo = demo_rocket(&planet.planet.terrain);
     let air =
         RocketAir::for_planet(&planet.planet, &ephemeris, index, &demo).expect("Aurelia has air");
-    let radius = planet.planet.terrain.radius_meters;
+    // Altitudes are the air's: from the sea on layered Aurelia.
+    let radius = planet.planet.terrain.radius_meters + planet.planet.air_datum_meters();
     let at = |altitude: f64| air.pressure_pa(DVec3::new(radius + altitude, 0.0, 0.0));
     assert!(
         (at(0.0) - 101_325.0).abs() < 1.0,

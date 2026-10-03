@@ -67,7 +67,7 @@ F6／F7 與 `--load` 現在使用直接世界 checkpoint：完整行星設定、
 
 Mark 檢查所有船、零件位置／姿態／燃料／staged／lit／firing、控制、SAS phase／target、scene／frame origin／睡眠、連接圖、星曆狀態、Fleet 時鐘／pending 時間和選取船。版本、catalog、缺失／亂序 mark、命令結果或世界狀態不同均明確 panic。寫檔在同目錄 temporary file 完成 fsync 後 atomic rename，失敗不覆寫原存檔。
 
-`--load` 直接載入 checkpoint 並可續玩；`--verify-save <file>` 在建立 Bevy App 前驗證直接存檔；`--replay` 由初始世界逐格播放，用錄下的 Advance 時間而不是現在的 wall delta，逐一比對 mark，結束後暫停並可續玩。`--verify` 在建立 Bevy App 前完成重播／比對，不開 OS 視窗。MODEL_VERSION 4 已把相機／觀察操作與暫停 frame boundary 納入紀錄，重播使用錄下的視角；MODEL_VERSION 5 改為經 `Environment` 取空氣（積分器內不再外推天體中心）。
+`--load` 直接載入 checkpoint 並可續玩；`--verify-save <file>` 在建立 Bevy App 前驗證直接存檔；`--replay` 由初始世界逐格播放，用錄下的 Advance 時間而不是現在的 wall delta，逐一比對 mark，結束後暫停並可續玩。`--verify` 在建立 Bevy App 前完成重播／比對，不開 OS 視窗。MODEL_VERSION 4 已把相機／觀察操作與暫停 frame boundary 納入紀錄，重播使用錄下的視角；MODEL_VERSION 5 改為經 `Environment` 取空氣（積分器內不再外推天體中心）；MODEL_VERSION 6 讓有海的地形（layered）的大氣從海平面起算（[environment.md](environment.md)）。
 
 限制：native cache 是固定 Rapier／模型版本的存檔，不承諾跨版本相容；星曆重建仍與天體模擬時間相關。Journal verify 重跑操作，成本與操作數相關，直接 checkpoint 載入則無此船舶操作成本。模擬規則變更必須提高 MODEL_VERSION，舊紀錄會明確拒絕；目前沒有跨版本 save migration。
 

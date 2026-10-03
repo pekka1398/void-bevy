@@ -23,6 +23,17 @@ pub enum TerrainConfig {
     Layered(LayeredOptions),
 }
 
+impl TerrainConfig {
+    /// The sea above the reference sphere, where the terrain is shaped around one: layered's
+    /// continents and basins are split at `SEA_LEVEL`; hills have no sea.
+    pub fn sea_level_meters(&self) -> Option<f64> {
+        match self {
+            TerrainConfig::Hills(_) => None,
+            TerrainConfig::Layered(_) => Some(SEA_LEVEL),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 enum Kind {
     Hills(Hills),
@@ -42,6 +53,10 @@ pub struct Terrain {
 impl Terrain {
     pub fn config(&self) -> &TerrainConfig {
         &self.config
+    }
+    /// `TerrainConfig::sea_level_meters`.
+    pub fn sea_level_meters(&self) -> Option<f64> {
+        self.config.sea_level_meters()
     }
     pub fn from_config(config: &TerrainConfig) -> Self {
         match config {

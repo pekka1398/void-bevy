@@ -29,6 +29,14 @@ pub struct LandingPlanet {
     pub air_density_scale: Option<f64>,
 }
 
+impl LandingPlanet {
+    /// The atmosphere's altitude zero above the terrain's reference sphere: the sea where the
+    /// terrain has one, else the sphere. Physics' air and the drawn sky both start here.
+    pub fn air_datum_meters(&self) -> f64 {
+        self.terrain.sea_level_meters().unwrap_or(0.0)
+    }
+}
+
 struct PlanetParameters {
     air_density_scale: Option<f64>,
     id: &'static str,
@@ -238,8 +246,9 @@ pub fn planet_by_id(id: &str) -> LandingPlanet {
     }
 }
 
-/// The world around the planet: every body's gravity, the planet's terrain and, with `air`, its
-/// atmosphere at the planet's density scale (altitude from the terrain's reference sphere).
+/// The world around the planet: every body's gravity, the planet's terrain and its sea, and, with
+/// `air`, its atmosphere at the planet's density scale. Altitude is from the sea where the terrain
+/// has one (`LandingPlanet::air_datum_meters`).
 pub fn planet_environment(
     planet: &LandingPlanet,
     ephemeris: &dyn EphemerisSource,
@@ -256,9 +265,9 @@ pub fn planet_environment(
         body,
         BodyEnvironment {
             atmosphere,
-            air_datum_meters: 0.0,
+            air_datum_meters: planet.air_datum_meters(),
             terrain: Some(planet.terrain.clone()),
-            sea_level_meters: None,
+            sea_level_meters: planet.terrain.sea_level_meters(),
         },
     ))
 }

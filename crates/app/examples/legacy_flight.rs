@@ -959,7 +959,9 @@ fn setup(
 
     // scenery's atmosphere tables and cloud noise, and the ground and sea shader on the tiles.
     let scenery_started = Instant::now();
-    let params = earth_like_atmosphere(planet.planet.terrain.radius_meters);
+    // The sky starts where physics' air does (the sea on layered terrain).
+    let datum = planet.planet.air_datum_meters();
+    let params = earth_like_atmosphere(planet.planet.terrain.radius_meters + datum);
     let transmittance = build_transmittance_table(&params);
     let multiple = build_multiple_scattering_table(&params, &transmittance, 64, 20);
     let irradiance = build_irradiance_table(&params, &transmittance, &multiple, 128, 24);
@@ -1111,7 +1113,7 @@ fn setup(
     let mut air = AirSettings::new(&params);
     air.enabled = f32::from(u8::from(planet.atmosphere));
     air.clouds_enabled = f32::from(u8::from(planet.atmosphere));
-    air.sea_level = planet.sea_level as f32;
+    air.sea_level = (planet.sea_level - planet.planet.air_datum_meters()) as f32;
     // scenery's initial exposure and ACES.
     air.exposure = EXPOSURE;
     air.tone_mapping = 0.0;
@@ -2624,12 +2626,14 @@ mod tests {
             assert!(marks > 100, "only {marks} marks over the flight");
         }
         let flown = mark(&game, frames.len());
-        // The flight has to have been a flight, or the replay below proves nothing: off the ground,
-        // through both stagings, and moving.
-        let altitude =
-            DVec3::from_array(flown.position).length() - game.planet.planet.terrain.radius_meters;
+        // The flight has to have been a flight, or the replay below proves nothing: off the ground
+        // (far past the 400 m contact band), through both stagings, and moving. In sea-level air
+        // the script climbs about 14 km above the sea, where the pad and the air's zero are.
+        let altitude = DVec3::from_array(flown.position).length()
+            - game.planet.planet.terrain.radius_meters
+            - game.planet.planet.air_datum_meters();
         println!(
-            "recorded launch: {} frames, {:.0} s, stage {}, {:.1} km up at {:.0} m/s, {:.0} kg",
+            "recorded launch: {} frames, {:.0} s, stage {}, {:.1} km above the sea at {:.0} m/s, {:.0} kg",
             frames.len(),
             flown.sim_time,
             flown.stage,
@@ -2637,7 +2641,7 @@ mod tests {
             DVec3::from_array(flown.velocity).length(),
             flown.mass_kg
         );
-        assert!(flown.stage == 2 && altitude > 20e3);
+        assert!(flown.stage == 2 && altitude > 10e3);
 
         // Now fly the file, from a game built the same way and nothing carried over.
         let session = Session::read(&path);

@@ -73,7 +73,7 @@ pub fn body_pull(body: &CelestialBody, r: DVec3) -> DVec3;               // 星�
 // void-environment
 pub struct BodyEnvironment {
     pub atmosphere: Option<Atmosphere>,
-    pub air_datum_meters: f64,          // 大氣高度零點，從地形參考球起算（目前是 0）
+    pub air_datum_meters: f64,          // 大氣高度零點，從地形參考球起算（有海的地形是海平面，否則 0）
     pub terrain: Option<Arc<Terrain>>,  // 必須在天體的球面上（半徑相同）
     pub sea_level_meters: Option<f64>,  // 從地形參考球起算；None 表示沒有海
 }
@@ -176,7 +176,7 @@ pub struct SeaSample { pub depth: f64 }                                      // 
 | 2. `void-environment` | 搬入大氣模型；`BodyEnvironment`、`Environment::sample` | 不改（新程式） |
 | 3. Fleet／fleet-flight | 從 `LandingPlanet`／`GamePlanet` 建環境；`GroundSpec` 的地形改由環境提供；`clearance_over`、`launch_landed` 用 `GroundSample`。`FleetAir` 的空氣與引擎背壓用 `AirSample`。`AirSource::acceleration` 多拿星曆，取代天體中心線性外插 | 只有外插那一項。量出差異並記錄 |
 | 4. landing 與 aero | `PlanetAir`／`RocketAir`、`EntryFlight` 的大氣經環境取樣 | 不改；`EntryFlight` golden 門檻不放寬 |
-| 5. 待決定項目 | 依使用者決定：大氣零點、海 | 改（若決定要改） |
+| 5. 待決定項目 | 依使用者決定：大氣零點、海 | 改（若決定要改）。使用者決定：大氣從海平面起算、水先只做場 |
 | 6. 文件 | 本頁、aero.md、landing.md、fleet-flight.md、status.md | 無 |
 
 ### 進度
@@ -185,8 +185,9 @@ pub struct SeaSample { pub depth: f64 }                                      // 
 | --- | --- | --- |
 | 1. 重力定律 | `void_orbit::gravity`：`pull`、`add_pull`（累加形式）、`body_pull`、`oblateness`。積分器 `Field::gravity`、orbit-lab 起始圓軌道速度的徑向重力、`PlanetFrame` 的本體與潮汐都改用它。測試：極點與赤道的解析值、等於 J2 位能的負梯度、隨軸旋轉、多天體加總與 lab 寫法逐位元相同 | 見下 |
 | 2. `void-environment` | 大氣模型從 aero 搬來（`git mv`，aero 重新匯出 `Air`、`Atmosphere`、`EarthAtmosphere`、`smooth`、`validate_air`，aero 的 golden 不受影響）。`Environment::new(bodies).with(body, BodyEnvironment)`；查詢分成 `gravity`、`surroundings`、兩者合併的 `sample` | 從星球設定建環境的函式移到第 3 步：environment 不能依賴 landing（landing 之後要用它） |
-| 3. Fleet／fleet-flight | `Fleet::new(ephemeris, environment, …)`：世界的 `Arc<Environment>` 由呼叫者建立，`GroundSpec` 不再帶地形，接觸 tile、發射位置、離地高度都讀環境的地形；`clearance_over` 改用 `Environment::ground`。`FleetEnvironment` 改名 `PartForces`（`ForceSample`、`ForcePart`、`set_forces`），`sample` 多拿環境。`FleetAir` 的引擎背壓與 `CraftAir` 的空氣都經 `surroundings` 取；`AirSource::acceleration` 多拿星曆。新飛行與存檔還原用同一個函式建世界的環境（第 4 步移到 landing 的 `planet_environment`）。`MODEL_VERSION` 4 → 5 | 新增只查地形的 `Environment::ground`：離地檢查不能因為大氣模型的 −5 km 定義域而 panic。阻力在星曆軸算（只跟氣流與姿態有關），不再先轉到地表軸。存檔格式不變：仍存地形設定，還原時檢查與環境的地形相同。海平面還沒進 `FleetFlight`（`GamePlanet` 的海在 app，等「待決定」第 2 項） |
+| 3. Fleet／fleet-flight | `Fleet::new(ephemeris, environment, …)`：世界的 `Arc<Environment>` 由呼叫者建立，`GroundSpec` 不再帶地形，接觸 tile、發射位置、離地高度都讀環境的地形；`clearance_over` 改用 `Environment::ground`。`FleetEnvironment` 改名 `PartForces`（`ForceSample`、`ForcePart`、`set_forces`），`sample` 多拿環境。`FleetAir` 的引擎背壓與 `CraftAir` 的空氣都經 `surroundings` 取；`AirSource::acceleration` 多拿星曆。新飛行與存檔還原用同一個函式建世界的環境（第 4 步移到 landing 的 `planet_environment`）。`MODEL_VERSION` 4 → 5 | 新增只查地形的 `Environment::ground`：離地檢查不能因為大氣模型的 −5 km 定義域而 panic。阻力在星曆軸算（只跟氣流與姿態有關），不再先轉到地表軸。存檔格式不變：仍存地形設定，還原時檢查與環境的地形相同。海平面當時還沒進 `FleetFlight`（第 5 步加入） |
 | 4. landing、app、aero | landing 提供 `planet_environment`（fleet-flight 的新飛行與存檔還原、舊火箭共用）。`PlanetAir` 改存 `PlanetFrame`，每個 stage 經座標樹換到本體座標，不再線性外推；app 的 `RocketAir` 經 `Environment::surroundings_local` 取空氣。`EntryFlight` 以選定的大氣建自己的環境，經 `surroundings_local` 取空氣，沒有空氣時用模型本來的真空狀態（新的 `Air::VACUUM`） | 新增 `surroundings_local`：本體座標的狀態不需要樹。修正舊火箭 contact step 的壓力位置（見下） |
+| 5. 大氣零點與海 | `TerrainConfig::sea_level_meters`（layered 為 `SEA_LEVEL`，hills 沒有海）；`LandingPlanet::air_datum_meters` 是海平面，沒有海時為 0。`planet_environment` 把兩者交給環境，所以主遊戲、存檔還原、舊火箭都從海平面起算，`Surroundings::sea` 也有值。主遊戲與 `legacy_flight` 的散射大氣底移到參考球＋大氣零點，雲的基準跟著減去零點（雲仍在海平面上 1.5–8 km）。`MODEL_VERSION` 5 → 6 | 海平面由地形提供，不另設欄位：layered 的大陸與海盆本來就以 `SEA_LEVEL` 劃分。scenery example 不改，維持 lab 的參數（layered 的天空仍從參考球起算） |
 | 6. 文件 | 本頁的介面與使用者表、aero.md、fleet-flight.md、vessels.md、game.md、landing.md、status.md | 原計畫沒列 vessels.md 與 game.md：`PartForces` 改名與舊火箭的熄火數字在那裡 |
 
 第 1 步的差異：
@@ -222,18 +223,36 @@ pub struct SeaSample { pub depth: f64 }                                      // 
 - **舊火箭 contact step 的壓力位置是錯的。** 它把相對浮動原點的 Rapier 位置當成本體座標傳給 `pressure_pa`，算出約 −6400 km 的高度；舊 `RocketAir` 遇到低於 −5 km 就回傳沒有空氣，所以發射台上一直用真空推力。環境沒有這個截斷，直接 panic（`air_costs_the_ascent_speed_and_height`），因此改成傳引擎的本體座標位置（`ContactWorld::position`）。結果：有空氣的熄火 1631 m/s、65.9 km → 1613 m/s、64.8 km（真空不變，2366 m/s、116.4 km）。
 - `PlanetAir` 不再外推天體中心，和第 3 步相同性質的差異；舊火箭的檢查都在原門檻內。
 
+第 5 步的差異（layered Aurelia；同一個 build，只把大氣零點改回 0 對照）：
+
+| 檢查 | 大氣零點 0 | 海平面（5000 m） |
+| --- | --- | --- |
+| 主遊戲火箭（Fleet、`flight_rocket`）發射台推力 | 113.6 kN | 108.0 kN |
+| 同上，SAS 垂直全推力 30／60／90 s（海平面上） | 147／246／443 m/s，2.4／8.3／18.0 km | 117／184／269 m/s，2.0／6.5／13.2 km |
+| 同上，助推級熄火（135.75 s） | 1623 m/s，海平面上 60.3 km | 1005 m/s，海平面上 36.8 km |
+| 舊火箭垂直全推力熄火（`tests/air.rs`，參考球起算） | 1613 m/s，64.8 km | 988 m/s，41.2 km（真空不變，2366 m/s、116.4 km） |
+| 舊火箭預設重力轉彎（`trace_one_gravity_turn`） | 遠拱點 101 km，未入軌 | 遠拱點 39 km，未入軌 |
+| 舊火箭錄放檢查的腳本發射（123 s） | 參考球上 29.6 km | 參考球上 19.4 km（海平面上 14.4 km） |
+
+- 空氣變成海平面的量，阻力與背壓都變大，差異會隨「慢 → 在濃空氣裡待更久」累積，所以熄火速度少了約 38%。demo 火箭本來就是照地球海平面空氣估的 Δv（[game.md](game.md)：手動入低軌道約需 9400–9600 m/s），能否手動入軌留給視窗驗收。
+- 錄放檢查（`a_recorded_session_replays_to_the_same_flight`）的前提「飛行要真的飛過」原本寫成參考球上 20 km。它檢查的是重播一致，不是上升性能；改為從海平面量、10 km（遠超過 400 m 的接觸帶，且經過兩次分級）。重播本身的比對門檻沒動。
+- `ambient_pressure_drives_the_nozzle`、`there_is_no_drag_above_the_atmosphere` 的高度改從大氣零點量，門檻不變（海平面一大氣壓、11 km 的氣壓、大氣頂）。
+- 最深的海盆：20 萬個方向的格點加上最低點附近細掃，最低在參考球上 406.9 m，也就是海平面下 4593 m，在大氣模型 −5 km 的定義域內。地形高度下限是 0（海平面下 5000 m），所以地表以上不會超出定義域。
+- 新檢查 `the_air_starts_at_the_sea_where_the_terrain_has_one`（landing）：layered 的環境有海、大氣零點是海平面，海平面上 80 m 的空氣等於模型 80 m 的值、深度 −80 m；hills 沒有海、零點 0；沒有空氣的環境仍有海。主遊戲的 renderer-free 檢查另核對散射大氣底與雲的基準。
+
 不在範圍：
 
 - aero `AircraftFlight` 的平地世界。
-- 畫面的散射大氣（app `air.rs`、scenery）：它是渲染參數，不是 physics。只有大氣零點（待決定第 1 項）若要改，它的底才跟著移。
+- 畫面的散射大氣（app `air.rs`、scenery）：它是渲染參數，不是 physics；只有它的底跟著大氣零點移（第 5 步）。
+- **水的物理：之後做，不是不做（使用者決定）。** 浮力、水阻力、濺落、水中的引擎、水下畫面都還沒有；現在落進海裡，船仍會停在海床上，引擎和阻力照空氣算。環境已經提供要用的參考：`BodyEnvironment::sea_level_meters` 與 `Surroundings::sea`（`SeaSample::depth`，海面下為正），做水的零件模組時直接讀它，照新功能的流程先在 lab 做。
 
-## 待決定（需要使用者）
+## 待決定（已決定）
 
-1. **大氣高度零點。** 目前 physics 和畫面的散射大氣都從參考球起算，layered 發射台的空氣只有海平面的 60%（見上表）。
+1. **大氣高度零點。**（已決定：照建議，第 5 步）改之前 physics 和畫面的散射大氣都從參考球起算，layered 發射台的空氣只有海平面的 60%（見上表）。
    - 建議：layered 的 `air_datum_meters` 設為海平面 5000 m，畫面散射大氣的底也移到同一個零點，兩者繼續一致。hills 沒有海，維持 0。
    - 影響：主遊戲上升段的阻力與引擎背壓變大，大氣頂上移 5 km，發射台的天空變成海平面的樣子。最深的海盆（海平面下約 4.5 km）仍在大氣模型 −5 km 的定義域內，第 5 步會確認地形最低點。`EntryFlight` 與 landing 舊路徑有自己的星球設定，維持 0。
    - 步驟 1–4 都先維持 0，行為不變；第 5 步才依決定修改，並量出發射段的差異。
-2. **水先做到哪裡。** 目前 physics 沒有水：落進 layered 的海，船穿過畫出來的海面，停在海床上（最深約 4.5 km），引擎和阻力照空氣算。`FleetFlight` 的環境目前也沒有海平面（`sea_level_meters` 為 None）。
+2. **水先做到哪裡。**（已決定：先只做場，第 5 步；水的物理之後做，見「不在範圍」）改之前 physics 沒有水：落進 layered 的海，船穿過畫出來的海面，停在海床上（最深約 4.5 km），引擎和阻力照空氣算。`FleetFlight` 的環境目前也沒有海平面（`sea_level_meters` 為 None）。
    - 建議：先只做場，即海平面與深度：主遊戲 layered 傳入 5000 m，行為不變，之後的 HUD、濺落、浮力讀它。水的密度、浮力、水阻力等零件模組需要時再加，照新功能的流程先在 lab 做。
    - 只有 layered 有海。hills 的 1800 m 是雲和色帶的基準，不算海。
 3. **`AirSource` 拿星曆。**（已採用，第 3 步） 這會改 orbit 的公開 trait，好處是積分器內不再線性外插天體中心。
