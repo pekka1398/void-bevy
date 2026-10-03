@@ -2,21 +2,21 @@
 
 此工作依序調查 assembly／Fleet 承接主遊戲的缺口，建立獨立核心 `void-fleet-flight` 與 Bevy 程式 `void-fleet-flight-lab`。使用者已要求先完成 A／B，視窗驗收之後補做；主遊戲現已引用 Fleet runtime 與 assembly 零件；舊固定兩級火箭移到 `void-app --example legacy_flight` 保存回歸場景。
 
-## 調查結果
+## 原有缺口與目前接線
 
-| 項目 | 原本能否直接承接 | 第一輪處理／後續缺口 |
+| 項目 | 原本能否直接承接 | 目前處理／限制 |
 | --- | --- | --- |
 | 自訂船、供油、分級、多船 | Fleet 已引用 assembly graph，並有部件／接點快照 | lab 直接讀 assembly 匯出的 craft JSON，以同一艘船建立地面與軌道實體；不是重寫固定兩級火箭 |
 | 行星地形、ground／orbit／bubble | Fleet 已有 owner 交接與地形串流 | 使用主遊戲 GamePlanet 的行星／terrain 設定，獨立畫 LOD 地形與從 Fleet 讀回的碰撞線 |
 | SAS | Fleet 已有逐船控制器，能跨 owner 重設框架 | 直接使用既有 SAS；沒有新增順行、目標等模式 |
-| 時間加速 | Fleet 有 rails blocker、交會／高度帶攔截 | lab 提供 1／2／4 倍 physics、20／100／1000 倍 rails；阻擋時顯示原因，攔截後回 1 倍；尚未搬主遊戲依高度細分的 warp 上限 |
+| 時間加速 | Fleet 有 rails blocker、交會／高度帶攔截 | main／lab 共用主遊戲依高度細分的九級 warp gates、rails／交會攔截與 warp-to-maneuver；阻擋顯示原因，攔截回 1 倍 |
 | 空氣施力 | Fleet 原本完全沒有 AirSource／AirField 接線 | 新增可選 FleetEnvironment；新核心提供各零件阻力，Orbit 每個 Dopri stage 評估、接觸世界逐步評估，bubble 與 ground 都有施力；rails 也保留空氣 |
 | 噴嘴氣壓 | assembly catalog 的 Engine 只有真空 thrust／Isp，沒有出口面積 | 第一輪在 FleetAir 用顯式 engine ID → nozzle area 表，large 0.12 m²、small 0.15 m²；壓力降低引擎力、真空質量流率保持不變。未修改既有 catalog／golden；未評為正式零件資料模型定案 |
 | 滑行預測 | predict_coast 原本只接受具體 Ephemeris，但 Fleet 持有 EphemerisSource | 改為接受既有 trait，可共用預測；與主遊戲一樣畫真空滑行。lab 的 C 是當下 600 s 預測快照，非持續刷新 |
 | 有限燃燒機動 | FlightPlan 與 Fleet staged engine 已可共用 | 已接逐船計畫、編輯／apsis／參考天體、第一個機動的理想軌道導引、存檔／重播；第一 fuel-group flameout 為規劃上限。手動控制、分級、進入 contact physics 明確中止，切船不取消 |
-| 撞擊毀損 | PartJointRocket 有 Crash，Fleet 沒有等價船／零件毀損政策 | 尚未接。這也是主遊戲替換前需要保留或明確重設的行為 |
-| navball／map／scenery | renderer 部分可共用，但主遊戲 Game 持有大量固定上級／兩級假設 | 第一輪只共用地形 tile 與零件資產；沒有完整 navball／多天體 map／scenery 外觀 |
-| 錄放 | 現有 session 格式只記兩級火箭的 mark，Game／step 在 app binary | 已提供 Fleet Action journal、逐船／零件／owner 完整 mark、增量視窗 playback 與獨立程序 headless verify；相機與純視覺操作尚未列入 Fleet 紀錄 |
+| 撞擊毀損 | PartJointRocket 有 Crash，Fleet 沒有等價船／零件毀損政策 | 舊主遊戲從未啟用 opt-in crash_detection（預設 false）；毀損仍是後續新功能，不是此次整合遺失的行為 |
+| navball／map／scenery | renderer 部分可共用，但主遊戲 Game 持有大量固定上級／兩級假設 | 主遊戲已接回 navball／多天體 map／scenery，與 lab 共用 Fleet runtime；離屏 GPU 檢查也使用主遊戲材質與 HUD |
+| 錄放 | 現有 session 格式只記兩級火箭的 mark，Game／step 在 app binary | Fleet Action journal、逐船／零件／owner／camera／presentation 完整 mark、增量 playback 與跨程序 headless verify；Intent／Commit stream 同步保存並可恢復中斷錄製 |
 | 存檔／checkpoint | craft JSON 只保存組裝，Fleet live graph、owners、controls、lit／staged、pending time 沒有存讀介面 | 已能以初始完整行星／terrain／craft 與操作紀錄重建並續玩，保留原 solver／SAS 歷史、錄放保留初始操作歷史；另有直接 checkpoint 保存 live 狀態與完整 native owner cache，不必重播船的操作 |
 
 ## 已建立的驗收入口
@@ -57,7 +57,7 @@ cargo run -p void-fleet-flight-lab -- --replay lab-log/fleet-session.json
 cargo run -p void-fleet-flight-lab -- --verify lab-log/fleet-session.json
 ```
 
-F6 保存，F7 載入並暫停；路徑由 `--save <file>` 指定，預設 `lab-log/fleet-save.json`。`--record` 會在正常關閉視窗或按 F8 時完成寫檔；F8 後仍能繼續遊戲。現在的錄製不是逐條刷入硬碟，崩潰途中尚未寫出的部分不保留，這個缺口列在 A／B 進度中。
+F6 保存，F7 載入並暫停；路徑由 `--save <file>` 指定，預設 `lab-log/fleet-save.json`。`--record` 會在正常關閉視窗或按 F8 時完成寫檔；F8 後仍能繼續遊戲。錄製使用下述同步 Intent／Commit stream，崩潰會保留已持久化的輸入與已提交操作；未完成的操作不會被恢復入口自動執行。
 
 F6／F7 與 `--load` 現在使用直接世界 checkpoint：完整行星設定、live graph／燃料／控制／SAS／pending substep、orbit 傳播歷史、ground／bubble 的 native 接觸世界與 frame／半步狀態。native handles 與它們所屬的完整 arenas／contact caches 一起序列化，帶 Rapier ABI 版本檢查；不是把單獨 handle 當成持久化零件 ID。星曆依初始 SystemSpec 重建到原取樣邊界；船不重播操作。載入先驗證 graph／owner／native handles，再比對完整 world mark。
 
@@ -65,7 +65,7 @@ F6／F7 與 `--load` 現在使用直接世界 checkpoint：完整行星設定、
 
 Mark 檢查所有船、零件位置／姿態／燃料／staged／lit／firing、控制、SAS phase／target、scene／frame origin／睡眠、連接圖、星曆狀態、Fleet 時鐘／pending 時間和選取船。版本、catalog、缺失／亂序 mark、命令結果或世界狀態不同均明確 panic。寫檔在同目錄 temporary file 完成 fsync 後 atomic rename，失敗不覆寫原存檔。
 
-`--load` 直接載入 checkpoint 並可續玩；`--verify-save <file>` 在建立 Bevy App 前驗證直接存檔；`--replay` 由初始世界逐格播放，用錄下的 Advance 時間而不是現在的 wall delta，逐一比對 mark，結束後暫停並可續玩。`--verify` 在建立 Bevy App 前完成重播／比對，不開 OS 視窗。相機／純視覺設定沒有納入此版紀錄，重播時可以自行查看場景。
+`--load` 直接載入 checkpoint 並可續玩；`--verify-save <file>` 在建立 Bevy App 前驗證直接存檔；`--replay` 由初始世界逐格播放，用錄下的 Advance 時間而不是現在的 wall delta，逐一比對 mark，結束後暫停並可續玩。`--verify` 在建立 Bevy App 前完成重播／比對，不開 OS 視窗。目前 MODEL_VERSION 4 已把相機／觀察操作與暫停 frame boundary 納入紀錄，重播使用錄下的視角。
 
 限制：native cache 是固定 Rapier／模型版本的存檔，不承諾跨版本相容；星曆重建仍與天體模擬時間相關。Journal verify 重跑操作，成本與操作數相關，直接 checkpoint 載入則無此船舶操作成本。模擬規則變更必須提高 MODEL_VERSION，舊紀錄會明確拒絕；目前沒有跨版本 save migration。
 
@@ -79,7 +79,7 @@ cargo run -p void-fleet-flight-lab -- --verify lab-log/fleet-session.json --prof
 python3 tools/profile-native.py --output lab-log/native-perf.data --stacks lab-log/native-stacks.txt -- target/debug/void-fleet-flight-lab --verify lab-log/fleet-session.json
 ```
 
-`void-diagnostics` 收集系統 wall duration，報表有 sample count／min／mean／p50／p95／max（ms，nearest-rank quantile），並輸出 traceEvents complete spans（時間線 ts／dur 使用 µs）。lab 的 simulation 與 draw／LOD／overlays、frame interval 分開量；headless verify 也可量完整重建。frame interval 包含等待，CPU 系統 wall time 也可能含排程，不宣稱是 process CPU time 或 GPU 時間；尚未接 GPU／draw-call 統計。
+`void-diagnostics` 收集系統 wall duration，報表有 sample count／min／mean／p50／p95／max（ms，nearest-rank quantile），並輸出 traceEvents complete spans（時間線 ts／dur 使用 µs）。lab 的 simulation 與 draw／LOD／overlays、frame interval 分開量；headless verify 也可量完整重建。frame interval 包含等待，CPU 系統 wall time 也可能含排程，不宣稱是 process CPU time 或 GPU 時間；GPU／draw 統計由下述獨立 RenderDiagnostics 管線提供。
 
 Native sampling 工具使用 perf `cpu-clock:u`、99 Hz、DWARF call graph，可輸出 perf.data 與原始 stack samples；`--dry-run` 可檢查命令，錯誤會直接失敗。已確認此機器 `/usr/bin/perf` 可用，但實際探測受到 `perf_event_paranoid=4` 拒絕，未更改核心設定，也未產生冒充取樣的資料。手動使用視窗執行檔時由使用者操作，agent 僅跑 headless／dry-run。
 
@@ -157,3 +157,30 @@ Fleet journal 現在也包含 `View` 命令：滑鼠拖曳（pixels）、滾輪�
 simulation model version 已升到 **4**；先前 model 3 的錄製／checkpoint 明確拒絕載入，不默默補相機狀態。此版五個 core 檢查涵蓋暫停逐幀錄放、checkpoint 接續、改一筆相機輸入必定使 mark 失敗、不同 camera sample 次數不改狀態，以及 plain lab 模式與切船焦點。app 的 renderer-free 檢查另從真實 keyboard/mouse controls 接到暫停幀，再核對 headless 重播與重複繪圖沒有修改 world mark。OS 視窗的視覺驗收由使用者之後補做。
 
 本批驗證：`cargo test --workspace --all-targets -j2` **270 passed、0 failed、3 ignored**；workspace all-target Clippy (`-D warnings`)、`cargo fmt --all -- --check` 與 diff whitespace check 通過。
+
+## 真實渲染量測與離屏 benchmark
+
+GPU 量測使用 Bevy RenderDiagnostics，保留每個 pass 的 CPU／GPU 耗時與硬體支援的 pipeline statistics，輸出各指標的樣本數、min／mean／p50／p95／max。互相包含的 pass 時間不相加；未支援的 GPU query 不補零。adapter、backend、driver 與 query capabilities 一併寫入報告。
+
+```sh
+# 使用者正常開視窗飛行時量測，正常結束後寫出報告
+cargo run -p void-app -- --render-profile lab-log/render.json
+# 實際 GPU 渲染，但完全不建立 OS 視窗；完整 main scene，包含 HUD／navball
+cargo run -p void-app --features render-metrics -- --render-benchmark lab-log/surface-render.json --benchmark-scenario surface --benchmark-frames 120 --width 640 --height 360
+# 以相同世界狀態再量一次，不重新套用 preset
+cargo run -p void-app --features render-metrics -- --render-benchmark lab-log/repeat-render.json --load lab-log/surface-render.world.json
+# 原生 GPU 檢查，需可用 adapter；預設 workspace 測試不執行
+cargo test -p void-app --test render_benchmark --features render-metrics -- --ignored
+```
+
+`surface`／`orbit`／`map` 為固定、暫停的渲染場景；這是渲染成本 benchmark，動態飛行的 CPU 成本另用 journal `--verify --profile`。離屏模式關閉 Winit 與 pipelined rendering，使用共用主遊戲場景渲染到 Image；唯一主相機明確標記為 UI 相機，避免 Image target 漏掉 HUD。正常視窗模式仍使用既有渲染排程。
+
+每次 benchmark 保存 `.world.json` 直接 checkpoint 與 `.cpu.json` 系統 profile。`--load` 保留存檔的相機／多船狀態；不能同時指定 scenario preset。暖機至少 `--benchmark-settle` 格（預設 60），等待地形建置／請求清空、pipeline ready、UI／大氣 pass 出現及連續五次就緒；正式收足 `--benchmark-frames` 個已回讀的來源幀後停止取樣，再執行 20 次更新處理回讀。180 秒內未完成或出現 render ERROR 直接失敗。報告含實際暖機／run／drain 更新數與地形 mesh cache bytes；不是只有 Rust LOD 選擇演算法的 golden 重播。
+
+非同步 GPU 回讀透過 GPU buffer 中的來源 frame ID／measure flag／pending pipelines 標籤，按同次 diagnostic timestamp 對齊各 pass。暖機與 drain 不列入正式 p50／p95；報告保留 source frame IDs，CPU update 數和 delivered GPU sample 數分列。
+
+`render-metrics` feature 額外開啟 pinned Bevy 0.19.1 的 detailed_trace：區分 CPU draw API command、direct／固定數量 draw record，以及 GPU-counted multi-draw。後者回讀實際提交命令使用的 count-buffer slot，按命令 max_count 截限；不把 max_count 當成實際 draw 數。覆蓋 TrackedRenderPass、VOID 大氣 pass、Bevy tonemapping／upscaling 的 fullscreen draw；`covered_draw_records` 為這些路徑的合計。硬體 pipeline primitives 指標另列，不稱為場景獨立三角形數。開啟 feature 會增加 trace、COPY_SRC 與回讀成本，只比較相同 instrumentation 的報告；不開 feature 仍可量 GPU 時間，但不聲稱已量 draw 數。
+
+實際原生 GPU 檢查也驗證從 preset 保存、跨程序載入後 world mark 相同，且大氣／UI pass 存在、render errors 為空。此檢查使用 Image，不操作使用者視窗。首次真實渲染揭露共享 main runtime 漏註冊 SceneryPlugin 的啟動問題；已補回正式 main 啟動路徑，避免只註冊測試用 Assets 掩蓋缺口。
+
+本批驗證：workspace all-targets **273 passed、0 failed、4 ignored**（新增一項 opt-in native GPU test）；workspace 與 render-metrics feature 的 Clippy（-D warnings）、fmt 通過。另明確執行 native GPU test，orbit 場景與 saved-scene 重測均通過；surface／map preset 也在 RTX 5060 Laptop／Vulkan 上離屏完成，含實際 UI／大氣 pass。這些檢查證明本機管線和報告接線可用，不當作不同 GPU 平台或視覺品質的驗收。

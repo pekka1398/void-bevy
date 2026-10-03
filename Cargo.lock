@@ -733,6 +733,7 @@ dependencies = [
  "slotmap",
  "smallvec",
  "thiserror 2.0.21",
+ "tracing",
  "variadics_please",
 ]
 
@@ -5691,6 +5692,21 @@ dependencies = [
  "serde_json",
  "void-math",
  "void-terrain",
+]
+
+[[package]]
+name = "void-seam-check"
+version = "0.0.0"
+dependencies = [
+ "glam 0.32.1",
+ "serde",
+ "serde_json",
+ "void-assembly",
+ "void-frames",
+ "void-landing",
+ "void-multiscale",
+ "void-orbit",
+ "void-vessels",
 ]
 
 [[package]]

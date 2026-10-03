@@ -1,4 +1,6 @@
-# 移植盤點（2026-10-02）
+# 移植盤點（2026-10-02，歷史紀錄）
+
+本頁保留搬遷階段的系統／缺口與當時 package 數。搬遷後 A／B 已完成 assembly／Fleet 主遊戲整合、直接存檔、durable replay、碰撞疊圖、渲染 profiling 與接縫 corpus；當前完成度以 [ab-progress.md](ab-progress.md) 及 [fleet-flight.md](fleet-flight.md) 為準。multiscale 仍為獨立核心／lab，已與 Fleet 在接縫檢查中共用。
 
 範圍：以目前 TS `src/`、各 `lab/*/src` 和檢查腳本為參考，盤點 Rust 核心、可操作驗收場景、主遊戲及獨立專案的依賴。這是原始碼／API／場景接線對照加 headless 驗證，不是所有演算法逐行正確性的證明，也沒有代替使用者操作視窗驗收。
 
