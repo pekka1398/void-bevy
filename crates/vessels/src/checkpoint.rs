@@ -183,13 +183,6 @@ impl Fleet {
                 "fleet checkpoint: duplicate part"
             );
         }
-        for vessel in saved.vessels {
-            let id = vessel.id.clone();
-            assert!(
-                fleet.vessels.insert(id, vessel).is_none(),
-                "fleet checkpoint: duplicate vessel"
-            );
-        }
         fleet.connections = saved.connections;
         fleet.order = saved.order;
         fleet.controls = saved.controls.into_iter().collect();
@@ -228,20 +221,11 @@ impl Fleet {
                 world.time, fleet.time,
                 "fleet checkpoint: scene clock differs"
             );
-            assert!(
-                fleet
-                    .scenes
-                    .insert(
-                        scene.id,
-                        Scene {
-                            world,
-                            ground,
-                            members: scene.members
-                        }
-                    )
-                    .is_none(),
-                "fleet checkpoint: duplicate scene"
-            );
+            fleet.insert_scene(scene.id, world, ground, scene.members);
+        }
+        // After the scenes, so each vessel's frame can hang under its scene.
+        for vessel in saved.vessels {
+            fleet.put(vessel);
         }
         fleet.gate.restore_pairs(saved.active_pairs);
         fleet.validate_checkpoint();

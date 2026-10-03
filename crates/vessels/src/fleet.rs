@@ -10,13 +10,16 @@ use std::sync::Arc;
 use void_assembly::{
     Connection, Craft, Module, PartDefinition, PartPose, Shape, compile, node, part_inertia_per_kg,
 };
+use void_frames::{
+    BodyId, FrameId, FrameSource, FrameTree, Motion, Snapshot, SplitPosition, State, SystemId,
+};
 use void_landing::{
     BodyShape, ContactBodySpec, ContactFrame, ContactWorld, ContactWorldOptions,
     EncounterPhysicsGate, EncounterRanges, FrameState, Piece, PieceMass, PlanetFrame, SimpleShape,
 };
 use void_orbit::{
     AdvanceOutcome, CelestialBody, Control, EphemerisSource, ForceControl, PropagationRun,
-    Tolerances, VesselPropagator, VesselState, body_orientation,
+    SystemFrames, Tolerances, VesselPropagator, VesselState,
 };
 use void_rotation::{Mat3, rotation_step};
 use void_sas::{SAS_TUNING, SasPhase, StabilityAssist};
@@ -183,6 +186,21 @@ struct Scene {
     world: ContactWorld<SceneFrame>,
     ground: Option<usize>,
     members: Vec<String>,
+    /// The contact world's coordinates: the ground body's surface frame, or the bubble's
+    /// free-falling origin under the origin system.
+    contact: FrameId,
+    /// The contact world's floating origin, a child of `contact`.
+    floating: FrameId,
+}
+/// What a dynamic frame of the fleet's tree follows.
+#[derive(Clone, Debug)]
+enum Dynamic {
+    /// A bubble's free-falling origin.
+    Bubble(u64),
+    /// A scene's floating origin.
+    Floating(u64),
+    /// A vessel's parts frame (poses' origin and axes).
+    Vessel(String),
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum Owner {
@@ -228,11 +246,46 @@ pub struct Fleet {
     staged: HashSet<String>,
     sas: HashMap<String, Sas>,
     scenes: BTreeMap<u64, Scene>,
+    /// Star systems and bodies, with scenes and vessels as dynamic frames below them.
+    frames: SystemFrames,
+    dynamic: HashMap<u64, Dynamic>,
+    vessel_frames: HashMap<String, FrameId>,
+    next_key: u64,
     gate: EncounterPhysicsGate,
     time: f64,
     pending: f64,
     next_vessel: u64,
     next_scene: u64,
+}
+/// The fleet's tree reads systems and bodies from the ephemeris and scenes and vessels from the
+/// fleet's own state, which exists at the fleet's time only.
+impl FrameSource for Fleet {
+    fn system_state(&self, system: SystemId, t: f64) -> (SplitPosition, DVec3) {
+        self.ephemeris.system_state(system, t)
+    }
+    fn body_in_system(&self, body: BodyId, t: f64) -> (DVec3, DVec3) {
+        self.ephemeris.body_in_system(body, t)
+    }
+    fn dynamic_motion(&self, key: u64, t: f64) -> Motion {
+        assert_eq!(t, self.time, "fleet frames exist at the fleet's time only");
+        match self
+            .dynamic
+            .get(&key)
+            .expect("fleet: unknown dynamic frame")
+        {
+            Dynamic::Bubble(scene) => {
+                let SceneFrame::Bubble(f) = &self.scenes[scene].world.frame else {
+                    panic!("fleet: scene {scene} is not a bubble")
+                };
+                let o = f.origin(t);
+                Motion::new(o.position, o.velocity, DQuat::IDENTITY, DVec3::ZERO)
+            }
+            Dynamic::Floating(scene) => {
+                Motion::fixed(self.scenes[scene].world.origin, DQuat::IDENTITY)
+            }
+            Dynamic::Vessel(id) => self.vessel_motion(self.vessel(id)),
+        }
+    }
 }
 fn rows(a: DMat3) -> Mat3 {
     a.transpose().to_cols_array()
@@ -245,6 +298,18 @@ fn vec32(v: DVec3) -> rapier3d::math::Vector {
 }
 fn quat64(q: rapier3d::math::Rotation) -> DQuat {
     DQuat::from_xyzw(q.x as f64, q.y as f64, q.z as f64, q.w as f64).normalize()
+}
+fn state_of(s: FrameState) -> State {
+    State {
+        position: s.position,
+        velocity: s.velocity,
+    }
+}
+fn frame_state(s: State) -> FrameState {
+    FrameState {
+        position: s.position,
+        velocity: s.velocity,
+    }
 }
 impl Fleet {
     pub fn new(
@@ -295,6 +360,7 @@ impl Fleet {
             .collect();
         let propagator = VesselPropagator::new(&ephemeris, options.tolerances);
         ephemeris.extend_to(time + options.step_seconds);
+        let frames = SystemFrames::new(&ephemeris);
         Self {
             ephemeris: Box::new(ephemeris),
             options,
@@ -312,6 +378,10 @@ impl Fleet {
             staged: HashSet::new(),
             sas: HashMap::new(),
             scenes: BTreeMap::new(),
+            frames,
+            dynamic: HashMap::new(),
+            vessel_frames: HashMap::new(),
+            next_key: 0,
             gate: EncounterPhysicsGate::new(options.encounter),
             time,
             pending: 0.0,
@@ -597,7 +667,7 @@ impl Fleet {
                 angular_velocity,
             },
         };
-        self.vessels.insert(id.clone(), v);
+        self.put(v);
         self.order.push(id.clone());
         self.controls.insert(id.clone(), VesselControl::default());
         self.event(&id, None, Some(VesselMode::Orbit), None);
@@ -633,17 +703,20 @@ impl Fleet {
             .fold(f64::INFINITY, f64::min);
         let g = &self.grounds[self.ground_index(body)];
         let r = g.frame.body.radius_meters + g.spec.terrain.height(d) + cy - lowest + 0.05;
-        let state = g.frame.to_inertial(
-            &self.ephemeris,
-            self.time,
-            FrameState {
-                position: d * r,
-                velocity: DVec3::ZERO,
-            },
-        );
-        let axes = self.ground_axes(self.ground_index(body));
+        let ground = self
+            .frames()
+            .transform(self.frames.surface[body], self.frames.origin);
+        let state = frame_state(ground.apply_state(State {
+            position: d * r,
+            velocity: DVec3::ZERO,
+        }));
         let q = void_landing::upright_at(d);
-        self.launch(craft, state, axes * q, axes * g.frame.spin())
+        self.launch(
+            craft,
+            state,
+            ground.rotation() * q,
+            ground.to_motion().angular_velocity,
+        )
     }
     fn event(
         &mut self,
@@ -673,26 +746,62 @@ impl Fleet {
             Owner::Scene { scene, .. } => self.scene_mode(scene),
         }
     }
-    fn ground_axes(&self, g: usize) -> DQuat {
-        let b = body_orientation(&self.grounds[g].frame.body.rotation, self.time);
-        DQuat::from_mat3(&glam::DMat3::from_cols(b[0], b[1], b[2])).normalize()
+    /// The frame tree at the fleet's time. "Inertial" fleet states are in `origin_frame`.
+    pub fn frames(&self) -> Snapshot<'_, Self> {
+        self.frames.tree.at(self.time, self)
+    }
+    pub fn frame_tree(&self) -> &FrameTree {
+        &self.frames.tree
+    }
+    /// The system the ephemeris' physics view, and every fleet state, is relative to.
+    pub fn origin_frame(&self) -> FrameId {
+        self.frames.origin
+    }
+    /// A body's (inertial, surface) frames.
+    pub fn body_frames(&self, body: usize) -> (FrameId, FrameId) {
+        (self.frames.inertial[body], self.frames.surface[body])
+    }
+    /// A vessel's parts frame: part poses are in its coordinates.
+    pub fn vessel_frame(&self, id: &str) -> FrameId {
+        *self
+            .vessel_frames
+            .get(id)
+            .unwrap_or_else(|| panic!("fleet: no frame for vessel {id}"))
+    }
+    /// A scene's contact frame, and its floating origin.
+    pub fn scene_frames(&self, scene: u64) -> (FrameId, FrameId) {
+        let s = self.scenes.get(&scene).expect("fleet: unknown scene");
+        (s.contact, s.floating)
+    }
+    fn surface(&self, g: usize) -> FrameId {
+        self.frames.surface[self.grounds[g].spec.body_index]
+    }
+    /// Inertial state to a ground's body-fixed coordinates.
+    fn body_fixed(&self, g: usize, state: FrameState) -> FrameState {
+        let s = self
+            .frames()
+            .transform(self.frames.origin, self.surface(g))
+            .apply_state(state_of(state));
+        frame_state(s)
     }
     fn axes(&self, s: u64) -> DQuat {
-        self.scenes[&s]
-            .ground
-            .map_or(DQuat::IDENTITY, |g| self.ground_axes(g))
+        self.frames()
+            .transform(self.scenes[&s].contact, self.frames.origin)
+            .rotation()
     }
     fn to_inertial(&self, s: u64, state: FrameState) -> FrameState {
-        match &self.scenes[&s].world.frame {
-            SceneFrame::Bubble(f) => f.to_inertial(self.time, state),
-            SceneFrame::Ground(f) => f.to_inertial(&self.ephemeris, self.time, state),
-        }
+        frame_state(
+            self.frames()
+                .transform(self.scenes[&s].contact, self.frames.origin)
+                .apply_state(state_of(state)),
+        )
     }
     fn scene_local(&self, s: u64, state: FrameState) -> FrameState {
-        match &self.scenes[&s].world.frame {
-            SceneFrame::Bubble(f) => f.from_inertial(self.time, state),
-            SceneFrame::Ground(f) => f.to_body_fixed(&self.ephemeris, self.time, state),
-        }
+        frame_state(
+            self.frames()
+                .transform(self.frames.origin, self.scenes[&s].contact)
+                .apply_state(state_of(state)),
+        )
     }
     fn scene_centre(&self, v: &Vessel) -> FrameState {
         let Owner::Scene { scene, body, push } = v.owner else {
@@ -703,6 +812,29 @@ impl Fleet {
         let b = world.body(body);
         s.position += quat64(*b.rotation()) * vec64(b.local_center_of_mass());
         s
+    }
+    /// Motion of a vessel's parts frame relative to its parent: the origin system in orbit, the
+    /// scene's contact frame in a scene. Rapier's velocity is the centre of mass's.
+    fn vessel_motion(&self, v: &Vessel) -> Motion {
+        match &v.owner {
+            Owner::Orbit {
+                run,
+                rotation,
+                angular_velocity,
+            } => {
+                let s = run.state();
+                Motion::new(s.position, s.velocity, *rotation, *angular_velocity)
+            }
+            Owner::Scene { scene, body, push } => {
+                let world = &self.scenes[scene].world;
+                let s = world.state(&self.ephemeris, *body, *push);
+                let b = world.body(*body);
+                let q = quat64(*b.rotation());
+                let w = vec64(b.angvel());
+                let c = q * vec64(b.local_center_of_mass());
+                Motion::new(s.position, s.velocity - w.cross(c), q, w)
+            }
+        }
     }
     pub fn snapshot(&self, id: &str) -> VesselSnapshot {
         self.snapshot_of(self.vessel(id))
@@ -726,12 +858,19 @@ impl Fleet {
                 )
             }
             Owner::Scene { scene, body, .. } => {
-                let b = self.scenes[scene].world.body(*body);
-                let a = self.axes(*scene);
+                let up = self.vessel_motion(v);
+                let out = self
+                    .frames()
+                    .transform(self.scenes[scene].contact, self.frames.origin);
+                let centre = State {
+                    position: vec64(self.scenes[scene].world.body(*body).local_center_of_mass()),
+                    velocity: DVec3::ZERO,
+                };
+                let motion = up.then(&out.to_motion());
                 (
-                    self.to_inertial(*scene, self.scene_centre(v)),
-                    (a * quat64(*b.rotation())).normalize(),
-                    a * (vec64(b.angvel()) + self.scenes[scene].world.frame.spin()),
+                    frame_state(out.apply_state(up.apply_state(centre))),
+                    motion.rotation,
+                    motion.angular_velocity,
                     Some(*scene),
                 )
             }
@@ -749,18 +888,12 @@ impl Fleet {
             part_ids: v.poses.iter().map(|(id, _)| id.clone()).collect(),
         }
     }
+    /// The vessel's parts frame in inertial coordinates.
     fn poses_frame(&self, v: &Vessel) -> (DVec3, DQuat) {
-        match &v.owner {
-            Owner::Orbit { run, rotation, .. } => (run.state().position, *rotation),
-            Owner::Scene { scene, body, push } => {
-                let world = &self.scenes[scene].world;
-                (
-                    self.to_inertial(*scene, world.state(&self.ephemeris, *body, *push))
-                        .position,
-                    self.axes(*scene) * quat64(*world.body(*body).rotation()),
-                )
-            }
-        }
+        let t = self
+            .frames()
+            .transform(self.vessel_frame(&v.id), self.frames.origin);
+        (t.apply_point(DVec3::ZERO), t.rotation())
     }
     pub fn part_snapshots(&self, id: &str) -> Vec<PartSnapshot> {
         let v = self.vessel(id);
@@ -950,15 +1083,13 @@ impl Fleet {
         }
         c.position /= mass;
         c.velocity /= mass;
-        let (frame, terrain, mut options, origin) = if let Some(g) = ground {
-            let g = &self.grounds[g];
+        let (frame, terrain, mut options, origin) = if let Some(g_index) = ground {
+            let g = &self.grounds[g_index];
             (
                 SceneFrame::Ground(Box::new(g.frame.clone())),
                 Some(g.spec.terrain.clone()),
                 g.spec.tiles,
-                g.frame
-                    .to_body_fixed(&self.ephemeris, self.time, c)
-                    .position,
+                self.body_fixed(g_index, c).position,
             )
         } else {
             (
@@ -994,23 +1125,86 @@ impl Fleet {
         );
         let id = self.next_scene;
         self.next_scene += 1;
+        self.insert_scene(id, world, ground, vec![]);
+        id
+    }
+    fn add_dynamic(&mut self, parent: FrameId, what: Dynamic) -> FrameId {
+        let key = self.next_key;
+        self.next_key += 1;
+        self.dynamic.insert(key, what);
+        self.frames.tree.add_dynamic(parent, key)
+    }
+    fn insert_scene(
+        &mut self,
+        id: u64,
+        world: ContactWorld<SceneFrame>,
+        ground: Option<usize>,
+        members: Vec<String>,
+    ) {
+        assert!(!self.scenes.contains_key(&id), "fleet: duplicate scene");
+        let contact = match ground {
+            Some(g) => self.surface(g),
+            None => self.add_dynamic(self.frames.origin, Dynamic::Bubble(id)),
+        };
+        let floating = self.add_dynamic(contact, Dynamic::Floating(id));
         self.scenes.insert(
             id,
             Scene {
                 world,
                 ground,
-                members: vec![],
+                members,
+                contact,
+                floating,
             },
         );
-        id
+    }
+    fn remove_scene(&mut self, id: u64) {
+        let scene = self.scenes.remove(&id).expect("fleet: unknown scene");
+        self.frames.tree.remove(scene.floating);
+        if scene.ground.is_none() {
+            self.frames.tree.remove(scene.contact);
+        }
+        self.dynamic
+            .retain(|_, d| !matches!(d, Dynamic::Bubble(s) | Dynamic::Floating(s) if *s == id));
+    }
+    /// Stores a vessel and hangs its parts frame under its owner's frame.
+    fn put(&mut self, v: Vessel) {
+        let parent = match v.owner {
+            Owner::Orbit { .. } => self.frames.origin,
+            Owner::Scene { scene, .. } => self.scenes[&scene].contact,
+        };
+        match self.vessel_frames.get(&v.id) {
+            Some(&frame) => self.frames.tree.reparent(frame, parent),
+            None => {
+                let frame = self.add_dynamic(parent, Dynamic::Vessel(v.id.clone()));
+                self.vessel_frames.insert(v.id.clone(), frame);
+            }
+        }
+        assert!(
+            self.vessels.insert(v.id.clone(), v).is_none(),
+            "fleet: vessel stored twice"
+        );
+    }
+    /// A vessel that no longer exists.
+    fn forget_vessel_frame(&mut self, id: &str) {
+        let frame = self
+            .vessel_frames
+            .remove(id)
+            .expect("fleet: vessel has no frame");
+        self.frames.tree.remove(frame);
+        self.dynamic
+            .retain(|_, d| !matches!(d, Dynamic::Vessel(v) if v == id));
     }
     fn remove_scene_body(&mut self, v: &Vessel, refill: bool) {
         if let Owner::Scene { scene, body, .. } = v.owner {
+            // Out of the scene's frame until `put` hangs it under its next owner.
+            let frame = self.vessel_frame(&v.id);
+            self.frames.tree.reparent(frame, self.frames.origin);
             let s = self.scenes.get_mut(&scene).unwrap();
             s.members.retain(|id| id != &v.id);
             s.world.remove_body(body);
             if s.members.is_empty() && !refill {
-                self.scenes.remove(&scene);
+                self.remove_scene(scene);
             }
         }
     }
@@ -1086,7 +1280,7 @@ impl Fleet {
         let local = self.scene_local(scene, snap.state());
         let w = axes * snap.angular_velocity - self.scenes[&scene].world.frame.spin();
         self.add_scene_body(&mut v, scene, local, axes * snap.rotation, w, axes * push);
-        self.vessels.insert(id.into(), v);
+        self.put(v);
         self.event(id, Some(from), Some(self.scene_mode(scene)), Some(scene));
     }
     fn move_to_orbit(&mut self, id: &str) {
@@ -1104,7 +1298,7 @@ impl Fleet {
             rotation: s.rotation,
             angular_velocity: s.angular_velocity,
         };
-        self.vessels.insert(id.into(), v);
+        self.put(v);
         self.event(id, Some(s.mode), Some(VesselMode::Orbit), s.scene);
     }
     fn settle(&mut self, id: &str) {
@@ -1123,7 +1317,7 @@ impl Fleet {
         self.remove_scene_body(&v, true);
         v.poses = self.centred(&v.poses).0;
         self.add_scene_body(&mut v, scene, local, q, w, push);
-        self.vessels.insert(id.into(), v);
+        self.put(v);
     }
     fn ground_for(&self, v: &Vessel) -> Option<usize> {
         self.grounds.iter().enumerate().find(|(i,g)| { let inside=matches!(v.owner,Owner::Scene { scene,.. } if self.scenes[&scene].ground==Some(*i)); self.clearance_over(v,*i)<=if inside { g.spec.band_exit_meters } else { g.spec.band_enter_meters+0.1 } }).map(|(i,_)|i)
@@ -1134,12 +1328,7 @@ impl Fleet {
             Owner::Scene { scene, .. } if self.scenes[&scene].ground == Some(g) => {
                 self.scene_centre(v).position
             }
-            _ => {
-                ground
-                    .frame
-                    .to_body_fixed(&self.ephemeris, self.time, self.snapshot(&v.id).state())
-                    .position
-            }
+            _ => self.body_fixed(g, self.snapshot(&v.id).state()).position,
         };
         let r = p.length();
         let reach = self
@@ -1167,11 +1356,7 @@ impl Fleet {
         if matches!(v.owner,Owner::Scene { scene,.. } if self.scenes[&scene].ground==Some(g)) {
             self.scene_centre(v)
         } else {
-            self.grounds[g].frame.to_body_fixed(
-                &self.ephemeris,
-                self.time,
-                self.snapshot(id).state(),
-            )
+            self.body_fixed(g, self.snapshot(id).state())
         }
     }
     fn band_safe_seconds(&self) -> f64 {
@@ -1182,9 +1367,7 @@ impl Fleet {
                 continue;
             }
             for (i, g) in self.grounds.iter().enumerate() {
-                let s =
-                    g.frame
-                        .to_body_fixed(&self.ephemeris, self.time, self.snapshot(id).state());
+                let s = self.body_fixed(i, self.snapshot(id).state());
                 let gap = (self.clearance_over(v, i) - g.spec.band_enter_meters).max(0.0);
                 let speed = s.velocity.length();
                 let a = 1.2 * g.frame.body.gm / s.position.length_squared()
@@ -1449,7 +1632,7 @@ impl Fleet {
                 },
             );
             self.add_scene_body(&mut v, scene, local, q, w, push);
-            self.vessels.insert(new_id.clone(), v);
+            self.put(v);
             if !keeps {
                 self.event(&new_id, None, Some(self.scene_mode(scene)), Some(scene));
             }
@@ -1549,6 +1732,7 @@ impl Fleet {
         self.remove_scene_body(&va, true);
         self.remove_scene_body(&vb, true);
         self.order.retain(|id| id != &b);
+        self.forget_vessel_frame(&b);
         self.gate.remove_vessel(&b);
         self.controls.remove(&b);
         self.sas.remove(&b);
@@ -1572,7 +1756,7 @@ impl Fleet {
             w,
             push,
         );
-        self.vessels.insert(a.clone(), joined);
+        self.put(joined);
         a
     }
     fn attitude_ground(&self, v: &Vessel) -> Option<usize> {
@@ -1830,7 +2014,7 @@ impl Fleet {
                 }
             }
         }
-        self.vessels.insert(id.into(), v);
+        self.put(v);
     }
     fn step_scene(&mut self, scene: u64) {
         let dt = self.options.step_seconds;

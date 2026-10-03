@@ -23,10 +23,11 @@
 Galaxy（根，非旋轉；所有恆星系共用此軸）
 └─ System[s]          恆星系質心；平移是 SplitPosition（整數格＋f64），根層相減精確
    ├─ BodyInertial[b] 天體中心、赤道軸，不轉
-   │  └─ BodySurface[b]  隨天體自轉
-   │     └─ 地面接觸場景的浮動原點（Rapier 的 f32 都相對它）
-   │        └─ 場景內的船
-   ├─ 交會氣泡的浮動原點（沿自由落體軌道移動，不轉）
+   │  └─ BodySurface[b]  隨天體自轉＝地面接觸場景的座標系
+   │     ├─ 場景的浮動原點（Rapier 的 f32 都相對它；給繪圖用）
+   │     └─ 場景內的船（零件座標系）
+   ├─ 交會氣泡（沿自由落體軌道移動，不轉）
+   │  ├─ 場景的浮動原點
    │  └─ 場景內的船
    ├─ 軌道上的船（傳播器的質心＋姿態）
    └─ 相機（掛在焦點的座標系下）
@@ -41,12 +42,14 @@ Galaxy（根，非旋轉；所有恆星系共用此軸）
 | 來源 | 提供 |
 | --- | --- |
 | 星曆（orbit `Ephemeris`、multiscale） | 天體相對自己恆星系質心的狀態；恆星系相對銀河的 split 狀態 |
-| Fleet | 場景原點、船的運動（寫入 Free 節點，有效時間＝Fleet 時鐘） |
+| Fleet | 氣泡、浮動原點、船的運動（Dynamic 節點，`Fleet` 本身就是樹的來源，只在 Fleet 時鐘有效） |
 | presentation／app | 相機節點 |
 
 物理定律不搬：`PlanetFrame` 的重力／離心／Coriolis／潮汐、`FreeFallFrame` 的潮汐加速度仍是「在這個座標系裡的運動方程」，但座標轉換改由樹做。星曆的 `EphemerisSource` 仍是物理積分用的批次介面（每個 Dopri stage 一次取全部天體），它和樹用同一套 split 算術與同一份天體軸公式。
 
 ## 步驟（每步全部測試通過才往下）
+
+進度：1–3 完成。船的節點掛在場景的接觸座標系（地面＝BodySurface），不是浮動原點下：Rapier 的位置本來就以接觸座標系記錄，掛在這裡不必多一次相減；浮動原點是同層的節點，給繪圖用。
 
 1. **frames 核心**：`SplitPosition` 移入 `void-frames`；根改為 Galaxy，新增 System 節點與根層精確相減；節點可移除（id 不重用）；`Spin` 提供唯一的天體軸公式，orbit 的 `body_orientation` 改用它。
 2. **來源**：星曆提供恆星系資訊，`Ephemeris`（單系統）與 `FrameEphemeris`（多系統）都能建樹。

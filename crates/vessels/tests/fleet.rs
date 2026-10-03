@@ -560,3 +560,75 @@ fn connected_engines_share_tanks_and_drain_proportionally() {
     assert_eq!(fleet.fuel("v1/p4"), 0.0);
     assert_eq!(fleet.thrust(&id).force, DVec3::ZERO);
 }
+#[test]
+fn vessel_frames_follow_their_physics_owner() {
+    let mut s = create_lab_scene(Scenario::Launch);
+    let (_, surface) = s.fleet.body_frames(s.body_index);
+    let check_landed = |f: &Fleet| {
+        let origin = f.origin_frame();
+        for id in f.vessel_ids() {
+            let snap = f.snapshot(&id);
+            let frame = f.vessel_frame(&id);
+            let scene = snap.scene.expect("landed vessels are in a ground scene");
+            let (contact, floating) = f.scene_frames(scene);
+            assert_eq!(contact, surface);
+            assert_eq!(f.frame_tree().parent(frame), Some(contact));
+            assert_eq!(f.frame_tree().parent(floating), Some(contact));
+            let frames = f.frames();
+            let out = frames.transform(frame, origin);
+            let turn = out.rotation() * snap.rotation.conjugate();
+            assert!(turn.xyz().length() < 1e-12, "{id}: {turn:?}");
+            // The inertial snapshot, carried back down the tree, lands on the scene's own state.
+            let fixed = frames
+                .transform(origin, surface)
+                .apply_state(void_frames::State {
+                    position: snap.position,
+                    velocity: snap.velocity,
+                });
+            let direct = f.body_fixed_state(&id, s.body_index);
+            assert!((fixed.position - direct.position).length() < 1e-8, "{id}");
+            assert!((fixed.velocity - direct.velocity).length() < 1e-9, "{id}");
+            for part in f.part_snapshots(&id) {
+                // Parts sit within a few metres of their vessel's parts frame.
+                assert!((part.position - out.apply_point(DVec3::ZERO)).length() < 20.0);
+            }
+        }
+    };
+    check_landed(&s.fleet);
+    s.fleet.advance(1.0);
+    check_landed(&s.fleet);
+    let (ephemeris, _) = void_landing::planet_ephemeris(&void_landing::pebble());
+    let restored = Fleet::from_checkpoint(ephemeris, s.fleet.checkpoint(), None);
+    check_landed(&restored);
+    for id in s.fleet.vessel_ids() {
+        assert_eq!(
+            s.fleet.part_snapshots(&id)[0].position,
+            restored.part_snapshots(&id)[0].position
+        );
+    }
+
+    let mut s = create_lab_scene(Scenario::Join);
+    while s.fleet.bubble_count() == 0 && s.fleet.time() < 60.0 {
+        s.fleet.advance(1.0 / 60.0);
+    }
+    let f = &mut s.fleet;
+    let scene = f.snapshot("v1").scene.expect("the pair shares a bubble");
+    let (bubble, floating) = f.scene_frames(scene);
+    assert_eq!(f.frame_tree().parent(bubble), Some(f.origin_frame()));
+    let v2 = f.vessel_frame("v2");
+    assert_eq!(f.frame_tree().parent(v2), Some(bubble));
+    while (f.node_frame("v1/p2", "bottom").0 - f.node_frame("v2/p2", "bottom").0).length() > 0.08
+        && f.time() < 60.0
+    {
+        f.advance(1.0 / 60.0);
+    }
+    f.join("v1/p2", "bottom", "v2/p2", "bottom");
+    assert!(!f.frame_tree().contains(v2));
+    f.advance(0.0);
+    assert_eq!(f.snapshot("v1").mode, VesselMode::Orbit);
+    assert_eq!(
+        f.frame_tree().parent(f.vessel_frame("v1")),
+        Some(f.origin_frame())
+    );
+    assert!(!f.frame_tree().contains(bubble) && !f.frame_tree().contains(floating));
+}
