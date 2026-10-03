@@ -1,8 +1,24 @@
-//! Air by altitude, as the lab's `Atmosphere.ts`.
+//! Air by altitude, as the aerodynamics lab's `Atmosphere.ts` (moved here from `void-aero`, which
+//! re-exports it).
 
 use void_math::{exp, pow};
 
-use crate::{finite, positive, smooth};
+fn finite(value: f64, label: &str) -> f64 {
+    assert!(value.is_finite(), "{label}: non-finite");
+    value
+}
+
+fn positive(value: f64, label: &str) -> f64 {
+    finite(value, label);
+    assert!(value > 0.0, "{label}: must be positive");
+    value
+}
+
+/// Smoothstep from a to b, as the lab's `smooth` (`Math.max(0, Math.min(1, ...))` clamp).
+pub fn smooth(a: f64, b: f64, x: f64) -> f64 {
+    let t = 0.0_f64.max(1.0_f64.min((x - a) / (b - a)));
+    t * t * (3.0 - 2.0 * t)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Air {

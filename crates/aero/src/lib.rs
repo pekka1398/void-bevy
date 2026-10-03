@@ -6,7 +6,6 @@
 //! it bit for bit except where V8's own `sin`, `cos` and `pow` round differently (see `void_math`).
 
 mod aero;
-mod atmosphere;
 mod entry;
 mod flight;
 mod loads;
@@ -14,7 +13,6 @@ mod thermal;
 mod vehicle;
 
 pub use aero::*;
-pub use atmosphere::*;
 pub use entry::*;
 pub use flight::*;
 pub use loads::*;
@@ -25,18 +23,14 @@ use glam::{DQuat, DVec3};
 use void_math::hypot;
 
 pub use void_assembly::rotate;
+/// The atmosphere model lives in `void-environment`; aero keeps the names it always had.
+pub use void_environment::{Air, Atmosphere, EarthAtmosphere, smooth, validate_air};
 
 pub const DEG: f64 = std::f64::consts::PI / 180.0;
 
 /// `Math.max(lo, Math.min(hi, x))`.
 pub fn clamp(x: f64, lo: f64, hi: f64) -> f64 {
     lo.max(hi.min(x))
-}
-
-/// Smoothstep from a to b.
-pub fn smooth(a: f64, b: f64, x: f64) -> f64 {
-    let t = clamp((x - a) / (b - a), 0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
 }
 
 pub(crate) fn finite(value: f64, label: &str) -> f64 {

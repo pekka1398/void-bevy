@@ -32,6 +32,7 @@ void-view = { path = "crates/view" }
 void-assembly = { path = "crates/assembly" }
 void-vessels = { path = "crates/vessels" }
 void-aero = { path = "crates/aero" }
+void-environment = { path = "crates/environment" }
 void-multiscale = { path = "crates/multiscale" }
 
 # Bevy is slow unoptimised; our own crates stay quick to rebuild.

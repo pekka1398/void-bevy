@@ -1,0 +1,238 @@
+//! What surrounds a point: every body's gravity, and one body's air, ground and sea.
+//!
+//! A query is a state in any frame of the tree, usually a body's or a scene's, not the root; the
+//! answer comes back in that frame's axes. Part modules compute drag, heating, buoyancy and engine
+//! back pressure from it. How a vessel moves (rails, the integrator, contact) is the solver's
+//! business: it adds its own frame's terms (origin acceleration, tides, centrifugal, Coriolis).
+//! See `docs/environment.md`.
+
+mod atmosphere;
+
+pub use atmosphere::*;
+
+use std::sync::Arc;
+
+use glam::DVec3;
+use void_frames::{FrameId, FrameSource, Snapshot, State};
+use void_orbit::{CelestialBody, SystemFrames, gravity};
+use void_terrain::Terrain;
+
+/// One body's air, ground and sea. Heights are metres above the body's radius
+/// (`CelestialBody::radius_meters`, which is also its terrain's reference sphere).
+#[derive(Clone, Debug)]
+pub struct BodyEnvironment {
+    pub atmosphere: Option<Atmosphere>,
+    /// The atmosphere's altitude zero.
+    pub air_datum_meters: f64,
+    pub terrain: Option<Arc<Terrain>>,
+    /// None: no sea.
+    pub sea_level_meters: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AirSample {
+    /// Above the air datum.
+    pub altitude: f64,
+    pub air: Air,
+    /// Velocity relative to the air, which turns with the body; query axes.
+    pub airspeed: DVec3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GroundSample {
+    /// Terrain under the point, above the reference sphere.
+    pub height: f64,
+    /// The point above that terrain; negative underground.
+    pub clearance: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SeaSample {
+    /// Below the sea surface; negative above it.
+    pub depth: f64,
+}
+
+/// One body's conditions at a point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Surroundings {
+    pub body: usize,
+    /// Away from the body's centre; query axes.
+    pub up: DVec3,
+    /// From the body's centre.
+    pub radius: f64,
+    /// None without an atmosphere, or at or above its ceiling.
+    pub air: Option<AirSample>,
+    /// None without terrain.
+    pub ground: Option<GroundSample>,
+    /// None without a sea.
+    pub sea: Option<SeaSample>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sample {
+    /// Every body's pull (`void_orbit::gravity`); query axes; none of the query frame's own terms.
+    pub gravity: DVec3,
+    pub surroundings: Surroundings,
+}
+
+#[derive(Clone, Debug)]
+pub struct Environment {
+    bodies: Vec<CelestialBody>,
+    places: Vec<Option<BodyEnvironment>>,
+}
+
+impl Environment {
+    /// Gravity of `bodies` (an ephemeris's, in index order) and nothing else; `with` adds a body's
+    /// air, ground and sea.
+    pub fn new(bodies: &[CelestialBody]) -> Self {
+        assert!(!bodies.is_empty(), "environment: no bodies");
+        for (i, b) in bodies.iter().enumerate() {
+            assert_eq!(b.index, i, "environment: bodies out of order");
+        }
+        Self {
+            bodies: bodies.to_vec(),
+            places: vec![None; bodies.len()],
+        }
+    }
+
+    pub fn with(mut self, body: usize, place: BodyEnvironment) -> Self {
+        let b = self
+            .bodies
+            .get(body)
+            .unwrap_or_else(|| panic!("environment: unknown body {body}"));
+        assert!(
+            self.places[body].is_none(),
+            "environment: {} is already described",
+            b.id
+        );
+        assert!(
+            place.air_datum_meters.is_finite(),
+            "environment: {} air datum {}",
+            b.id,
+            place.air_datum_meters
+        );
+        if let Some(terrain) = &place.terrain {
+            assert_eq!(
+                terrain.radius_meters, b.radius_meters,
+                "environment: {} terrain is not on the body's sphere",
+                b.id
+            );
+        }
+        if let Some(sea) = place.sea_level_meters {
+            assert!(sea.is_finite(), "environment: {} sea level {sea}", b.id);
+        }
+        self.places[body] = Some(place);
+        self
+    }
+
+    pub fn bodies(&self) -> &[CelestialBody] {
+        &self.bodies
+    }
+
+    pub fn body(&self, body: usize) -> Option<&BodyEnvironment> {
+        self.places
+            .get(body)
+            .unwrap_or_else(|| panic!("environment: unknown body {body}"))
+            .as_ref()
+    }
+
+    /// Every body's pull at `position` in `from`, in `from`'s axes. Each body's pull is taken in
+    /// its own inertial frame (spin axis +z), reached through the frames' common ancestor.
+    pub fn gravity<S: FrameSource + ?Sized>(
+        &self,
+        at: &Snapshot<S>,
+        frames: &SystemFrames,
+        from: FrameId,
+        position: DVec3,
+    ) -> DVec3 {
+        assert_eq!(
+            frames.inertial.len(),
+            self.bodies.len(),
+            "environment: frames for another ephemeris"
+        );
+        assert!(position.is_finite(), "environment: position {position}");
+        let mut g = DVec3::ZERO;
+        for (body, &inertial) in self.bodies.iter().zip(&frames.inertial) {
+            let to = at.transform(from, inertial);
+            let r = to.apply_point(position);
+            assert!(
+                r != DVec3::ZERO,
+                "environment: at the centre of {}",
+                body.id
+            );
+            let a = gravity::pull(body.gm, gravity::oblateness(body), DVec3::Z, r);
+            g += to.rotation().inverse() * a;
+        }
+        g
+    }
+
+    /// `body`'s air, ground and sea at `state` in `from`, read in the body's surface frame.
+    pub fn surroundings<S: FrameSource + ?Sized>(
+        &self,
+        at: &Snapshot<S>,
+        frames: &SystemFrames,
+        from: FrameId,
+        state: State,
+        body: usize,
+    ) -> Surroundings {
+        let b = self
+            .bodies
+            .get(body)
+            .unwrap_or_else(|| panic!("environment: unknown body {body}"));
+        assert!(
+            state.position.is_finite() && state.velocity.is_finite(),
+            "environment: state {state:?}"
+        );
+        let to = at.transform(from, frames.surface[body]);
+        let local = to.apply_state(state);
+        let radius = local.position.length();
+        assert!(radius > 0.0, "environment: at the centre of {}", b.id);
+        let back = to.rotation().inverse();
+        let direction = local.position / radius;
+        let place = self.places[body].as_ref();
+        let air = place.and_then(|p| {
+            let atmosphere = p.atmosphere.as_ref()?;
+            let altitude = radius - b.radius_meters - p.air_datum_meters;
+            (altitude < atmosphere.ceiling_meters()).then(|| AirSample {
+                altitude,
+                air: atmosphere.sample(altitude),
+                airspeed: back * local.velocity,
+            })
+        });
+        let ground = place.and_then(|p| {
+            let height = p.terrain.as_ref()?.height(direction);
+            Some(GroundSample {
+                height,
+                clearance: radius - (b.radius_meters + height),
+            })
+        });
+        let sea = place.and_then(|p| {
+            Some(SeaSample {
+                depth: b.radius_meters + p.sea_level_meters? - radius,
+            })
+        });
+        Surroundings {
+            body,
+            up: back * direction,
+            radius,
+            air,
+            ground,
+            sea,
+        }
+    }
+
+    /// `gravity` and `surroundings` together.
+    pub fn sample<S: FrameSource + ?Sized>(
+        &self,
+        at: &Snapshot<S>,
+        frames: &SystemFrames,
+        from: FrameId,
+        state: State,
+        body: usize,
+    ) -> Sample {
+        Sample {
+            gravity: self.gravity(at, frames, from, state.position),
+            surroundings: self.surroundings(at, frames, from, state, body),
+        }
+    }
+}

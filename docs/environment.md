@@ -148,8 +148,8 @@ pub struct SeaSample  { pub depth: f64 }                                      //
 | 步驟 | 內容 | 行為是否改變 |
 | --- | --- | --- |
 | 1. 重力定律 | `void_orbit::gravity::pull`。積分器 `Field::gravity`、`PlanetFrame::acceleration`（本體＋潮汐）、multiscale `gravity_in` 都改呼叫它 | 只有捨入順序。另外，`PlanetFrame` 的潮汐會多出其他天體的 J2（積分器本來就有），量出差異並記錄 |
-| 2. `void-environment` | 搬入大氣模型；`BodyEnvironment`、`Environment::sample`；從 `LandingPlanet`／`GamePlanet` 建環境的函式 | 不改（新程式） |
-| 3. Fleet／fleet-flight | `GroundSpec` 的地形改由環境提供；`clearance_over`、`launch_landed` 用 `GroundSample`。`FleetAir` 的空氣與引擎背壓用 `AirSample`。`AirSource::acceleration` 多拿星曆，取代天體中心線性外插 | 只有外插那一項。量出差異並記錄 |
+| 2. `void-environment` | 搬入大氣模型；`BodyEnvironment`、`Environment::sample` | 不改（新程式） |
+| 3. Fleet／fleet-flight | 從 `LandingPlanet`／`GamePlanet` 建環境；`GroundSpec` 的地形改由環境提供；`clearance_over`、`launch_landed` 用 `GroundSample`。`FleetAir` 的空氣與引擎背壓用 `AirSample`。`AirSource::acceleration` 多拿星曆，取代天體中心線性外插 | 只有外插那一項。量出差異並記錄 |
 | 4. landing 與 aero | `PlanetAir`／`RocketAir`、`EntryFlight` 的大氣經環境取樣 | 不改；`EntryFlight` golden 門檻不放寬 |
 | 5. 待決定項目 | 依使用者決定：大氣零點、海 | 改（若決定要改） |
 | 6. 文件 | 本頁、aero.md、landing.md、fleet-flight.md、status.md | 無 |
@@ -159,12 +159,24 @@ pub struct SeaSample  { pub depth: f64 }                                      //
 | 步驟 | 結果 | 與原計畫的差異 |
 | --- | --- | --- |
 | 1. 重力定律 | `void_orbit::gravity`：`pull`、`add_pull`（累加形式）、`body_pull`、`oblateness`。積分器 `Field::gravity`、orbit-lab 起始圓軌道速度的徑向重力、`PlanetFrame` 的本體與潮汐都改用它。測試：極點與赤道的解析值、等於 J2 位能的負梯度、隨軸旋轉、多天體加總與 lab 寫法逐位元相同 | 見下 |
+| 2. `void-environment` | 大氣模型從 aero 搬來（`git mv`，aero 重新匯出 `Air`、`Atmosphere`、`EarthAtmosphere`、`smooth`、`validate_air`，aero 的 golden 不受影響）。`Environment::new(bodies).with(body, BodyEnvironment)`；查詢分成 `gravity`、`surroundings`、兩者合併的 `sample` | 從星球設定建環境的函式移到第 3 步：environment 不能依賴 landing（landing 之後要用它） |
 
 第 1 步的差異：
 
 - **累加順序是定律的一部分。** 先把每個天體的點質量與 J2 合成一個向量再加總，會讓 orbit lab 的撞擊時間 golden 從 1e-6 s 內變成差 2.8e-5 s。撞擊時間是 1e-4 s 解析度的二分法，golden 能對到 1e-6 s，靠的就是和 lab 同樣的捨入。所以積分器用 `add_pull`：先加點質量、再加 J2，和 lab 逐位元相同。門檻沒有放寬。
 - **multiscale 保留 lab 的算術。** 它的 golden 是逐位元比對；multiscale lab 用 `hypot` 和 r·r·r，orbit lab 用 r²·√r²，同一條定律的兩種捨入無法同時重現。`gravity_in` 註明它是 `pull` 的點質量情形；新測試 `gravity_is_the_shared_law` 確認兩者差在各天體拉力的 4 個 ulp 內。
 - **`PlanetFrame` 的潮汐多了其他天體的 J2。** 主遊戲的 Aurelia（sol，每個天體都有 J2）地表 100 m，四個時刻、四個方向：最多 1.1e-14 m/s²。對照點質量潮汐 1.3e-6 m/s²、地表重力 9.82 m/s²，屬於捨入等級。
+
+第 2 步的檢查（`cargo test -p void-environment`，以及 landing 的 `tests/environment.rs`）：
+
+| 檢查 | 結果 |
+| --- | --- |
+| 同一點的重力從地表、場景、天體慣性、月球、origin 座標系取，轉到同一組軸 | 地表以下 5.4e-16；月球與 origin 2.0e-12（它們和 Aurelia 只在恆星系質心相遇：點經過 1 AU 座標，間距 3e-5 m，乘上重力梯度 3e-6 /s²，約 1e-11 相對） |
+| 等於積分器的場（`gravity_at` 加回座標原點加速度） | 4.4e-16 相對 |
+| `PlanetFrame::acceleration` ＝ 環境重力 − 星球中心加速度 ＋ 離心 ＋ Coriolis | 2.4e-16 相對 |
+| 發射台上方 150 m：大氣高度、地形高、離地、海深、airspeed、up | 地表與場景座標系 ≤ 1.2e-9 m（6.4e6 m 的一個間距左右）；從 origin 7.6e-6 m；`Air` 與 `Atmosphere::sample` 完全相同 |
+| 大氣頂以上、沒有描述的天體 | None |
+| panic：天體中心、未知天體、非有限輸入、低於大氣定義域、重複描述、地形不在天體球面上、大氣零點非有限 | 都會 panic |
 
 不在範圍：
 
