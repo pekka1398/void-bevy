@@ -1,13 +1,10 @@
 //! First integration boundary for assembly/Fleet flight. No Bevy and no fixed two-stage rocket.
-mod air;
 pub mod checkpoint;
 pub mod plans;
 pub mod presentation;
 pub mod session;
 pub mod warp;
-pub use air::FleetAir;
 use glam::DVec3;
-use std::sync::Arc;
 use void_assembly::Craft;
 use void_landing::{
     CoastPrediction, ContactWorldOptions, FrameState, LandingPlanet, PlanetFrame,
@@ -50,9 +47,6 @@ impl FleetFlight {
             vec![ground],
             FleetOptions::default(),
         );
-        if air {
-            fleet.set_forces(Some(Arc::new(FleetAir::new(home))));
-        }
         let selected = fleet.launch_landed(craft, home, site);
         fleet.advance(0.0);
         let ship = fleet.snapshot(&selected);

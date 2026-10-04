@@ -1,0 +1,17 @@
+[package]
+name = "void-modules"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+glam.workspace = true
+void-aero.workspace = true
+void-assembly.workspace = true
+void-environment.workspace = true
+void-frames.workspace = true
+void-orbit.workspace = true
+
+[dev-dependencies]
+void-landing.workspace = true

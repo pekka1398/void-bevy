@@ -206,3 +206,59 @@ fn buffered_checkpoint_writes_complete_files_and_can_overwrite_and_resume() {
     }
     std::fs::remove_file(path).unwrap();
 }
+
+/// A save taken while the main rocket climbs through the air on SAS restores. Its orbital run
+/// steps 1/60 s at a time, and those steps must end on the fleet's clock: a run left a few
+/// 1e-14 s short every advance failed the restore's clock check after 50 s of ascent.
+#[test]
+fn a_save_mid_ascent_restores_and_flies_on() {
+    let planet = void_landing::aurelia();
+    let craft = void_assembly::flight_rocket();
+    let mut original =
+        FlightSession::new(InitialWorld::new(&planet, &craft, flat_site(&planet), true))
+            .with_recording();
+    original.execute(Action::Sas { enabled: true });
+    original.execute(Action::Control {
+        throttle: 1.0,
+        turn: DVec3::ZERO,
+    });
+    original.execute(Action::Stage);
+    for _ in 0..200 {
+        original.execute(Action::Advance {
+            seconds: 0.25,
+            rails: false,
+        });
+    }
+    let ship = original.sim().fleet.snapshot(&original.sim().selected);
+    assert_eq!(
+        ship.mode,
+        void_vessels::VesselMode::Orbit,
+        "{:?}",
+        ship.mode
+    );
+    let mut restored = FlightSession::from_checkpoint(FlightCheckpoint::capture(
+        original.sim(),
+        original.recording_initial().clone(),
+    ))
+    .with_recording();
+    for s in [&mut original, &mut restored] {
+        for _ in 0..20 {
+            s.execute(Action::Advance {
+                seconds: 0.25,
+                rails: false,
+            });
+        }
+    }
+    assert_eq!(world_mark(original.sim()), world_mark(restored.sim()));
+}
+
+#[test]
+#[should_panic(expected = "world checkpoint: incompatible model")]
+fn pre_clock_fix_model_eight_is_rejected_before_restoring_owners() {
+    let original = make(false);
+    let saved = FlightCheckpoint::capture(original.sim(), original.recording_initial().clone());
+    let mut value = serde_json::to_value(saved).unwrap();
+    value["model_version"] = serde_json::json!(8);
+    let saved: FlightCheckpoint = serde_json::from_value(value).unwrap();
+    saved.restore();
+}

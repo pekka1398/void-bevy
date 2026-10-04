@@ -5552,9 +5552,7 @@ dependencies = [
  "glam 0.32.1",
  "serde",
  "serde_json",
- "void-aero",
  "void-assembly",
- "void-environment",
  "void-frames",
  "void-landing",
  "void-orbit",
@@ -5618,6 +5616,19 @@ version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
  "libm",
+]
+
+[[package]]
+name = "void-modules"
+version = "0.0.0"
+dependencies = [
+ "glam 0.32.1",
+ "void-aero",
+ "void-assembly",
+ "void-environment",
+ "void-frames",
+ "void-landing",
+ "void-orbit",
 ]
 
 [[package]]
@@ -5748,6 +5759,7 @@ dependencies = [
  "void-environment",
  "void-frames",
  "void-landing",
+ "void-modules",
  "void-orbit",
  "void-rotation",
  "void-sas",

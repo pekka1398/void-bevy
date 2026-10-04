@@ -151,10 +151,6 @@ fn air_coast_differential(step_seconds: f64) -> (f64, f64) {
                 ..Default::default()
             },
         );
-        sim.fleet
-            .set_forces(Some(std::sync::Arc::new(void_fleet_flight::FleetAir::new(
-                sim.home,
-            ))));
     }
     let o = airborne(&mut orbit, &craft, 10_000.0, 100.0, 0.0);
     let b = airborne(&mut bubble, &craft, 10_000.0, 100.0, 0.0);

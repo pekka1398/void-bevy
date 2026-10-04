@@ -1,6 +1,6 @@
 //! Direct world save. Logical state and native owner caches are restored without any pilot replay.
 use crate::{
-    FleetAir, FleetFlight,
+    FleetFlight,
     session::{InitialWorld, MODEL_VERSION, world_mark},
 };
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,6 @@ use std::{
     fs::{self, OpenOptions},
     io::{BufWriter, Write},
     path::Path,
-    sync::Arc,
 };
 use void_vessels::{Fleet, FleetCheckpoint};
 
@@ -75,9 +74,7 @@ impl FlightCheckpoint {
         ephemeris.extend_to(self.ephemeris_end);
         let air = self.initial.air_enabled;
         let environment = void_landing::planet_environment(&planet, &ephemeris, home, air);
-        let forces =
-            air.then(|| Arc::new(FleetAir::new(home)) as Arc<dyn void_vessels::PartForces>);
-        let fleet = Fleet::from_checkpoint(ephemeris, environment, self.fleet.clone(), forces);
+        let fleet = Fleet::from_checkpoint(ephemeris, environment, self.fleet.clone());
         let mut sim = FleetFlight {
             fleet,
             planet,

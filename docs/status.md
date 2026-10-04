@@ -1,6 +1,6 @@
 # 目前狀態
 
-（2026-10-04，座標樹重構合入 master）本頁回答「現在做到哪裡、還缺什麼」。各項的細節與驗證紀錄見連結的文件；NOTE.md 是原始筆記與願望清單，其中的完成狀態是歷史紀錄。
+（2026-10-04，座標樹、環境介面、零件圖與零件模組四項重構已合入 master）本頁回答「現在做到哪裡、還缺什麼」。各項的細節與驗證紀錄見連結的文件；NOTE.md 是原始筆記與願望清單，其中的完成狀態是歷史紀錄。
 
 ## 一句話
 
@@ -36,11 +36,15 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 - 測試：在 `a730519` 記錄的 `cargo test --workspace --all-targets` 為 283 passed、0 failed、4 ignored。ignored 包括一項需要 GPU 的 opt-in 測試，以及已結案為非缺陷的 Pebble 靜止傾角（量到的是場地坡度，見 [vessels.md](vessels.md)）。本頁的文件修改沒有重跑測試。
 - GPU：只在使用者本機與 RTX 5060 Laptop／Vulkan 離屏 benchmark 上跑過，其他 GPU／平台沒有測過。
 
-## 進行中
+## 已完成的架構重構
 
 - **座標樹統一已完成並合入 master**：所有座標走同一棵 `void-frames` 樹，從銀河、恆星系、天體、地面場景到船；相機掛在焦點下，零件、碰撞線與 tile 直接轉到相機，不再繞經 1 AU 的質心系。使用者已完成主遊戲、multiscale example／lab 的視窗驗收。審查修正了 plain lab 天體焦點的 NaN、探測器焦點的 split 精度，並把模型版本升到 5。修正後相關 40 項測試、受影響範圍 clippy 與 fmt 通過；未重跑全量。見 [frame-tree.md](frame-tree.md)、[frames.md](frames.md)。
 - **環境介面已完成並合入 master**：重力共用 `void_orbit::gravity`；`void-environment` 在座標樹上查重力、大氣、地形與海深。Fleet、舊火箭與再入 lab 共用環境取樣，積分器不再線性外推天體中心。layered 大氣與散射天空從海平面起算，水的物理仍待開發。審查補上環境／星曆世界描述核對，相機固定追蹤 craft root（主遊戲為上面級指令艙），避免分離時因質心切換而跳動；該次合併的 `MODEL_VERSION` 為 7。使用者已完成本輪視窗驗收。整合後 42 項針對性測試通過，相機修改後另有 19 項相機／存檔／錄放檢查通過，相關 Clippy、fmt 與主遊戲／multiscale example 編譯檢查通過；未重跑全量。見 [environment.md](environment.md)。
-- **零件圖整合已驗收**：`void_assembly::PartGraph` 是 Fleet 唯一零件紀錄，燃料、分級、點火、pose 在零件上；每艘船為連通分量加物理擁有者，每個零件有座標樹節點，噴嘴面積進 catalog。審查補上還原連通性、PartGraph 基本狀態驗證與受控修改接口，跳過未改變父節點的 reparent。整合保留世界核對與上面級相機，`MODEL_VERSION` 8。使用者完成視窗驗收並同意合併；F6 存檔已加入緩衝寫入，修正大量小型檔案寫入造成的卡住。見 [part-graph.md](part-graph.md)。
+- **零件圖整合已完成並合入 master**：`void_assembly::PartGraph` 是 Fleet 唯一零件紀錄，燃料、分級、點火、pose 在零件上；每艘船為連通分量加物理擁有者，每個零件有座標樹節點，噴嘴面積進 catalog。審查補上還原連通性、PartGraph 基本狀態驗證與受控修改接口，跳過未改變父節點的 reparent。整合保留世界核對與上面級相機，`MODEL_VERSION` 8。使用者完成視窗驗收並同意合併；F6 存檔已加入緩衝寫入，修正大量小型檔案寫入造成的卡住。見 [part-graph.md](part-graph.md)。
+- **零件模組整合已完成並合入 master**：引擎背壓與零件阻力集中到 `void-modules`，Fleet 直接讀環境，移除外掛力接線；修正非法氣壓掩蓋與軌道段累積時鐘誤差，整合版模型 9。保留前幾輪審查修正與 F6 緩衝存檔。使用者已完成本輪視窗驗收並同意合併；101 項針對性測試、相關 lint、編譯檢查與 fmt 通過，未重跑全量測試。見 [part-modules.md](part-modules.md)。
+
+## 進行中
+
 - **RCS／對接**：噴嘴分配、捕獲判定、接點吸附、解除對接、單推進劑與 RCS 零件，以及對接 lab 場景，尚未合入 master。合入前需要視窗驗收。
 
 ## 對照 NOTE.md 的願望清單
@@ -73,6 +77,6 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 ## 已知缺口與限制
 
 - 主遊戲沒有 scenery 開關與曝光調整（scenery example 有）。
-- 噴嘴面積在 master 上是 fleet-flight 內以 engine ID 對照的表，不是 catalog 的正式欄位；branch `claude/part-graph` 已移到 catalog（`nozzleExitAreaM2`）。
+- 噴嘴面積已是 catalog 的正式欄位（`nozzleExitAreaM2`）；新增引擎需在定義中提供，沒有額外的 engine ID 對照表。
 - 搬遷時列出、仍未補的觀察工具：`lod` example 的 preset 選擇、vessels-lab 的歷史軌跡、multiscale encounter 的任意天體／船選取。詳見 [port-audit.md](port-audit.md)（歷史頁）。
 - 存檔與錄影綁定模型版本、catalog 與 Rapier 版本，版本不同時直接拒絕，沒有遷移。

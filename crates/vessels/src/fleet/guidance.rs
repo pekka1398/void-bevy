@@ -35,7 +35,13 @@ impl Fleet {
         }
     }
     pub(super) fn full_rating_of(&self, v: &Vessel) -> Propulsion {
-        propulsion(&self.parts, &v.members, 1.0, self.centre(&v.members))
+        propulsion(
+            &self.parts,
+            &v.members,
+            1.0,
+            self.centre(&v.members),
+            &Conditions::VACUUM,
+        )
     }
     pub fn guidance(&self, id: &str) -> Option<&GuidedBurn> {
         self.vessel(id);

@@ -593,7 +593,7 @@ fn vessel_frames_follow_their_physics_owner() {
     check_landed(&s.fleet);
     let (ephemeris, _) = void_landing::planet_ephemeris(&void_landing::pebble());
     let environment = s.fleet.environment().clone();
-    let restored = Fleet::from_checkpoint(ephemeris, environment, s.fleet.checkpoint(), None);
+    let restored = Fleet::from_checkpoint(ephemeris, environment, s.fleet.checkpoint());
     check_landed(&restored);
     for id in s.fleet.vessel_ids() {
         assert_eq!(
@@ -663,7 +663,7 @@ fn grounds_and_checkpoints_need_the_environments_terrain() {
     assert!(panics(&mut || {
         let e = fresh();
         let gravity_only = std::sync::Arc::new(Environment::new(&e));
-        Fleet::from_checkpoint(e, gravity_only, saved.clone(), None);
+        Fleet::from_checkpoint(e, gravity_only, saved.clone());
     }));
     let other = std::sync::Arc::new(void_terrain::Terrain::from_config(
         &void_terrain::TerrainConfig::Layered(void_terrain::LayeredOptions {
@@ -676,11 +676,11 @@ fn grounds_and_checkpoints_need_the_environments_terrain() {
         let elsewhere = std::sync::Arc::new(
             Environment::new(&e).with(s.body_index, BodyEnvironment::airless(other.clone())),
         );
-        Fleet::from_checkpoint(e, elsewhere, saved.clone(), None);
+        Fleet::from_checkpoint(e, elsewhere, saved.clone());
     }));
     let e = fresh();
     let same = s.fleet.environment().clone();
-    Fleet::from_checkpoint(e, same, saved, None);
+    Fleet::from_checkpoint(e, same, saved);
 }
 
 #[test]
@@ -708,7 +708,7 @@ fn fleet_and_restore_reject_another_worlds_environment() {
     let matching = Arc::new(Environment::new(&e));
     let empty = Fleet::new(e, matching, 0.0, vec![], FleetOptions::default());
     let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        Fleet::from_checkpoint(fresh(), environment, empty.checkpoint(), None);
+        Fleet::from_checkpoint(fresh(), environment, empty.checkpoint());
     }));
     assert!(rejected.is_err());
 }
@@ -766,7 +766,6 @@ fn the_part_graph_is_the_record_and_a_checkpoint_restores_it() {
         ephemeris,
         s.fleet.environment().clone(),
         s.fleet.checkpoint(),
-        None,
     );
     let (a, b): (Vec<_>, Vec<_>) = (
         s.fleet.parts().parts().collect(),
@@ -844,7 +843,6 @@ fn parts_are_frames_under_their_vessel() {
         ephemeris,
         s.fleet.environment().clone(),
         s.fleet.checkpoint(),
-        None,
     );
     check(&restored);
 }
@@ -865,7 +863,7 @@ fn checkpoint_rejects_disconnected_members() {
         let saved = serde_json::from_value(value).unwrap();
         let e = void_landing::planet_ephemeris(&s.planet).0;
         let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            Fleet::from_checkpoint(e, s.fleet.environment().clone(), saved, None);
+            Fleet::from_checkpoint(e, s.fleet.environment().clone(), saved);
         }));
         let panic = rejected.expect_err("disconnected members must not restore as one vessel");
         let message = panic
@@ -876,7 +874,7 @@ fn checkpoint_rejects_disconnected_members() {
         assert!(message.contains("not one connected component"), "{message}");
     }
     let e = void_landing::planet_ephemeris(&s.planet).0;
-    Fleet::from_checkpoint(e, s.fleet.environment().clone(), s.fleet.checkpoint(), None);
+    Fleet::from_checkpoint(e, s.fleet.environment().clone(), s.fleet.checkpoint());
 }
 
 #[test]
@@ -925,8 +923,7 @@ fn repeated_split_join_and_restore_preserve_graph_and_frames() {
             let saved = scene.fleet.checkpoint();
             let before = serde_json::to_value(&saved).unwrap();
             let eph = void_landing::planet_ephemeris(&scene.planet).0;
-            scene.fleet =
-                Fleet::from_checkpoint(eph, scene.fleet.environment().clone(), saved, None);
+            scene.fleet = Fleet::from_checkpoint(eph, scene.fleet.environment().clone(), saved);
             assert_eq!(
                 serde_json::to_value(scene.fleet.checkpoint()).unwrap(),
                 before

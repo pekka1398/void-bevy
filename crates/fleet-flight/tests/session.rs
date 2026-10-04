@@ -288,3 +288,12 @@ fn pre_frame_tree_recording_is_rejected_before_replay() {
     recording.model_version = 4;
     FlightSession::from_recording(recording);
 }
+
+#[test]
+#[should_panic(expected = "session: incompatible simulation model")]
+fn pre_clock_fix_model_eight_recording_is_rejected_before_replay() {
+    let mut s = session(false);
+    let mut recording = s.recording();
+    recording.model_version = 8;
+    FlightSession::from_recording(recording);
+}

@@ -128,13 +128,12 @@ impl Fleet {
             active_pairs: self.gate.active_pairs(),
         }
     }
-    /// `environment` and `forces` are the world's, as the caller built them; the saved terrain
+    /// `environment` is the world's, as the caller built it; the saved terrain
     /// must be the environment's.
     pub fn from_checkpoint(
         ephemeris: impl EphemerisSource + 'static,
         environment: Arc<Environment>,
         saved: FleetCheckpoint,
-        forces: Option<Arc<dyn PartForces>>,
     ) -> Self {
         assert_eq!(saved.version, 3, "fleet checkpoint: unsupported version");
         assert!(
@@ -164,9 +163,6 @@ impl Fleet {
             })
             .collect();
         let mut fleet = Fleet::new(ephemeris, environment, saved.time, grounds, saved.options);
-        // Install forces before restoring integrator caches; set_forces intentionally invalidates
-        // the caches of existing vessels when live forces change.
-        fleet.forces = forces;
         for part in saved.parts {
             let definition = void_assembly::definition(&part.definition_id)
                 .expect("fleet checkpoint: unknown part");

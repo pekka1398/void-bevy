@@ -1,5 +1,6 @@
 use glam::DVec3;
-use void_assembly::{G0, PartGraph};
+use void_assembly::PartGraph;
+use void_modules::{Conditions, engine};
 
 #[derive(Clone, Debug)]
 pub struct EngineForce {
@@ -23,12 +24,14 @@ pub struct Propulsion {
     pub seconds_to_flameout: f64,
 }
 /// Shared by orbital and contact owners: the lit engines among `members`, which are summed in
-/// that order. Tanks in one crossfeed group drain proportionally.
+/// that order, each pushing as its engine module says in `conditions`. Tanks in one crossfeed
+/// group drain proportionally.
 pub fn propulsion(
     graph: &PartGraph,
     members: &[String],
     throttle: f64,
     centre: DVec3,
+    conditions: &Conditions,
 ) -> Propulsion {
     assert!(
         (0.0..=1.0).contains(&throttle),
@@ -41,19 +44,18 @@ pub fn propulsion(
             if !p.lit {
                 continue;
             }
-            let engine = p.engine().expect("lit part has no engine");
             let tanks = graph.crossfeed_tanks(members, id);
             let fuel_kg = tanks.iter().map(|t| graph.part(t).fuel_kg).sum::<f64>();
             if fuel_kg <= 0.0 {
                 continue;
             }
-            let thrust = engine.thrust_newtons * throttle;
+            let thrust = engine::thrust(p, throttle, conditions);
             let e = EngineForce {
                 part_id: id.clone(),
-                force: p.pose.rotation * engine.direction * thrust,
-                point: p.pose.position,
+                force: thrust.force,
+                point: thrust.point,
             };
-            let flow = thrust / (engine.isp_seconds * G0);
+            let flow = thrust.flow_kg_per_second;
             if let Some(g) = groups.iter_mut().find(|g| g.tanks == tanks) {
                 g.engines.push(e);
                 g.flow_kg_per_second += flow;
