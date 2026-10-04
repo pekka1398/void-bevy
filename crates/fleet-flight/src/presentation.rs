@@ -185,6 +185,25 @@ impl Presentation {
             ViewCommand::Configure { main_camera } => self.main_camera = main_camera,
             ViewCommand::Focus { body } => {
                 self.focus_body = body;
+                if body.is_none() {
+                    // Re-enter ship view relative to this ship's local ground, rather than
+                    // keeping the previous planet's inertial direction below its horizon.
+                    let fleet = &sim.fleet;
+                    let surface = fleet.body_frames(sim.nearby_body(&sim.selected)).1;
+                    let frames = fleet.frames();
+                    let radial = frames
+                        .transform(fleet.vessel_frame(&sim.selected), surface)
+                        .apply_point(fleet.root_position_local(&sim.selected))
+                        .normalize();
+                    let east = if radial.x.hypot(radial.y) > 1e-9 {
+                        DVec3::new(-radial.y, radial.x, 0.0).normalize()
+                    } else {
+                        DVec3::X
+                    };
+                    self.direction = frames
+                        .transform(surface, fleet.origin_frame())
+                        .apply_direction((east + 0.3 * radial).normalize());
+                }
                 self.distance = body.map_or(40.0, |i| {
                     sim.fleet
                         .ephemeris
@@ -279,7 +298,7 @@ impl Presentation {
         let direction = if self.main_camera {
             self.direction
         } else {
-            let surface = f.body_frames(sim.home).1;
+            let surface = f.body_frames(sim.nearby_body(&sim.selected)).1;
             let frames = f.frames();
             let up = frames
                 .transform(f.vessel_frame(&sim.selected), surface)

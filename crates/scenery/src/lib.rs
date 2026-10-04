@@ -3,6 +3,7 @@
 //! app.
 
 pub mod atmosphere;
+pub mod atmosphere_scene;
 pub mod clouds;
 pub mod orbit_view;
 pub mod stars;

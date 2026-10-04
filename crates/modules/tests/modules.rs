@@ -341,3 +341,34 @@ fn a_local_chute_feels_air_when_its_com_is_above_the_ceiling() {
         .is_err()
     );
 }
+
+#[test]
+fn scene_air_at_rest_is_exactly_zero_at_a_distant_planet() {
+    let planet = void_landing::aurelia();
+    let (mut ephemeris, home) = void_landing::planet_ephemeris(&planet);
+    let environment = void_landing::planet_environment(&planet, &ephemeris, home, true);
+    let (graph, ids) = rocket();
+    let frames = environment.frames();
+    let surface = frames.surface[home];
+    let mass = graph.mass(&ids);
+    let local = State {
+        position: DVec3::X * (planet.terrain.radius_meters + 1000.0),
+        velocity: DVec3::ZERO,
+    };
+    for t in [0.0, 1.0, 100.0] {
+        ephemeris.extend_to(t);
+        let at = frames.tree.at(t, &ephemeris);
+        let rotation = at.transform(surface, frames.origin).rotation();
+        let source = vessel_air(&environment, &graph, &ids, DVec3::ZERO, rotation).unwrap();
+        assert_eq!(
+            source.acceleration_in(&at, surface, local, mass),
+            DVec3::ZERO
+        );
+        let moving = State {
+            velocity: DVec3::X * 100.0,
+            ..local
+        };
+        let drag = source.acceleration_in(&at, surface, moving, mass);
+        assert!(drag.dot(moving.velocity) < 0.0);
+    }
+}

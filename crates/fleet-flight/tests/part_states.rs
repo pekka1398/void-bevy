@@ -196,3 +196,71 @@ fn an_open_parachute_slows_the_same_return_without_changing_mass() {
     assert!(slower < 0.75 * faster, "open {slower}m/s, cut {faster}m/s");
     assert_eq!(mass, other_mass, "deploying adds no propellant or mass");
 }
+
+#[test]
+fn second_body_parachute_state_and_optical_world_resume_together() {
+    let planet = void_landing::aurelia();
+    let mut world = void_fleet_flight::world::aurelia_selene(&planet);
+    let moon = world.bodies.get_mut("selene").unwrap();
+    moon.air_density_scale = Some(0.2);
+    moon.visual.atmosphere = true;
+    moon.visual.scattering =
+        Some(void_scenery::atmosphere_scene::AtmosphereProfile::EarthScaled { density_scale: 0.1 });
+    let radius = world.landing_planet("selene").terrain.radius_meters;
+    let initial = InitialWorld {
+        world,
+        launch_body: "aurelia".into(),
+        craft: craft(),
+        launch_site: flat_site(&planet),
+    };
+    let mut session = FlightSession::new(initial.clone()).with_recording();
+    let Outcome::Spawned(id) = session.execute(Action::LaunchFlightAt {
+        body: "selene".into(),
+        craft: craft(),
+        position: DVec3::X * (radius + 1000.0),
+        velocity: -DVec3::X * 80.0,
+    }) else {
+        panic!("spawn")
+    };
+    assert_eq!(id, "v2");
+    session.execute(Action::Select { vessel: id.clone() });
+    session.execute(Action::Parachute {
+        part: "v2/p1".into(),
+        module: "parachute1".into(),
+        deploy: true,
+    });
+    advance(&mut session, 0.5);
+    assert_eq!(phase(&session), ParachutePhase::SemiDeploying);
+    assert_eq!(
+        session.sim().nearby_body(&id),
+        initial.world.body_index("selene")
+    );
+    let saved = void_fleet_flight::checkpoint::FlightCheckpoint::capture(session.sim(), initial);
+    let mut restored = FlightSession::from_checkpoint(saved);
+    assert_eq!(world_mark(session.sim()), world_mark(restored.sim()));
+    for s in [&mut session, &mut restored] {
+        advance(s, 3.0);
+    }
+    assert_eq!(phase(&session), ParachutePhase::Full);
+    assert_eq!(world_mark(session.sim()), world_mark(restored.sim()));
+    session.mark();
+    let replay = FlightSession::from_recording(session.recording());
+    assert_eq!(world_mark(session.sim()), world_mark(replay.sim()));
+}
+
+#[test]
+fn standalone_branch_models_are_rejected_by_the_combined_runtime() {
+    for model in [10, 12] {
+        let mut session = drop();
+        session.mark();
+        let mut recording = session.recording();
+        recording.model_version = model;
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                FlightSession::from_recording(recording)
+            }))
+            .is_err(),
+            "standalone branch model {model} must not alias the merged model"
+        );
+    }
+}

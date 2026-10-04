@@ -1,6 +1,6 @@
 # 任務：零件運行狀態與多資源供應
 
-狀態：實作與核對完成，使用者已接受目前降落傘外觀；尚未提交或合併。任務分支 `claude/part-state-resources`。
+狀態：實作與核對完成，使用者接受目前降落傘外觀並授權審查後合併 master；整合模型 13。任務分支 `claude/part-state-resources` 保留歷史。
 起始程式基線：`7a4e5d2`（已審查的四項重構，MODEL_VERSION 9）。
 相關：[NOTE.md](../../NOTE.md)、[part-modules.md](../part-modules.md)、[part-graph.md](../part-graph.md)。
 
@@ -71,3 +71,5 @@
 - 使用者已取消全量 workspace 測試；本任務先跑受影響 crate 與整合場景、對應 all-targets Clippy、fmt。新增改動若需額外全量檢查，說明理由後再由使用者決定，不擅自恢復。
 - 保留世界相容核對、PartGraph 不變量、root 相機、split 精度、軌道時鐘、F6 緩衝原子寫入與 durable recording；不能為新架構撤掉它們。
 - 中間成果可供設計／程式審查；最終成果 commit／push 的視窗驗收依 AGENTS.md。交付須列真實測試結果、限制與未完成項。
+
+最終整合狀態：MODEL_VERSION 13，world schema 2、craft 2、FleetCheckpoint 4；分支暫定版本為歷史紀錄，master 以此為準。

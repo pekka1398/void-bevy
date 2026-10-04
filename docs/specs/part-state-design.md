@@ -1,6 +1,6 @@
 # 零件狀態與資源：實作設計
 
-本文件是 part-state-resources 分支的具體設計，尚未視窗驗收。
+本文件是 part-state-resources 的具體設計；審查修正後與多天體任務合併 master，整合模型 13。
 
 ## 表示法
 

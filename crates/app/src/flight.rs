@@ -79,6 +79,8 @@ pub fn game_planet_by_id(id: &str, requested: Option<&str>) -> GamePlanet {
             label: format!("{} | SCENERY TERRAIN", original.label),
             terrain_config,
             terrain,
+            air_datum: SEA_LEVEL,
+            sea_level: Some(SEA_LEVEL),
             ..original
         },
         terrain_id,

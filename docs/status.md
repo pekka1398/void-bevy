@@ -1,6 +1,6 @@
 # 目前狀態
 
-（2026-10-04，座標樹、環境介面、零件圖與零件模組四項重構已合入 master）本頁回答「現在做到哪裡、還缺什麼」。各項的細節與驗證紀錄見連結的文件；NOTE.md 是原始筆記與願望清單，其中的完成狀態是歷史紀錄。
+（2026-10-05，零件狀態／資源與多天體場景在審查修正後合入 master；整合模型 13）本頁回答「現在做到哪裡、還缺什麼」。各項的細節與驗證紀錄見連結的文件；NOTE.md 是原始筆記與願望清單，其中的完成狀態是歷史紀錄。
 
 ## 一句話
 
@@ -11,6 +11,10 @@ cargo run -p void-app                        # 主遊戲：Aurelia、預設 flig
 cargo run -p void-app -- --craft my.json     # 用 assembly-lab 匯出的船
 cargo run -p void-assembly-lab               # 組船
 ```
+
+## 多天體與零件狀態 lab
+
+多天體任務已建立同世界 Aurelia／Selene 地形與兩地 Fleet 船的獨立 lab；世界描述、InitialWorld、存讀檔與錄放已共用多天體配置。可執行 `cargo run -p void-app --example multi_body`；操作、數值檢查與 renderer 限制見 [multi-body-scenes.md](multi-body-scenes.md)。已依使用者授權審查後合併；多天體仍是獨立 lab，未啟用為主遊戲預設。
 
 ## 主遊戲現在有的
 
@@ -56,14 +60,14 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 | 3 | 軌道／飛行視角切換 | 完成：map 淡入、多天體 map、標籤焦點、inertial／surface path frame |
 | 4 | profiling、GPU、SIMD、多執行緒 | profiling 完成（CPU／GPU）；效能優化本身尚未系統性進行 |
 | 5 | scenery | 大氣、海、體積雲、星空、分層地形已有。雲的移動與雲影、極光、天氣、植被、生物群系配色未做 |
-| 6 | 火箭／飛機零件 | 指令艙、油箱、引擎、分離器、著陸腿已有。降落傘未做；飛機只在 aero-lab 有寫死的機體，沒有飛機零件 |
+| 6 | 火箭／飛機零件 | 指令艙、油箱、引擎、分離器、著陸腿已有。降落傘 core／獨立 lab 已完成，主遊戲預設 craft 尚無傘；飛機只在 aero-lab 有寫死的機體，沒有飛機零件 |
 | 7 | 空氣動力、燒蝕、熱 | aero-lab 完整（力矩、翼面、熱、燒蝕、再入）。主遊戲只接了阻力，力矩／熱／燒蝕／翼面未接 |
 | 8 | 交會、對接 | 交會完成；對接進行中（見上） |
 | 9 | 多船 | 完成 |
 | 10 | SAS、旋轉、RCS | SAS 穩定／鎖定姿態完成。順行等進階模式、有限轉向時間未做；RCS 進行中 |
 | 11 | 存檔 | 完成：直接世界存檔＋錄放。沒有跨模型版本的存檔遷移 |
 | 12 | 參考框架切換 | 完成：frames 樹、orbit-lab 四種繪圖框架、multiscale 的跨星系換框架；已統一到同一棵樹並完成視窗驗收 |
-| 13 | 其他天體的程序地形 | 未做：一局只有發射的那顆行星有 LOD 地形可著陸，其他天體是球 |
+| 13 | 其他天體的程序地形 | 多天體 lab 已支持同世界多個可著陸天體；各太陽系天體專屬地形／美術未做，主遊戲預設仍單近景 |
 | 14 | 水上漂浮 | 未做：環境介面已提供海平面與深度（`Surroundings::sea`），浮力、水阻力、濺落等水的物理之後做 |
 | 15 | UI | 只有 HUD 與按鍵操作，正式 UI 未做 |
 | 16 | 太空人 EVA | 未做 |
@@ -81,6 +85,10 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 - 搬遷時列出、仍未補的觀察工具：`lod` example 的 preset 選擇、vessels-lab 的歷史軌跡、multiscale encounter 的任意天體／船選取。詳見 [port-audit.md](port-audit.md)（歷史頁）。
 - 存檔與錄影綁定模型版本、catalog 與 Rapier 版本，版本不同時直接拒絕，沒有遷移。
 
-## Part-state/resources 分支（待視窗驗收）
+## 本輪合併：零件狀態／資源與多天體
 
-`claude/part-state-resources` 把 Fleet 的 live 零件可變資料統一為 typed resource map、按穩定 module ID 尋址的 state/stage map，新增雙資源供應與 force-only 降落傘。Craft 2／FleetCheckpoint 4／暫定 model 10 明確區分基線；舊 craft 可用顯式離線工具轉換。主遊戲預設火箭未新增傘。獨立 `void-part-state-lab` 與驗收操作、限制見 [part-state-resources.md](part-state-resources.md)。最終格式版本由兩分支整合時再分配。
+`claude/part-state-resources` 把 Fleet 的 live 零件可變資料統一為 typed resource map、按穩定 module ID 尋址的 state/stage map，新增雙資源供應與 force-only 降落傘。Craft 2／FleetCheckpoint 4／整合 model 13 明確區分基線；舊 craft 可用顯式離線工具轉換。主遊戲預設火箭未新增傘。獨立 `void-part-state-lab` 與驗收操作、限制見 [part-state-resources.md](part-state-resources.md)。整合版 world schema 2 / model 13，分支暫用的 10 / 12 明確拒絕。
+
+多天體後續追加：多顆分離大氣 HDR 合成、自訂散射／雲配置與 solar scenery 交接規格已實作；world schema 2 / 整合 model 13。已合併 master，實際九天體外觀未做，見 [specs/solar-scenery.md](specs/solar-scenery.md)。
+
+合併核對（2026-10-05）：受影響核心／場景 **245 passed、0 failed**；主遊戲原有 offscreen GPU 重建／存檔測試另跑 **1 passed**。唯一仍跳過的行為測試是已結案的 Pebble 傾角；沒有重跑全 workspace。所屬 crates all-targets Clippy `-D warnings`、fmt、主遊戲與兩 lab 編譯通過。新增第二天體降落傘 checkpoint／續跑／錄放，以及分支舊模型拒絕回歸。

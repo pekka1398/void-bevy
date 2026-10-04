@@ -1,6 +1,6 @@
 # 任務：多天體世界描述與場景管理
 
-狀態：待實作。任務分支 `claude/multi-body-scenes`。
+狀態：審查修正／TigerVNC 核對完成，依使用者授權合併 master；整合模型 13。任務分支 `claude/multi-body-scenes` 保留歷史。
 起始程式基線：`7a4e5d2`（已審查的四項重構，MODEL_VERSION 9）。
 相關：[NOTE.md](../../NOTE.md)、[environment.md](../environment.md)、[frame-tree.md](../frame-tree.md)、[scenery.md](../scenery.md)。
 
@@ -85,3 +85,9 @@
 - 使用者取消了全量測試；跑實際受影響 crate／場景的針對性測試、對應 all-targets Clippy、fmt；如需要全量另說明理由，不擅自重啟。
 - 保留環境世界核對、PartGraph 驗證、root 相機、split 精度、精確軌道時鐘、F6 緩衝原子存檔及 durable journal。
 - 最終 commit／push 的視窗驗收依 AGENTS.md；交付真實檢查結果、限制及未完成項，不能把「世界有兩份配置」當作本任務完成。
+
+## 後續追加範圍
+
+使用者追加多大氣支援與太陽系 scenery 開發入口。已補 per-body optics/cloud profiles、HDR transport、世界配置匯入／匯出及 [solar-scenery.md](solar-scenery.md) 交接規格。原「不要求多大氣」邊界不再代表最新實作；共同逐射線積分／相穿介質仍未實作。最新實作已由 agent 核對，使用者授權審查後合併 master。
+
+最終整合狀態：MODEL_VERSION 13，world schema 2、craft 2、FleetCheckpoint 4；分支暫定版本為歷史紀錄，master 以此為準。

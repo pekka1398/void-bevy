@@ -1,6 +1,6 @@
 # 零件資源與降落傘 lab
 
-本輪新增 typed 質量資源、按穩定 module ID 尋址的動作狀態與 staging、降落傘狀態機。核心已接 Fleet，但主遊戲預設火箭沒有新增降落傘；此 lab 尚待使用者視窗驗收。具體格式與算法見 [設計](specs/part-state-design.md)。
+本輪新增 typed 質量資源、按穩定 module ID 尋址的動作狀態與 staging、降落傘狀態機。核心已接 Fleet，但主遊戲預設火箭沒有新增降落傘；使用者已接受目前傘外觀，並授權審查修正後合併。具體格式與算法見 [設計](specs/part-state-design.md)。
 
 ## 驗收
 
@@ -54,3 +54,7 @@ agent 初輪驗證（審查前）：assembly 22、modules 6、vessels 43、Fleet
 TigerVNC 實際操作：預設 paused 下 D 只進 Armed，P 之後展開；已補明確暫停提示、無傘提示、傘繩及傘面厚度，畫面確認 Full 80 m²。這是 agent 的操作核對，不替代使用者最終驗收。
 
 最終核對：受影響 assembly／modules／vessels／FleetFlight 的 lib/tests 共 128 passed、0 failed、1 既有 ignored；對應五個 package all-targets Clippy 通過。修正模組級 stage 不再依賴舊 part stage，傘可直接用 part stage。TigerVNC 核對半開存讀、切斷、恢復續開、雙傘分離／切船／debug join、雙資源消耗，實際視窗錄影 --verify 通過。使用者已接受目前傘外觀；未 commit／push／merge。
+
+## 整合到 master
+
+與多天體／多大氣分支合併，MODEL_VERSION 13 / world schema 2 / craft 2 / FleetCheckpoint 4。保留每個 chute 的局部空氣取樣、accepted tick 狀態提交、passive air 不喚醒睡眠剛體及所有 typed resources。新增第二天體部署／半開存檔／續跑／錄放核對與舊分支模型拒絕檢查。多天體和降落傘仍各有獨立 lab；主遊戲預設不新增傘。

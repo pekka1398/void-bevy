@@ -1997,6 +1997,23 @@ struct SceneryState {
     stars: Handle<crate::scenery::StarMaterial>,
 }
 
+/// The legacy renderer owns only the launch planet's scenery. Other worlds must use the
+/// multi-body lab until its renderer is deliberately integrated into the main app.
+fn validate_legacy_scenery(sim: &void_fleet_flight::FleetFlight) {
+    let mut preset = sim.planet.clone();
+    preset.sea_level = preset.terrain.sea_level_meters();
+    preset.air_datum = preset.sea_level.unwrap_or(0.0);
+    let expected = void_fleet_flight::world::WorldDescription::single(
+        &preset,
+        preset.air_density_scale.is_some(),
+    );
+    assert_eq!(
+        serde_json::to_value(&sim.world).unwrap(),
+        serde_json::to_value(expected).unwrap(),
+        "main renderer supports the legacy single-planet scenery preset; use --example multi_body for configured worlds"
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_scenery(
     commands: &mut Commands,
@@ -2011,6 +2028,7 @@ fn build_scenery(
     use void_scenery::atmosphere::*;
     use void_scenery::clouds::*;
     use void_scenery::tables::*;
+    validate_legacy_scenery(lab.session.sim());
     let planet = &lab.session.sim().planet;
     // The sky starts where physics' air does (the sea on layered terrain).
     let datum = lab
@@ -2021,38 +2039,25 @@ fn build_scenery(
         .body(lab.session.sim().home)
         .expect("scenery: the home body has no environment")
         .air_datum_meters;
-    let params = void_scenery::earth_like_atmosphere(planet.terrain.radius_meters + datum);
+    let description = &lab.session.sim().world.bodies[&planet.body_id];
+    let visual = &description.visual;
+    let mut params = void_scenery::earth_like_atmosphere(planet.terrain.radius_meters + datum);
+    let density = description.air_density_scale.unwrap_or(0.0);
+    params.rayleigh_scattering = params.rayleigh_scattering.map(|x| x * density);
+    params.ozone_absorption = params.ozone_absorption.map(|x| x * density);
+    params.mie_scattering *= density;
+    params.mie_extinction *= density;
     let transmittance = build_transmittance_table(&params);
     let multiple = build_multiple_scattering_table(&params, &transmittance, 64, 20);
     let irradiance = build_irradiance_table(&params, &transmittance, &multiple, 128, 24);
-    let layered = matches!(
-        planet.terrain_config,
-        void_terrain::TerrainConfig::Layered(_)
-    );
-    let air = planet.air_density_scale.is_some();
-    let max = planet.terrain.max_height_meters;
     let mut uniforms = GroundUniforms::new(
         &params,
-        if layered {
-            void_terrain::SEA_LEVEL
-        } else if air {
-            1800.0
-        } else {
-            0.0
-        },
-        if layered {
-            void_terrain::SEA_LEVEL + 2600.0
-        } else {
-            max * 0.5625
-        },
-        if layered {
-            void_terrain::SEA_LEVEL + 4800.0
-        } else {
-            max * 0.75
-        },
+        visual.color_datum_meters,
+        visual.rock_height_meters,
+        visual.snow_height_meters,
     );
-    uniforms.ocean_enabled = f32::from(u8::from(layered));
-    uniforms.atmosphere_enabled = f32::from(u8::from(air));
+    uniforms.ocean_enabled = f32::from(u8::from(visual.ocean));
+    uniforms.atmosphere_enabled = f32::from(u8::from(visual.atmosphere));
     let transmittance = images.add(table_image(
         &transmittance,
         TRANSMITTANCE_WIDTH,
@@ -2111,8 +2116,8 @@ fn build_scenery(
     ));
     let mut settings = crate::air::AirSettings::new(&params);
     settings.exposure = EXPOSURE;
-    settings.enabled = f32::from(u8::from(air));
-    settings.clouds_enabled = f32::from(u8::from(air));
+    settings.enabled = f32::from(u8::from(visual.atmosphere));
+    settings.clouds_enabled = f32::from(u8::from(visual.clouds));
     settings.sea_level = (f64::from(uniforms.sea_level) - datum) as f32;
     settings.sun_disc_enabled = f32::from(u8::from(
         lab.session.sim().fleet.ephemeris.bodies()[lab.session.sim().home]
