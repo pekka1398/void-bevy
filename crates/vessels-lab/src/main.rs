@@ -255,9 +255,7 @@ impl Lab {
                             if na.size != nb.size {
                                 continue;
                             }
-                            let d = (f.node_frame(&na.part, &na.node).0
-                                - f.node_frame(&nb.part, &nb.node).0)
-                                .length();
+                            let d = f.node_gap(&na.part, &na.node, &nb.part, &nb.node);
                             if d <= gap {
                                 gap = d;
                                 candidate = Some((na.clone(), nb));
@@ -951,9 +949,10 @@ mod tests {
         lab.act(Action::Join);
         assert_eq!(lab.scene.fleet.vessel_ids().len(), 2);
         assert!(!lab.notice.is_empty());
-        while (lab.scene.fleet.node_frame("v1/p2", "bottom").0
-            - lab.scene.fleet.node_frame("v2/p2", "bottom").0)
-            .length()
+        while lab
+            .scene
+            .fleet
+            .node_gap("v1/p2", "bottom", "v2/p2", "bottom")
             > 0.08
             && lab.scene.fleet.time() < 60.0
         {

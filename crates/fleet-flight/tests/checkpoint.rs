@@ -156,3 +156,53 @@ fn pre_frame_tree_checkpoint_is_rejected_before_restoring_owners() {
     let old: FlightCheckpoint = serde_json::from_value(value).unwrap();
     old.restore();
 }
+
+#[test]
+#[should_panic(expected = "world checkpoint: incompatible model")]
+fn pre_part_graph_model_is_rejected_before_restoring_owners() {
+    let original = make(false);
+    let saved = FlightCheckpoint::capture(original.sim(), original.recording_initial().clone());
+    let mut value = serde_json::to_value(saved).unwrap();
+    value["model_version"] = serde_json::json!(7);
+    let saved: FlightCheckpoint = serde_json::from_value(value).unwrap();
+    saved.restore();
+}
+
+#[test]
+fn buffered_checkpoint_writes_complete_files_and_can_overwrite_and_resume() {
+    let path = std::env::temp_dir().join(format!(
+        "void-buffered-checkpoint-{}.json",
+        std::process::id()
+    ));
+    let mut original = make(false);
+    for advance in [0.0, 0.137] {
+        if advance > 0.0 {
+            original.execute(Action::Stage);
+            original.execute(Action::Advance {
+                seconds: advance,
+                rails: false,
+            });
+        }
+        let saved = FlightCheckpoint::capture(original.sim(), original.recording_initial().clone());
+        saved.write(&path);
+        let bytes = std::fs::read(&path).unwrap();
+        // Exceed the write buffer so both automatic buffer drains and the final flush are exercised.
+        assert!(bytes.len() > 64 * 1024);
+        assert_eq!(bytes.last(), Some(&b'\n'));
+        let read = FlightCheckpoint::read(&path);
+        assert_eq!(
+            serde_json::to_value(&read).unwrap(),
+            serde_json::to_value(&saved).unwrap()
+        );
+        let mut restored = FlightSession::from_checkpoint(read);
+        assert_eq!(world_mark(restored.sim()), world_mark(original.sim()));
+        let action = Action::Advance {
+            seconds: 0.031,
+            rails: false,
+        };
+        original.execute(action.clone());
+        restored.execute(action);
+        assert_eq!(world_mark(restored.sim()), world_mark(original.sim()));
+    }
+    std::fs::remove_file(path).unwrap();
+}

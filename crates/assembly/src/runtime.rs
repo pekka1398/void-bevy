@@ -359,6 +359,7 @@ impl AssemblyFlight {
                         thrust_newtons,
                         isp_seconds,
                         direction,
+                        ..
                     } = m
                     {
                         Some((*thrust_newtons, *isp_seconds, *direction))

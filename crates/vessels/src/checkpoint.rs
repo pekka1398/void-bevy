@@ -1,6 +1,7 @@
 //! Direct Fleet checkpoints: logical IDs/graph plus versioned owner caches. No input replay.
 use super::*;
 use crate::free_fall::FreeFallCheckpoint;
+use void_assembly::Part;
 use void_landing::ContactWorldCheckpoint;
 use void_terrain::TerrainConfig;
 
@@ -34,6 +35,9 @@ struct SavedPart {
     definition_id: String,
     fuel_kg: f64,
     stage: Option<u32>,
+    staged: bool,
+    lit: bool,
+    pose: PartPose,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -50,8 +54,6 @@ pub struct FleetCheckpoint {
     vessels: Vec<Vessel>,
     order: Vec<String>,
     controls: BTreeMap<String, VesselControl>,
-    lit: Vec<String>,
-    staged: Vec<String>,
     sas: BTreeMap<String, Sas>,
     guidance: BTreeMap<String, GuidedBurn>,
     scenes: Vec<SavedScene>,
@@ -59,23 +61,22 @@ pub struct FleetCheckpoint {
 }
 impl Fleet {
     pub fn checkpoint(&self) -> FleetCheckpoint {
-        let mut parts: Vec<_> = self
+        // By ID.
+        let parts = self
             .parts
-            .values()
+            .parts()
             .map(|part| SavedPart {
                 id: part.id.clone(),
                 definition_id: part.definition.id.clone(),
                 fuel_kg: part.fuel_kg,
                 stage: part.stage,
+                staged: part.staged,
+                lit: part.lit,
+                pose: part.pose,
             })
             .collect();
-        parts.sort_by(|a, b| a.id.cmp(&b.id));
-        let mut lit: Vec<_> = self.lit.iter().cloned().collect();
-        lit.sort();
-        let mut staged: Vec<_> = self.staged.iter().cloned().collect();
-        staged.sort();
         FleetCheckpoint {
-            version: 2,
+            version: 3,
             options: self.options,
             time: self.time,
             pending: self.pending,
@@ -93,7 +94,7 @@ impl Fleet {
                 })
                 .collect(),
             parts,
-            connections: self.connections.clone(),
+            connections: self.parts.connections().to_vec(),
             vessels: self.vessels.values().cloned().collect(),
             order: self.order.clone(),
             controls: self
@@ -101,8 +102,6 @@ impl Fleet {
                 .iter()
                 .map(|(id, c)| (id.clone(), *c))
                 .collect(),
-            lit,
-            staged,
             sas: self
                 .sas
                 .iter()
@@ -137,7 +136,7 @@ impl Fleet {
         saved: FleetCheckpoint,
         forces: Option<Arc<dyn PartForces>>,
     ) -> Self {
-        assert_eq!(saved.version, 2, "fleet checkpoint: unsupported version");
+        assert_eq!(saved.version, 3, "fleet checkpoint: unsupported version");
         assert!(
             saved.time.is_finite()
                 && saved.pending.is_finite()
@@ -171,34 +170,19 @@ impl Fleet {
         for part in saved.parts {
             let definition = void_assembly::definition(&part.definition_id)
                 .expect("fleet checkpoint: unknown part");
-            assert!(
-                part.fuel_kg.is_finite()
-                    && part.fuel_kg >= 0.0
-                    && part.fuel_kg <= void_assembly::tank_capacity(definition),
-                "fleet checkpoint: invalid fuel"
-            );
-            let id = part.id.clone();
-            assert!(
-                fleet
-                    .parts
-                    .insert(
-                        id,
-                        PropulsionPart {
-                            id: part.id,
-                            definition,
-                            fuel_kg: part.fuel_kg,
-                            stage: part.stage
-                        }
-                    )
-                    .is_none(),
-                "fleet checkpoint: duplicate part"
-            );
+            fleet.parts.insert(Part {
+                id: part.id,
+                definition,
+                fuel_kg: part.fuel_kg,
+                stage: part.stage,
+                staged: part.staged,
+                lit: part.lit,
+                pose: part.pose,
+            });
         }
-        fleet.connections = saved.connections;
+        fleet.parts.restore_connections(saved.connections);
         fleet.order = saved.order;
         fleet.controls = saved.controls.into_iter().collect();
-        fleet.lit = saved.lit.into_iter().collect();
-        fleet.staged = saved.staged.into_iter().collect();
         fleet.sas = saved.sas.into_iter().collect();
         fleet.guidance = saved.guidance;
         fleet.pending = saved.pending;
@@ -258,19 +242,20 @@ impl Fleet {
         let mut used = HashSet::new();
         for (id, vessel) in &self.vessels {
             assert!(
-                !vessel.poses.is_empty() && vessel.poses.iter().any(|(id, _)| id == &vessel.root),
+                vessel.members.contains(&vessel.root),
                 "fleet checkpoint: missing vessel root"
             );
-            for (part, pose) in &vessel.poses {
+            for part in &vessel.members {
                 assert!(
-                    self.parts.contains_key(part)
-                        && used.insert(part)
-                        && pose.position.is_finite()
-                        && pose.rotation.is_finite()
-                        && (pose.rotation.length() - 1.0).abs() < 1e-6,
-                    "fleet checkpoint: invalid part ownership/pose"
+                    self.parts.contains(part) && used.insert(part),
+                    "fleet checkpoint: invalid part ownership"
                 );
             }
+            assert_eq!(
+                self.parts.components(&vessel.members).len(),
+                1,
+                "fleet checkpoint: vessel {id} is not one connected component"
+            );
             let control = self
                 .controls
                 .get(id)
@@ -315,7 +300,7 @@ impl Fleet {
         }
         assert_eq!(
             used.len(),
-            self.parts.len(),
+            self.parts.parts().count(),
             "fleet checkpoint: orphan parts"
         );
         assert_eq!(
@@ -323,12 +308,6 @@ impl Fleet {
             self.vessels.len(),
             "fleet checkpoint: orphan controls"
         );
-        for part in self.lit.iter().chain(&self.staged) {
-            assert!(
-                self.parts.contains_key(part),
-                "fleet checkpoint: unknown staged/lit part"
-            );
-        }
         for (id, g) in &self.guidance {
             let vessel = self.vessel(id);
             assert!(
@@ -359,23 +338,11 @@ impl Fleet {
                 "fleet checkpoint: orphan SAS"
             );
         }
-        for connection in &self.connections {
-            let a = self
-                .parts
-                .get(&connection.a)
-                .expect("fleet checkpoint: missing connection part");
-            let b = self
-                .parts
-                .get(&connection.b)
-                .expect("fleet checkpoint: missing connection part");
-            node(a.definition, &connection.node_a)
-                .expect("fleet checkpoint: missing connection node");
-            node(b.definition, &connection.node_b)
-                .expect("fleet checkpoint: missing connection node");
+        // Restoring the connections checked their parts and nodes.
+        for connection in self.parts.connections() {
             assert!(
                 self.vessels.values().any(|v| {
-                    v.poses.iter().any(|(id, _)| id == &connection.a)
-                        && v.poses.iter().any(|(id, _)| id == &connection.b)
+                    v.members.contains(&connection.a) && v.members.contains(&connection.b)
                 }),
                 "fleet checkpoint: connection crosses owners"
             );

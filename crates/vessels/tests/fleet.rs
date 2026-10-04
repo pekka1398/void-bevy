@@ -139,11 +139,7 @@ fn spinning_separation_keeps_parts_poses_fuel_and_momentum() {
 #[test]
 fn collision_and_join_preserve_part_graph_and_both_momenta() {
     let mut s = create_lab_scene(Scenario::Join);
-    while (s.fleet.node_frame("v1/p2", "bottom").0 - s.fleet.node_frame("v2/p2", "bottom").0)
-        .length()
-        > 0.08
-        && s.fleet.time() < 60.0
-    {
+    while s.fleet.node_gap("v1/p2", "bottom", "v2/p2", "bottom") > 0.08 && s.fleet.time() < 60.0 {
         s.fleet.advance(1.0 / 60.0);
     }
     let f = &mut s.fleet;
@@ -154,15 +150,8 @@ fn collision_and_join_preserve_part_graph_and_both_momenta() {
         .iter()
         .flat_map(|id| f.part_snapshots(id))
         .collect();
-    let nodes = (
-        f.node_frame("v1/p2", "bottom").0,
-        f.node_frame("v2/p2", "bottom").0,
-    );
-    assert!(
-        (nodes.0 - nodes.1).length() < 0.25,
-        "join gap {}",
-        (nodes.0 - nodes.1).length()
-    );
+    let gap = f.node_gap("v1/p2", "bottom", "v2/p2", "bottom");
+    assert!(gap < 0.25, "join gap {gap}");
     f.join("v1/p2", "bottom", "v2/p2", "bottom");
     assert_eq!(f.vessel_ids(), ["v1"]);
     assert_eq!(f.snapshot("v1").mass_kg, 2240.0);
@@ -366,10 +355,7 @@ fn native_fleet_matches_owning_ts_lab_scenarios() {
             scene.fleet.decouple("v1/p4");
         }
         if scenario == Scenario::Join {
-            while (scene.fleet.node_frame("v1/p2", "bottom").0
-                - scene.fleet.node_frame("v2/p2", "bottom").0)
-                .length()
-                > 0.08
+            while scene.fleet.node_gap("v1/p2", "bottom", "v2/p2", "bottom") > 0.08
                 && scene.fleet.time() < 60.0
             {
                 scene.fleet.advance(1.0 / 60.0);
@@ -626,9 +612,7 @@ fn vessel_frames_follow_their_physics_owner() {
     assert_eq!(f.frame_tree().parent(bubble), Some(f.origin_frame()));
     let v2 = f.vessel_frame("v2");
     assert_eq!(f.frame_tree().parent(v2), Some(bubble));
-    while (f.node_frame("v1/p2", "bottom").0 - f.node_frame("v2/p2", "bottom").0).length() > 0.08
-        && f.time() < 60.0
-    {
+    while f.node_gap("v1/p2", "bottom", "v2/p2", "bottom") > 0.08 && f.time() < 60.0 {
         f.advance(1.0 / 60.0);
     }
     f.join("v1/p2", "bottom", "v2/p2", "bottom");
@@ -727,4 +711,226 @@ fn fleet_and_restore_reject_another_worlds_environment() {
         Fleet::from_checkpoint(fresh(), environment, empty.checkpoint(), None);
     }));
     assert!(rejected.is_err());
+}
+
+/// The part graph is the fleet's record of its parts: separation takes a connection out of it,
+/// each vessel is one of its connected groups, and a checkpoint restores every part's state and
+/// pose and the connections in their order.
+#[test]
+fn the_part_graph_is_the_record_and_a_checkpoint_restores_it() {
+    let mut s = create_lab_scene(Scenario::Separate);
+    let f = &mut s.fleet;
+    let connections = f.parts().connections().len();
+    // The demo's first stage lights its lower engine; the second releases the decoupler and
+    // lights the upper engine.
+    assert!(f.stage("v1").is_empty());
+    assert!(f.parts().part("v1/p6").lit);
+    f.set_control(
+        "v1",
+        VesselControl {
+            throttle: 1.0,
+            ..f.control("v1")
+        },
+    );
+    f.advance(0.5);
+    assert_eq!(f.stage("v1"), ["v2"]);
+    let decoupler = f.parts().part("v1/p4");
+    assert!(decoupler.staged && !decoupler.lit);
+    assert!(f.parts().part("v1/p3").lit);
+    assert_eq!(f.parts().connections().len(), connections - 1);
+    let members = |f: &Fleet, id: &str| -> Vec<String> {
+        f.part_snapshots(id).into_iter().map(|p| p.id).collect()
+    };
+    let all: Vec<String> = f
+        .vessel_ids()
+        .iter()
+        .flat_map(|id| members(f, id))
+        .collect();
+    let groups = f.parts().components(&all);
+    assert_eq!(groups.len(), 2);
+    for id in f.vessel_ids() {
+        let mut own = members(f, &id);
+        own.sort();
+        assert!(
+            groups.iter().any(|g| {
+                let mut g = g.clone();
+                g.sort();
+                g == own
+            }),
+            "{id} is not one connected group"
+        );
+    }
+    f.advance(0.5);
+    let (ephemeris, _) = void_landing::planet_ephemeris(&s.planet);
+    let restored = Fleet::from_checkpoint(
+        ephemeris,
+        s.fleet.environment().clone(),
+        s.fleet.checkpoint(),
+        None,
+    );
+    let (a, b): (Vec<_>, Vec<_>) = (
+        s.fleet.parts().parts().collect(),
+        restored.parts().parts().collect(),
+    );
+    assert_eq!(a.len(), b.len());
+    for (a, b) in a.iter().zip(&b) {
+        assert_eq!(a.id, b.id);
+        assert_eq!(a.definition.id, b.definition.id);
+        assert_eq!(a.fuel_kg.to_bits(), b.fuel_kg.to_bits(), "{}", a.id);
+        assert_eq!(
+            (a.stage, a.staged, a.lit, a.pose),
+            (b.stage, b.staged, b.lit, b.pose),
+            "{}",
+            a.id
+        );
+    }
+    assert_eq!(
+        s.fleet.parts().connections(),
+        restored.parts().connections()
+    );
+}
+
+/// Every part is a frame under its vessel's parts frame, at its pose; separation and docking move
+/// the parts' frames to their new vessel, and a restored fleet has them again.
+#[test]
+fn parts_are_frames_under_their_vessel() {
+    let check = |f: &Fleet| {
+        let frames = f.frames();
+        for id in f.vessel_ids() {
+            let vessel = f.vessel_frame(&id);
+            for p in f.part_snapshots(&id) {
+                let frame = f.part_frame(&p.id);
+                assert_eq!(f.frame_tree().parent(frame), Some(vessel), "{}", p.id);
+                let local = frames.transform(frame, vessel);
+                assert_eq!(local.apply_point(DVec3::ZERO), p.local_position, "{}", p.id);
+                assert!(
+                    local.rotation().dot(p.local_rotation).abs() > 1.0 - 1e-15,
+                    "{}",
+                    p.id
+                );
+                for n in &p.definition.nodes {
+                    let (at, out) = f.node_in(&p.id, &n.id, frame);
+                    assert!((at - n.position).length() < 1e-15, "{} {}", p.id, n.id);
+                    assert!((out - n.direction).length() < 1e-15, "{} {}", p.id, n.id);
+                }
+            }
+        }
+    };
+    let mut s = create_lab_scene(Scenario::Join);
+    check(&s.fleet);
+    while s.fleet.node_gap("v1/p2", "bottom", "v2/p2", "bottom") > 0.08 && s.fleet.time() < 60.0 {
+        s.fleet.advance(1.0 / 60.0);
+    }
+    let f = &mut s.fleet;
+    check(f);
+    // The gap through the two parts' common ancestor agrees with the inertial one to the
+    // inertial coordinates' rounding.
+    let inertial = (f.node_frame("v1/p2", "bottom").0 - f.node_frame("v2/p2", "bottom").0).length();
+    let gap = f.node_gap("v1/p2", "bottom", "v2/p2", "bottom");
+    assert!((gap - inertial).abs() < 1e-3, "{gap} {inertial}");
+    f.join("v1/p2", "bottom", "v2/p2", "bottom");
+    check(f);
+    assert_eq!(f.part_snapshots("v1").len(), 4);
+
+    let mut s = create_lab_scene(Scenario::Separate);
+    s.fleet.decouple("v1/p4");
+    check(&s.fleet);
+    assert_eq!(
+        s.fleet.frame_tree().parent(s.fleet.part_frame("v1/p5")),
+        Some(s.fleet.vessel_frame("v2"))
+    );
+    let (ephemeris, _) = void_landing::planet_ephemeris(&s.planet);
+    let restored = Fleet::from_checkpoint(
+        ephemeris,
+        s.fleet.environment().clone(),
+        s.fleet.checkpoint(),
+        None,
+    );
+    check(&restored);
+}
+
+#[test]
+fn checkpoint_rejects_disconnected_members() {
+    let s = create_lab_scene(Scenario::Launch);
+    let original = serde_json::to_value(s.fleet.checkpoint()).unwrap();
+    // Removing just one joint is already invalid; removing all must also be rejected.
+    for remove_all in [false, true] {
+        let mut value = original.clone();
+        let connections = value["connections"].as_array_mut().unwrap();
+        if remove_all {
+            connections.clear();
+        } else {
+            connections.remove(0);
+        }
+        let saved = serde_json::from_value(value).unwrap();
+        let e = void_landing::planet_ephemeris(&s.planet).0;
+        let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Fleet::from_checkpoint(e, s.fleet.environment().clone(), saved, None);
+        }));
+        let panic = rejected.expect_err("disconnected members must not restore as one vessel");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap();
+        assert!(message.contains("not one connected component"), "{message}");
+    }
+    let e = void_landing::planet_ephemeris(&s.planet).0;
+    Fleet::from_checkpoint(e, s.fleet.environment().clone(), s.fleet.checkpoint(), None);
+}
+
+#[test]
+fn repeated_split_join_and_restore_preserve_graph_and_frames() {
+    let mut scene = create_lab_scene(Scenario::Separate);
+    let decoupler = "v1/p4";
+    let node = scene.fleet.parts().part(decoupler).decoupler().unwrap().0;
+    let cut = scene
+        .fleet
+        .parts()
+        .connection_at(decoupler, node)
+        .unwrap()
+        .clone();
+    for i in 0..30 {
+        scene.fleet.decouple(decoupler);
+        for id in scene.fleet.vessel_ids() {
+            let parts = scene.fleet.snapshot(&id).part_ids;
+            assert_eq!(scene.fleet.parts().components(&parts).len(), 1);
+            for part in parts {
+                assert_eq!(
+                    scene
+                        .fleet
+                        .frame_tree()
+                        .parent(scene.fleet.part_frame(&part)),
+                    Some(scene.fleet.vessel_frame(&id))
+                );
+            }
+        }
+        let original_side = scene.fleet.vessel_of_part("v1/p1");
+        if scene.fleet.vessel_of_part(&cut.a) == original_side {
+            scene.fleet.join(&cut.a, &cut.node_a, &cut.b, &cut.node_b);
+        } else {
+            scene.fleet.join(&cut.b, &cut.node_b, &cut.a, &cut.node_a);
+        }
+        assert_eq!(scene.fleet.vessel_ids().len(), 1);
+        for part in scene.fleet.snapshot(&original_side).part_ids {
+            assert_eq!(
+                scene
+                    .fleet
+                    .frame_tree()
+                    .parent(scene.fleet.part_frame(&part)),
+                Some(scene.fleet.vessel_frame(&original_side))
+            );
+        }
+        if i % 5 == 0 {
+            let saved = scene.fleet.checkpoint();
+            let before = serde_json::to_value(&saved).unwrap();
+            let eph = void_landing::planet_ephemeris(&scene.planet).0;
+            scene.fleet =
+                Fleet::from_checkpoint(eph, scene.fleet.environment().clone(), saved, None);
+            assert_eq!(
+                serde_json::to_value(scene.fleet.checkpoint()).unwrap(),
+                before
+            );
+        }
+    }
 }

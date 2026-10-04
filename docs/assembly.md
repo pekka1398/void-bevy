@@ -51,12 +51,15 @@ Launch 使用當下的自訂組裝建立 Rapier compound bodies，不是另一�
 | `model.ts` | `model.rs`：零件／模組／資源、接合樹、編譯姿態、空接點、子樹、連通群、crossfeed、分離接點、摘要、JSON |
 | `runtime.ts` | `runtime.rs`：Rapier 本地世界、各群剛體與各零件 collider、燃料／慣量更新、Isp、分離與分級 |
 | `main.ts` | 獨立 `void-assembly-lab` 的 Bevy 操作與繪圖 |
+| （無） | `graph.rs`：飛行中的零件圖 `PartGraph`，每個零件帶自己的燃料、分級、點火與 pose；分離、對接是它的 `disconnect`／`connect`。Fleet 用它，assembly lab 的 `AssemblyFlight` 不用（[part-graph.md](part-graph.md)） |
 
 `crossfeed_tanks(&[CrossfeedPart { id, definition }], &connections, engine_id)` 是獨立供油查詢 API，不需要 `Craft` 或 `CompiledCraft`，可處理任意連接圖（包含環路）。只穿過兩端都允許 crossfeed 的連接，回傳燃料箱 ID，順序沿用輸入零件順序；外部零件的連接會略過，呼叫端在分離後傳入仍有效的連接。重複 ID 或無效引擎會 panic。`CompiledCraft::fuel_sources()` 過濾已切斷連接後共用此 API。獨立圖測試涵蓋環路、阻斷、外部端點、分離與無效輸入。
 
 原本的六種零件（pod、tank-small／large、engine-small／large、decoupler）的 authored data 直接從 TS catalog 匯出到 `data/catalog.json`。對照資料由 `golden/assembly.ts` 產生，沒有在 Rust 手抄一份不同的火箭參數。
 
 主遊戲整合時在同一 catalog 新增 11 個 `flight-*` 零件（指令艙、上級箱／引擎、分離器、助推箱／引擎、斜撐、四個腳墊），組成主遊戲預設船 `data/flight-rocket.json`（7620 kg、理想 Δv 9.6 km/s，共 14 個零件）。原六種零件的數值與 golden fixture 不變；catalog 改變後，舊 catalog 的存檔／錄影會被明確拒絕。詳見 [fleet-flight.md](fleet-flight.md)。
+
+引擎模組的 `nozzleExitAreaM2`（噴嘴出口面積，主遊戲的背壓用）每個引擎都必須寫：engine-large、flight-booster-engine 0.12 m²，engine-small、flight-upper-engine 0.15 m²。TS catalog 沒有這個欄位，是零件圖 branch 從 fleet-flight 的對照表搬來的；assembly lab 的試飛不讀它。
 
 ```sh
 # repo 根目錄

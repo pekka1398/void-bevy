@@ -6,7 +6,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
-    io::Write,
+    io::{BufWriter, Write},
     path::Path,
     sync::Arc,
 };
@@ -119,15 +119,20 @@ impl FlightCheckpoint {
                 .to_string_lossy(),
             std::process::id()
         ));
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&tmp)
             .expect("world checkpoint: create temp file");
+        // JSON's token-sized writes must not become millions of filesystem writes on the UI thread.
+        let mut file = BufWriter::with_capacity(64 * 1024, file);
         serde_json::to_writer(&mut file, self).expect("world checkpoint: encode file");
         file.write_all(b"\n")
             .expect("world checkpoint: finish file");
-        file.sync_all().expect("world checkpoint: sync file");
+        file.flush().expect("world checkpoint: flush file");
+        file.get_ref()
+            .sync_all()
+            .expect("world checkpoint: sync file");
         drop(file);
         fs::rename(tmp, path).expect("world checkpoint: replace file");
         fs::File::open(parent)

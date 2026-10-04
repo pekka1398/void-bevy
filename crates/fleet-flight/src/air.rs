@@ -9,24 +9,14 @@ use void_frames::State;
 use void_orbit::{AirSource, EphemerisSource};
 use void_vessels::{ForcePart, ForceSample, PartForces, VesselSnapshot};
 
+/// Engines lose `nozzleExitAreaM2` × ambient pressure of their catalog thrust.
 pub struct FleetAir {
     /// The body whose air the craft flies through.
     pub body_index: usize,
-    /// Authored nozzle areas by engine definition ID. Every engine must have an explicit rating.
-    pub nozzle_areas: HashMap<String, f64>,
 }
 impl FleetAir {
     pub fn new(body_index: usize) -> Self {
-        Self {
-            body_index,
-            nozzle_areas: [
-                ("engine-large".into(), 0.12),
-                ("engine-small".into(), 0.15),
-                ("flight-booster-engine".into(), 0.12),
-                ("flight-upper-engine".into(), 0.15),
-            ]
-            .into(),
-        }
+        Self { body_index }
     }
 }
 /// The air seen at a state of the ephemeris's physics view, through the environment's own frames.
@@ -99,11 +89,12 @@ impl PartForces for FleetAir {
         for part in parts {
             let d = part.definition;
             for module in &d.modules {
-                if let Module::Engine { thrust_newtons, .. } = module {
-                    let area = *self
-                        .nozzle_areas
-                        .get(&d.id)
-                        .expect("fleet air: engine has no nozzle rating");
+                if let Module::Engine {
+                    thrust_newtons,
+                    nozzle_exit_area_m2: area,
+                    ..
+                } = *module
+                {
                     assert!(
                         area.is_finite() && area >= 0.0,
                         "fleet air: invalid nozzle area"

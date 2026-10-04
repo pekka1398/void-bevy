@@ -78,9 +78,7 @@ impl Encounter {
     pub fn join(&mut self) -> String {
         let a = format!("{}/p2", self.first);
         let b = format!("{}/p2", self.second);
-        let distance = (self.fleet.node_frame(&a, "bottom").0
-            - self.fleet.node_frame(&b, "bottom").0)
-            .length();
+        let distance = self.fleet.node_gap(&a, "bottom", &b, "bottom");
         assert!(
             distance <= 0.25,
             "encounter: node distance {distance} m exceeds 0.25 m"
