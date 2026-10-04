@@ -101,6 +101,10 @@ pub fn propulsion(graph: &PartGraph, members: &[String], throttle: f64, centre: 
 | --- | --- | --- |
 | 1. `void-modules` | 新 crate `crates/modules`：`Conditions`（有大氣的天體依序，第一個大氣裡包含該狀態的；沒有時是真空）、`engine::thrust`、`body::element`、`VesselAir`／`vessel_air`／`has_atmosphere`。檢查：真空推力就是額定、半油門推力與流量減半；海平面時 booster 保有 89.9%、上級的真空噴嘴只剩 24%，流量都維持真空額定；十大氣壓時推力停在零。零件單獨時兩端全開；在船裡，頂、底只露出比鄰居大的部分；鄰居不在成員裡（分離出去的）就不遮。Aurelia 海平面上 1 km、上升 300 m/s 時，阻力對氣流做負功；200 km 以上沒有空氣也沒有阻力；沒有大氣的世界 `vessel_air` 是 None。workspace 測試 319 passed、0 failed、4 ignored，clippy 無警告 | 阻力不是正好逆著氣流：機體有攻角，側面和端面的係數不同。檢查改成「做負功」 |
 
+## 順帶修正
+
+- **上升中存的檔讀不回來（master 也有）。** 有空氣、開著 SAS 燃燒時，軌道積分以 `t + 1/60 s` 一小段往前加，和 Fleet 的時鐘捨入不同；`advance_orbit` 在目標前 1e-12 s 內就停，所以每次 advance 停在目標前幾個 1e-14 s，越積越多。存檔還原要求軌道積分的時間和 Fleet 完全相同，主遊戲火箭上升 50 s 時存的檔還原就 panic（`fleet checkpoint: invalid orbital owner`）。修正：離目標不到 1e-12 s 的一段直接停在目標上。影響與量測見 [fleet-flight.md](fleet-flight.md)（`MODEL_VERSION` 8）。這是模擬改變，和本 branch 逐位元相同的模組化分開提交；模組化的前後對照以修正後為準。
+
 ## 之後（不在本 branch，另行決定）
 
 1. **第一個新模組。** 建議降落傘（願望清單第 6 項）：它是流體類模組，有自己的狀態（收起／展開），正好驗證這套介面；照流程先在 lab 做、視窗驗收。RCS 由對接那條線在做，本 branch 不碰。

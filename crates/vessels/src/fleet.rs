@@ -1858,6 +1858,12 @@ impl Fleet {
             if burning {
                 leg = leg.min(t + p.seconds_to_flameout);
             }
+            // Legs summed from `t` (steps while burning and turning) round differently from the
+            // fleet's clock. A leg that would stop within the loop's tolerance of `end` ends on it,
+            // so the run keeps the fleet's time and a checkpoint taken now restores.
+            if leg + 1e-12 >= end {
+                leg = end;
+            }
             let control = if burning
                 && let Some(g) = &guide
                 && p.force.length() > 0.0
