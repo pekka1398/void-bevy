@@ -92,3 +92,5 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 多天體後續追加：多顆分離大氣 HDR 合成、自訂散射／雲配置與 solar scenery 交接規格已實作；world schema 2 / 整合 model 13。已合併 master，實際九天體外觀未做，見 [specs/solar-scenery.md](specs/solar-scenery.md)。
 
 合併核對（2026-10-05）：受影響核心／場景 **245 passed、0 failed**；主遊戲原有 offscreen GPU 重建／存檔測試另跑 **1 passed**。唯一仍跳過的行為測試是已結案的 Pebble 傾角；沒有重跑全 workspace。所屬 crates all-targets Clippy `-D warnings`、fmt、主遊戲與兩 lab 編譯通過。新增第二天體降落傘 checkpoint／續跑／錄放，以及分支舊模型拒絕回歸。
+
+合併 commit 後再次以 TigerVNC 核對：降落傘 deploy／全開／F6-F7 續跑，雙大氣切船／月球軌道／存讀；兩份實際操作錄影的 merged-model headless verify 與多天體 checkpoint verify 通過，未見 panic／shader validation 錯誤。
