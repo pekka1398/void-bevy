@@ -17,6 +17,7 @@ void-rotation.workspace = true
 void-sas.workspace = true
 void-terrain.workspace = true
 void-frames.workspace = true
+void-modules.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
