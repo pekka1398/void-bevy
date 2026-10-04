@@ -157,7 +157,12 @@ fn new_rocket(
         demo.options,
         demo.launch_site,
     );
-    rocket.set_air_field(RocketAir::for_planet(sim_planet, demo));
+    rocket.set_air_field(RocketAir::for_planet(
+        sim_planet,
+        &*ephemeris,
+        body_index,
+        demo,
+    ));
     rocket
 }
 

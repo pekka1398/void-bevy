@@ -246,3 +246,48 @@ fn plain_camera_can_focus_every_body_and_return_to_the_ship() {
         );
     }
 }
+
+#[test]
+fn camera_tracks_the_upper_command_part_before_and_after_staging() {
+    for main_camera in [true, false] {
+        let planet = void_landing::earth_size();
+        let craft = void_assembly::flight_rocket();
+        let mut s = FlightSession::new(InitialWorld::new(
+            &planet,
+            &craft,
+            flat_site(&planet),
+            false,
+        ));
+        s.execute(Action::View {
+            command: ViewCommand::Configure { main_camera },
+        });
+        let root = s
+            .sim()
+            .fleet
+            .part_snapshots(&s.sim().selected)
+            .into_iter()
+            .find(|p| p.definition.id == "flight-pod")
+            .unwrap();
+        let before = s.sim().presentation.sample(s.sim());
+        assert!((before.focus - root.position).length() < 1e-8);
+        assert_eq!(before.focus_local, root.local_position);
+        // Ignite, then separate without advancing physics: neither the part nor camera may jump.
+        s.execute(Action::Stage);
+        s.execute(Action::Stage);
+        let after = s.sim().presentation.sample(s.sim());
+        let root_after = s
+            .sim()
+            .fleet
+            .part_snapshots(&s.sim().selected)
+            .into_iter()
+            .find(|p| p.id == root.id)
+            .unwrap();
+        assert!((after.focus - root_after.position).length() < 1e-8);
+        assert!((after.focus - before.focus).length() < 1e-5);
+        assert!((after.eye - before.eye).length() < 1e-5);
+        let in_camera = after
+            .to_camera(&s.sim().fleet, root_after.frame, glam::DQuat::IDENTITY)
+            .apply_point(root_after.local_position);
+        assert!((in_camera + after.offset).length() < 1e-8);
+    }
+}

@@ -10,6 +10,7 @@ serde.workspace = true
 glam.workspace = true
 rapier3d.workspace = true
 void-assembly.workspace = true
+void-environment.workspace = true
 void-orbit.workspace = true
 void-landing.workspace = true
 void-rotation.workspace = true

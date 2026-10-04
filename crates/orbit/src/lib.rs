@@ -6,6 +6,7 @@ mod dopri5;
 mod ephemeris;
 mod flight_plan;
 mod frames;
+pub mod gravity;
 mod hermite;
 mod kepler;
 mod propagator;

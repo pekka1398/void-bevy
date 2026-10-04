@@ -86,6 +86,7 @@ pub struct AirSettings {
     pub detail_origin: Vec3,
     pub weather_only: f32,
     pub macro_origin: Vec3,
+    /// The clouds' base above `bottom_radius`: the sea, or hills' colour band, less the air datum.
     pub sea_level: f32,
     pub focal_pixels: f32,
     /// The lab's exposure multiplier (10^slider) and tone mapping (`ToneMapping as f32`).

@@ -12,7 +12,7 @@
 | 行星地形、ground／orbit／bubble | Fleet 已有 owner 交接與地形串流 | 使用主遊戲 GamePlanet 的行星／terrain 設定，獨立畫 LOD 地形與從 Fleet 讀回的碰撞線 |
 | SAS | Fleet 已有逐船控制器，能跨 owner 重設框架 | 直接使用既有 SAS；沒有新增順行、目標等模式 |
 | 時間加速 | Fleet 有 rails blocker、交會／高度帶攔截 | main／lab 共用主遊戲依高度細分的九級 warp gates、rails／交會攔截與 warp-to-maneuver；阻擋顯示原因，攔截回 1 倍 |
-| 空氣施力 | Fleet 原本完全沒有 AirSource／AirField 接線 | 新增可選 FleetEnvironment；新核心提供各零件阻力，Orbit 每個 Dopri stage 評估、接觸世界逐步評估，bubble 與 ground 都有施力；rails 也保留空氣 |
+| 空氣施力 | Fleet 原本完全沒有 AirSource／AirField 接線 | 新增可選 `PartForces`（原名 FleetEnvironment）；空氣取自世界的 `Environment`，新核心提供各零件阻力，Orbit 每個 Dopri stage 評估、接觸世界逐步評估，bubble 與 ground 都有施力；rails 也保留空氣 |
 | 噴嘴氣壓 | assembly catalog 的 Engine 只有真空 thrust／Isp，沒有出口面積 | FleetAir 用顯式 engine ID → nozzle area 表：engine-large／flight-booster-engine 0.12 m²、engine-small／flight-upper-engine 0.15 m²，沒有列在表中的引擎直接 panic；壓力降低引擎力、真空質量流率保持不變。未修改既有 catalog／golden；未評為正式零件資料模型定案 |
 | 滑行預測 | predict_coast 原本只接受具體 Ephemeris，但 Fleet 持有 EphemerisSource | 改為接受既有 trait，可共用預測；與主遊戲一樣畫真空滑行。lab 的 C 是當下 600 s 預測快照，非持續刷新 |
 | 有限燃燒機動 | FlightPlan 與 Fleet staged engine 已可共用 | 已接逐船計畫、編輯／apsis／參考天體、第一個機動的理想軌道導引、存檔／重播；第一 fuel-group flameout 為規劃上限。手動控制、分級、進入 contact physics 明確中止，切船不取消 |
@@ -40,7 +40,7 @@ cargo run -p void-fleet-flight-lab -- --planet aurelia --vacuum
 
 空氣與主遊戲維持 force-only 範圍：沒有氣動力矩、旋轉阻尼、熱、燒蝕或翼面。幾何用各零件尺寸、姿態與 live connections 更新；分離後原先被遮住的端面重新暴露，同半徑連接遮住端面，不同半徑保留肩部。不是完整氣動遮蔽演算法。
 
-FleetEnvironment 會在每段起點建立純 AirSource，固定當段幾何／姿態；天體中心在短段內按起點速度線性外推，段長以 flight_chunk_seconds 限制。接觸步則取當下船的質心狀態計算加速度，與既有半步 thrust push 一起保存／交接。供油只由 Fleet 原路徑消耗一次。無環境時保留原 lab 行為，既有 golden／行為門檻不調整。
+`PartForces` 會在每段起點建立純 AirSource，固定當段幾何／姿態；積分器每個 stage 把星曆交給 AirSource，空氣經 `Environment` 在天體的地表座標系取樣，不再把天體中心線性外推（見 [environment.md](environment.md)）。段長以 flight_chunk_seconds 限制。接觸步則取當下船的質心狀態計算加速度，與既有半步 thrust push 一起保存／交接。供油只由 Fleet 原路徑消耗一次。無環境時保留原 lab 行為，既有 golden／行為門檻不調整。
 
 ## 驗證與下一輪
 
@@ -67,7 +67,7 @@ F6／F7 與 `--load` 現在使用直接世界 checkpoint：完整行星設定、
 
 Mark 檢查所有船、零件位置／姿態／燃料／staged／lit／firing、控制、SAS phase／target、scene／frame origin／睡眠、連接圖、星曆狀態、Fleet 時鐘／pending 時間和選取船。版本、catalog、缺失／亂序 mark、命令結果或世界狀態不同均明確 panic。寫檔在同目錄 temporary file 完成 fsync 後 atomic rename，失敗不覆寫原存檔。
 
-`--load` 直接載入 checkpoint 並可續玩；`--verify-save <file>` 在建立 Bevy App 前驗證直接存檔；`--replay` 由初始世界逐格播放，用錄下的 Advance 時間而不是現在的 wall delta，逐一比對 mark，結束後暫停並可續玩。`--verify` 在建立 Bevy App 前完成重播／比對，不開 OS 視窗。目前 MODEL_VERSION 5 使用統一座標樹與精確取餘的自轉公式；model 4 的錄影與存檔在載入前明確拒絕。相機／觀察操作與暫停 frame boundary 自 model 4 起納入紀錄，重播使用錄下的視角。
+`--load` 直接載入 checkpoint 並可續玩；`--verify-save <file>` 在建立 Bevy App 前驗證直接存檔；`--replay` 由初始世界逐格播放，用錄下的 Advance 時間而不是現在的 wall delta，逐一比對 mark，結束後暫停並可續玩。`--verify` 在建立 Bevy App 前完成重播／比對，不開 OS 視窗。目前 MODEL_VERSION 7 使用統一座標樹與精確取餘的自轉公式，並經 `Environment` 取空氣（積分器內不再外推天體中心），有海的地形（layered）大氣從海平面起算（[environment.md](environment.md)）；舊模型版本的錄影與存檔在載入前明確拒絕。相機／觀察操作與暫停 frame boundary 自 model 4 起納入紀錄，重播使用錄下的視角。
 
 限制：native cache 是固定 Rapier／模型版本的存檔，不承諾跨版本相容；星曆重建仍與天體模擬時間相關。Journal verify 重跑操作，成本與操作數相關，直接 checkpoint 載入則無此船舶操作成本。模擬規則變更必須提高 MODEL_VERSION，舊紀錄會明確拒絕；目前沒有跨版本 save migration。
 
@@ -196,3 +196,5 @@ cargo test -p void-app --test render_benchmark --features render-metrics -- --ig
 新增檢查核對 legacy 火箭的各級質量、燃料、推力與 Isp、assembly 試飛／Fleet 分級、理想 Δv，以及新 engine 的大氣 nozzle 接線；紀錄檢查涵蓋關閉時數千幀零保留、F8 後續玩、跨 checkpoint、重播與第二段錄製。
 
 降落腳已補回原 booster 的四支半徑 0.1 m 斜撐與四個 0.42 × 0.1 × 0.42 m 方形腳墊，節點編譯位置／姿態對照原 `booster_pieces()`。它們是 assembly 零件，有實際 Rapier collider 與外觀，分級後留在助推級。80 kg 從助推箱乾重轉配到腳，助推級乾重仍為 500 kg，起飛仍為 7620 kg／9.6 km/s。
+
+相機的船舶焦點固定在 craft 的 root 零件（主遊戲火箭為上面級的指令艙），從發射前到分級後都追蹤同一零件，不跟著燃料變化的整船質心移動。模型版本 7 包含這項觀察行為變更，舊版本錄放與存檔明確拒絕。

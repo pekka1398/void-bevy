@@ -1,10 +1,10 @@
 # aero：空氣動力、加熱與再入
 
-`crates/aero`（`void-aero`）移植 `lab/aerodynamics` 的物理，不依賴 Bevy。TS 主遊戲沒有用到這個 lab。Rust 主遊戲則用了其中一部分：`void-fleet-flight` 的 `FleetAir` 以這裡的 `Atmosphere` 與 `aerodynamic_forces` 求各零件阻力並計算噴嘴氣壓，`legacy_flight` example 的 `aero_field.rs` 也用它。主遊戲只施加力（force-only），氣動力矩、熱、燒蝕與翼面仍只在 `void-aero-lab`。見 [fleet-flight.md](fleet-flight.md)。
+`crates/aero`（`void-aero`）移植 `lab/aerodynamics` 的物理，不依賴 Bevy。TS 主遊戲沒有用到這個 lab。Rust 主遊戲則用了其中一部分：`void-fleet-flight` 的 `FleetAir` 從世界的 `Environment`（[environment.md](environment.md)）取空氣，再以這裡的 `aerodynamic_forces` 求各零件阻力並計算噴嘴氣壓，`legacy_flight` example 的 `aero_field.rs` 也用它。主遊戲只施加力（force-only），氣動力矩、熱、燒蝕與翼面仍只在 `void-aero-lab`。見 [fleet-flight.md](fleet-flight.md)。
 
 | TS | Rust |
 | --- | --- |
-| `Atmosphere.ts` | `atmosphere.rs`：`Atmosphere::earth()`／`Atmosphere::Vacuum`、`sample(海拔)`。1976 標準大氣到 86 km，之後等溫延伸，105–120 km 平滑降到真空 |
+| `Atmosphere.ts` | `void-environment` 的 `atmosphere.rs`（aero 重新匯出同名型別）：`Atmosphere::earth()`／`Atmosphere::Vacuum`、`sample(海拔)`。1976 標準大氣到 86 km，之後等溫延伸，105–120 km 平滑降到真空。見 [environment.md](environment.md) |
 | `Aero.ts` | `aero.rs`：機身與翼面的力（`aerodynamic_forces`）、`wing_polar`、防熱盾遮蔽 `shielded` |
 | `Thermal.ts` | `thermal.rs`：表皮／核心兩層熱容、傳導、輻射、對流、Sutton–Graves 駐點加熱、有限的燒蝕材 |
 | `Vehicle.ts` | `vehicle.rs`：A-01 飛機、C-01 防熱艙、assembly 火箭（`demo_rocket()`，讀 `void-assembly` 的 `compile(&demo_craft())`），質量、重心、對角慣量 |

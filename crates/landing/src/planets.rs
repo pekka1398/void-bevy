@@ -4,9 +4,10 @@
 use std::f64::consts::PI;
 use std::sync::Arc;
 
+use void_environment::{Atmosphere, BodyEnvironment, EarthAtmosphere, Environment};
 use void_orbit::{
-    BodySpec, Ephemeris, EphemerisOptions, GRAVITATIONAL_CONSTANT, RotationSpec, SpinSpec,
-    SystemSpec, build_system, suggested_step_seconds,
+    BodySpec, Ephemeris, EphemerisOptions, EphemerisSource, GRAVITATIONAL_CONSTANT, RotationSpec,
+    SpinSpec, SystemSpec, build_system, suggested_step_seconds,
 };
 use void_terrain::{HillsOptions, Terrain, TerrainConfig};
 
@@ -26,6 +27,14 @@ pub struct LandingPlanet {
     /// Only the amount of air is a planet's own: the profile it thins out along is the aero
     /// crate's, so this is meaningful on an Earth-size planet and a liberty elsewhere.
     pub air_density_scale: Option<f64>,
+}
+
+impl LandingPlanet {
+    /// The atmosphere's altitude zero above the terrain's reference sphere: the sea where the
+    /// terrain has one, else the sphere. Physics' air and the drawn sky both start here.
+    pub fn air_datum_meters(&self) -> f64 {
+        self.terrain.sea_level_meters().unwrap_or(0.0)
+    }
 }
 
 struct PlanetParameters {
@@ -235,6 +244,32 @@ pub fn planet_by_id(id: &str) -> LandingPlanet {
             "planets: unknown planet {other:?}; valid: pebble, luna, terra, aurelia, aurelia-fast"
         ),
     }
+}
+
+/// The world around the planet: every body's gravity, the planet's terrain and its sea, and, with
+/// `air`, its atmosphere at the planet's density scale. Altitude is from the sea where the terrain
+/// has one (`LandingPlanet::air_datum_meters`).
+pub fn planet_environment(
+    planet: &LandingPlanet,
+    ephemeris: &dyn EphemerisSource,
+    body: usize,
+    air: bool,
+) -> Arc<Environment> {
+    let atmosphere = air.then(|| {
+        let scale = planet
+            .air_density_scale
+            .unwrap_or_else(|| panic!("planets: air requested on airless {}", planet.label));
+        Atmosphere::Earth(EarthAtmosphere::new(scale))
+    });
+    Arc::new(Environment::new(ephemeris).with(
+        body,
+        BodyEnvironment {
+            atmosphere,
+            air_datum_meters: planet.air_datum_meters(),
+            terrain: Some(planet.terrain.clone()),
+            sea_level_meters: planet.terrain.sea_level_meters(),
+        },
+    ))
 }
 
 /// The planet's system integrated as an ephemeris, and the planet's index in it. A lone planet has

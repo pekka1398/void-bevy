@@ -8,6 +8,7 @@ use glam::DVec3;
 
 use crate::dopri5::Dopri5;
 use crate::ephemeris::EphemerisSource;
+use crate::gravity;
 use crate::trajectory::Trajectory;
 
 /// Per-step absolute error bounds. Mass needs none: its derivative is constant per leg.
@@ -249,15 +250,23 @@ impl PropagationRun {
 /// Orbit knows nothing about atmospheres or vessel shapes; whoever supplies the source owns both.
 pub trait AirSource: Send + Sync {
     /// Acceleration in the ephemeris frame, m/s², at `t` for a vessel of `mass_kg` passing
-    /// `position` with `velocity`. Zero outside any atmosphere.
-    fn acceleration(&self, t: f64, position: DVec3, velocity: DVec3, mass_kg: f64) -> DVec3;
+    /// `position` with `velocity`. Zero outside any atmosphere. `ephemeris` covers `t`, so the
+    /// source can place the bodies exactly at every stage.
+    fn acceleration(
+        &self,
+        ephemeris: &dyn EphemerisSource,
+        t: f64,
+        position: DVec3,
+        velocity: DVec3,
+        mass_kg: f64,
+    ) -> DVec3;
 }
 
 /// Gravity and thrust as the integrator sees them; borrowed apart from the stepper.
 struct Field {
     gm: Vec<f64>,
     radii: Vec<f64>,
-    /// Per body: spin axis and 1.5 J2 GM R² (0 for a point mass).
+    /// Per body: spin axis and `gravity::oblateness`.
     oblateness: Vec<(DVec3, f64)>,
     spin_rates: Vec<f64>,
     positions: Vec<DVec3>,
@@ -269,28 +278,13 @@ struct Field {
 impl Field {
     /// Requires `positions` at t; includes the ephemeris origin's translational inertial term.
     fn gravity(&self, ephemeris: &dyn EphemerisSource, t: f64, x: f64, yy: f64, z: f64) -> DVec3 {
-        let (mut ax, mut ay, mut az) = (0.0, 0.0, 0.0);
+        let vessel = DVec3::new(x, yy, z);
+        let mut a = DVec3::ZERO;
         for (i, p) in self.positions.iter().enumerate() {
-            let (dx, dyy, dz) = (p.x - x, p.y - yy, p.z - z);
-            let r2 = dx * dx + dyy * dyy + dz * dz;
-            let s = self.gm[i] / (r2 * r2.sqrt());
-            ax += dx * s;
-            ay += dyy * s;
-            az += dz * s;
             let (k, c) = self.oblateness[i];
-            if c != 0.0 {
-                // J2 with r = vessel − body = −d and u = r·k:
-                // a = c / r⁵ [(5 u² / r² − 1) r − 2 u k], c = 1.5 J2 GM R².
-                let u = -(dx * k.x + dyy * k.y + dz * k.z);
-                let f = c / (r2 * r2 * r2.sqrt());
-                let radial = f * (5.0 * u * u / r2 - 1.0);
-                ax -= radial * dx + 2.0 * f * u * k.x;
-                ay -= radial * dyy + 2.0 * f * u * k.y;
-                az -= radial * dz + 2.0 * f * u * k.z;
-            }
+            gravity::add_pull(&mut a, self.gm[i], c, k, vessel - *p);
         }
-        let origin = ephemeris.frame_acceleration_at(t);
-        DVec3::new(ax - origin.x, ay - origin.y, az - origin.z)
+        a - ephemeris.frame_acceleration_at(t)
     }
 
     fn evaluate(
@@ -336,7 +330,13 @@ impl Field {
             None => dy[6] = 0.0,
         }
         if let Some(air) = &self.air {
-            a += air.acceleration(t, DVec3::new(x, yy, z), DVec3::new(y[3], y[4], y[5]), y[6]);
+            a += air.acceleration(
+                ephemeris,
+                t,
+                DVec3::new(x, yy, z),
+                DVec3::new(y[3], y[4], y[5]),
+                y[6],
+            );
         }
         dy[3] = a.x;
         dy[4] = a.y;
@@ -437,12 +437,7 @@ impl VesselPropagator {
                 radii: bodies.iter().map(|b| b.radius_meters).collect(),
                 oblateness: bodies
                     .iter()
-                    .map(|b| {
-                        (
-                            b.rotation.axis(),
-                            1.5 * b.j2 * b.gm * b.j2_reference_radius_meters.powi(2),
-                        )
-                    })
+                    .map(|b| (b.rotation.axis(), gravity::oblateness(b)))
                     .collect(),
                 spin_rates: bodies
                     .iter()

@@ -10,9 +10,11 @@ fn main() {
         let planet = pebble();
         let (e, b) = planet_ephemeris(&planet);
         let frame = PlanetFrame::new(&e, b);
+        let environment = std::sync::Arc::new(
+            Environment::new(&e).with(b, BodyEnvironment::airless(planet.terrain.clone())),
+        );
         let ground = GroundSpec {
             body_index: b,
-            terrain: planet.terrain.clone(),
             band_enter_meters: 200.0,
             band_exit_meters: 400.0,
             tiles: ContactWorldOptions {
@@ -27,6 +29,7 @@ fn main() {
         };
         let mut f = Fleet::new(
             e,
+            environment,
             0.0,
             vec![ground],
             FleetOptions {

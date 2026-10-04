@@ -8,7 +8,7 @@ use void_frames::{BodyId, BodyStates};
 use void_landing::{FrameState, aurelia, planet_ephemeris};
 use void_multiscale::{FrameEphemeris, wide_world};
 use void_orbit::{AdvanceOutcome, EphemerisSource, PropagationRun, VesselPropagator, VesselState};
-use void_vessels::{Fleet, FleetOptions, VesselMode, pod_tank};
+use void_vessels::{Environment, Fleet, FleetOptions, VesselMode, pod_tank};
 fn initial(f: &Fleet, body: usize, altitude: f64) -> FrameState {
     let (p, v) = f.ephemeris.body_state(BodyId(body), 0.0);
     let b = &f.ephemeris.bodies()[body];
@@ -20,7 +20,11 @@ fn initial(f: &Fleet, body: usize, altitude: f64) -> FrameState {
 }
 fn normal() -> (Fleet, usize) {
     let (e, body) = planet_ephemeris(&aurelia());
-    (Fleet::new(e, 0.0, vec![], FleetOptions::default()), body)
+    let environment = std::sync::Arc::new(Environment::new(&e));
+    (
+        Fleet::new(e, environment, 0.0, vec![], FleetOptions::default()),
+        body,
+    )
 }
 fn distant(cells: [i128; 3]) -> (Fleet, usize) {
     let world = Rc::new(RefCell::new(wide_world(SplitPosition::new(
@@ -33,7 +37,11 @@ fn distant(cells: [i128; 3]) -> (Fleet, usize) {
         .iter()
         .position(|b| b.id == "Beryl/planet")
         .unwrap();
-    (Fleet::new(e, 0.0, vec![], FleetOptions::default()), body)
+    let environment = std::sync::Arc::new(Environment::new(&e));
+    (
+        Fleet::new(e, environment, 0.0, vec![], FleetOptions::default()),
+        body,
+    )
 }
 fn momentum(f: &Fleet) -> (DVec3, DVec3) {
     let ids = f.vessel_ids();

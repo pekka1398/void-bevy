@@ -146,7 +146,11 @@ impl Presentation {
         let navigation = void_orbit::DominanceTree::new(bodies).dominant(&positions, ship.position);
         let reference = self.focus_body.unwrap_or(navigation);
         let body = bodies.get(reference).expect("view: unknown focus body");
-        let radial = ship.position - positions[reference];
+        let anchor = f
+            .frames()
+            .transform(f.vessel_frame(&sim.selected), f.origin_frame())
+            .apply_point(f.root_position_local(&sim.selected));
+        let radial = anchor - positions[reference];
         (
             FocusGeometry {
                 kind: if self.focus_body.is_some() {
@@ -170,7 +174,7 @@ impl Presentation {
             },
             reference,
             navigation,
-            self.focus_body.map_or(ship.position, |i| positions[i]),
+            self.focus_body.map_or(anchor, |i| positions[i]),
         )
     }
     fn camera(&self) -> OrbitCamera {
@@ -269,7 +273,7 @@ impl Presentation {
             Some(body) => (f.body_frames(body).0, DVec3::ZERO),
             None => (
                 f.vessel_frame(&sim.selected),
-                f.centre_of_mass_local(&sim.selected),
+                f.root_position_local(&sim.selected),
             ),
         };
         let direction = if self.main_camera {
@@ -279,7 +283,7 @@ impl Presentation {
             let frames = f.frames();
             let up = frames
                 .transform(f.vessel_frame(&sim.selected), surface)
-                .apply_point(f.centre_of_mass_local(&sim.selected))
+                .apply_point(f.root_position_local(&sim.selected))
                 .normalize();
             let east = if up.x.hypot(up.y) > 1e-9 {
                 DVec3::new(-up.y, up.x, 0.0).normalize()

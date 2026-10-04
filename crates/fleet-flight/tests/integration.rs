@@ -139,8 +139,11 @@ fn air_coast_differential(step_seconds: f64) -> (f64, f64) {
     for sim in [&mut orbit, &mut bubble, &mut rails] {
         // This differential concerns airborne owners only; omit the unrelated launch-pad ship.
         let (ephemeris, _) = void_landing::planet_ephemeris(&sim.planet);
+        // The same world: Aurelia's air at density scale 1.
+        let environment = sim.fleet.environment().clone();
         sim.fleet = void_vessels::Fleet::new(
             ephemeris,
+            environment,
             0.0,
             vec![],
             void_vessels::FleetOptions {
@@ -148,9 +151,10 @@ fn air_coast_differential(step_seconds: f64) -> (f64, f64) {
                 ..Default::default()
             },
         );
-        sim.fleet.set_environment(Some(std::sync::Arc::new(
-            void_fleet_flight::FleetAir::earth(sim.home, 1.0),
-        )));
+        sim.fleet
+            .set_forces(Some(std::sync::Arc::new(void_fleet_flight::FleetAir::new(
+                sim.home,
+            ))));
     }
     let o = airborne(&mut orbit, &craft, 10_000.0, 100.0, 0.0);
     let b = airborne(&mut bubble, &craft, 10_000.0, 100.0, 0.0);

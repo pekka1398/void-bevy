@@ -28,9 +28,9 @@ pub struct FleetFlight {
 impl FleetFlight {
     pub fn new(planet: LandingPlanet, craft: &Craft, site: DVec3, air: bool) -> Self {
         let (ephemeris, home) = planet_ephemeris(&planet);
+        let environment = void_landing::planet_environment(&planet, &ephemeris, home, air);
         let ground = GroundSpec {
             body_index: home,
-            terrain: planet.terrain.clone(),
             band_enter_meters: 200.0,
             band_exit_meters: 400.0,
             tiles: ContactWorldOptions {
@@ -43,12 +43,15 @@ impl FleetFlight {
                 sleeping: true,
             },
         };
-        let mut fleet = Fleet::new(ephemeris, 0.0, vec![ground], FleetOptions::default());
+        let mut fleet = Fleet::new(
+            ephemeris,
+            environment,
+            0.0,
+            vec![ground],
+            FleetOptions::default(),
+        );
         if air {
-            let scale = planet
-                .air_density_scale
-                .expect("fleet flight: requested air on an airless planet");
-            fleet.set_environment(Some(Arc::new(FleetAir::earth(home, scale))));
+            fleet.set_forces(Some(Arc::new(FleetAir::new(home))));
         }
         let selected = fleet.launch_landed(craft, home, site);
         fleet.advance(0.0);

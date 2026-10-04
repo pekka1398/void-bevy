@@ -1,6 +1,6 @@
 //! Multiple vessels, orbital/contact ownership, separation and joining.
-mod environment;
-pub use environment::*;
+mod forces;
+pub use forces::*;
 mod fleet;
 mod free_fall;
 mod propulsion;
@@ -11,4 +11,5 @@ pub use propulsion::*;
 mod scenarios;
 pub use scenarios::*;
 
+pub use void_environment::{BodyEnvironment, Environment};
 pub use void_sas::SasPhase;

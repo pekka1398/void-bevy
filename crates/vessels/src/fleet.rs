@@ -1,6 +1,6 @@
 use crate::{
-    EnvironmentPart, EnvironmentSample, FleetEnvironment, FreeFallFrame, Propulsion,
-    PropulsionPart, burn, propulsion, step_thrust,
+    ForcePart, ForceSample, FreeFallFrame, PartForces, Propulsion, PropulsionPart, burn,
+    propulsion, step_thrust,
 };
 use glam::{DMat3, DQuat, DVec3};
 use rapier3d::prelude::RigidBodyHandle;
@@ -10,6 +10,7 @@ use std::sync::Arc;
 use void_assembly::{
     Connection, Craft, Module, PartDefinition, PartPose, Shape, compile, node, part_inertia_per_kg,
 };
+use void_environment::Environment;
 use void_frames::{
     BodyId, FrameId, FrameSource, FrameTree, Motion, Snapshot, SplitPosition, State, SystemId,
 };
@@ -62,9 +63,9 @@ impl Default for FleetOptions {
     }
 }
 #[derive(Clone, Debug)]
+/// Contact for one body; its terrain is the world `Environment`'s.
 pub struct GroundSpec {
     pub body_index: usize,
-    pub terrain: Arc<Terrain>,
     pub tiles: ContactWorldOptions,
     pub band_enter_meters: f64,
     pub band_exit_meters: f64,
@@ -244,7 +245,9 @@ pub struct Fleet {
     pub options: FleetOptions,
     pub events: Vec<FleetEvent>,
     propagator: VesselPropagator,
-    environment: Option<Arc<dyn FleetEnvironment>>,
+    /// The world's gravity, air, terrain and sea.
+    environment: Arc<Environment>,
+    forces: Option<Arc<dyn PartForces>>,
     grounds: Vec<Ground>,
     parts: HashMap<String, PropulsionPart>,
     connections: Vec<Connection>,
@@ -324,10 +327,12 @@ fn frame_state(s: State) -> FrameState {
 impl Fleet {
     pub fn new(
         mut ephemeris: impl EphemerisSource + 'static,
+        environment: Arc<Environment>,
         time: f64,
         grounds: Vec<GroundSpec>,
         options: FleetOptions,
     ) -> Self {
+        environment.assert_compatible(&ephemeris);
         assert!(
             time.is_finite()
                 && options.step_seconds.is_finite()
@@ -357,9 +362,12 @@ impl Fleet {
             .map(|spec| {
                 assert!(seen.insert(spec.body_index), "fleet: duplicate ground");
                 let frame = PlanetFrame::new(&ephemeris, spec.body_index);
-                assert_eq!(
-                    spec.terrain.radius_meters, frame.body.radius_meters,
-                    "fleet: terrain radius mismatch"
+                // The environment already holds terrain to its body's sphere.
+                assert!(
+                    environment
+                        .body(spec.body_index)
+                        .is_some_and(|b| b.terrain.is_some()),
+                    "fleet: ground on a body without terrain"
                 );
                 assert!(
                     spec.band_enter_meters > 0.0 && spec.band_exit_meters > spec.band_enter_meters,
@@ -376,7 +384,8 @@ impl Fleet {
             options,
             events: vec![],
             propagator,
-            environment: None,
+            environment,
+            forces: None,
             grounds,
             parts: HashMap::new(),
             connections: vec![],
@@ -399,27 +408,41 @@ impl Fleet {
             next_scene: 1,
         }
     }
-    pub fn set_environment(&mut self, environment: Option<Arc<dyn FleetEnvironment>>) {
-        self.environment = environment;
+    pub fn environment(&self) -> &Arc<Environment> {
+        &self.environment
+    }
+    /// The star systems' and bodies' frames under `frames()`, for environment queries.
+    pub fn system_frames(&self) -> &SystemFrames {
+        &self.frames
+    }
+    fn terrain(&self, body: usize) -> &Arc<Terrain> {
+        self.environment
+            .body(body)
+            .and_then(|b| b.terrain.as_ref())
+            .expect("fleet: body has no terrain")
+    }
+    pub fn set_forces(&mut self, forces: Option<Arc<dyn PartForces>>) {
+        self.forces = forces;
         for vessel in self.vessels.values_mut() {
             if let Owner::Orbit { run, .. } = &mut vessel.owner {
                 **run = run.restarted();
             }
         }
     }
-    fn environment_sample(&self, v: &Vessel, time: f64) -> Option<EnvironmentSample> {
-        self.environment.as_ref().map(|environment| {
+    fn force_sample(&self, v: &Vessel, time: f64) -> Option<ForceSample> {
+        self.forces.as_ref().map(|forces| {
             let parts = self
                 .centred(&v.poses)
                 .0
                 .into_iter()
-                .map(|(id, pose)| EnvironmentPart {
+                .map(|(id, pose)| ForcePart {
                     definition: self.parts[&id].definition,
                     id,
                     pose,
                 })
                 .collect::<Vec<_>>();
-            environment.sample(
+            forces.sample(
+                &self.environment,
                 &self.ephemeris,
                 time,
                 &self.snapshot_of(v),
@@ -505,19 +528,10 @@ impl Fleet {
                 .any(|m| matches!(m, Module::Command))
         })
     }
-    fn propulsion_with_environment(
-        &self,
-        v: &Vessel,
-        sample: Option<&EnvironmentSample>,
-    ) -> Propulsion {
+    fn propulsion_with_forces(&self, v: &Vessel, sample: Option<&ForceSample>) -> Propulsion {
         self.propulsion_at(v, sample, self.time)
     }
-    fn propulsion_at(
-        &self,
-        v: &Vessel,
-        sample: Option<&EnvironmentSample>,
-        time: f64,
-    ) -> Propulsion {
+    fn propulsion_at(&self, v: &Vessel, sample: Option<&ForceSample>, time: f64) -> Propulsion {
         let parts: Vec<_> = v.poses.iter().map(|(id, _)| &self.parts[id]).collect();
         let mut p = propulsion(
             &parts,
@@ -536,7 +550,7 @@ impl Fleet {
                     let scale = *sample
                         .thrust_scales
                         .get(&engine.part_id)
-                        .expect("fleet: environment omitted active engine");
+                        .expect("fleet: part forces omitted active engine");
                     assert!(
                         scale.is_finite() && (0.0..=1.0).contains(&scale),
                         "fleet: invalid engine scale"
@@ -550,8 +564,8 @@ impl Fleet {
         p
     }
     fn propulsion_of(&self, v: &Vessel) -> Propulsion {
-        let sample = self.environment_sample(v, self.time);
-        self.propulsion_with_environment(v, sample.as_ref())
+        let sample = self.force_sample(v, self.time);
+        self.propulsion_with_forces(v, sample.as_ref())
     }
     pub fn thrust(&self, id: &str) -> Propulsion {
         self.propulsion_of(self.vessel(id))
@@ -712,7 +726,7 @@ impl Fleet {
             })
             .fold(f64::INFINITY, f64::min);
         let g = &self.grounds[self.ground_index(body)];
-        let r = g.frame.body.radius_meters + g.spec.terrain.height(d) + cy - lowest + 0.05;
+        let r = g.frame.body.radius_meters + self.terrain(body).height(d) + cy - lowest + 0.05;
         let ground = self
             .frames()
             .transform(self.frames.surface[body], self.frames.origin);
@@ -771,7 +785,20 @@ impl Fleet {
     pub fn body_frames(&self, body: usize) -> (FrameId, FrameId) {
         (self.frames.inertial[body], self.frames.surface[body])
     }
-    /// A vessel's centre of mass, in its parts frame: what a camera following it looks at.
+    /// A vessel's centre of mass in its parts frame.
+    /// Stable authored anchor in the vessel's parts frame. The root stays with the controlled
+    /// upper stage during separation, unlike the fuel-dependent centre of mass.
+    pub fn root_position_local(&self, id: &str) -> DVec3 {
+        let vessel = self.vessel(id);
+        vessel
+            .poses
+            .iter()
+            .find(|(id, _)| id == &vessel.root)
+            .expect("vessel: root has no pose")
+            .1
+            .position
+    }
+
     pub fn centre_of_mass_local(&self, id: &str) -> DVec3 {
         match &self.vessel(id).owner {
             // The propagator carries the centre of mass as the frame's origin.
@@ -1114,7 +1141,7 @@ impl Fleet {
             let g = &self.grounds[g_index];
             (
                 SceneFrame::Ground(Box::new(g.frame.clone())),
-                Some(g.spec.terrain.clone()),
+                Some(self.terrain(g.spec.body_index).clone()),
                 g.spec.tiles,
                 self.body_fixed(g_index, c).position,
             )
@@ -1293,10 +1320,16 @@ impl Fleet {
         let push = match v.owner {
             Owner::Scene { scene, push, .. } => self.axes(scene) * push,
             Owner::Orbit { .. } => {
-                let sample = self.environment_sample(&v, self.time);
-                let thrust = self.propulsion_with_environment(&v, sample.as_ref());
+                let sample = self.force_sample(&v, self.time);
+                let thrust = self.propulsion_with_forces(&v, sample.as_ref());
                 let air = sample.and_then(|s| s.air).map_or(DVec3::ZERO, |source| {
-                    source.acceleration(self.time, snap.position, snap.velocity, snap.mass_kg)
+                    source.acceleration(
+                        &*self.ephemeris,
+                        self.time,
+                        snap.position,
+                        snap.velocity,
+                        snap.mass_kg,
+                    )
                 });
                 snap.rotation * thrust.force / snap.mass_kg + air
             }
@@ -1357,7 +1390,6 @@ impl Fleet {
             }
             _ => self.body_fixed(g, self.snapshot(&v.id).state()).position,
         };
-        let r = p.length();
         let reach = self
             .centred(&v.poses)
             .0
@@ -1372,7 +1404,18 @@ impl Fleet {
                     })
             })
             .fold(0.0, f64::max);
-        r - ground.frame.body.radius_meters - ground.spec.terrain.height(p / r) - reach
+        let body = ground.spec.body_index;
+        self.environment
+            .ground(
+                &self.frames(),
+                &self.frames,
+                self.frames.surface[body],
+                p,
+                body,
+            )
+            .expect("fleet: ground body has no terrain")
+            .clearance
+            - reach
     }
     pub fn clearance(&self, id: &str, body: usize) -> f64 {
         self.clearance_over(self.vessel(id), self.ground_index(body))
@@ -1850,7 +1893,7 @@ impl Fleet {
             }
             let q = *rotation;
             let w = *angular_velocity;
-            let environment = self.environment_sample(&v, t);
+            let forces = self.force_sample(&v, t);
             let guide = self
                 .guidance
                 .get(id)
@@ -1875,14 +1918,14 @@ impl Fleet {
                 .get(id)
                 .filter(|g| g.status == GuidanceStatus::Armed)
                 .cloned();
-            let p = self.propulsion_at(&v, environment.as_ref(), t);
+            let p = self.propulsion_at(&v, forces.as_ref(), t);
             let burning = p.flow_kg_per_second > 0.0;
             let turning = !(burning && guide.is_some())
                 && (w != DVec3::ZERO
                     || p.torque != DVec3::ZERO
                     || self.controls[id].turn != DVec3::ZERO
                     || self.sas.contains_key(id));
-            let mut leg = if self.environment.is_some() {
+            let mut leg = if self.forces.is_some() {
                 end.min(t + self.options.flight_chunk_seconds)
             } else {
                 end
@@ -1943,7 +1986,7 @@ impl Fleet {
             let Owner::Orbit { run, .. } = &mut v.owner else {
                 unreachable!()
             };
-            self.propagate(run, leg, control, environment.and_then(|s| s.air));
+            self.propagate(run, leg, control, forces.and_then(|s| s.air));
             if burning {
                 let duration = if leg == t + p.seconds_to_flameout {
                     p.seconds_to_flameout
@@ -2057,13 +2100,14 @@ impl Fleet {
             let q = quat64(*b.rotation());
             let w = vec64(b.angvel());
             let c = vec64(b.local_center_of_mass());
-            let environment = self.environment_sample(&v, self.time);
-            let p = self.propulsion_with_environment(&v, environment.as_ref());
-            let air = environment.and_then(|s| s.air);
+            let forces = self.force_sample(&v, self.time);
+            let p = self.propulsion_with_forces(&v, forces.as_ref());
+            let air = forces.and_then(|s| s.air);
             let snapshot = self.snapshot_of(&v);
             let air_acceleration = air.map_or(DVec3::ZERO, |source| {
                 self.axes(scene).conjugate()
                     * source.acceleration(
+                        &*self.ephemeris,
                         self.time,
                         snapshot.position,
                         snapshot.velocity,
@@ -2240,7 +2284,7 @@ impl Fleet {
                 done = false;
                 break;
             }
-            let chunk = if self.environment.is_some() {
+            let chunk = if self.forces.is_some() {
                 self.options.flight_chunk_seconds
             } else {
                 self.options.rails_chunk_seconds
@@ -2270,7 +2314,7 @@ impl Fleet {
                 }
             }
             for id in ids {
-                let sample = self.environment_sample(self.vessel(&id), self.time);
+                let sample = self.force_sample(self.vessel(&id), self.time);
                 self.propagator.set_air_source(sample.and_then(|s| s.air));
                 if let Owner::Orbit { run, .. } = &mut self.vessels.get_mut(&id).unwrap().owner {
                     let outcome =

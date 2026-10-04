@@ -1,7 +1,9 @@
 //! The six owning TS lab scenarios, usable by both headless checks and the Bevy lab.
 use crate::{Fleet, FleetOptions, GroundSpec, VesselMode};
 use glam::{DQuat, DVec3};
+use std::sync::Arc;
 use void_assembly::{Craft, add_part, demo_craft, fresh_craft};
+use void_environment::{BodyEnvironment, Environment};
 use void_frames::{BodyId, BodyStates};
 use void_landing::{
     ContactWorldOptions, LandingPlanet, aurelia, level_for_tile_size, pebble, planet_ephemeris,
@@ -100,9 +102,12 @@ pub fn create_lab_scene(scenario: Scenario) -> LabScene {
         position: centre + DVec3::X * r + offset,
         velocity: velocity + DVec3::Y * (gm / r).sqrt() + dv,
     };
+    let environment = Arc::new(
+        Environment::new(&ephemeris)
+            .with(body_index, BodyEnvironment::airless(planet.terrain.clone())),
+    );
     let ground = GroundSpec {
         body_index,
-        terrain: planet.terrain.clone(),
         band_enter_meters: 200.0,
         band_exit_meters: 400.0,
         tiles: ContactWorldOptions {
@@ -115,7 +120,13 @@ pub fn create_lab_scene(scenario: Scenario) -> LabScene {
             sleeping: true,
         },
     };
-    let mut fleet = Fleet::new(ephemeris, 0.0, vec![ground], FleetOptions::default());
+    let mut fleet = Fleet::new(
+        ephemeris,
+        environment,
+        0.0,
+        vec![ground],
+        FleetOptions::default(),
+    );
     let mut references = vec![];
     match scenario {
         Scenario::Launch => {
