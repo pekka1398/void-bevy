@@ -5621,6 +5621,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-modules"
+version = "0.0.0"
+dependencies = [
+ "glam 0.32.1",
+ "void-aero",
+ "void-assembly",
+ "void-environment",
+ "void-frames",
+ "void-landing",
+ "void-orbit",
+]
+
+[[package]]
 name = "void-multiscale"
 version = "0.0.0"
 dependencies = [
