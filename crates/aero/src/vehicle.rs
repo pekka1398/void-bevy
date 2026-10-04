@@ -527,7 +527,7 @@ pub fn assembly_rocket(compiled: &CompiledCraft) -> Vehicle {
                 color: u32::from_str_radix(&d.color[1..], 16)
                     .unwrap_or_else(|_| panic!("part colour {}", d.color)),
                 dry_mass_kg: d.dry_mass_kg,
-                fuel_kg: p.instance.fuel_kg,
+                fuel_kg: p.instance.resource_mass(),
                 aero: Some(PartAero {
                     point: DVec3::ZERO,
                     shape: AeroShape::Body(BodyAero {

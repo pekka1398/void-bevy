@@ -5,4 +5,5 @@
 mod air;
 pub mod body;
 pub mod engine;
-pub use air::{Conditions, VesselAir, has_atmosphere, vessel_air};
+pub mod parachute;
+pub use air::{Conditions, VesselAir, has_atmosphere, vessel_air, vessel_air_at};

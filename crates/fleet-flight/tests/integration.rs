@@ -36,7 +36,8 @@ fn exported_custom_craft_stages_and_keeps_each_vessels_controls() {
         .iter_mut()
         .find(|p| p.id == "p2")
         .unwrap()
-        .fuel_kg = 200.0;
+        .resources
+        .insert(void_assembly::ResourceId::LiquidPropellant, 200.0);
     let loaded = import_craft(&export_craft(&craft).unwrap()).unwrap();
     let mut sim = make(&loaded, false);
     assert_eq!(sim.mode(), VesselMode::Ground);
@@ -268,7 +269,7 @@ fn main_rocket_preserves_the_legacy_stage_masses_engines_and_delta_v() {
             .filter(|p| ids.contains(&p.instance.id.as_str()))
             .collect();
         let dry: f64 = parts.iter().map(|p| p.definition.dry_mass_kg).sum();
-        let fuel: f64 = parts.iter().map(|p| p.instance.fuel_kg).sum();
+        let fuel: f64 = parts.iter().map(|p| p.instance.resource_mass()).sum();
         let (thrust, isp) = parts
             .iter()
             .flat_map(|p| &p.definition.modules)

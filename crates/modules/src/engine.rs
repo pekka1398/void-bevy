@@ -1,7 +1,7 @@
 //! The engine module: thrust along the part's axis, less the back pressure on its nozzle.
 use crate::Conditions;
 use glam::DVec3;
-use void_assembly::{G0, Part};
+use void_assembly::{EngineRating, G0, Part};
 
 /// One engine's push for a leg, in its vessel's parts frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -17,9 +17,16 @@ pub struct Thrust {
 /// thrust; an overexpanded nozzle stops at zero (the flow separates) rather than pulling back.
 /// The mass flow stays the vacuum rating's.
 pub fn thrust(part: &Part, throttle: f64, conditions: &Conditions) -> Thrust {
-    let engine = part
-        .engine()
-        .unwrap_or_else(|| panic!("engine: {} has no engine module", part.id));
+    let engine = part.engine().expect("engine: no single engine");
+    thrust_rating(part, engine, throttle, conditions)
+}
+/// Pure evaluation of one addressed engine module.
+pub fn thrust_rating(
+    part: &Part,
+    engine: EngineRating,
+    throttle: f64,
+    conditions: &Conditions,
+) -> Thrust {
     assert!(
         (0.0..=1.0).contains(&throttle),
         "engine: {} throttle {throttle}",

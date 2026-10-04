@@ -1,11 +1,20 @@
 use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
 use void_math::hypot;
 
 pub const G0: f64 = 9.80665;
 pub type ModelResult<T> = Result<T, String>;
+
+/// Mass-bearing resources; authored IDs are deliberately a closed vocabulary.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase")]
+pub enum ResourceId {
+    LiquidPropellant,
+    Monopropellant,
+}
+pub type Resources = BTreeMap<ResourceId, f64>;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -18,12 +27,22 @@ pub struct AttachNode {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Module {
-    Command,
+    Parachute {
+        id: String,
+        parameters: ParachuteDefinition,
+    },
+    Command {
+        id: String,
+    },
     Tank {
+        id: String,
+        resource: ResourceId,
         #[serde(rename = "capacityKg")]
         capacity_kg: f64,
     },
     Engine {
+        id: String,
+        resource: ResourceId,
         #[serde(rename = "thrustNewtons")]
         thrust_newtons: f64,
         #[serde(rename = "ispSeconds")]
@@ -34,6 +53,7 @@ pub enum Module {
         direction: DVec3,
     },
     Decoupler {
+        id: String,
         #[serde(rename = "nodeId")]
         node_id: String,
         #[serde(rename = "impulseNs")]
@@ -84,7 +104,11 @@ pub struct Attachment {
 pub struct PartInstance {
     pub id: String,
     pub definition_id: String,
-    pub fuel_kg: f64,
+    #[serde(deserialize_with = "unique_map")]
+    pub resources: Resources,
+    /// Explicit per-module overrides of the authored part's default stage. Empty means inherit.
+    #[serde(default, deserialize_with = "unique_map")]
+    pub module_stages: BTreeMap<String, Option<u32>>,
     #[serde(deserialize_with = "explicit_option")]
     pub stage: Option<u32>,
     #[serde(deserialize_with = "explicit_option")]
@@ -168,15 +192,18 @@ pub fn tank_capacity(part: &PartDefinition) -> f64 {
     part.modules
         .iter()
         .map(|m| match m {
-            Module::Tank { capacity_kg } => *capacity_kg,
+            Module::Tank { capacity_kg, .. } => *capacity_kg,
             _ => 0.0,
         })
         .sum()
 }
 pub fn actionable(part: &PartDefinition) -> bool {
-    part.modules
-        .iter()
-        .any(|m| matches!(m, Module::Engine { .. } | Module::Decoupler { .. }))
+    part.modules.iter().any(|m| {
+        matches!(
+            m,
+            Module::Engine { .. } | Module::Decoupler { .. } | Module::Parachute { .. }
+        )
+    })
 }
 pub fn part_inertia_per_kg(part: &PartDefinition) -> DVec3 {
     if part.shape == Shape::Box {
@@ -216,8 +243,8 @@ fn align(from: DVec3, to: DVec3) -> DQuat {
 }
 /// Validate untrusted craft data and derive every part pose from its paired stack nodes.
 pub fn compile(craft: &Craft) -> ModelResult<CompiledCraft> {
-    if craft.version != 1 || craft.name.trim().is_empty() || craft.parts.is_empty() {
-        return Err("Craft requires version 1, a name and at least one part".into());
+    if craft.version != 2 || craft.name.trim().is_empty() || craft.parts.is_empty() {
+        return Err("Craft requires version 2, a name and at least one part".into());
     }
     if craft.parts.len() > 100 {
         return Err("This lab supports at most 100 parts".into());
@@ -234,9 +261,20 @@ pub fn compile(craft: &Craft) -> ModelResult<CompiledCraft> {
             return Err(format!("Invalid or duplicate part id: {}", p.id));
         }
         let d = definition(&p.definition_id)?;
-        if !p.fuel_kg.is_finite() || p.fuel_kg < 0.0 || p.fuel_kg > tank_capacity(d) {
-            return Err(format!("{}: fuel outside capacity", p.id));
+        validate_definition(d)?;
+        for (id, stage) in &p.module_stages {
+            if !d.modules.iter().any(|m| {
+                m.id() == id
+                    && matches!(
+                        m,
+                        Module::Engine { .. } | Module::Decoupler { .. } | Module::Parachute { .. }
+                    )
+            }) || stage.is_some_and(|s| s > 99)
+            {
+                return Err(format!("{}: invalid module stage {id}", p.id));
+            }
         }
+        validate_resources(d, &p.resources).map_err(|e| format!("{}: {e}", p.id))?;
         if p.stage.is_some_and(|s| s > 99 || !actionable(d)) {
             return Err(format!("{}: invalid stage", p.id));
         }
@@ -250,7 +288,7 @@ pub fn compile(craft: &Craft) -> ModelResult<CompiledCraft> {
         || !definition(&roots[0].definition_id)?
             .modules
             .iter()
-            .any(|m| matches!(m, Module::Command))
+            .any(|m| matches!(m, Module::Command { .. }))
     {
         return Err("Craft requires exactly one command root".into());
     }
@@ -451,7 +489,7 @@ impl CompiledCraft {
             center: DVec3::ZERO,
         };
         for p in &self.parts {
-            let f = fuel.map_or(p.instance.fuel_kg, |fs| {
+            let f = fuel.map_or(p.instance.resource_mass(), |fs| {
                 *fs.get(&p.instance.id).expect("missing fuel state")
             });
             assert!(
@@ -549,7 +587,8 @@ pub fn add_part(
     next.parts.push(PartInstance {
         id: format!("p{i}"),
         definition_id: definition_id.into(),
-        fuel_kg: tank_capacity(d),
+        resources: full_resources(d),
+        module_stages: BTreeMap::new(),
         stage: actionable(d).then_some(0),
         attachment: Some(Attachment {
             parent_id: parent_id.into(),
@@ -589,12 +628,13 @@ pub fn remove_subtree(craft: &Craft, id: &str) -> ModelResult<Craft> {
 }
 pub fn fresh_craft() -> Craft {
     Craft {
-        version: 1,
+        version: 2,
         name: "Untitled rocket".into(),
         parts: vec![PartInstance {
             id: "p1".into(),
             definition_id: "pod".into(),
-            fuel_kg: 0.0,
+            resources: Resources::new(),
+            module_stages: BTreeMap::new(),
             stage: None,
             attachment: None,
         }],
@@ -629,4 +669,201 @@ pub fn export_craft(craft: &Craft) -> ModelResult<String> {
 /// The main game's original 7620 kg, 9.6 km/s rocket, in the editor's portable craft format.
 pub fn flight_rocket() -> Craft {
     import_craft(include_str!("../data/flight-rocket.json")).expect("authored flight rocket")
+}
+
+impl Module {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Command { id }
+            | Self::Tank { id, .. }
+            | Self::Engine { id, .. }
+            | Self::Decoupler { id, .. }
+            | Self::Parachute { id, .. } => id,
+        }
+    }
+}
+impl PartInstance {
+    pub fn resource_mass(&self) -> f64 {
+        self.resources.values().sum()
+    }
+}
+pub fn capacity(part: &PartDefinition, resource: ResourceId) -> f64 {
+    part.modules
+        .iter()
+        .filter_map(|m| match m {
+            Module::Tank {
+                resource: r,
+                capacity_kg,
+                ..
+            } if *r == resource => Some(*capacity_kg),
+            _ => None,
+        })
+        .sum()
+}
+pub fn full_resources(part: &PartDefinition) -> Resources {
+    let mut out = Resources::new();
+    for m in &part.modules {
+        if let Module::Tank {
+            resource,
+            capacity_kg,
+            ..
+        } = m
+        {
+            *out.entry(*resource).or_insert(0.0) += capacity_kg;
+        }
+    }
+    out
+}
+pub fn validate_resources(part: &PartDefinition, resources: &Resources) -> ModelResult<()> {
+    let capacities = full_resources(part);
+    if capacities.keys().ne(resources.keys()) {
+        return Err("resource inventory does not match tank definitions".into());
+    }
+    for (r, q) in resources {
+        if !q.is_finite() || *q < 0.0 || *q > capacities[r] {
+            return Err(format!("{r:?}: quantity outside capacity"));
+        }
+    }
+    Ok(())
+}
+/// Explicit, offline conversion of the historical single-liquid craft schema.
+pub fn migrate_legacy_craft(value: serde_json::Value) -> ModelResult<Craft> {
+    let mut value = value;
+    if value["version"] != 1 {
+        return Err("migration requires craft version 1".into());
+    }
+    value["version"] = 2.into();
+    for p in value["parts"].as_array_mut().ok_or("parts must be array")? {
+        let amount = p
+            .as_object_mut()
+            .ok_or("part must be object")?
+            .remove("fuelKg")
+            .ok_or("missing fuelKg")?;
+        let d = definition(p["definitionId"].as_str().ok_or("missing definitionId")?)?;
+        p["resources"] = if tank_capacity(d) > 0.0 {
+            serde_json::json!({"liquidPropellant":amount})
+        } else {
+            if amount.as_f64() != Some(0.0) {
+                return Err("non-tank legacy fuel".into());
+            }
+            serde_json::json!({})
+        };
+    }
+    let craft: Craft = serde_json::from_value(value).map_err(|e| e.to_string())?;
+    compile(&craft)?;
+    Ok(craft)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ParachuteDefinition {
+    pub semi_area_m2: f64,
+    pub full_area_m2: f64,
+    pub drag_coefficient: f64,
+    pub min_pressure_pa: f64,
+    pub max_dynamic_pressure_pa: f64,
+    pub full_deploy_altitude_meters: f64,
+    pub semi_seconds: f64,
+    pub full_seconds: f64,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ParachutePhase {
+    Stowed,
+    Armed,
+    SemiDeploying,
+    Semi,
+    FullDeploying,
+    Full,
+    Cut,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParachuteState {
+    pub phase: ParachutePhase,
+    pub elapsed_seconds: f64,
+}
+impl ParachuteState {
+    pub const STOWED: Self = Self {
+        phase: ParachutePhase::Stowed,
+        elapsed_seconds: 0.0,
+    };
+}
+pub fn validate_definition(d: &PartDefinition) -> ModelResult<()> {
+    let mut ids = HashSet::new();
+    for m in &d.modules {
+        if m.id().is_empty() || !ids.insert(m.id()) {
+            return Err("empty/duplicate module ID".into());
+        }
+        match m {
+            Module::Tank { capacity_kg, .. } if !capacity_kg.is_finite() || *capacity_kg <= 0.0 => {
+                return Err("invalid tank capacity".into());
+            }
+            Module::Engine {
+                thrust_newtons,
+                isp_seconds,
+                nozzle_exit_area_m2,
+                direction,
+                ..
+            } if !thrust_newtons.is_finite()
+                || *thrust_newtons <= 0.0
+                || !isp_seconds.is_finite()
+                || *isp_seconds <= 0.0
+                || !nozzle_exit_area_m2.is_finite()
+                || *nozzle_exit_area_m2 < 0.0
+                || !direction.is_finite()
+                || (direction.length() - 1.0).abs() > 1e-9 =>
+            {
+                return Err("invalid engine rating".into());
+            }
+            Module::Parachute { parameters: p, .. }
+                if [
+                    p.semi_area_m2,
+                    p.full_area_m2,
+                    p.drag_coefficient,
+                    p.min_pressure_pa,
+                    p.max_dynamic_pressure_pa,
+                    p.full_deploy_altitude_meters,
+                    p.semi_seconds,
+                    p.full_seconds,
+                ]
+                .iter()
+                .any(|v| !v.is_finite() || *v <= 0.0)
+                    || p.full_area_m2 < p.semi_area_m2 =>
+            {
+                return Err("invalid parachute parameters".into());
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Maps in authored/saved state must reject duplicate JSON keys before insertion.
+/// Shared publicly with Fleet SavedPart; parsing through serde_json::Value first loses this check.
+pub fn unique_map<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    K: Deserialize<'de> + Ord,
+    V: Deserialize<'de>,
+{
+    struct Unique<K, V>(std::marker::PhantomData<(K, V)>);
+    impl<'de, K: Deserialize<'de> + Ord, V: Deserialize<'de>> serde::de::Visitor<'de> for Unique<K, V> {
+        type Value = BTreeMap<K, V>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a map with unique keys")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut out = BTreeMap::new();
+            while let Some((key, value)) = map.next_entry()? {
+                if out.insert(key, value).is_some() {
+                    return Err(serde::de::Error::custom("duplicate state map key"));
+                }
+            }
+            Ok(out)
+        }
+    }
+    deserializer.deserialize_map(Unique(std::marker::PhantomData))
 }

@@ -33,10 +33,13 @@ struct SavedScene {
 struct SavedPart {
     id: String,
     definition_id: String,
-    fuel_kg: f64,
+    #[serde(deserialize_with = "void_assembly::unique_map")]
+    resources: void_assembly::Resources,
+    #[serde(deserialize_with = "void_assembly::unique_map")]
+    modules: BTreeMap<String, void_assembly::ModuleState>,
     stage: Option<u32>,
-    staged: bool,
-    lit: bool,
+    #[serde(deserialize_with = "void_assembly::unique_map")]
+    module_stages: BTreeMap<String, Option<u32>>,
     pose: PartPose,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -68,15 +71,15 @@ impl Fleet {
             .map(|part| SavedPart {
                 id: part.id.clone(),
                 definition_id: part.definition.id.clone(),
-                fuel_kg: part.fuel_kg,
+                resources: part.resources.clone(),
+                modules: part.modules.clone(),
                 stage: part.stage,
-                staged: part.staged,
-                lit: part.lit,
+                module_stages: part.module_stages.clone(),
                 pose: part.pose,
             })
             .collect();
         FleetCheckpoint {
-            version: 3,
+            version: 4,
             options: self.options,
             time: self.time,
             pending: self.pending,
@@ -135,7 +138,7 @@ impl Fleet {
         environment: Arc<Environment>,
         saved: FleetCheckpoint,
     ) -> Self {
-        assert_eq!(saved.version, 3, "fleet checkpoint: unsupported version");
+        assert_eq!(saved.version, 4, "fleet checkpoint: unsupported version");
         assert!(
             saved.time.is_finite()
                 && saved.pending.is_finite()
@@ -169,10 +172,10 @@ impl Fleet {
             fleet.parts.insert(Part {
                 id: part.id,
                 definition,
-                fuel_kg: part.fuel_kg,
+                resources: part.resources.clone(),
+                modules: part.modules.clone(),
                 stage: part.stage,
-                staged: part.staged,
-                lit: part.lit,
+                module_stages: part.module_stages.clone(),
                 pose: part.pose,
             });
         }

@@ -1,156 +1,160 @@
 {
-  "version": 1,
+  "version": 2,
   "name": "VOID 9.6 km/s two-stage rocket",
   "parts": [
     {
       "id": "p1",
       "definitionId": "flight-pod",
-      "fuelKg": 0,
       "stage": null,
-      "attachment": null
+      "attachment": null,
+      "resources": {}
     },
     {
       "id": "p2",
       "definitionId": "flight-upper-tank",
-      "fuelKg": 1470,
       "stage": null,
       "attachment": {
         "parentId": "p1",
         "parentNodeId": "bottom",
         "nodeId": "top"
+      },
+      "resources": {
+        "liquidPropellant": 1470
       }
     },
     {
       "id": "p3",
       "definitionId": "flight-upper-engine",
-      "fuelKg": 0,
       "stage": 1,
       "attachment": {
         "parentId": "p2",
         "parentNodeId": "bottom",
         "nodeId": "top"
-      }
+      },
+      "resources": {}
     },
     {
       "id": "p4",
       "definitionId": "flight-decoupler",
-      "fuelKg": 0,
       "stage": 1,
       "attachment": {
         "parentId": "p3",
         "parentNodeId": "bottom",
         "nodeId": "top"
-      }
+      },
+      "resources": {}
     },
     {
       "id": "p5",
       "definitionId": "flight-booster-tank",
-      "fuelKg": 5350,
       "stage": null,
       "attachment": {
         "parentId": "p4",
         "parentNodeId": "bottom",
         "nodeId": "top"
+      },
+      "resources": {
+        "liquidPropellant": 5350
       }
     },
     {
       "id": "p6",
       "definitionId": "flight-booster-engine",
-      "fuelKg": 0,
       "stage": 0,
       "attachment": {
         "parentId": "p5",
         "parentNodeId": "bottom",
         "nodeId": "top"
-      }
+      },
+      "resources": {}
     },
     {
       "id": "leg0",
       "definitionId": "flight-landing-strut",
-      "fuelKg": 0,
       "stage": null,
       "attachment": {
         "parentId": "p5",
         "parentNodeId": "leg0",
         "nodeId": "top"
-      }
+      },
+      "resources": {}
     },
     {
       "id": "foot0",
       "definitionId": "flight-foot-0",
-      "fuelKg": 0,
       "stage": null,
       "attachment": {
         "parentId": "leg0",
         "parentNodeId": "bottom",
         "nodeId": "top"
-      }
+      },
+      "resources": {}
     },
     {
       "id": "leg1",
       "definitionId": "flight-landing-strut",
-      "fuelKg": 0,
       "stage": null,
       "attachment": {
         "parentId": "p5",
         "parentNodeId": "leg1",
         "nodeId": "top"
-      }
+      },
+      "resources": {}
     },
     {
       "id": "foot1",
       "definitionId": "flight-foot-1",
-      "fuelKg": 0,
       "stage": null,
       "attachment": {
         "parentId": "leg1",
         "parentNodeId": "bottom",
         "nodeId": "top"
-      }
+      },
+      "resources": {}
     },
     {
       "id": "leg2",
       "definitionId": "flight-landing-strut",
-      "fuelKg": 0,
       "stage": null,
       "attachment": {
         "parentId": "p5",
         "parentNodeId": "leg2",
         "nodeId": "top"
-      }
+      },
+      "resources": {}
     },
     {
       "id": "foot2",
       "definitionId": "flight-foot-2",
-      "fuelKg": 0,
       "stage": null,
       "attachment": {
         "parentId": "leg2",
         "parentNodeId": "bottom",
         "nodeId": "top"
-      }
+      },
+      "resources": {}
     },
     {
       "id": "leg3",
       "definitionId": "flight-landing-strut",
-      "fuelKg": 0,
       "stage": null,
       "attachment": {
         "parentId": "p5",
         "parentNodeId": "leg3",
         "nodeId": "top"
-      }
+      },
+      "resources": {}
     },
     {
       "id": "foot3",
       "definitionId": "flight-foot-3",
-      "fuelKg": 0,
       "stage": null,
       "attachment": {
         "parentId": "leg3",
         "parentNodeId": "bottom",
         "nodeId": "top"
-      }
+      },
+      "resources": {}
     }
   ]
 }

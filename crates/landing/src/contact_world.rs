@@ -731,7 +731,18 @@ impl<F: ContactFrame> ContactWorld<F> {
     pub fn step(
         &mut self,
         ephemeris: &mut dyn EphemerisSource,
+        extra: Option<ExtraAcceleration<'_>>,
+    ) {
+        self.step_with_passive(ephemeris, extra, None);
+    }
+
+    /// Active forces wake resting bodies; passive damping does not create motion at rest.
+    /// Callers must classify forces by intent, rather than by their numerical magnitude.
+    pub fn step_with_passive(
+        &mut self,
+        ephemeris: &mut dyn EphemerisSource,
         mut extra: Option<ExtraAcceleration<'_>>,
+        mut passive: Option<ExtraAcceleration<'_>>,
     ) {
         let dt = self.options.step_seconds;
         ephemeris.extend_to(self.time + dt);
@@ -770,7 +781,11 @@ impl<F: ContactFrame> ContactWorld<F> {
             }
             let u = v64(body.linvel());
             // Coriolis at the mid-point velocity estimate u + a dt / 2, thrust included.
-            let e = push.unwrap_or(DVec3::ZERO);
+            let damping = passive.as_mut().map_or(DVec3::ZERO, |f| {
+                let state = self.state(ephemeris, handle, DVec3::ZERO);
+                f(handle, state)
+            });
+            let e = push.unwrap_or(DVec3::ZERO) + damping;
             let mut a = self.frame.acceleration(ephemeris, self.time, position, u);
             a = self.frame.acceleration(
                 ephemeris,

@@ -906,7 +906,7 @@ fn controls(
         p.definition
             .modules
             .iter()
-            .any(|m| matches!(m, Module::Command))
+            .any(|m| matches!(m, Module::Command { .. }))
     });
     if keys.just_pressed(KeyCode::KeyT) && commanded {
         let enabled = lab.session.sim().fleet.sas_phase(&id) == void_vessels::SasPhase::Off;

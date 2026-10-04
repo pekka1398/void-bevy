@@ -1,16 +1,18 @@
 use glam::DVec3;
-use void_assembly::PartGraph;
+use void_assembly::{PartGraph, ResourceId};
 use void_modules::{Conditions, engine};
 
 #[derive(Clone, Debug)]
 pub struct EngineForce {
     pub part_id: String,
+    pub module_id: String,
     pub force: DVec3,
     pub point: DVec3,
 }
 #[derive(Clone, Debug)]
 pub struct FuelGroup {
     pub tanks: Vec<String>,
+    pub resource: ResourceId,
     pub engines: Vec<EngineForce>,
     pub flow_kg_per_second: f64,
     pub fuel_kg: f64,
@@ -41,31 +43,49 @@ pub fn propulsion(
     if throttle > 0.0 {
         for id in members {
             let p = graph.part(id);
-            if !p.lit {
-                continue;
-            }
-            let tanks = graph.crossfeed_tanks(members, id);
-            let fuel_kg = tanks.iter().map(|t| graph.part(t).fuel_kg).sum::<f64>();
-            if fuel_kg <= 0.0 {
-                continue;
-            }
-            let thrust = engine::thrust(p, throttle, conditions);
-            let e = EngineForce {
-                part_id: id.clone(),
-                force: thrust.force,
-                point: thrust.point,
-            };
-            let flow = thrust.flow_kg_per_second;
-            if let Some(g) = groups.iter_mut().find(|g| g.tanks == tanks) {
-                g.engines.push(e);
-                g.flow_kg_per_second += flow;
-            } else {
-                groups.push(FuelGroup {
-                    tanks,
-                    engines: vec![e],
-                    flow_kg_per_second: flow,
-                    fuel_kg,
-                });
+            for (module_id, rating) in p.engines() {
+                if !p.engine_enabled(module_id) {
+                    continue;
+                }
+                let resource = rating.resource;
+                let tanks = graph.resource_tanks(members, id, resource);
+                let fuel_kg = tanks
+                    .iter()
+                    .map(|t| graph.part(t).resource(resource))
+                    .sum::<f64>();
+                if fuel_kg == 0.0 {
+                    continue;
+                }
+                let thrust = engine::thrust_rating(p, rating, throttle, conditions);
+                let e = EngineForce {
+                    part_id: id.clone(),
+                    module_id: module_id.to_string(),
+                    force: thrust.force,
+                    point: thrust.point,
+                };
+                let flow = thrust.flow_kg_per_second;
+                assert!(flow.is_finite() && flow > 0.0, "invalid consumer flow");
+                assert!(
+                    !groups.iter().any(|g| g.resource == resource
+                        && g.tanks != tanks
+                        && g.tanks.iter().any(|t| tanks.contains(t))),
+                    "partially overlapping supply pools unsupported"
+                );
+                if let Some(g) = groups
+                    .iter_mut()
+                    .find(|g| g.resource == resource && g.tanks == tanks)
+                {
+                    g.engines.push(e);
+                    g.flow_kg_per_second += flow;
+                } else {
+                    groups.push(FuelGroup {
+                        resource,
+                        tanks,
+                        engines: vec![e],
+                        flow_kg_per_second: flow,
+                        fuel_kg,
+                    });
+                }
             }
         }
     }
@@ -97,13 +117,13 @@ pub fn burn(graph: &mut PartGraph, groups: &[FuelGroup], seconds: f64) -> f64 {
     for g in groups {
         let used = g.fuel_kg.min(g.flow_kg_per_second * seconds);
         for id in &g.tanks {
-            let fuel_kg = graph.part(id).fuel_kg;
+            let fuel_kg = graph.part(id).resource(g.resource);
             let remaining = if used >= g.fuel_kg {
                 0.0
             } else {
-                (fuel_kg * (1.0 - used / g.fuel_kg)).max(0.0)
+                fuel_kg * (1.0 - used / g.fuel_kg)
             };
-            graph.set_fuel(id, remaining);
+            graph.set_resource(id, g.resource, remaining);
         }
         total += used;
     }

@@ -1,6 +1,6 @@
 # 任務：零件運行狀態與多資源供應
 
-狀態：待實作。任務分支 `claude/part-state-resources`。
+狀態：實作與核對完成，使用者已接受目前降落傘外觀；尚未提交或合併。任務分支 `claude/part-state-resources`。
 起始程式基線：`7a4e5d2`（已審查的四項重構，MODEL_VERSION 9）。
 相關：[NOTE.md](../../NOTE.md)、[part-modules.md](../part-modules.md)、[part-graph.md](../part-graph.md)。
 

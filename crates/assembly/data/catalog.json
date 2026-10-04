@@ -28,7 +28,8 @@
     ],
     "modules": [
       {
-        "kind": "command"
+        "kind": "command",
+        "id": "command1"
       }
     ]
   },
@@ -76,7 +77,9 @@
     "modules": [
       {
         "kind": "tank",
-        "capacityKg": 700
+        "capacityKg": 700,
+        "id": "tank1",
+        "resource": "liquidPropellant"
       }
     ]
   },
@@ -124,7 +127,9 @@
     "modules": [
       {
         "kind": "tank",
-        "capacityKg": 2800
+        "capacityKg": 2800,
+        "id": "tank1",
+        "resource": "liquidPropellant"
       }
     ]
   },
@@ -179,7 +184,9 @@
           0,
           1,
           0
-        ]
+        ],
+        "id": "engine1",
+        "resource": "liquidPropellant"
       }
     ]
   },
@@ -234,7 +241,9 @@
           0,
           1,
           0
-        ]
+        ],
+        "id": "engine1",
+        "resource": "liquidPropellant"
       }
     ]
   },
@@ -283,7 +292,8 @@
       {
         "kind": "decoupler",
         "nodeId": "top",
-        "impulseNs": 100
+        "impulseNs": 100,
+        "id": "decoupler1"
       }
     ]
   },
@@ -316,7 +326,8 @@
     ],
     "modules": [
       {
-        "kind": "command"
+        "kind": "command",
+        "id": "command1"
       }
     ]
   },
@@ -364,7 +375,9 @@
     "modules": [
       {
         "kind": "tank",
-        "capacityKg": 1470
+        "capacityKg": 1470,
+        "id": "tank1",
+        "resource": "liquidPropellant"
       }
     ]
   },
@@ -419,7 +432,9 @@
           0,
           1,
           0
-        ]
+        ],
+        "id": "engine1",
+        "resource": "liquidPropellant"
       }
     ]
   },
@@ -468,7 +483,8 @@
       {
         "kind": "decoupler",
         "nodeId": "top",
-        "impulseNs": 100
+        "impulseNs": 100,
+        "id": "decoupler1"
       }
     ]
   },
@@ -572,7 +588,9 @@
     "modules": [
       {
         "kind": "tank",
-        "capacityKg": 5350
+        "capacityKg": 5350,
+        "id": "tank1",
+        "resource": "liquidPropellant"
       }
     ]
   },
@@ -627,7 +645,9 @@
           0,
           1,
           0
-        ]
+        ],
+        "id": "engine1",
+        "resource": "liquidPropellant"
       }
     ]
   },
@@ -789,5 +809,153 @@
       }
     ],
     "modules": []
+  },
+  {
+    "id": "parachute-pod",
+    "name": "返回傘艙",
+    "category": "command",
+    "description": "居中降落傘驗收零件",
+    "dryMassKg": 300,
+    "height": 1.6,
+    "radius": 0.625,
+    "shape": "cone",
+    "color": "#e5e9ec",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.8,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      },
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.8,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "command",
+        "id": "command1"
+      },
+      {
+        "kind": "parachute",
+        "id": "parachute1",
+        "parameters": {
+          "semiAreaM2": 2.0,
+          "fullAreaM2": 80.0,
+          "dragCoefficient": 1.5,
+          "minPressurePa": 100.0,
+          "maxDynamicPressurePa": 25000.0,
+          "fullDeployAltitudeMeters": 1500.0,
+          "semiSeconds": 1.0,
+          "fullSeconds": 2.0
+        }
+      }
+    ]
+  },
+  {
+    "id": "dual-resource-pod",
+    "name": "雙資源驗收艙",
+    "category": "command",
+    "description": "獨立液體／單推進劑消耗與多模組驗收",
+    "dryMassKg": 300,
+    "height": 1.6,
+    "radius": 0.625,
+    "shape": "cone",
+    "color": "#e5e9ec",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.8,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      },
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.8,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "command",
+        "id": "command1"
+      },
+      {
+        "kind": "tank",
+        "id": "tank1",
+        "resource": "liquidPropellant",
+        "capacityKg": 20.0
+      },
+      {
+        "kind": "tank",
+        "id": "tank2",
+        "resource": "monopropellant",
+        "capacityKg": 10.0
+      },
+      {
+        "kind": "engine",
+        "id": "engine1",
+        "resource": "liquidPropellant",
+        "thrustNewtons": 100.0,
+        "ispSeconds": 100.0,
+        "nozzleExitAreaM2": 0.0,
+        "direction": [
+          0,
+          1,
+          0
+        ]
+      },
+      {
+        "kind": "engine",
+        "id": "engine2",
+        "resource": "monopropellant",
+        "thrustNewtons": 100.0,
+        "ispSeconds": 100.0,
+        "nozzleExitAreaM2": 0.0,
+        "direction": [
+          0,
+          1,
+          0
+        ]
+      }
+    ]
   }
 ]

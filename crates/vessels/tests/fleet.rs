@@ -520,7 +520,9 @@ fn connected_engines_share_tanks_and_drain_proportionally() {
     craft = void_assembly::add_part(&craft, "engine-small", "p2", "bottom", "top").unwrap();
     craft = void_assembly::add_part(&craft, "tank-small", "p3", "bottom", "top").unwrap();
     craft = void_assembly::add_part(&craft, "engine-small", "p4", "bottom", "top").unwrap();
-    craft.parts[3].fuel_kg = 350.0;
+    craft.parts[3]
+        .resources
+        .insert(void_assembly::ResourceId::LiquidPropellant, 350.0);
     craft.parts[2].stage = Some(0);
     craft.parts[4].stage = Some(0);
     let s = create_lab_scene(Scenario::Separate);
@@ -724,7 +726,7 @@ fn the_part_graph_is_the_record_and_a_checkpoint_restores_it() {
     // The demo's first stage lights its lower engine; the second releases the decoupler and
     // lights the upper engine.
     assert!(f.stage("v1").is_empty());
-    assert!(f.parts().part("v1/p6").lit);
+    assert!(f.parts().part("v1/p6").lit());
     f.set_control(
         "v1",
         VesselControl {
@@ -735,8 +737,8 @@ fn the_part_graph_is_the_record_and_a_checkpoint_restores_it() {
     f.advance(0.5);
     assert_eq!(f.stage("v1"), ["v2"]);
     let decoupler = f.parts().part("v1/p4");
-    assert!(decoupler.staged && !decoupler.lit);
-    assert!(f.parts().part("v1/p3").lit);
+    assert!(decoupler.staged() && !decoupler.lit());
+    assert!(f.parts().part("v1/p3").lit());
     assert_eq!(f.parts().connections().len(), connections - 1);
     let members = |f: &Fleet, id: &str| -> Vec<String> {
         f.part_snapshots(id).into_iter().map(|p| p.id).collect()
@@ -775,10 +777,10 @@ fn the_part_graph_is_the_record_and_a_checkpoint_restores_it() {
     for (a, b) in a.iter().zip(&b) {
         assert_eq!(a.id, b.id);
         assert_eq!(a.definition.id, b.definition.id);
-        assert_eq!(a.fuel_kg.to_bits(), b.fuel_kg.to_bits(), "{}", a.id);
+        assert_eq!(a.fuel_kg().to_bits(), b.fuel_kg().to_bits(), "{}", a.id);
         assert_eq!(
-            (a.stage, a.staged, a.lit, a.pose),
-            (b.stage, b.staged, b.lit, b.pose),
+            (a.stage, a.staged(), a.lit(), a.pose),
+            (b.stage, b.staged(), b.lit(), b.pose),
             "{}",
             a.id
         );

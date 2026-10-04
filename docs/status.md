@@ -80,3 +80,7 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 - 噴嘴面積已是 catalog 的正式欄位（`nozzleExitAreaM2`）；新增引擎需在定義中提供，沒有額外的 engine ID 對照表。
 - 搬遷時列出、仍未補的觀察工具：`lod` example 的 preset 選擇、vessels-lab 的歷史軌跡、multiscale encounter 的任意天體／船選取。詳見 [port-audit.md](port-audit.md)（歷史頁）。
 - 存檔與錄影綁定模型版本、catalog 與 Rapier 版本，版本不同時直接拒絕，沒有遷移。
+
+## Part-state/resources 分支（待視窗驗收）
+
+`claude/part-state-resources` 把 Fleet 的 live 零件可變資料統一為 typed resource map、按穩定 module ID 尋址的 state/stage map，新增雙資源供應與 force-only 降落傘。Craft 2／FleetCheckpoint 4／暫定 model 10 明確區分基線；舊 craft 可用顯式離線工具轉換。主遊戲預設火箭未新增傘。獨立 `void-part-state-lab` 與驗收操作、限制見 [part-state-resources.md](part-state-resources.md)。最終格式版本由兩分支整合時再分配。

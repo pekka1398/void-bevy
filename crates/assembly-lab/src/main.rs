@@ -205,7 +205,12 @@ impl Lab {
                     .find(|p| p.id == self.selected)
                     .expect("selected part");
                 let cap = tank_capacity(definition(&p.definition_id)?);
-                p.fuel_kg = (p.fuel_kg + delta * cap).clamp(0.0, cap);
+                let r = void_assembly::ResourceId::LiquidPropellant;
+                let quantity = p
+                    .resources
+                    .get_mut(&r)
+                    .ok_or_else(|| "selected part has no liquid propellant tank".to_string())?;
+                *quantity = (*quantity + delta * cap).clamp(0.0, cap);
                 self.set_craft(c)?;
             }
             Action::StageEdit(delta) => {
@@ -905,7 +910,7 @@ fn draw(
             let fuel = lab
                 .flight
                 .as_ref()
-                .map_or(p.instance.fuel_kg, |f| f.fuel[&p.instance.id]);
+                .map_or(p.instance.resource_mass(), |f| f.fuel[&p.instance.id]);
             text.0 = format!(
                 "{} / {}\nDry mass: {:.0} kg\nFuel: {:.1} / {:.0} kg\nStage: {}\n{}",
                 p.instance.id,

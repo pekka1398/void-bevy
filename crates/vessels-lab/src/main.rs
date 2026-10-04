@@ -195,7 +195,7 @@ impl Lab {
                         p.definition
                             .modules
                             .iter()
-                            .any(|m| matches!(m, void_assembly::Module::Command))
+                            .any(|m| matches!(m, void_assembly::Module::Command { .. }))
                     })
                 {
                     self.scene.fleet.set_sas(&self.selected, on);
@@ -533,7 +533,7 @@ fn controls(
         !p.definition
             .modules
             .iter()
-            .any(|m| matches!(m, void_assembly::Module::Command))
+            .any(|m| matches!(m, void_assembly::Module::Command { .. }))
     }) {
         c.turn = DVec3::ZERO;
     }

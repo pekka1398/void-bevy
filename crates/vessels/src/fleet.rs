@@ -16,7 +16,7 @@ use void_landing::{
     BodyShape, ContactBodySpec, ContactFrame, ContactWorld, ContactWorldOptions,
     EncounterPhysicsGate, EncounterRanges, FrameState, Piece, PieceMass, PlanetFrame, SimpleShape,
 };
-use void_modules::{Conditions, has_atmosphere, vessel_air};
+use void_modules::{Conditions, has_atmosphere, vessel_air_at};
 use void_orbit::{
     AdvanceOutcome, AirSource, CelestialBody, Control, EphemerisSource, ForceControl,
     PropagationRun, SystemFrames, Tolerances, VesselPropagator, VesselState,
@@ -107,6 +107,9 @@ pub struct PartSnapshot {
     pub local_position: DVec3,
     pub local_rotation: DQuat,
     pub fuel_kg: f64,
+    pub resources: void_assembly::Resources,
+    pub modules: BTreeMap<String, void_assembly::ModuleState>,
+    pub module_stages: BTreeMap<String, Option<u32>>,
     pub stage: Option<u32>,
     pub staged: bool,
     pub lit: bool,
@@ -444,14 +447,137 @@ impl Fleet {
             return None;
         }
         let snapshot = self.snapshot_of(v);
-        vessel_air(
+        vessel_air_at(
             &self.environment,
             &self.parts,
             &v.members,
             self.centre(&v.members),
             snapshot.rotation,
+            match &v.owner {
+                Owner::Orbit { run, .. } => run.time,
+                _ => self.time,
+            },
         )
         .map(|air| Arc::new(air) as Arc<dyn AirSource>)
+    }
+    /// Commands are addressed to immutable part/module identities, never vector positions.
+    pub fn set_module_stage(&mut self, part: &str, module: &str, stage: Option<u32>) {
+        let id = self.vessel_of_part(part);
+        self.cancel_guidance(&id, "module staging changed");
+        self.parts.set_module_stage(part, module, stage);
+    }
+    pub fn parachute_command(
+        &mut self,
+        part: &str,
+        module: &str,
+        command: void_modules::parachute::Command,
+    ) {
+        let id = self.vessel_of_part(part);
+        self.cancel_guidance(&id, "parachute command");
+        let void_assembly::ModuleState::Parachute { state } = self
+            .parts
+            .part(part)
+            .modules
+            .get(module)
+            .expect("unknown parachute module")
+        else {
+            panic!("module is not parachute")
+        };
+        let state = void_modules::parachute::command(*state, command);
+        self.parts.set_module_state(
+            part,
+            module,
+            void_assembly::ModuleState::Parachute { state },
+        );
+    }
+    fn active_parachutes(&self) -> bool {
+        self.parts.parts().any(|p|p.modules.values().any(|m|matches!(m,void_assembly::ModuleState::Parachute{state} if void_modules::parachute::active(*state))))
+    }
+    fn prepare_parachutes(&mut self) {
+        let mut changes = vec![];
+        for id in &self.order {
+            let v = self.vessel(id);
+            let snap = self.snapshot_of(v);
+            let centre = self.centre(&v.members);
+            for pid in &v.members {
+                let part = self.parts.part(pid);
+                for m in &part.definition.modules {
+                    if let Module::Parachute {
+                        id: mid,
+                        parameters,
+                    } = m
+                    {
+                        let void_assembly::ModuleState::Parachute { state } = part.modules[mid]
+                        else {
+                            panic!("parachute state mismatch")
+                        };
+                        let position =
+                            snap.position + snap.rotation * (part.pose.position - centre);
+                        let velocity =
+                            snap.velocity + snap.angular_velocity.cross(position - snap.position);
+                        let frames = self.environment.frames();
+                        let at = frames.tree.at(self.time, &*self.ephemeris);
+                        let conditions = (0..self.environment.bodies().len()).find_map(|body| {
+                            let sample = self.environment.surroundings(
+                                &at,
+                                frames,
+                                frames.origin,
+                                State { position, velocity },
+                                body,
+                            );
+                            sample.air.map(|air| void_modules::parachute::Conditions {
+                                pressure_pa: air.air.pressure_pa,
+                                dynamic_pressure_pa: 0.5
+                                    * air.air.density
+                                    * air.airspeed.length_squared(),
+                                altitude_meters: air.altitude,
+                            })
+                        });
+                        changes.push((
+                            pid.clone(),
+                            mid.clone(),
+                            void_modules::parachute::prepare(state, parameters, conditions),
+                        ));
+                    }
+                }
+            }
+        }
+        for (part, module, state) in changes {
+            self.parts.set_module_state(
+                &part,
+                &module,
+                void_assembly::ModuleState::Parachute { state },
+            );
+        }
+    }
+    fn commit_parachutes(&mut self, seconds: f64) {
+        let changes: Vec<_> = self
+            .parts
+            .parts()
+            .flat_map(|p| {
+                p.definition.modules.iter().filter_map(|m| {
+                    if let Module::Parachute { id, parameters } = m {
+                        let void_assembly::ModuleState::Parachute { state } = p.modules[id] else {
+                            panic!("parachute state mismatch")
+                        };
+                        Some((
+                            p.id.clone(),
+                            id.clone(),
+                            void_modules::parachute::commit(state, parameters, seconds),
+                        ))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+        for (part, module, state) in changes {
+            self.parts.set_module_state(
+                &part,
+                &module,
+                void_assembly::ModuleState::Parachute { state },
+            );
+        }
     }
     pub fn time(&self) -> f64 {
         self.time
@@ -554,7 +680,7 @@ impl Fleet {
         )
     }
     pub fn fuel(&self, id: &str) -> f64 {
-        self.parts.part(id).fuel_kg
+        self.parts.part(id).fuel_kg()
     }
     pub fn control(&self, id: &str) -> VesselControl {
         self.controls[id]
@@ -611,12 +737,18 @@ impl Fleet {
         );
         for p in &c.parts {
             assert!(
-                !p.definition
+                p.definition
                     .modules
                     .iter()
-                    .any(|m| matches!(m, Module::Engine { .. } | Module::Decoupler { .. }))
-                    || p.instance.stage.is_some(),
-                "fleet: actionable part needs stage"
+                    .filter(|m| matches!(m, Module::Engine { .. } | Module::Decoupler { .. }))
+                    .all(|m| p
+                        .instance
+                        .module_stages
+                        .get(m.id())
+                        .copied()
+                        .unwrap_or(p.instance.stage)
+                        .is_some()),
+                "fleet: engine/decoupler module needs stage"
             );
         }
         let id = format!("v{}", self.next_vessel);
@@ -903,10 +1035,13 @@ impl Fleet {
                     frame,
                     local_position: pose.position,
                     local_rotation: pose.rotation,
-                    fuel_kg: part.fuel_kg,
+                    fuel_kg: part.fuel_kg(),
+                    resources: part.resources.clone(),
+                    modules: part.modules.clone(),
+                    module_stages: part.module_stages.clone(),
                     stage: part.stage,
-                    staged: part.staged,
-                    lit: part.lit,
+                    staged: part.staged(),
+                    lit: part.lit(),
                     firing: p
                         .groups
                         .iter()
@@ -1486,51 +1621,73 @@ impl Fleet {
         }
     }
     pub fn stages_left(&self, id: &str) -> Vec<u32> {
-        let mut s: Vec<_> = self
+        let mut stages: Vec<_> = self
             .vessel(id)
             .members
             .iter()
-            .map(|id| self.parts.part(id))
-            .filter(|p| !p.staged)
-            .filter_map(|p| p.stage)
+            .flat_map(|pid| {
+                let p = self.parts.part(pid);
+                p.module_stages.iter().filter_map(|(mid, stage)| {
+                    (!p.module_activated(mid)).then_some(*stage).flatten()
+                })
+            })
             .collect();
-        s.sort_unstable();
-        s.dedup();
-        s
+        stages.sort_unstable();
+        stages.dedup();
+        stages
     }
     pub fn stage(&mut self, id: &str) -> Vec<String> {
         self.cancel_guidance(id, "staging");
         let Some(next) = self.stages_left(id).first().copied() else {
             return vec![];
         };
-        let parts: Vec<_> = self
+        let actions: Vec<_> = self
             .vessel(id)
             .members
             .iter()
-            .filter(|p| {
-                let part = self.parts.part(p);
-                part.stage == Some(next) && !part.staged
+            .flat_map(|pid| {
+                let p = self.parts.part(pid);
+                p.definition
+                    .modules
+                    .iter()
+                    .filter(move |m| {
+                        p.module_stages.get(m.id()) == Some(&Some(next))
+                            && !p.module_activated(m.id())
+                    })
+                    .map(move |m| {
+                        (
+                            pid.clone(),
+                            m.id().to_string(),
+                            matches!(m, Module::Decoupler { .. }),
+                        )
+                    })
             })
-            .cloned()
             .collect();
         let mut split = vec![];
-        for p in &parts {
-            if self.parts.part(p).decoupler().is_some() {
-                let new = self.decouple(p);
-                self.parts.stage_part(p);
+        for (part, module, cut) in &actions {
+            if *cut {
+                let new = self.decouple_module(part, module);
+                self.parts.stage_module(part, module);
                 split.push(new);
             }
         }
-        for p in parts {
-            if self.parts.part(&p).engine().is_some() {
-                self.parts.stage_part(&p);
+        for (part, module, cut) in actions {
+            if !cut {
+                self.parts.stage_module(&part, &module);
             }
         }
         split
     }
+    pub fn decouple_module(&mut self, part: &str, module: &str) -> String {
+        let (node_id, impulse) = self.parts.part(part).decoupler_module(module);
+        self.decouple_at(part, node_id, impulse)
+    }
     pub fn decouple(&mut self, part: &str) -> String {
-        let d = self.parts.part(part).definition;
         let (node_id, impulse) = self.parts.part(part).decoupler().expect("not a decoupler");
+        self.decouple_at(part, node_id, impulse)
+    }
+    fn decouple_at(&mut self, part: &str, node_id: &str, impulse: f64) -> String {
+        let d = self.parts.part(part).definition;
         assert!(
             self.parts.connection_at(part, node_id).is_some(),
             "decoupler node not connected"
@@ -2004,17 +2161,26 @@ impl Fleet {
             let w = vec64(b.angvel());
             let c = vec64(b.local_center_of_mass());
             let p = self.propulsion_of(&v);
-            let air = self.air_source(&v);
             let snapshot = self.snapshot_of(&v);
-            let air_acceleration = air.map_or(DVec3::ZERO, |source| {
-                self.axes(scene).conjugate()
-                    * source.acceleration(
-                        &*self.ephemeris,
-                        self.time,
-                        snapshot.position,
-                        snapshot.velocity,
-                        snapshot.mass_kg,
-                    )
+            let air_acceleration = vessel_air_at(
+                &self.environment,
+                &self.parts,
+                &v.members,
+                self.centre(&v.members),
+                snapshot.rotation,
+                self.time,
+            )
+            .map_or(DVec3::ZERO, |source| {
+                let local = world.state(&*self.ephemeris, body, push);
+                source.acceleration_in(
+                    &self.frames(),
+                    self.scenes[&scene].contact,
+                    State {
+                        position: local.position,
+                        velocity: local.velocity,
+                    },
+                    snapshot.mass_kg,
+                )
             });
             let (force, tau, burned) = step_thrust(&p, dt, c);
             let resting =
@@ -2024,29 +2190,39 @@ impl Fleet {
             } else {
                 tau + self.steering(&v, q, w, dt)
             };
-            let now = q * force / (self.mass(&v.members) - burned / 2.0) + air_acceleration;
+            let active = q * force / (self.mass(&v.members) - burned / 2.0);
+            let now = active + air_acceleration;
             self.scenes
                 .get_mut(&scene)
                 .unwrap()
                 .world
                 .apply_local_torque(body, torque);
-            plans.push((id, body, push, now, p));
+            plans.push((id, body, push, now, p, active));
         }
         let world = &mut self.scenes.get_mut(&scene).unwrap().world;
         if let SceneFrame::Bubble(f) = &mut world.frame {
             f.advance_origin(&mut self.ephemeris, self.time + dt);
         }
-        world.step(
+        world.step_with_passive(
             &mut self.ephemeris,
             Some(&mut |body, _| {
                 let p = plans
                     .iter()
-                    .find(|(_, b, _, _, _)| *b == body)
+                    .find(|(_, b, _, _, _, _)| *b == body)
                     .expect("scene body has no vessel");
-                (p.2 + p.3) / 2.0
+                p.5
+            }),
+            Some(&mut |body, _| {
+                let p = plans
+                    .iter()
+                    .find(|p| p.1 == body)
+                    .expect("scene body has no vessel");
+                // Preserve the previous total kick for half-step state reconstruction. Only the
+                // current active thrust wakes a body; the remaining trapezoidal kick is passive.
+                (p.2 + p.3) / 2.0 - p.5
             }),
         );
-        for (id, body, _, now, p) in plans {
+        for (id, body, _, now, p, _) in plans {
             if let Owner::Scene { push, .. } = &mut self.vessels.get_mut(&id).unwrap().owner {
                 *push = now;
             }
@@ -2068,6 +2244,7 @@ impl Fleet {
         }
     }
     fn step_all(&mut self) {
+        self.prepare_parachutes();
         let end = self.time + self.options.step_seconds;
         for scene in self.scenes.keys().copied().collect::<Vec<_>>() {
             self.step_scene(scene);
@@ -2077,6 +2254,7 @@ impl Fleet {
                 self.advance_orbit(&id, end);
             }
         }
+        self.commit_parachutes(self.options.step_seconds);
         self.time = end;
         for scene in self.scenes.keys().copied().collect::<Vec<_>>() {
             let s = &self.scenes[&scene];
@@ -2111,7 +2289,7 @@ impl Fleet {
                 step
             };
             self.reconcile(lookahead);
-            if !self.scenes.is_empty() {
+            if !self.scenes.is_empty() || self.active_parachutes() {
                 if self.time + step > target + 1e-12 {
                     self.pending = (target - self.time).max(0.0);
                     return;
@@ -2141,6 +2319,13 @@ impl Fleet {
             return Some("scheduled maneuver: use physics time".into());
         }
         for id in &self.order {
+            let v = self.vessel(id);
+            let active=v.members.iter().any(|pid|self.parts.part(pid).modules.values().any(|m|matches!(m,void_assembly::ModuleState::Parachute{state} if void_modules::parachute::active(*state))));
+            if active && has_atmosphere(&self.environment) {
+                return Some(format!(
+                    "active parachute requires physics in atmospheric world on {id}"
+                ));
+            }
             if self.propulsion_of(self.vessel(id)).flow_kg_per_second > 0.0 {
                 return Some(format!("engine firing on {id}"));
             }
@@ -2179,6 +2364,10 @@ impl Fleet {
         self.pending = 0.0;
         let mut done = true;
         'coast: while self.time + 1e-9 < target {
+            if self.rails_blocker().is_some() {
+                done = false;
+                break;
+            }
             if self.order.iter().any(|id| {
                 matches!(self.vessel(id).owner, Owner::Orbit { .. })
                     && self.ground_for(self.vessel(id)).is_some()
@@ -2228,6 +2417,7 @@ impl Fleet {
             for s in self.scenes.values_mut() {
                 s.world.idle_to(&mut self.ephemeris, end);
             }
+            self.commit_parachutes(end - self.time);
             self.time = end;
         }
         for sas in self.sas.values_mut() {

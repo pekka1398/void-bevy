@@ -253,3 +253,91 @@ fn vessel_air_samples_the_current_body_in_a_multi_atmosphere_world() {
         assert!(drag.dot(actual.airspeed) < 0.0, "body {body}: {drag}");
     }
 }
+
+#[test]
+fn a_local_chute_feels_air_when_its_com_is_above_the_ceiling() {
+    use void_assembly::{ModuleState, ParachutePhase, ParachuteState, PartPose, fresh_craft};
+    let p = void_landing::earth_size();
+    let (e, home) = void_landing::planet_ephemeris(&p);
+    let env = void_landing::planet_environment(&p, &e, home, true);
+    let mut c = fresh_craft();
+    c.parts[0].definition_id = "parachute-pod".into();
+    let mut g = PartGraph::new();
+    let ids = g.add(&compile(&c).unwrap(), "v1");
+    g.set_pose(
+        &ids[0],
+        PartPose {
+            position: -DVec3::X * 1000.0,
+            rotation: DQuat::IDENTITY,
+        },
+    );
+    // Restore a valid full state directly; live transitions cannot skip deployment.
+    let mut part = g.part(&ids[0]).clone();
+    part.id = "full".into();
+    part.modules.insert(
+        "parachute1".into(),
+        ModuleState::Parachute {
+            state: ParachuteState {
+                phase: ParachutePhase::Full,
+                elapsed_seconds: 0.0,
+            },
+        },
+    );
+    g.insert(part);
+    let ids = vec!["full".into()];
+    let frames = env.frames();
+    let at = frames.tree.at(10.0, &e);
+    let rotation = at.transform(frames.surface[home], frames.origin).rotation();
+    let air = void_modules::vessel_air_at(&env, &g, &ids, DVec3::ZERO, rotation, 10.0).unwrap();
+    let frame = void_landing::PlanetFrame::new(&e, home);
+    let state = frame.to_inertial(
+        &e,
+        10.0,
+        void_landing::FrameState {
+            position: DVec3::X * (p.terrain.radius_meters + 120500.0),
+            velocity: DVec3::Y * 1000.0,
+        },
+    );
+    assert!(
+        Conditions::at(
+            &env,
+            &e,
+            10.0,
+            State {
+                position: state.position,
+                velocity: state.velocity
+            }
+        )
+        .air
+        .is_none()
+    );
+    let before = g.part("full").modules.clone();
+    let force = air.acceleration(&e, 10.0, state.position, state.velocity, 300.0);
+    assert!(force.length() > 0.0);
+    let frames = env.frames();
+    let at = frames.tree.at(10.0, &e);
+    let framed = air.acceleration_in(
+        &at,
+        frames.origin,
+        State {
+            position: state.position,
+            velocity: state.velocity,
+        },
+        300.0,
+    );
+    assert_eq!(
+        framed, force,
+        "scene sampling must retain the off-centre chute force"
+    );
+    assert_eq!(g.part("full").modules, before);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| air.acceleration(
+            &e,
+            9.0,
+            state.position,
+            state.velocity,
+            300.0
+        )))
+        .is_err()
+    );
+}

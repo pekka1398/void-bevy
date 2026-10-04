@@ -5555,6 +5555,7 @@ dependencies = [
  "void-assembly",
  "void-frames",
  "void-landing",
+ "void-modules",
  "void-orbit",
  "void-terrain",
  "void-vessels",
@@ -5685,6 +5686,20 @@ dependencies = [
  "serde_json",
  "void-orbit",
  "void-view",
+]
+
+[[package]]
+name = "void-part-state-lab"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "glam 0.32.1",
+ "void-assembly",
+ "void-fleet-flight",
+ "void-frames",
+ "void-landing",
+ "void-modules",
+ "void-vessels",
 ]
 
 [[package]]

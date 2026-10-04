@@ -26,9 +26,9 @@ fn a_launched_craft_is_its_compiled_graph() {
         for (id, p) in ids.iter().zip(&c.parts) {
             let part = graph.part(id);
             assert_eq!(part.pose, p.pose);
-            assert_eq!(part.fuel_kg, p.instance.fuel_kg);
+            assert_eq!(part.fuel_kg(), p.instance.resource_mass());
             assert_eq!(part.stage, p.instance.stage);
-            assert!(!part.staged && !part.lit);
+            assert!(!part.staged() && !part.lit());
             assert_eq!(
                 part.engine().is_some(),
                 p.definition.category == Category::Engine
@@ -162,7 +162,13 @@ fn invalid_graph_operations_panic() {
     }));
     let mut lit = graph.part("v1/p1").clone();
     lit.id = "v2/p1".into();
-    lit.lit = true;
+    lit.modules.insert(
+        "command1".into(),
+        void_assembly::ModuleState::Engine {
+            activated: true,
+            enabled: true,
+        },
+    );
     assert!(panics(|| {
         graph.clone().insert(lit.clone());
     }));
@@ -182,10 +188,10 @@ fn every_catalog_engine_rates_its_nozzle() {
         graph.insert(void_assembly::Part {
             id: "e".into(),
             definition: d,
-            fuel_kg: 0.0,
+            resources: void_assembly::Resources::new(),
+            modules: void_assembly::initial_modules(d),
             stage: None,
-            staged: false,
-            lit: false,
+            module_stages: void_assembly::default_module_stages(d, None),
             pose: void_assembly::PartPose {
                 position: glam::DVec3::ZERO,
                 rotation: glam::DQuat::IDENTITY,
@@ -218,7 +224,8 @@ fn insertion_rejects_invalid_fuel_pose_and_ignition() {
         void_assembly::tank_capacity(tank.definition) + 1.0,
     ] {
         let mut part = tank.clone();
-        part.fuel_kg = fuel;
+        part.resources
+            .insert(void_assembly::ResourceId::LiquidPropellant, fuel);
         assert!(panics(|| PartGraph::new().insert(part)));
     }
     for pose in [
@@ -240,12 +247,26 @@ fn insertion_rejects_invalid_fuel_pose_and_ignition() {
         assert!(panics(|| PartGraph::new().insert(part)));
     }
     let mut engine = source.part("v1/p3").clone();
-    engine.lit = true;
+    engine.modules.insert(
+        "engine1".into(),
+        void_assembly::ModuleState::Engine {
+            activated: false,
+            enabled: true,
+        },
+    );
     assert!(panics(|| PartGraph::new().insert(engine.clone())));
-    engine.staged = true;
+    engine.modules.insert(
+        "engine1".into(),
+        void_assembly::ModuleState::Engine {
+            activated: true,
+            enabled: true,
+        },
+    );
     PartGraph::new().insert(engine);
     let mut no_tank = source.part("v1/p1").clone();
-    no_tank.fuel_kg = 1.0;
+    no_tank
+        .resources
+        .insert(void_assembly::ResourceId::LiquidPropellant, 1.0);
     assert!(panics(|| PartGraph::new().insert(no_tank)));
 }
 
@@ -263,9 +284,11 @@ fn runtime_edits_preserve_identity_and_reject_invalid_state_before_mutating() {
         }
     )));
     let mut duplicate = before.clone();
-    duplicate.fuel_kg = 0.0;
+    duplicate
+        .resources
+        .insert(void_assembly::ResourceId::LiquidPropellant, 0.0);
     assert!(panics(|| graph.insert(duplicate)));
-    assert_eq!(graph.part("v1/p2").fuel_kg, before.fuel_kg);
+    assert_eq!(graph.part("v1/p2").fuel_kg(), before.fuel_kg());
     assert_eq!(graph.part("v1/p2").pose, before.pose);
     graph.set_fuel("v1/p2", 0.0);
     graph.set_pose(
@@ -281,7 +304,7 @@ fn runtime_edits_preserve_identity_and_reject_invalid_state_before_mutating() {
         before.definition
     ));
     graph.stage_part("v1/p3");
-    assert!(graph.part("v1/p3").lit && graph.part("v1/p3").staged);
+    assert!(graph.part("v1/p3").lit() && graph.part("v1/p3").staged());
     graph.stage_part("v1/p4");
-    assert!(!graph.part("v1/p4").lit && graph.part("v1/p4").staged);
+    assert!(!graph.part("v1/p4").lit() && graph.part("v1/p4").staged());
 }

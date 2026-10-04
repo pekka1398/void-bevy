@@ -2,8 +2,8 @@
 //! parts. A vessel is one connected group of it; separation and docking are graph operations.
 //! See `docs/part-graph.md`.
 use crate::{
-    AttachNode, CompiledCraft, Connection, CrossfeedPart, Module, PartDefinition, PartPose,
-    crossfeed_tanks, node, tank_capacity,
+    AttachNode, CompiledCraft, Connection, Module, PartDefinition, PartPose, ResourceId, Resources,
+    node, validate_resources,
 };
 use glam::DVec3;
 use std::collections::{BTreeMap, HashSet};
@@ -14,12 +14,10 @@ pub struct Part {
     pub id: String,
     pub definition: &'static PartDefinition,
     /// Propellant in the part's tanks; zero without one.
-    pub fuel_kg: f64,
+    pub resources: Resources,
+    pub modules: BTreeMap<String, ModuleState>,
     pub stage: Option<u32>,
-    /// Its stage has fired: an engine lit, a decoupler released.
-    pub staged: bool,
-    /// An engine that is burning when throttled; only engines can be lit.
-    pub lit: bool,
+    pub module_stages: BTreeMap<String, Option<u32>>,
     /// In the parts frame of the vessel it belongs to.
     pub pose: PartPose,
 }
@@ -33,43 +31,73 @@ pub struct EngineRating {
     pub nozzle_exit_area_m2: f64,
     /// Thrust direction in the part's axes.
     pub direction: DVec3,
+    pub resource: ResourceId,
 }
 
 impl Part {
     pub fn mass_kg(&self) -> f64 {
-        self.definition.dry_mass_kg + self.fuel_kg
+        self.definition.dry_mass_kg + self.resource_mass()
     }
     pub fn is_command(&self) -> bool {
         self.definition
             .modules
             .iter()
-            .any(|m| matches!(m, Module::Command))
+            .any(|m| matches!(m, Module::Command { .. }))
     }
-    pub fn engine(&self) -> Option<EngineRating> {
-        self.definition.modules.iter().find_map(|m| match m {
+    pub fn engines(&self) -> impl Iterator<Item = (&str, EngineRating)> {
+        self.definition.modules.iter().filter_map(|m| match m {
             Module::Engine {
+                id,
                 thrust_newtons,
                 isp_seconds,
                 nozzle_exit_area_m2,
                 direction,
-            } => Some(EngineRating {
-                thrust_newtons: *thrust_newtons,
-                isp_seconds: *isp_seconds,
-                nozzle_exit_area_m2: *nozzle_exit_area_m2,
-                direction: *direction,
-            }),
+                resource,
+            } => Some((
+                id.as_str(),
+                EngineRating {
+                    thrust_newtons: *thrust_newtons,
+                    isp_seconds: *isp_seconds,
+                    nozzle_exit_area_m2: *nozzle_exit_area_m2,
+                    direction: *direction,
+                    resource: *resource,
+                },
+            )),
             _ => None,
         })
     }
+    /// Only for callers that require a single engine; rejects ambiguous definitions.
+    pub fn engine(&self) -> Option<EngineRating> {
+        let mut es = self.engines();
+        let first = es.next();
+        assert!(
+            es.next().is_none(),
+            "single-engine API used on multi-engine part"
+        );
+        first.map(|(_, e)| e)
+    }
+    pub fn engine_enabled(&self, id: &str) -> bool {
+        match self.modules.get(id).expect("unknown engine module") {
+            ModuleState::Engine { enabled, .. } => *enabled,
+            _ => panic!("not an engine module"),
+        }
+    }
     /// The decoupler's node and separation impulse.
     pub fn decoupler(&self) -> Option<(&'static str, f64)> {
-        self.definition.modules.iter().find_map(|m| match m {
+        let mut modules = self.definition.modules.iter().filter_map(|m| match m {
             Module::Decoupler {
                 node_id,
                 impulse_ns,
+                ..
             } => Some((node_id.as_str(), *impulse_ns)),
             _ => None,
-        })
+        });
+        let first = modules.next();
+        assert!(
+            modules.next().is_none(),
+            "single-decoupler API used on multi-decoupler part"
+        );
+        first
     }
 }
 
@@ -96,10 +124,32 @@ impl PartGraph {
                 self.insert(Part {
                     id: id.clone(),
                     definition: p.definition,
-                    fuel_kg: p.instance.fuel_kg,
+                    resources: p.instance.resources.clone(),
+                    modules: initial_modules(p.definition),
                     stage: p.instance.stage,
-                    staged: false,
-                    lit: false,
+                    module_stages: p
+                        .definition
+                        .modules
+                        .iter()
+                        .filter(|m| {
+                            matches!(
+                                m,
+                                Module::Engine { .. }
+                                    | Module::Decoupler { .. }
+                                    | Module::Parachute { .. }
+                            )
+                        })
+                        .map(|m| {
+                            (
+                                m.id().to_string(),
+                                p.instance
+                                    .module_stages
+                                    .get(m.id())
+                                    .copied()
+                                    .unwrap_or(p.instance.stage),
+                            )
+                        })
+                        .collect(),
                     pose: p.pose,
                 });
                 id
@@ -117,13 +167,34 @@ impl PartGraph {
 
     /// A part restored as it was saved.
     pub fn insert(&mut self, part: Part) {
-        Self::check_fuel(&part, part.fuel_kg);
-        Self::check_pose(part.pose);
+        crate::validate_definition(part.definition).expect("part graph: invalid definition");
+        validate_resources(part.definition, &part.resources)
+            .unwrap_or_else(|e| panic!("part graph: {} {e}", part.id));
+        check_modules(&part);
+        let expected: Vec<_> = part
+            .definition
+            .modules
+            .iter()
+            .filter(|m| {
+                matches!(
+                    m,
+                    Module::Engine { .. } | Module::Decoupler { .. } | Module::Parachute { .. }
+                )
+            })
+            .map(|m| m.id())
+            .collect();
         assert!(
-            !part.lit || (part.engine().is_some() && part.staged),
-            "part graph: {} is lit without a staged engine",
-            part.id
+            expected.len() == part.module_stages.len()
+                && expected
+                    .iter()
+                    .all(|id| part.module_stages.contains_key(*id))
+                && part
+                    .module_stages
+                    .values()
+                    .all(|s| s.is_none_or(|s| s <= 99)),
+            "part graph: invalid module stage mapping"
         );
+        Self::check_pose(part.pose);
         let id = part.id.clone();
         match self.parts.entry(id.clone()) {
             std::collections::btree_map::Entry::Vacant(entry) => {
@@ -133,15 +204,6 @@ impl PartGraph {
                 panic!("part graph: duplicate part {id}")
             }
         }
-    }
-
-    fn check_fuel(part: &Part, fuel_kg: f64) {
-        assert!(
-            fuel_kg.is_finite() && fuel_kg >= 0.0 && fuel_kg <= tank_capacity(part.definition),
-            "part graph: {} fuel {} exceeds its tank domain",
-            part.id,
-            fuel_kg
-        );
     }
 
     fn check_pose(pose: PartPose) {
@@ -173,26 +235,97 @@ impl PartGraph {
             .get(id)
             .unwrap_or_else(|| panic!("part graph: unknown part {id}"))
     }
-    /// Change runtime fuel without exposing the part's identity or definition.
-    pub fn set_fuel(&mut self, id: &str, fuel_kg: f64) {
-        Self::check_fuel(self.part(id), fuel_kg);
-        self.parts.get_mut(id).expect("checked part").fuel_kg = fuel_kg;
+    /// Validates before changing a quantity; identities and definitions stay immutable.
+    pub fn set_resource(&mut self, id: &str, resource: ResourceId, amount: f64) {
+        let part = self.part(id);
+        let mut quantities = part.resources.clone();
+        assert!(
+            quantities.contains_key(&resource),
+            "part graph: {id} has no {resource:?} tank"
+        );
+        quantities.insert(resource, amount);
+        validate_resources(part.definition, &quantities)
+            .unwrap_or_else(|e| panic!("part graph: {id} {e}"));
+        self.parts.get_mut(id).expect("checked part").resources = quantities;
+    }
+    /// Legacy observation/control: liquid propellant only, never total resource mass.
+    pub fn set_fuel(&mut self, id: &str, amount: f64) {
+        self.set_resource(id, ResourceId::LiquidPropellant, amount);
     }
 
+    /// Definition-aware module state update validates before mutating.
+    pub fn set_module_state(&mut self, id: &str, module: &str, state: ModuleState) {
+        let mut part = self.part(id).clone();
+        assert!(
+            part.modules.contains_key(module),
+            "part graph: unknown module {module}"
+        );
+        check_transition(&part.modules[module], &state);
+        part.modules.insert(module.to_string(), state);
+        check_modules(&part);
+        self.parts.get_mut(id).expect("checked part").modules = part.modules;
+    }
     pub fn set_pose(&mut self, id: &str, pose: PartPose) {
         self.part(id);
         Self::check_pose(pose);
         self.parts.get_mut(id).expect("checked part").pose = pose;
     }
 
-    /// Consume a part's stage, lighting it if it has an engine.
+    /// Consume one addressed module's action. Repeated staging is explicitly idempotent.
+    pub fn stage_module(&mut self, id: &str, module: &str) {
+        let old = self
+            .part(id)
+            .modules
+            .get(module)
+            .expect("unknown staged module")
+            .clone();
+        let state = match old {
+            ModuleState::Engine {
+                activated: true, ..
+            } => return,
+            ModuleState::Engine { .. } => ModuleState::Engine {
+                activated: true,
+                enabled: true,
+            },
+            ModuleState::Decoupler { .. } => ModuleState::Decoupler { activated: true },
+            ModuleState::Parachute { state } => {
+                if state.phase != crate::ParachutePhase::Stowed {
+                    return;
+                }
+                ModuleState::Parachute {
+                    state: crate::ParachuteState {
+                        phase: crate::ParachutePhase::Armed,
+                        elapsed_seconds: 0.0,
+                    },
+                }
+            }
+            ModuleState::Passive => panic!("passive module has no stage action"),
+        };
+        self.set_module_state(id, module, state);
+    }
+    /// Legacy part action activates all its actionable modules, preserving the old lab's semantics.
     pub fn stage_part(&mut self, id: &str) {
-        self.part(id);
-        let part = self.parts.get_mut(id).expect("checked part");
-        part.staged = true;
-        if part.engine().is_some() {
-            part.lit = true;
+        let ids: Vec<_> = self.part(id).module_stages.keys().cloned().collect();
+        for module in ids {
+            self.stage_module(id, &module);
         }
+    }
+    pub fn set_module_stage(&mut self, id: &str, module: &str, stage: Option<u32>) {
+        assert!(stage.is_none_or(|s| s <= 99), "invalid module stage");
+        let part = self.part(id);
+        assert!(
+            part.module_stages.contains_key(module),
+            "unknown action module"
+        );
+        assert!(
+            !part.module_activated(module),
+            "cannot change consumed module stage"
+        );
+        self.parts
+            .get_mut(id)
+            .expect("checked part")
+            .module_stages
+            .insert(module.to_string(), stage);
     }
 
     /// Every part, by ID.
@@ -292,18 +425,226 @@ impl PartGraph {
 
     /// The tanks an engine draws from, in `members` order (`crossfeed_tanks`).
     pub fn crossfeed_tanks(&self, members: &[String], engine: &str) -> Vec<String> {
-        let parts: Vec<_> = members
+        self.resource_tanks(members, engine, ResourceId::LiquidPropellant)
+    }
+
+    pub fn resource_tanks(
+        &self,
+        members: &[String],
+        consumer: &str,
+        resource: ResourceId,
+    ) -> Vec<String> {
+        assert!(
+            members.iter().any(|id| id == consumer),
+            "resource consumer is outside vessel"
+        );
+        let mut visited = HashSet::from([consumer.to_string()]);
+        let mut queue = vec![consumer.to_string()];
+        let mut i = 0;
+        while i < queue.len() {
+            for c in &self.connections {
+                if !members.contains(&c.a)
+                    || !members.contains(&c.b)
+                    || !self.part(&c.a).definition.crossfeed
+                    || !self.part(&c.b).definition.crossfeed
+                {
+                    continue;
+                }
+                let next = if c.a == queue[i] {
+                    Some(&c.b)
+                } else if c.b == queue[i] {
+                    Some(&c.a)
+                } else {
+                    None
+                };
+                if let Some(n) = next
+                    && visited.insert(n.clone())
+                {
+                    queue.push(n.clone());
+                }
+            }
+            i += 1;
+        }
+        members
             .iter()
-            .map(|id| CrossfeedPart {
-                id,
-                definition: self.part(id).definition,
-            })
-            .collect();
-        crossfeed_tanks(&parts, &self.connections, engine)
+            .filter(|id| visited.contains(*id) && self.part(id).resources.contains_key(&resource))
+            .cloned()
+            .collect()
     }
 
     /// Summed in `ids` order.
     pub fn mass(&self, ids: &[String]) -> f64 {
         ids.iter().map(|id| self.part(id).mass_kg()).sum()
     }
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", deny_unknown_fields)]
+pub enum ModuleState {
+    Parachute { state: crate::ParachuteState },
+    Passive,
+    Engine { activated: bool, enabled: bool },
+    Decoupler { activated: bool },
+}
+pub fn initial_modules(definition: &PartDefinition) -> BTreeMap<String, ModuleState> {
+    definition
+        .modules
+        .iter()
+        .map(|m| {
+            (
+                m.id().to_string(),
+                match m {
+                    Module::Parachute { .. } => ModuleState::Parachute {
+                        state: crate::ParachuteState::STOWED,
+                    },
+                    Module::Engine { .. } => ModuleState::Engine {
+                        activated: false,
+                        enabled: false,
+                    },
+                    Module::Decoupler { .. } => ModuleState::Decoupler { activated: false },
+                    _ => ModuleState::Passive,
+                },
+            )
+        })
+        .collect()
+}
+fn check_modules(part: &Part) {
+    assert_eq!(
+        part.modules.len(),
+        part.definition.modules.len(),
+        "part graph: module count mismatch"
+    );
+    let mut ids = HashSet::new();
+    for m in &part.definition.modules {
+        assert!(
+            !m.id().is_empty() && ids.insert(m.id()),
+            "part graph: empty/duplicate module ID"
+        );
+        let state = part
+            .modules
+            .get(m.id())
+            .expect("part graph: missing module state");
+        assert!(
+            match (m, state) {
+                (Module::Engine { .. }, ModuleState::Engine { activated, enabled }) =>
+                    !enabled || *activated,
+                (Module::Decoupler { .. }, ModuleState::Decoupler { .. }) => true,
+                (Module::Command { .. } | Module::Tank { .. }, ModuleState::Passive) => true,
+                (Module::Parachute { parameters: p, .. }, ModuleState::Parachute { state: s }) =>
+                    s.elapsed_seconds.is_finite()
+                        && s.elapsed_seconds >= 0.0
+                        && match s.phase {
+                            crate::ParachutePhase::SemiDeploying =>
+                                s.elapsed_seconds < p.semi_seconds,
+                            crate::ParachutePhase::FullDeploying =>
+                                s.elapsed_seconds < p.full_seconds,
+                            _ => s.elapsed_seconds == 0.0,
+                        },
+                _ => false,
+            },
+            "part graph: module definition/state mismatch"
+        );
+    }
+}
+impl Part {
+    pub fn resource(&self, r: ResourceId) -> f64 {
+        self.resources.get(&r).copied().unwrap_or(0.0)
+    }
+    pub fn resource_mass(&self) -> f64 {
+        self.resources.values().sum()
+    }
+    pub fn fuel_kg(&self) -> f64 {
+        self.resource(ResourceId::LiquidPropellant)
+    }
+    pub fn lit(&self) -> bool {
+        self.modules
+            .values()
+            .any(|m| matches!(m, ModuleState::Engine { enabled: true, .. }))
+    }
+    pub fn staged(&self) -> bool {
+        let mut actions = self.modules.values().filter_map(|m| match m {
+            ModuleState::Engine { activated, .. } | ModuleState::Decoupler { activated } => {
+                Some(*activated)
+            }
+            _ => None,
+        });
+        let Some(first) = actions.next() else {
+            return false;
+        };
+        first && actions.all(|a| a)
+    }
+}
+
+fn check_transition(old: &ModuleState, new: &ModuleState) {
+    use crate::ParachutePhase as P;
+    let valid = match (old, new) {
+        (ModuleState::Engine { activated: a, .. }, ModuleState::Engine { activated: b, .. })
+        | (ModuleState::Decoupler { activated: a }, ModuleState::Decoupler { activated: b }) => {
+            !a || *b
+        }
+        (ModuleState::Passive, ModuleState::Passive) => true,
+        (ModuleState::Parachute { state: a }, ModuleState::Parachute { state: b }) => {
+            if a.phase == b.phase {
+                b.elapsed_seconds >= a.elapsed_seconds
+            } else {
+                matches!(
+                    (a.phase, b.phase),
+                    (P::Stowed, P::Armed)
+                        | (P::Armed, P::SemiDeploying | P::Cut)
+                        | (P::SemiDeploying, P::Semi | P::Cut)
+                        | (P::Semi, P::FullDeploying | P::Cut)
+                        | (P::FullDeploying, P::Full | P::Cut)
+                        | (P::Full, P::Cut)
+                )
+            }
+        }
+        _ => false,
+    };
+    assert!(
+        valid,
+        "part graph: illegal module transition {old:?} -> {new:?}"
+    );
+}
+impl Part {
+    pub fn module_activated(&self, id: &str) -> bool {
+        match self.modules.get(id).expect("unknown module") {
+            ModuleState::Engine { activated, .. } | ModuleState::Decoupler { activated } => {
+                *activated
+            }
+            ModuleState::Parachute { state } => state.phase != crate::ParachutePhase::Stowed,
+            ModuleState::Passive => false,
+        }
+    }
+    pub fn decoupler_module(&self, id: &str) -> (&'static str, f64) {
+        match self
+            .definition
+            .modules
+            .iter()
+            .find(|m| m.id() == id)
+            .expect("unknown decoupler")
+        {
+            Module::Decoupler {
+                node_id,
+                impulse_ns,
+                ..
+            } => (node_id.as_str(), *impulse_ns),
+            _ => panic!("not decoupler"),
+        }
+    }
+}
+pub fn default_module_stages(
+    definition: &PartDefinition,
+    stage: Option<u32>,
+) -> BTreeMap<String, Option<u32>> {
+    definition
+        .modules
+        .iter()
+        .filter(|m| {
+            matches!(
+                m,
+                Module::Engine { .. } | Module::Decoupler { .. } | Module::Parachute { .. }
+            )
+        })
+        .map(|m| (m.id().to_string(), stage))
+        .collect()
 }

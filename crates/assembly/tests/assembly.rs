@@ -25,7 +25,7 @@ fn full() -> FlightInput {
 fn golden_model_and_catalog() {
     let golden: Value = serde_json::from_str(include_str!("golden/assembly.json")).unwrap();
     for g in golden.as_array().unwrap() {
-        let craft: Craft = serde_json::from_value(g["craft"].clone()).unwrap();
+        let craft: Craft = migrate_legacy_craft(g["craft"].clone()).unwrap();
         let c = compile(&craft).unwrap();
         assert_eq!(c.root_id, g["rootId"]);
         assert_eq!(
@@ -109,10 +109,14 @@ fn bad_data_and_edits_rejected_without_mutating_source() {
             .contains("occupied")
     );
     let mut bad = demo.clone();
-    bad.parts[1].fuel_kg = 701.0;
+    bad.parts[1]
+        .resources
+        .insert(ResourceId::LiquidPropellant, 701.0);
     assert!(compile(&bad).unwrap_err().contains("capacity"));
     bad = demo.clone();
-    bad.parts[1].fuel_kg = f64::NAN;
+    bad.parts[1]
+        .resources
+        .insert(ResourceId::LiquidPropellant, f64::NAN);
     assert!(compile(&bad).is_err());
     bad = demo.clone();
     bad.parts[1].attachment = None;
@@ -275,7 +279,9 @@ fn rotating_separation_preserves_every_pose_and_linear_and_angular_momentum() {
 fn custom_imported_craft_fuel_exhaustion_clips_impulse_and_mass() {
     let c = add_part(&fresh_craft(), "tank-small", "p1", "bottom", "top").unwrap();
     let mut c = add_part(&c, "engine-small", "p2", "bottom", "top").unwrap();
-    c.parts[1].fuel_kg = 0.01;
+    c.parts[1]
+        .resources
+        .insert(ResourceId::LiquidPropellant, 0.01);
     let mut f =
         AssemblyFlight::new(&import_craft(&export_craft(&c).unwrap()).unwrap(), 0.0).unwrap();
     f.stage();

@@ -18,7 +18,7 @@ pub mod durable;
 
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 9;
+pub const MODEL_VERSION: u32 = 10;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -78,6 +78,16 @@ impl InitialWorld {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum Action {
+    SetModuleStage {
+        part: String,
+        module: String,
+        stage: Option<u32>,
+    },
+    Parachute {
+        part: String,
+        module: String,
+        deploy: bool,
+    },
     View {
         command: crate::presentation::ViewCommand,
     },
@@ -123,6 +133,13 @@ pub enum Action {
     ExecuteManeuver,
     AbortManeuver,
     Stage,
+    LaunchState {
+        craft: Craft,
+        position: DVec3,
+        velocity: DVec3,
+        rotation: glam::DQuat,
+        angular_velocity: DVec3,
+    },
     LaunchGround {
         craft: Craft,
         site: DVec3,
@@ -161,6 +178,30 @@ impl Action {
     }
     fn apply(&self, sim: &mut FleetFlight) -> Outcome {
         let outcome = match self {
+            Self::SetModuleStage {
+                part,
+                module,
+                stage,
+            } => {
+                sim.fleet.set_module_stage(part, module, *stage);
+                Outcome::Applied
+            }
+            Self::Parachute {
+                part,
+                module,
+                deploy,
+            } => {
+                sim.fleet.parachute_command(
+                    part,
+                    module,
+                    if *deploy {
+                        void_modules::parachute::Command::Deploy
+                    } else {
+                        void_modules::parachute::Command::Cut
+                    },
+                );
+                Outcome::Applied
+            }
             Self::View { command } => {
                 sim.view_command(command);
                 Outcome::Applied
@@ -240,6 +281,21 @@ impl Action {
                 Outcome::Applied
             }
             Self::Stage => Outcome::Staged(sim.stage()),
+            Self::LaunchState {
+                craft,
+                position,
+                velocity,
+                rotation,
+                angular_velocity,
+            } => Outcome::Spawned(sim.fleet.launch(
+                craft,
+                void_landing::FrameState {
+                    position: *position,
+                    velocity: *velocity,
+                },
+                *rotation,
+                *angular_velocity,
+            )),
             Self::LaunchGround { craft, site } => {
                 let id = sim.fleet.launch_landed(craft, sim.home, *site);
                 sim.fleet.advance(0.0);
@@ -313,6 +369,7 @@ pub fn world_mark(sim: &FleetFlight) -> serde_json::Value {
             "id": p.id, "definition": p.definition.id, "position": p.position,
             "rotation": p.rotation, "fuel": p.fuel_kg, "stage": p.stage,
             "staged": p.staged, "lit": p.lit, "firing": p.firing,
+            "resources":p.resources,"modules":p.modules,"moduleStages":p.module_stages,
         })}).collect();
         json!({ "id": s.id, "name": s.name, "mode": format!("{:?}",s.mode),
             "scene": s.scene, "position": s.position, "velocity": s.velocity,

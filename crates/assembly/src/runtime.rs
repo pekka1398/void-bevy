@@ -60,6 +60,31 @@ impl AssemblyFlight {
         assert!(gravity.is_finite() && gravity >= 0.0, "invalid lab gravity");
         let compiled = compile(craft)?;
         for p in &compiled.parts {
+            if p.definition.modules.iter().any(|m| {
+                matches!(
+                    m,
+                    Module::Parachute { .. }
+                        | Module::Tank {
+                            resource: crate::ResourceId::Monopropellant,
+                            ..
+                        }
+                        | Module::Engine {
+                            resource: crate::ResourceId::Monopropellant,
+                            ..
+                        }
+                )
+            }) || p
+                .definition
+                .modules
+                .iter()
+                .filter(|m| matches!(m, Module::Engine { .. }))
+                .count()
+                > 1
+            {
+                return Err("legacy assembly flight supports one liquid engine per part; use void-part-state-lab for modules/resources".into());
+            }
+        }
+        for p in &compiled.parts {
             if p.definition
                 .modules
                 .iter()
@@ -94,7 +119,7 @@ impl AssemblyFlight {
         let fuel = compiled
             .parts
             .iter()
-            .map(|p| (p.instance.id.clone(), p.instance.fuel_kg))
+            .map(|p| (p.instance.id.clone(), p.instance.resource_mass()))
             .collect();
         let mut world = PhysicsWorld {
             gravity: Vector::new(0.0, -gravity as f32, 0.0),
@@ -227,6 +252,7 @@ impl AssemblyFlight {
                 if let Module::Decoupler {
                     node_id,
                     impulse_ns,
+                    ..
                 } = m
                 {
                     Some((node_id.clone(), *impulse_ns))
