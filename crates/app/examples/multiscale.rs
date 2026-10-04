@@ -172,12 +172,13 @@ impl Lab {
         }
     }
 
-    /// The frame the camera hangs on, and the focus point in it.
+    /// Tree frame for body/system focus. Probe focus uses a separate split galaxy anchor;
+    /// it can be light-years from its system, so its position must not become a local f64.
     fn focus_frame(&self) -> (FrameId, DVec3) {
         match self.focus {
             Focus::Probe => (
                 self.frames.systems[self.world.system_index(&self.probe.state.frame)],
-                self.probe.state.position.vector(),
+                DVec3::ZERO,
             ),
             Focus::System(i) => (self.frames.systems[i], DVec3::ZERO),
             Focus::Body(i) => (self.frames.inertial[i], DVec3::ZERO),
@@ -567,21 +568,28 @@ fn draw(
     let states = world.at(t);
     let frames = lab.frames.tree.at(t, world);
     // The camera frame: at the focus, in the galaxy's axes (shared by every system).
+    let probe_anchor = matches!(lab.focus, Focus::Probe).then(|| lab.probe.position(world));
     let (focus, local) = lab.focus_frame();
     let turn = frames.transform(focus, lab.frames.systems[0]).rotation();
     let camera_frame = Motion::fixed(local, turn.inverse());
     // The render unit follows the zoom; the tree subtracts before any f32.
     let u = (lab.orbit.distance / 1000.0).max(1.0);
     let render = |from: FrameId, p: DVec3| {
-        (frames
-            .transform(from, focus)
-            .into_child(&camera_frame)
-            .apply_point(p)
-            / u)
-            .as_vec3()
+        let relative = match &probe_anchor {
+            Some(anchor) => frames.relative_to_galaxy_anchor(from, p, anchor),
+            None => frames
+                .transform(from, focus)
+                .into_child(&camera_frame)
+                .apply_point(p),
+        };
+        (relative / u).as_vec3()
     };
     let to_render = |p: &SplitPosition| {
-        (camera_frame.unapply_point(frames.from_galaxy(p, focus)) / u).as_vec3()
+        let relative = match &probe_anchor {
+            Some(anchor) => p.relative(anchor),
+            None => camera_frame.unapply_point(frames.from_galaxy(p, focus)),
+        };
+        (relative / u).as_vec3()
     };
     let (cam, transform, projection) = &mut *camera;
     let eye = (lab.orbit.direction * (lab.orbit.distance / u)).as_vec3();

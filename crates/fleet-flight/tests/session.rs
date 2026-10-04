@@ -279,3 +279,12 @@ fn recording_is_opt_in_and_stopping_releases_history_without_stopping_the_world(
     std::fs::remove_file(path).unwrap();
     std::fs::remove_file(second).unwrap();
 }
+
+#[test]
+#[should_panic(expected = "session: incompatible simulation model")]
+fn pre_frame_tree_recording_is_rejected_before_replay() {
+    let mut s = session(false);
+    let mut recording = s.recording();
+    recording.model_version = 4;
+    FlightSession::from_recording(recording);
+}

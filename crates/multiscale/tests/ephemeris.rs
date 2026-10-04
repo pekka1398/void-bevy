@@ -96,3 +96,27 @@ fn system_frames_agree_with_the_physics_view() {
         "the fixture should have bodies outside the origin system"
     );
 }
+
+#[test]
+fn split_probe_focus_keeps_metre_offsets_between_systems() {
+    let world = wide_world(default_galaxy());
+    let frames = world.frames("Aster");
+    let snapshot = frames.tree.at(0.0, &world);
+    let system = frames.systems[0];
+    let probe_local = SplitPosition::at(DVec3::X * LIGHT_YEAR).translate(DVec3::X * 0.125);
+    let probe = world.at(0.0)[0].origin.compose(&probe_local);
+    // The probe and its trail use split galaxy positions, even far from their system.
+    for metres in [0.0, 0.125, 1.0, 18.0] {
+        let next = probe.translate(DVec3::X * metres);
+        assert!((next.relative(&probe) - DVec3::X * metres).length() < 1e-4);
+    }
+    // Bodies use tree-local points. Put the anchor one metre from a body in another system:
+    // the old system-f64 path loses this gap before subtracting the camera position.
+    let body = frames.inertial[2];
+    let body_position = snapshot.to_galaxy(body, DVec3::ZERO);
+    let anchor = body_position.translate(DVec3::new(1.0, 0.125, -0.25));
+    let relative = snapshot.relative_to_galaxy_anchor(body, DVec3::ZERO, &anchor);
+    assert!((relative + DVec3::new(1.0, 0.125, -0.25)).length() < 1e-4);
+    let old = snapshot.from_galaxy(&anchor, system) - snapshot.from_galaxy(&body_position, system);
+    assert!((old - DVec3::new(1.0, 0.125, -0.25)).length() > 0.1);
+}

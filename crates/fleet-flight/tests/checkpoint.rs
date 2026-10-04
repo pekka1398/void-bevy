@@ -145,3 +145,14 @@ fn corrupted_native_cache_and_graph_are_rejected() {
     let bad: FlightCheckpoint = serde_json::from_value(value).unwrap();
     assert!(std::panic::catch_unwind(|| bad.restore()).is_err());
 }
+
+#[test]
+#[should_panic(expected = "world checkpoint: incompatible model")]
+fn pre_frame_tree_checkpoint_is_rejected_before_restoring_owners() {
+    let s = make(false);
+    let saved = FlightCheckpoint::capture(s.sim(), s.recording_initial().clone());
+    let mut value = serde_json::to_value(saved).unwrap();
+    value["model_version"] = serde_json::json!(4);
+    let old: FlightCheckpoint = serde_json::from_value(value).unwrap();
+    old.restore();
+}

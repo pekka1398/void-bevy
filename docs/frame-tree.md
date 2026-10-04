@@ -49,7 +49,7 @@ Galaxy（根，非旋轉；所有恆星系共用此軸）
 
 ## 步驟與結果
 
-八步都已完成，每步全部測試與 clippy 通過後才提交。使用中的 API 與檢查整理在 [frames.md](frames.md)。第 4、6 步改了畫面（主遊戲、multiscale example 與 lab），還需要使用者在視窗驗收。
+八步都已完成，每步全部測試與 clippy 通過後才提交。使用中的 API 與檢查整理在 [frames.md](frames.md)。第 4、6 步改了畫面（主遊戲、multiscale example 與 lab），使用者已於 2026-10-04 完成視窗驗收。
 
 | 步驟 | 結果 | 與原計畫的差異 |
 | --- | --- | --- |
@@ -76,3 +76,9 @@ Galaxy（根，非旋轉；所有恆星系共用此軸）
 - 既有 TS golden 門檻不放寬。天體軸改為單一公式後，若某項 golden 因此超出門檻，記錄原因並回頭檢查公式選擇，不調門檻。
 - 新增精度檢查：三萬光年外的兩個恆星系間轉換、地表 1 m 外的船經 LCA 轉換、相機座標系下的零件位置，誤差與「繞根」路徑對照。
 - 每一步跑 `cargo test --workspace --all-targets` 與 `cargo clippy --workspace --all-targets -- -D warnings`。
+
+## 審查修正
+
+- plain lab 相機的 up 仍取選中船所在地；天體焦點只改相機的中心，不以天體中心的零向量計算 up。檢查逐一聚焦所有天體，再切回船，camera transform 必須有限。
+- multiscale example 聚焦探測器時保留 split 銀河位置；探測器與軌跡先做 split 相減，天體經樹得到 split 銀河位置後再相減。不能先把離星系數光年的探測器壓成 f64 相機平移。檢查跨星系近距離偏移與探測器的公尺級軌跡。
+- `MODEL_VERSION` 4 → 5：自轉公式與 Fleet 座標轉換的捨入已改變，舊版精確 mark 不保證相容。舊存檔與錄影直接以模型版本不相容拒絕，不等到重播或還原時才出現狀態差異。

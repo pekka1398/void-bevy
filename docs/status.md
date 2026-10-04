@@ -1,6 +1,6 @@
 # 目前狀態
 
-（2026-10-03，master `a730519`）本頁回答「現在做到哪裡、還缺什麼」。各項的細節與驗證紀錄見連結的文件；NOTE.md 是原始筆記與願望清單，其中的完成狀態是歷史紀錄。
+（2026-10-04，座標樹重構合入 master）本頁回答「現在做到哪裡、還缺什麼」。各項的細節與驗證紀錄見連結的文件；NOTE.md 是原始筆記與願望清單，其中的完成狀態是歷史紀錄。
 
 ## 一句話
 
@@ -38,7 +38,7 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 
 ## 進行中
 
-- **座標樹統一**（branch `claude/adoring-darwin-qogeug`，尚未合入 master）：所有座標都走同一棵 `void-frames` 樹，從銀河、恆星系、天體、地面場景到船與相機；主遊戲的零件、碰撞線與 tile 直接從自己的座標系轉到相機，不再繞經 1 AU 的質心系。八步都完成，workspace 測試 296 passed、0 failed、4 ignored，clippy 無警告。主遊戲與 multiscale example／lab 的畫面需要視窗驗收。見 [frame-tree.md](frame-tree.md)、[frames.md](frames.md)。
+- **座標樹統一已完成並合入 master**：所有座標走同一棵 `void-frames` 樹，從銀河、恆星系、天體、地面場景到船；相機掛在焦點下，零件、碰撞線與 tile 直接轉到相機，不再繞經 1 AU 的質心系。使用者已完成主遊戲、multiscale example／lab 的視窗驗收。審查修正了 plain lab 天體焦點的 NaN、探測器焦點的 split 精度，並把模型版本升到 5。修正後相關 40 項測試、受影響範圍 clippy 與 fmt 通過；未重跑全量。見 [frame-tree.md](frame-tree.md)、[frames.md](frames.md)。
 - **RCS／對接**：噴嘴分配、捕獲判定、接點吸附、解除對接、單推進劑與 RCS 零件，以及對接 lab 場景，尚未合入 master。合入前需要視窗驗收。
 
 ## 對照 NOTE.md 的願望清單
@@ -56,7 +56,7 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 | 9 | 多船 | 完成 |
 | 10 | SAS、旋轉、RCS | SAS 穩定／鎖定姿態完成。順行等進階模式、有限轉向時間未做；RCS 進行中 |
 | 11 | 存檔 | 完成：直接世界存檔＋錄放。沒有跨模型版本的存檔遷移 |
-| 12 | 參考框架切換 | 完成：frames 樹、orbit-lab 四種繪圖框架、multiscale 的跨星系換框架；統一到同一棵樹的工作在 branch 上（見「進行中」） |
+| 12 | 參考框架切換 | 完成：frames 樹、orbit-lab 四種繪圖框架、multiscale 的跨星系換框架；已統一到同一棵樹並完成視窗驗收 |
 | 13 | 其他天體的程序地形 | 未做：一局只有發射的那顆行星有 LOD 地形可著陸，其他天體是球 |
 | 14 | 水上漂浮 | 未做 |
 | 15 | UI | 只有 HUD 與按鍵操作，正式 UI 未做 |

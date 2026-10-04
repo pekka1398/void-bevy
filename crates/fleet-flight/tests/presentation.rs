@@ -219,3 +219,30 @@ fn the_camera_frame_agrees_with_the_inertial_eye() {
         }
     }
 }
+
+#[test]
+fn plain_camera_can_focus_every_body_and_return_to_the_ship() {
+    let mut s = session();
+    view(&mut s, ViewCommand::Configure { main_camera: false });
+    let initial_offset = s.sim().presentation.sample(s.sim()).offset;
+    let count = s.sim().fleet.ephemeris.bodies().len();
+    for body in (0..count).map(Some).chain(std::iter::once(None)) {
+        view(&mut s, ViewCommand::Focus { body });
+        let sim = s.sim();
+        let sample = sim.presentation.sample(sim);
+        assert!(sample.eye.is_finite() && sample.offset.is_finite());
+        assert!((sample.offset.normalize() - initial_offset.normalize()).length() < 1e-12);
+        let axes = sim
+            .fleet
+            .frames()
+            .transform(sim.fleet.body_frames(sim.home).1, sim.fleet.origin_frame())
+            .rotation();
+        let focus = sample
+            .to_camera(&sim.fleet, sample.focus_frame, axes)
+            .apply_point(sample.focus_local);
+        assert!(
+            (focus.length() - sim.presentation.distance).abs()
+                < 1e-12 * sim.presentation.distance.max(1.0)
+        );
+    }
+}

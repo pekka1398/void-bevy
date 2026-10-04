@@ -278,8 +278,8 @@ impl Presentation {
             let surface = f.body_frames(sim.home).1;
             let frames = f.frames();
             let up = frames
-                .transform(focus_frame, surface)
-                .apply_point(focus_local)
+                .transform(f.vessel_frame(&sim.selected), surface)
+                .apply_point(f.centre_of_mass_local(&sim.selected))
                 .normalize();
             let east = if up.x.hypot(up.y) > 1e-9 {
                 DVec3::new(-up.y, up.x, 0.0).normalize()

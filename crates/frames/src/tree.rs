@@ -466,6 +466,17 @@ impl<S: FrameSource + ?Sized> Snapshot<'_, S> {
         )
     }
 
+    /// A frame-local point relative to a split galaxy anchor, in galaxy axes. Keep both
+    /// positions split until subtraction: the anchor can be light-years from its system.
+    pub fn relative_to_galaxy_anchor(
+        &self,
+        from: FrameId,
+        p: DVec3,
+        anchor: &SplitPosition,
+    ) -> DVec3 {
+        self.to_galaxy(from, p).relative(anchor)
+    }
+
     /// As `transform`, but always through the root in float64. For checks that measure what the
     /// common ancestor saves.
     pub fn transform_via_root(&self, from: FrameId, to: FrameId) -> Transform {
