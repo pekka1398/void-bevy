@@ -22,7 +22,7 @@ use bevy::render::render_resource::binding_types::{
     sampler, texture_2d, texture_3d, texture_depth_2d, uniform_buffer,
 };
 use bevy::render::render_resource::*;
-use bevy::render::renderer::{RenderContext, RenderDevice, ViewQuery};
+use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery};
 use bevy::render::texture::GpuImage;
 use bevy::render::view::{ViewDepthTexture, ViewTarget};
 use bevy::render::{RenderApp, RenderStartup};
@@ -37,6 +37,7 @@ impl Plugin for AirPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             ExtractComponentPlugin::<AirSettings>::default(),
+            ExtractComponentPlugin::<AirLayers>::default(),
             UniformComponentPlugin::<AirSettings>::default(),
             ExtractResourcePlugin::<AirTextures>::default(),
         ));
@@ -92,6 +93,9 @@ pub struct AirSettings {
     /// The lab's exposure multiplier (10^slider) and tone mapping (`ToneMapping as f32`).
     pub exposure: f32,
     pub tone_mapping: f32,
+    pub cloud_bottom: f32,
+    pub cloud_top: f32,
+    pub cloud_extinction: f32,
 }
 
 /// three.js's tone mappings the lab offers, done at the end of the air pass. The camera's own
@@ -118,6 +122,31 @@ impl ToneMapping {
 impl AirSettings {
     /// The constant part, from the atmosphere's parameters; everything per-frame starts neutral.
     pub fn new(p: &AtmosphereParams) -> Self {
+        assert!(
+            [
+                p.bottom_radius,
+                p.top_radius,
+                p.rayleigh_scale_height,
+                p.mie_scale_height,
+                p.ozone_center_height,
+                p.ozone_width,
+                p.mie_scattering,
+                p.mie_extinction
+            ]
+            .iter()
+            .chain(p.rayleigh_scattering.iter())
+            .chain(p.ozone_absorption.iter())
+            .all(|v| v.is_finite() && (*v as f32).is_finite()),
+            "optics outside GPU numeric range"
+        );
+        assert!(
+            p.top_radius as f32 > p.bottom_radius as f32
+                && p.rayleigh_scale_height as f32 > 0.0
+                && p.mie_scale_height as f32 > 0.0
+                && p.ozone_width as f32 > 0.0
+                && (p.mie_anisotropy as f32).abs() < 1.0,
+            "optical profile loses valid dimensions or phase in GPU precision"
+        );
         let v = |c: [f64; 3]| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
         Self {
             view_from_clip: Mat4::IDENTITY,
@@ -154,6 +183,9 @@ impl AirSettings {
             focal_pixels: 1000.0,
             exposure: 1.0,
             tone_mapping: ToneMapping::AcesFilmic as u8 as f32,
+            cloud_bottom: 1500.0,
+            cloud_top: 8000.0,
+            cloud_extinction: 0.0011,
         }
     }
 
@@ -167,7 +199,14 @@ impl AirSettings {
         sun: glam::DVec3,
     ) {
         let r = camera.length();
-        assert!(r > 0.0, "AirSettings::update: camera at the planet centre");
+        assert!(
+            camera.is_finite() && r.is_finite() && r > 0.0,
+            "AirSettings::update: invalid camera relative to planet"
+        );
+        assert!(
+            sun.is_finite() && (sun.length() - 1.0).abs() < 1e-6,
+            "AirSettings::update: invalid sun direction"
+        );
         self.planet_center = (-camera).as_vec3();
         self.camera_up = (camera / r).as_vec3();
         self.camera_altitude = (r - f64::from(self.bottom_radius)) as f32;
@@ -197,6 +236,11 @@ pub struct AirTextures {
     pub shape: Handle<Image>,
     pub detail: Handle<Image>,
 }
+
+/// An ordered set of body-local transport passes for one camera. Each body owns its tables;
+/// the camera's AirSettings performs only the final resolve. Legacy cameras omit this component.
+#[derive(Component, Clone, ExtractComponent)]
+pub struct AirLayers(pub Vec<(AirSettings, AirTextures)>);
 
 /// The weather atlas: RGBA8, linear, longitude repeating.
 pub fn weather_image(data: Vec<u8>, width: usize, height: usize) -> Image {
@@ -340,18 +384,20 @@ fn air_pass(
         &ViewTarget,
         &ViewDepthTexture,
         &DynamicUniformIndex<AirSettings>,
+        Option<&AirLayers>,
     )>,
     air_pipeline: Option<Res<AirPipeline>>,
     textures: Option<Res<AirTextures>>,
     images: Res<RenderAssets<GpuImage>>,
     pipeline_cache: Res<PipelineCache>,
     uniforms: Res<ComponentUniforms<AirSettings>>,
+    queue: Res<RenderQueue>,
     mut ctx: RenderContext,
 ) {
     let (Some(air_pipeline), Some(textures)) = (air_pipeline, textures) else {
         return;
     };
-    let (view_target, depth, settings_index) = view.into_inner();
+    let (view_target, depth, settings_index, layers) = view.into_inner();
     let Some(pipeline) = pipeline_cache.get_render_pipeline(air_pipeline.pipeline_id) else {
         return;
     };
@@ -359,65 +405,81 @@ fn air_pass(
         return;
     };
     let image = |h: &Handle<Image>| images.get(h).map(|i| &i.texture_view);
-    let (
-        Some(transmittance),
-        Some(multiple),
-        Some(irradiance),
-        Some(weather),
-        Some(shape),
-        Some(detail),
-    ) = (
-        image(&textures.transmittance),
-        image(&textures.multiple),
-        image(&textures.irradiance),
-        image(&textures.weather),
-        image(&textures.shape),
-        image(&textures.detail),
-    )
-    else {
-        return;
+    // Wait for all images before touching the ping-pong target: partial transport is not valid.
+    let mut passes = Vec::new();
+    let mut buffers = Vec::new();
+    if let Some(layers) = layers {
+        for (setting, textures) in &layers.0 {
+            let mut buffer = UniformBuffer::from(*setting);
+            buffer.write_buffer(ctx.render_device(), &queue);
+            buffers.push(buffer);
+            passes.push((textures, buffers.len() - 1));
+        }
+    }
+    let textures_for = |t: &AirTextures| -> Option<_> {
+        Some((
+            image(&t.transmittance)?,
+            image(&t.multiple)?,
+            image(&t.irradiance)?,
+            image(&t.weather)?,
+            image(&t.shape)?,
+            image(&t.detail)?,
+        ))
     };
-    let post_process = view_target.post_process_write();
-    let bind_group = ctx.render_device().create_bind_group(
-        "air_bind_group",
-        &pipeline_cache.get_bind_group_layout(&air_pipeline.layout),
-        &BindGroupEntries::sequential((
-            post_process.source,
-            depth.view(),
-            settings.clone(),
-            transmittance,
-            multiple,
-            irradiance,
-            &air_pipeline.table_sampler,
-            weather,
-            shape,
-            detail,
-            &air_pipeline.noise_sampler,
-        )),
-    );
-    let diagnostics = ctx.diagnostic_recorder();
-    let diagnostics = diagnostics.as_deref();
-    let span = diagnostics.time_span(ctx.command_encoder(), "void_air");
-    let mut pass = ctx
-        .command_encoder()
-        .begin_render_pass(&RenderPassDescriptor {
-            label: Some("air_pass"),
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: post_process.destination,
-                depth_slice: None,
-                resolve_target: None,
-                ops: Operations::default(),
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-    pass.set_pipeline(pipeline);
-    pass.set_bind_group(0, &bind_group, &[settings_index.index()]);
-    #[cfg(feature = "render-metrics")]
-    bevy::log::trace!(target:"void_draw_submission", "draw: 0..3 0..1");
-    pass.draw(0..3, 0..1);
-    drop(pass);
-    span.end(ctx.command_encoder());
+    if textures_for(&textures).is_none() || passes.iter().any(|(t, _)| textures_for(t).is_none()) {
+        return;
+    }
+    // The final entry is the camera resolve (or the entire legacy single-body pass).
+    let mut draw_passes = passes
+        .iter()
+        .map(|(t, i)| (*t, buffers[*i].binding().expect("air uniform"), 0))
+        .collect::<Vec<_>>();
+    draw_passes.push((&*textures, settings.clone(), settings_index.index()));
+    for (textures, settings, offset) in draw_passes {
+        let (transmittance, multiple, irradiance, weather, shape, detail) =
+            textures_for(textures).expect("prepared air textures");
+        let post_process = view_target.post_process_write();
+        let bind_group = ctx.render_device().create_bind_group(
+            "air_bind_group",
+            &pipeline_cache.get_bind_group_layout(&air_pipeline.layout),
+            &BindGroupEntries::sequential((
+                post_process.source,
+                depth.view(),
+                settings.clone(),
+                transmittance,
+                multiple,
+                irradiance,
+                &air_pipeline.table_sampler,
+                weather,
+                shape,
+                detail,
+                &air_pipeline.noise_sampler,
+            )),
+        );
+        let diagnostics = ctx.diagnostic_recorder();
+        let diagnostics = diagnostics.as_deref();
+        let span = diagnostics.time_span(ctx.command_encoder(), "void_air");
+        let mut pass = ctx
+            .command_encoder()
+            .begin_render_pass(&RenderPassDescriptor {
+                label: Some("air_pass"),
+                color_attachments: &[Some(RenderPassColorAttachment {
+                    view: post_process.destination,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: Operations::default(),
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &bind_group, &[offset]);
+        #[cfg(feature = "render-metrics")]
+        bevy::log::trace!(target:"void_draw_submission", "draw: 0..3 0..1");
+        pass.draw(0..3, 0..1);
+        drop(pass);
+        span.end(ctx.command_encoder());
+    }
 }

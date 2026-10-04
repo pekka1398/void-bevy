@@ -12,6 +12,10 @@ cargo run -p void-app -- --craft my.json     # 用 assembly-lab 匯出的船
 cargo run -p void-assembly-lab               # 組船
 ```
 
+## 開發中的多天體場景
+
+`claude/multi-body-scenes` 已建立同世界 Aurelia／Selene 地形與兩地 Fleet 船的獨立 lab；世界描述、InitialWorld、存讀檔與錄放已共用多天體配置。可執行 `cargo run -p void-app --example multi_body`；操作、數值檢查與 renderer 限制見 [multi-body-scenes.md](multi-body-scenes.md)。尚待使用者視窗驗收，未啟用為主遊戲預設，也尚未提交／合併。
+
 ## 主遊戲現在有的
 
 | 功能 | 狀態 | 文件 |
@@ -80,3 +84,5 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 - 噴嘴面積已是 catalog 的正式欄位（`nozzleExitAreaM2`）；新增引擎需在定義中提供，沒有額外的 engine ID 對照表。
 - 搬遷時列出、仍未補的觀察工具：`lod` example 的 preset 選擇、vessels-lab 的歷史軌跡、multiscale encounter 的任意天體／船選取。詳見 [port-audit.md](port-audit.md)（歷史頁）。
 - 存檔與錄影綁定模型版本、catalog 與 Rapier 版本，版本不同時直接拒絕，沒有遷移。
+
+多天體 worktree 後續追加：多顆分離大氣 HDR 合成、自訂散射／雲配置與 solar scenery 交接規格已實作；world schema 2 / model 12。尚未合併 master，實際九天體外觀未做，見 [specs/solar-scenery.md](specs/solar-scenery.md)。

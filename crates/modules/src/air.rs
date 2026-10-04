@@ -5,7 +5,7 @@ use std::sync::Arc;
 use void_aero::{AeroElement, AeroState, NEUTRAL, aerodynamic_forces};
 use void_assembly::PartGraph;
 use void_environment::{AirSample, Environment};
-use void_frames::State;
+use void_frames::{FrameId, FrameSource, Snapshot, State};
 use void_orbit::{AirSource, EphemerisSource};
 
 /// The bodies with an atmosphere, by index.
@@ -75,6 +75,32 @@ pub struct VesselAir {
 }
 
 impl VesselAir {
+    /// Evaluate in a scene's frame without flattening its position through the distant origin.
+    pub fn acceleration_in<S: FrameSource + ?Sized>(
+        &self,
+        at: &Snapshot<'_, S>,
+        query: FrameId,
+        state: State,
+        mass: f64,
+    ) -> DVec3 {
+        let frames = self.environment.frames();
+        let Some(air) = self.bodies.iter().find_map(|&body| {
+            self.environment
+                .surroundings(at, frames, query, state, body)
+                .air
+        }) else {
+            return DVec3::ZERO;
+        };
+        let rotation = at.transform(frames.origin, query).rotation() * self.rotation;
+        let aero = AeroState {
+            center: state.position,
+            velocity: air.airspeed,
+            rotation: rotation.normalize(),
+            angular_velocity: DVec3::ZERO,
+        };
+        aerodynamic_forces(&self.elements, &aero, &air.air, DVec3::ZERO, &NEUTRAL).force / mass
+    }
+
     /// The parts' bodies, in `members` order.
     pub fn elements(&self) -> &[AeroElement] {
         &self.elements

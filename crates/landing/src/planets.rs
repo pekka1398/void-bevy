@@ -27,13 +27,16 @@ pub struct LandingPlanet {
     /// Only the amount of air is a planet's own: the profile it thins out along is the aero
     /// crate's, so this is meaningful on an Earth-size planet and a liberty elsewhere.
     pub air_density_scale: Option<f64>,
+    /// Explicit environment datum; world descriptions may differ from the terrain's baked sea.
+    pub air_datum: f64,
+    pub sea_level: Option<f64>,
 }
 
 impl LandingPlanet {
     /// The atmosphere's altitude zero above the terrain's reference sphere: the sea where the
     /// terrain has one, else the sphere. Physics' air and the drawn sky both start here.
     pub fn air_datum_meters(&self) -> f64 {
-        self.terrain.sea_level_meters().unwrap_or(0.0)
+        self.air_datum
     }
 }
 
@@ -99,6 +102,8 @@ fn landing_planet(p: PlanetParameters) -> LandingPlanet {
         terrain: Arc::new(Terrain::from_config(&terrain_config)),
         terrain_config,
         air_density_scale: p.air_density_scale,
+        air_datum: 0.0,
+        sea_level: None,
     }
 }
 
@@ -200,6 +205,8 @@ fn aurelia_with_spin(spin_factor: f64) -> LandingPlanet {
         terrain: Arc::new(Terrain::from_config(&terrain_config)),
         terrain_config,
         air_density_scale: Some(1.0),
+        air_datum: 0.0,
+        sea_level: None,
     }
 }
 
@@ -267,7 +274,7 @@ pub fn planet_environment(
             atmosphere,
             air_datum_meters: planet.air_datum_meters(),
             terrain: Some(planet.terrain.clone()),
-            sea_level_meters: planet.terrain.sea_level_meters(),
+            sea_level_meters: planet.sea_level,
         },
     ))
 }

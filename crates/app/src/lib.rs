@@ -12,3 +12,5 @@ pub mod render_metrics;
 pub mod scenery;
 pub mod session;
 pub mod tiles;
+
+pub mod multi_body;

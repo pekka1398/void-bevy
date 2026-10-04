@@ -55,6 +55,9 @@ struct Air {
     /// The renderer's exposure multiplier and tone mapping: 0 ACES filmic, 1 AgX, 2 Neutral, 3 none.
     exposure: f32,
     tone_mapping: f32,
+    cloud_bottom: f32,
+    cloud_top: f32,
+    cloud_extinction: f32,
 }
 
 @group(0) @binding(0) var scene_texture: texture_2d<f32>;
@@ -71,9 +74,6 @@ struct Air {
 
 /// Samples along each view ray through clear air.
 const VIEW_STEPS: i32 = 32;
-const CLOUD_BOTTOM: f32 = 1500.0;
-const CLOUD_TOP: f32 = 8000.0;
-const CLOUD_EXTINCTION: f32 = 0.0011;
 const DEFAULT_CLOUD_COVERAGE: f32 = 0.62;
 const SHAPE_PERIOD: f32 = 65536.0;
 const DETAIL_PERIOD: f32 = 2048.0;
@@ -104,7 +104,7 @@ fn cloud_height(position: vec3<f32>) -> f32 {
 
 fn cloud_density(position: vec3<f32>, footprint: f32) -> f32 {
     let height = cloud_height(position) - air.sea_level;
-    if !(height > CLOUD_BOTTOM && height < CLOUD_TOP) {
+    if !(height > air.cloud_bottom && height < air.cloud_top) {
         return 0.0;
     }
     let up = normalize(position - air.planet_center);
@@ -116,7 +116,7 @@ fn cloud_density(position: vec3<f32>, footprint: f32) -> f32 {
     let coverage = smoothstep(0.3, 0.65, weather.x + (air.coverage - DEFAULT_CLOUD_COVERAGE) * 1.5) * 0.9;
     // Anchor the broad banks to the shell base. Their footprint is horizontal; density then tapers
     // toward a locally varying domed top, rather than a flat slab.
-    let column = position - up * (height - CLOUD_BOTTOM);
+    let column = position - up * (height - air.cloud_bottom);
     let macro_noise = textureSampleLevel(shape_texture, noise_sampler, (column + air.macro_origin) / (SHAPE_PERIOD * 16.0),
         log2(max(footprint / (SHAPE_PERIOD * 16.0 / SHAPE_SIZE), 1.0)));
     let macro_shape = macro_noise.b * 0.7 + macro_noise.r * 0.3;
@@ -124,9 +124,9 @@ fn cloud_density(position: vec3<f32>, footprint: f32) -> f32 {
     let shape_level = log2(max(footprint / (SHAPE_PERIOD / SHAPE_SIZE), 1.0));
     let shape_value = textureSampleLevel(shape_texture, noise_sampler, (position + air.shape_origin) / SHAPE_PERIOD, shape_level).r;
     let unresolved = smoothstep(2000.0, 16000.0, footprint);
-    let top = CLOUD_BOTTOM + (weather.y * 4500.0 + 2000.0) * (bank * 0.8 + 0.2)
+    let top = air.cloud_bottom + ((weather.y * (4500.0 / 6500.0) + (2000.0 / 6500.0)) * (air.cloud_top - air.cloud_bottom)) * (bank * 0.8 + 0.2)
         * (mix(shape_value, 0.5, unresolved) * 0.55 + 0.45);
-    let h = (height - CLOUD_BOTTOM) / (top - CLOUD_BOTTOM);
+    let h = (height - air.cloud_bottom) / (top - air.cloud_bottom);
     let profile = smoothstep(0.0, 0.08, h) * (1.0 - smoothstep(0.35, 1.0, h));
     let cells = clamp((shape_value - h * h * 0.25 - (1.0 - coverage)) / max(coverage, 0.001), 0.0, 1.0);
     let sheet = smoothstep(0.55, 0.85, coverage) * (1.0 - weather.y * 0.6);
@@ -150,8 +150,8 @@ fn sun_optical_depth(position: vec3<f32>, footprint: f32) -> f32 {
     let height = cloud_height(position);
     let r = big_r + height;
     let mu = dot(normalize(position - air.planet_center), air.sun_direction);
-    let top = big_r + air.sea_level + CLOUD_TOP;
-    let delta = height - (air.sea_level + CLOUD_TOP);
+    let top = big_r + air.sea_level + air.cloud_top;
+    let delta = height - (air.sea_level + air.cloud_top);
     let discriminant = r * r * (mu * mu) - delta * (top * 2.0 + delta);
     let end = clamp(-r * mu + sqrt(max(discriminant, 0.0)), 0.0, 120000.0);
     var optical = 0.0;
@@ -162,7 +162,7 @@ fn sun_optical_depth(position: vec3<f32>, footprint: f32) -> f32 {
         let sm = (i + 0.5) / 5.0;
         let dt = end * (s1 * s1 - s0 * s0);
         let q = position + air.sun_direction * (end * (sm * sm));
-        optical += cloud_density(q, max(dt * 0.5, footprint)) * dt * CLOUD_EXTINCTION;
+        optical += cloud_density(q, max(dt * 0.5, footprint)) * dt * air.cloud_extinction;
     }
     return optical;
 }
@@ -287,8 +287,8 @@ fn transport(ray: Ray) -> Medium {
     let rd_sun = dot(rd, sun);
     // A ray can meet the cloud shell twice (near and far sides), with clear air between. Split at all
     // four shell crossings before integration, so orbit rays cannot skip a thin layer.
-    let outer = shell_roots(air.sea_level + CLOUD_TOP, r0, mu0, orbital, projection, closest_squared, start, end);
-    let inner = shell_roots(air.sea_level + CLOUD_BOTTOM, r0, mu0, orbital, projection, closest_squared, start, end);
+    let outer = shell_roots(air.sea_level + air.cloud_top, r0, mu0, orbital, projection, closest_squared, start, end);
+    let inner = shell_roots(air.sea_level + air.cloud_bottom, r0, mu0, orbital, projection, closest_squared, start, end);
     let cloud_ray = air.clouds_enabled > 0.0 && air.coverage > 0.0 && outer.discriminant > 0.0;
     var bounds = array<f32, 6>(start, select(end, outer.near, cloud_ray), select(end, inner.near, cloud_ray),
         select(end, inner.far, cloud_ray), select(end, outer.far, cloud_ray), end);
@@ -302,7 +302,7 @@ fn transport(ray: Ray) -> Medium {
         }
         let midpoint = rd * ((seg_from + seg_to) * 0.5);
         let mid_height = cloud_height(midpoint) - air.sea_level;
-        let in_cloud = cloud_ray && mid_height > CLOUD_BOTTOM && mid_height < CLOUD_TOP;
+        let in_cloud = cloud_ray && mid_height > air.cloud_bottom && mid_height < air.cloud_top;
         let steps = select(VIEW_STEPS, select(24, 48, air.camera_altitude < 100000.0), in_cloud);
         let span = seg_to - seg_from;
         for (var view_step = 0; view_step < steps; view_step++) {
@@ -331,7 +331,7 @@ fn transport(ray: Ray) -> Medium {
                 * air.sun_illuminance * air.enabled;
             if in_cloud {
                 let footprint = max(dt, t / air.focal_pixels) * 2.0;
-                let sigma = cloud_density(position, footprint) * CLOUD_EXTINCTION;
+                let sigma = cloud_density(position, footprint) * air.cloud_extinction;
                 if sigma > 0.000001 {
                     extinction += vec3(sigma);
                     source += cloud_source(position, rd, footprint) * sigma;

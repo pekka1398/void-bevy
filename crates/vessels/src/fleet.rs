@@ -2004,17 +2004,25 @@ impl Fleet {
             let w = vec64(b.angvel());
             let c = vec64(b.local_center_of_mass());
             let p = self.propulsion_of(&v);
-            let air = self.air_source(&v);
             let snapshot = self.snapshot_of(&v);
-            let air_acceleration = air.map_or(DVec3::ZERO, |source| {
-                self.axes(scene).conjugate()
-                    * source.acceleration(
-                        &*self.ephemeris,
-                        self.time,
-                        snapshot.position,
-                        snapshot.velocity,
-                        snapshot.mass_kg,
-                    )
+            let air_acceleration = vessel_air(
+                &self.environment,
+                &self.parts,
+                &v.members,
+                self.centre(&v.members),
+                snapshot.rotation,
+            )
+            .map_or(DVec3::ZERO, |source| {
+                let local = world.state(&*self.ephemeris, body, push);
+                source.acceleration_in(
+                    &self.frames(),
+                    self.scenes[&scene].contact,
+                    State {
+                        position: local.position,
+                        velocity: local.velocity,
+                    },
+                    snapshot.mass_kg,
+                )
             });
             let (force, tau, burned) = step_thrust(&p, dt, c);
             let resting =
@@ -2024,29 +2032,39 @@ impl Fleet {
             } else {
                 tau + self.steering(&v, q, w, dt)
             };
-            let now = q * force / (self.mass(&v.members) - burned / 2.0) + air_acceleration;
+            let active = q * force / (self.mass(&v.members) - burned / 2.0);
+            let now = active + air_acceleration;
             self.scenes
                 .get_mut(&scene)
                 .unwrap()
                 .world
                 .apply_local_torque(body, torque);
-            plans.push((id, body, push, now, p));
+            plans.push((id, body, push, now, p, active));
         }
         let world = &mut self.scenes.get_mut(&scene).unwrap().world;
         if let SceneFrame::Bubble(f) = &mut world.frame {
             f.advance_origin(&mut self.ephemeris, self.time + dt);
         }
-        world.step(
+        world.step_with_passive(
             &mut self.ephemeris,
             Some(&mut |body, _| {
                 let p = plans
                     .iter()
-                    .find(|(_, b, _, _, _)| *b == body)
+                    .find(|(_, b, _, _, _, _)| *b == body)
                     .expect("scene body has no vessel");
-                (p.2 + p.3) / 2.0
+                p.5
+            }),
+            Some(&mut |body, _| {
+                let p = plans
+                    .iter()
+                    .find(|p| p.1 == body)
+                    .expect("scene body has no vessel");
+                // Preserve the previous total kick for half-step state reconstruction. Only the
+                // current active thrust wakes a body; the remaining trapezoidal kick is passive.
+                (p.2 + p.3) / 2.0 - p.5
             }),
         );
-        for (id, body, _, now, p) in plans {
+        for (id, body, _, now, p, _) in plans {
             if let Owner::Scene { push, .. } = &mut self.vessels.get_mut(&id).unwrap().owner {
                 *push = now;
             }

@@ -6,71 +6,43 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::Path,
-    sync::Arc,
 };
 use void_assembly::{Craft, catalog};
 use void_landing::LandingPlanet;
-use void_orbit::SystemSpec;
-use void_terrain::{Terrain, TerrainConfig};
 use void_vessels::VesselControl;
 
 pub mod durable;
 
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 9;
+pub const MODEL_VERSION: u32 = 12;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct InitialWorld {
-    pub label: String,
-    pub system: SystemSpec,
-    pub body_id: String,
-    pub terrain: TerrainConfig,
-    pub air_density_scale: Option<f64>,
-    pub air_enabled: bool,
+    pub world: crate::world::WorldDescription,
+    pub launch_body: String,
     pub craft: Craft,
     pub launch_site: DVec3,
 }
 impl InitialWorld {
     pub fn new(planet: &LandingPlanet, craft: &Craft, site: DVec3, air: bool) -> Self {
         Self {
-            label: planet.label.clone(),
-            system: planet.system.clone(),
-            body_id: planet.body_id.clone(),
-            terrain: planet.terrain_config.clone(),
-            air_density_scale: planet.air_density_scale,
-            air_enabled: air,
+            world: crate::world::WorldDescription::single(planet, air),
+            launch_body: planet.body_id.clone(),
             craft: craft.clone(),
             launch_site: site,
         }
     }
     pub fn planet(&self) -> LandingPlanet {
-        assert!(
-            self.launch_site.is_finite(),
-            "session: non-finite launch site"
-        );
-        if let Some(scale) = self.air_density_scale {
-            assert!(
-                scale.is_finite() && scale > 0.0,
-                "session: invalid air density"
-            );
-        }
-        LandingPlanet {
-            label: self.label.clone(),
-            system: self.system.clone(),
-            body_id: self.body_id.clone(),
-            terrain_config: self.terrain.clone(),
-            terrain: Arc::new(Terrain::from_config(&self.terrain)),
-            air_density_scale: self.air_density_scale,
-        }
+        self.world.landing_planet(&self.launch_body)
     }
     pub fn build(&self) -> FleetFlight {
-        FleetFlight::new(
-            self.planet(),
+        FleetFlight::from_world(
+            self.world.clone(),
+            &self.launch_body,
             &self.craft,
             self.launch_site,
-            self.air_enabled,
         )
     }
 }
@@ -123,6 +95,22 @@ pub enum Action {
     ExecuteManeuver,
     AbortManeuver,
     Stage,
+    LaunchFlightAt {
+        body: String,
+        craft: Craft,
+        position: DVec3,
+        velocity: DVec3,
+    },
+    LaunchGroundAt {
+        body: String,
+        craft: Craft,
+        site: DVec3,
+    },
+    LaunchOrbitAt {
+        body: String,
+        craft: Craft,
+        offset: DVec3,
+    },
     LaunchGround {
         craft: Craft,
         site: DVec3,
@@ -240,6 +228,30 @@ impl Action {
                 Outcome::Applied
             }
             Self::Stage => Outcome::Staged(sim.stage()),
+            Self::LaunchFlightAt {
+                body,
+                craft,
+                position,
+                velocity,
+            } => Outcome::Spawned(sim.launch_flight_at(
+                body,
+                craft,
+                void_landing::FrameState {
+                    position: *position,
+                    velocity: *velocity,
+                },
+            )),
+            Self::LaunchGroundAt { body, craft, site } => {
+                Outcome::Spawned(sim.launch_ground_at(body, craft, *site))
+            }
+            Self::LaunchOrbitAt {
+                body,
+                craft,
+                offset,
+            } => {
+                assert!(offset.is_finite(), "session: non-finite orbital offset");
+                Outcome::Spawned(sim.launch_orbital_at(sim.world.body_index(body), craft, *offset))
+            }
             Self::LaunchGround { craft, site } => {
                 let id = sim.fleet.launch_landed(craft, sim.home, *site);
                 sim.fleet.advance(0.0);
@@ -339,10 +351,10 @@ pub fn world_mark(sim: &FleetFlight) -> serde_json::Value {
                 position.is_finite() && velocity.is_finite(),
                 "session: non-finite ephemeris body {i}"
             );
-            json!({"position":position,"velocity":velocity})
+            json!({"id":sim.fleet.ephemeris.bodies()[i].id,"position":position,"velocity":velocity})
         })
         .collect();
-    json!({ "time":sim.fleet.time(), "pending":sim.fleet.pending_seconds(),
+    json!({ "world":sim.world, "launchBody":sim.planet.body_id, "time":sim.fleet.time(), "pending":sim.fleet.pending_seconds(),
         "selected":sim.selected, "presentation":sim.presentation, "maneuverWarp":sim.maneuver_warp, "ships":ships, "scenes":scenes,
         "connections":connections, "bodies":bodies, "plans":sim.plan_checkpoints() })
 }

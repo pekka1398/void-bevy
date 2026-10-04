@@ -29,11 +29,16 @@ pub struct FlightCheckpoint {
 impl FlightCheckpoint {
     pub fn capture(sim: &FleetFlight, initial: InitialWorld) -> Self {
         assert_eq!(
+            sim.planet.body_id, initial.launch_body,
+            "world checkpoint: launch body changed"
+        );
+        assert_eq!(
             sim.launch_site, initial.launch_site,
             "world checkpoint: launch site changed"
         );
         assert_eq!(
-            sim.planet.terrain_config, initial.terrain,
+            serde_json::to_value(&sim.world).unwrap(),
+            serde_json::to_value(&initial.world).unwrap(),
             "world checkpoint: terrain changed"
         );
         Self {
@@ -69,14 +74,15 @@ impl FlightCheckpoint {
     pub fn restore(&self) -> FleetFlight {
         self.validate_header();
         let planet = self.initial.planet();
-        let (mut ephemeris, home) = void_landing::planet_ephemeris(&planet);
-        // Rebuild only the massive-body samples. This is not a replay of ships or pilot actions.
-        ephemeris.extend_to(self.ephemeris_end);
-        let air = self.initial.air_enabled;
-        let environment = void_landing::planet_environment(&planet, &ephemeris, home, air);
+        let home = self.initial.world.body_index(&self.initial.launch_body);
+        let mut built = self.initial.world.build();
+        built.ephemeris.extend_to(self.ephemeris_end);
+        let (ephemeris, environment) = (built.ephemeris, built.environment);
         let fleet = Fleet::from_checkpoint(ephemeris, environment, self.fleet.clone());
         let mut sim = FleetFlight {
             fleet,
+            world: self.initial.world.clone(),
+            terrains: built.terrains,
             planet,
             home,
             selected: self.selected.clone(),

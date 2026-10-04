@@ -16,6 +16,42 @@ use void_scenery::{DEFAULT_STARS, OrbitView, generate_stars};
 
 const GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/");
 
+#[test]
+fn airless_tables_and_sky_have_finite_vacuum_limits() {
+    let mut p = earth_like_atmosphere(1_737_400.0);
+    p.rayleigh_scattering = [0.0; 3];
+    p.ozone_absorption = [0.0; 3];
+    p.mie_scattering = 0.0;
+    p.mie_extinction = 0.0;
+    let trans = build_transmittance_table(&p);
+    let multiple = build_multiple_scattering_table(&p, &trans, 8, 4);
+    let irradiance = build_irradiance_table(&p, &trans, &multiple, 8, 4);
+    assert!(
+        trans
+            .iter()
+            .chain(&multiple)
+            .chain(&irradiance)
+            .all(|v| v.is_finite())
+    );
+    for texel in trans.as_chunks::<4>().0 {
+        assert_eq!(&texel[..3], &[1.0; 3]);
+    }
+    for texel in irradiance.as_chunks::<4>().0 {
+        assert_eq!(&texel[..3], &[0.0; 3]);
+    }
+    let sky = march_sky(
+        &p,
+        &trans,
+        Some(&multiple),
+        p.bottom_radius + 100.0,
+        DVec3::Z,
+        DVec3::Z,
+        4,
+    );
+    assert_eq!(sky.radiance, [0.0; 3]);
+    assert_eq!(sky.transmittance, [1.0; 3]);
+}
+
 #[derive(Deserialize, Clone, Copy)]
 struct V {
     x: f64,

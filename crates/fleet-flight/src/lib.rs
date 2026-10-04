@@ -4,17 +4,17 @@ pub mod plans;
 pub mod presentation;
 pub mod session;
 pub mod warp;
+pub mod world;
 use glam::DVec3;
 use void_assembly::Craft;
-use void_landing::{
-    CoastPrediction, ContactWorldOptions, FrameState, LandingPlanet, PlanetFrame,
-    level_for_tile_size, planet_ephemeris, predict_coast,
-};
-use void_vessels::{Fleet, FleetOptions, GroundSpec, VesselControl, VesselMode};
+use void_landing::{CoastPrediction, FrameState, LandingPlanet, PlanetFrame, predict_coast};
+use void_vessels::{Fleet, FleetOptions, VesselControl, VesselMode};
 
 pub struct FleetFlight {
     pub presentation: presentation::Presentation,
     pub fleet: Fleet,
+    pub world: world::WorldDescription,
+    pub terrains: std::collections::BTreeMap<usize, std::sync::Arc<void_terrain::Terrain>>,
     pub planet: LandingPlanet,
     pub home: usize,
     pub selected: String,
@@ -24,27 +24,29 @@ pub struct FleetFlight {
 }
 impl FleetFlight {
     pub fn new(planet: LandingPlanet, craft: &Craft, site: DVec3, air: bool) -> Self {
-        let (ephemeris, home) = planet_ephemeris(&planet);
-        let environment = void_landing::planet_environment(&planet, &ephemeris, home, air);
-        let ground = GroundSpec {
-            body_index: home,
-            band_enter_meters: 200.0,
-            band_exit_meters: 400.0,
-            tiles: ContactWorldOptions {
-                step_seconds: 1.0 / 60.0,
-                tile_level: level_for_tile_size(planet.terrain.radius_meters, 300.0),
-                tile_resolution: 33,
-                tile_reach_meters: 300.0,
-                tile_keep_meters: 600.0,
-                recenter_meters: 5000.0,
-                sleeping: true,
-            },
-        };
+        Self::from_world(
+            world::WorldDescription::single(&planet, air),
+            &planet.body_id,
+            craft,
+            site,
+        )
+    }
+    pub fn from_world(
+        world: world::WorldDescription,
+        launch_body: &str,
+        craft: &Craft,
+        site: DVec3,
+    ) -> Self {
+        world.validate_launch(launch_body, site);
+        let planet = world.landing_planet(launch_body);
+        let home = world.body_index(launch_body);
+        let built = world.build();
+        let terrains = built.terrains;
         let mut fleet = Fleet::new(
-            ephemeris,
-            environment,
+            built.ephemeris,
+            built.environment,
             0.0,
-            vec![ground],
+            built.grounds,
             FleetOptions::default(),
         );
         let selected = fleet.launch_landed(craft, home, site);
@@ -58,6 +60,8 @@ impl FleetFlight {
         Self {
             presentation,
             fleet,
+            world,
+            terrains,
             planet,
             home,
             selected,
@@ -65,6 +69,82 @@ impl FleetFlight {
             plans: std::collections::BTreeMap::new(),
             maneuver_warp: warp::ManeuverWarp::Idle,
         }
+    }
+    /// Geometric nearest configured terrain, evaluated in body-local frames before subtraction.
+    /// Home remains the launch identity; navigation and observation do not change collision worlds.
+    pub fn nearby_body(&self, vessel: &str) -> usize {
+        self.terrains
+            .keys()
+            .copied()
+            .min_by(|&a, &b| {
+                let distance = |body| {
+                    let local = self
+                        .fleet
+                        .frames()
+                        .transform(
+                            self.fleet.vessel_frame(vessel),
+                            self.fleet.body_frames(body).1,
+                        )
+                        .apply_point(self.fleet.root_position_local(vessel));
+                    local.length() - self.fleet.ephemeris.bodies()[body].radius_meters
+                };
+                distance(a).total_cmp(&distance(b))
+            })
+            .expect("flight: no terrain bodies")
+    }
+    /// Gravitational navigation reference; distinct from launch identity and terrain proximity.
+    pub fn navigation_body(&self, vessel: &str) -> usize {
+        let bodies = self.fleet.ephemeris.bodies();
+        let mut positions = vec![DVec3::ZERO; bodies.len()];
+        self.fleet
+            .ephemeris
+            .positions_at(self.fleet.time(), &mut positions);
+        void_orbit::DominanceTree::new(bodies)
+            .dominant(&positions, self.fleet.snapshot(vessel).position)
+    }
+    pub fn observation_body(&self) -> usize {
+        self.presentation
+            .focus_body
+            .unwrap_or_else(|| self.nearby_body(&self.selected))
+    }
+    pub fn launch_ground_at(&mut self, body_id: &str, craft: &Craft, site: DVec3) -> String {
+        self.world.validate_launch(body_id, site);
+        let id = self
+            .fleet
+            .launch_landed(craft, self.world.body_index(body_id), site);
+        self.fleet.advance(0.0);
+        id
+    }
+    /// Explicit body-local flight fixture. It is a journaled initial state, never a transfer claim.
+    pub fn launch_flight_at(&mut self, body_id: &str, craft: &Craft, local: FrameState) -> String {
+        assert!(
+            local.position.is_finite()
+                && local.position.length_squared() > 0.0
+                && local.velocity.is_finite(),
+            "flight: invalid fixture"
+        );
+        let body = self.world.body_index(body_id);
+        let transform = self
+            .fleet
+            .frames()
+            .transform(self.fleet.body_frames(body).1, self.fleet.origin_frame());
+        let state = transform.apply_state(void_frames::State {
+            position: local.position,
+            velocity: local.velocity,
+        });
+        let up = local.position.normalize();
+        let rotation = transform.rotation() * void_landing::upright_at(up);
+        let id = self.fleet.launch(
+            craft,
+            FrameState {
+                position: state.position,
+                velocity: state.velocity,
+            },
+            rotation,
+            DVec3::ZERO,
+        );
+        self.fleet.advance(0.0);
+        id
     }
     pub fn select(&mut self, id: &str) {
         self.fleet.snapshot(id); // Unknown vessels are errors.
@@ -108,9 +188,10 @@ impl FleetFlight {
     /// Vacuum coast, as the current game's cyan line. No engine or atmosphere in the prediction.
     pub fn predict(&mut self, horizon: f64) -> CoastPrediction {
         let snap = self.fleet.snapshot(&self.selected);
-        let frame = PlanetFrame::new(&self.fleet.ephemeris, self.home);
+        let body = self.nearby_body(&self.selected);
+        let frame = PlanetFrame::new(&self.fleet.ephemeris, body);
         let state = self.body_fixed(
-            self.home,
+            body,
             FrameState {
                 position: snap.position,
                 velocity: snap.velocity,
@@ -120,7 +201,7 @@ impl FleetFlight {
         predict_coast(
             &mut self.fleet.ephemeris,
             &frame,
-            &self.planet.terrain,
+            &self.terrains[&body],
             self.fleet.options.tolerances,
             time,
             state,
@@ -130,7 +211,10 @@ impl FleetFlight {
     }
     /// A repeatable orbital fixture for checking scale, warp and multi-vessel flight without launch.
     pub fn launch_orbital(&mut self, craft: &Craft, offset: DVec3) -> String {
-        let frame = PlanetFrame::new(&self.fleet.ephemeris, self.home);
+        self.launch_orbital_at(self.home, craft, offset)
+    }
+    pub fn launch_orbital_at(&mut self, body_index: usize, craft: &Craft, offset: DVec3) -> String {
+        let frame = PlanetFrame::new(&self.fleet.ephemeris, body_index);
         let body = &frame.body;
         let r = body.radius_meters + 400_000.0;
         let local = FrameState {
@@ -138,7 +222,7 @@ impl FleetFlight {
             velocity: DVec3::Y * ((body.gm / r).sqrt() - frame.omega * r),
         };
         let ground = self.fleet.frames().transform(
-            self.fleet.body_frames(self.home).1,
+            self.fleet.body_frames(body_index).1,
             self.fleet.origin_frame(),
         );
         let state = ground.apply_state(void_frames::State {

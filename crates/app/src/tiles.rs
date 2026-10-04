@@ -48,6 +48,7 @@ pub struct TileField<M: Material = StandardMaterial> {
     building: HashMap<u64, Task<TileMeshData>>,
     /// Drawn tiles: entity and the coarse neighbours its seams are stitched to.
     drawn: HashMap<u64, (Entity, [Option<u64>; 4])>,
+    owned_meshes: HashMap<Entity, AssetId<Mesh>>,
     indices: Vec<u32>,
     material: Handle<M>,
     render: Vec<u64>,
@@ -79,6 +80,7 @@ impl<M: Material> TileField<M> {
             // Skirts are left out: seams are stitched, as the LOD lab draws by default.
             indices: indices[..grid].to_vec(),
             material,
+            owned_meshes: HashMap::new(),
             render: Vec::new(),
             last_requests: 0,
             last_select_ms: 0.0,
@@ -89,6 +91,21 @@ impl<M: Material> TileField<M> {
         }
     }
 
+    /// Cancel this scene's pending work and release all app-owned rendered meshes.
+    /// A dropped Task cannot deliver into a replacement TileField/generation.
+    pub fn unload(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
+        self.building.clear();
+        for (_, (entity, _)) in self.drawn.drain() {
+            commands.entity(entity).despawn();
+        }
+        for (_, mesh) in self.owned_meshes.drain() {
+            meshes.remove(mesh);
+        }
+        self.render.clear();
+    }
+    pub fn owned_mesh_count(&self) -> usize {
+        self.owned_meshes.len()
+    }
     pub fn wireframe(&self) -> bool {
         self.wireframe
     }
@@ -233,6 +250,9 @@ impl<M: Material> TileField<M> {
             let keep = wanted.get(code) == Some(seams);
             if !keep {
                 commands.entity(*entity).despawn();
+                if let Some(mesh) = self.owned_meshes.remove(entity) {
+                    meshes.remove(mesh);
+                }
             }
             keep
         });
@@ -259,7 +279,7 @@ impl<M: Material> TileField<M> {
             let entity = commands
                 .spawn((
                     Tile,
-                    Mesh3d(mesh),
+                    Mesh3d(mesh.clone()),
                     MeshMaterial3d(self.material.clone()),
                     anchor(data.origin, eye),
                 ))
@@ -275,6 +295,7 @@ impl<M: Material> TileField<M> {
                     },
                 ));
             }
+            self.owned_meshes.insert(entity, mesh.id());
             self.drawn.insert(code, (entity, seams));
         }
         self.levels = (levels.0.min(levels.1), levels.1);
@@ -302,4 +323,65 @@ fn tile_mesh(
     .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
     .with_inserted_attribute(ATTRIBUTE_HEIGHT, heights[..count].to_vec())
     .with_inserted_indices(Indices::U32(indices.to_vec()))
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    #[test]
+    fn unload_releases_entities_meshes_and_cannot_accept_old_jobs() {
+        let planet = void_landing::pebble();
+        let demo = void_landing::demo_rocket(&planet.terrain);
+        let options = void_landing::landing_lod_options(&planet.terrain, &demo.options.contact);
+        let mut field: TileField = TileField::new(
+            options.clone(),
+            Some(planet.terrain.clone()),
+            Handle::default(),
+        );
+        let mut world = World::new();
+        let mut meshes = Assets::<Mesh>::default();
+        let pool = AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let key = void_lod::TileKey {
+            face: 0,
+            level: 0,
+            x: 0,
+            y: 0,
+        };
+        let task = pool.spawn(async move {
+            build_tile_mesh(
+                key,
+                &|_: DVec3, _: f64| SurfaceSample {
+                    height_meters: 123.0,
+                    color: [1.0, 0.0, 0.0],
+                },
+                TileMeshOptions {
+                    radius_meters: 100e3,
+                    resolution: 33,
+                },
+            )
+        });
+        field.building.insert(key.code(), task);
+        let mesh = meshes.add(Sphere::new(1.0).mesh().uv(8, 4));
+        let entity = world.spawn((Tile, Mesh3d(mesh.clone()))).id();
+        field.drawn.insert(key.code(), (entity, [None; 4]));
+        field.owned_meshes.insert(entity, mesh.id());
+        field.unload(&mut world.commands(), &mut meshes);
+        world.flush();
+        assert!(world.get_entity(entity).is_err());
+        assert!(meshes.get(mesh.id()).is_none());
+        assert_eq!(
+            (
+                field.building_count(),
+                field.drawn_count(),
+                field.owned_mesh_count()
+            ),
+            (0, 0, 0)
+        );
+        // A replacement scene owns a different job map. Even a previously completed old job is
+        // discarded rather than accepted as the same TileKey on a different body/configuration.
+        let mut replacement: TileField =
+            TileField::new(options, Some(planet.terrain), Handle::default());
+        replacement.finish_builds();
+        assert!(replacement.lod.node(key.code()).unwrap().data.is_none());
+    }
 }

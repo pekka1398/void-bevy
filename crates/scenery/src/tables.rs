@@ -122,7 +122,9 @@ pub fn build_multiple_scattering_table(
                         let scattering =
                             p.rayleigh_scattering[c] * d.rayleigh + p.mie_scattering * d.mie;
                         let step = exp(-e[c] * dt);
-                        let absorbed = (1.0 - step) / e[c];
+                        // Integral of exp(-extinction * s) over this step. In vacuum its
+                        // exact limit is dt; the quotient would otherwise evaluate 0/0.
+                        let absorbed = if e[c] == 0.0 { dt } else { (1.0 - step) / e[c] };
                         second[c] +=
                             (t3[c] * scattering * sunlight[c] * isotropic * absorbed) / count;
                         transfer[c] += (t3[c] * scattering * absorbed) / count;
@@ -209,7 +211,11 @@ pub fn march_sky(
             let source =
                 (rayleigh * phase_r + mie * phase_m) * sunlight[c] + (rayleigh + mie) * ms[c];
             let step = exp(-e[c] * dt);
-            radiance[c] += (t3[c] * (source - source * step)) / e[c];
+            radiance[c] += if e[c] == 0.0 {
+                t3[c] * source * dt
+            } else {
+                (t3[c] * (source - source * step)) / e[c]
+            };
             t3[c] *= step;
         }
     }

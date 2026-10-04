@@ -23,6 +23,8 @@ fn the_air_starts_at_the_sea_where_the_terrain_has_one() {
     let layered = LandingPlanet {
         terrain: Arc::new(Terrain::from_config(&config)),
         terrain_config: config,
+        air_datum: SEA_LEVEL,
+        sea_level: Some(SEA_LEVEL),
         ..hills.clone()
     };
     let (e, b) = planet_ephemeris(&hills);

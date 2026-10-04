@@ -188,7 +188,7 @@ fn reset_and_foreign_world_load_stay_in_the_same_stream_and_save_the_current_wor
     s.finish_stream();
     let replay = FlightSession::from_recording(Recording::read(&path)).with_recording();
     assert_eq!(world_mark(s.sim()), world_mark(replay.sim()));
-    assert_eq!(replay.recording_initial().body_id, planet.body_id);
+    assert_eq!(replay.recording_initial().launch_body, planet.body_id);
     let saved = void_fleet_flight::checkpoint::FlightCheckpoint::capture(
         replay.sim(),
         replay.recording_initial().clone(),
