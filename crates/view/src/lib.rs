@@ -23,3 +23,5 @@ pub use path_frame::{
     Basis, MAX_ORBIT_SAMPLES, PathCache, PathFrame, PathFrameKind, PlottingFrame, frame_axes,
     frame_to_ecliptic, orbit_in_surface_frame,
 };
+
+pub mod plot;

@@ -17,6 +17,7 @@ pub struct Presentation {
     pub pitch: f64,
     pub focus_body: Option<usize>,
     pub surface_path: bool,
+    pub plotting_frame: void_orbit::FrameSpec,
     pub speed_surface: bool,
     pub altitude_agl: bool,
     pub colliders: bool,
@@ -41,6 +42,7 @@ pub enum Toggle {
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ViewCommand {
     Configure { main_camera: bool },
+    PlotFrame { frame: void_orbit::FrameSpec },
     Focus { body: Option<usize> },
     Drag { x: f64, y: f64 },
     Zoom { pixels: f64 },
@@ -97,6 +99,7 @@ impl Presentation {
             pitch: 0.25,
             focus_body: None,
             surface_path: false,
+            plotting_frame: void_orbit::FrameSpec::Barycentric,
             speed_surface: true,
             altitude_agl: true,
             colliders: false,
@@ -109,6 +112,16 @@ impl Presentation {
         }
     }
     pub fn validate(&self, sim: &FleetFlight) {
+        self.plotting_frame
+            .assert_valid(sim.fleet.ephemeris.bodies().len());
+        if let void_orbit::FrameSpec::TwoBodyRotating { primary, secondary } = self.plotting_frame {
+            use void_orbit::EphemerisSource;
+            assert_eq!(
+                sim.fleet.ephemeris.system_of(primary),
+                sim.fleet.ephemeris.system_of(secondary),
+                "plotting pair spans systems"
+            );
+        }
         assert!(
             self.direction.is_finite() && (self.direction.length() - 1.0).abs() < 1e-9,
             "view: invalid direction"
@@ -183,6 +196,12 @@ impl Presentation {
     pub fn apply(&mut self, sim: &FleetFlight, command: &ViewCommand) {
         match *command {
             ViewCommand::Configure { main_camera } => self.main_camera = main_camera,
+            ViewCommand::PlotFrame { frame } => {
+                frame.assert_valid(sim.fleet.ephemeris.bodies().len());
+                let mut evaluator = void_orbit::FrameEvaluator::new(&sim.fleet.ephemeris, frame);
+                evaluator.evaluate(&sim.fleet.ephemeris, sim.fleet.time());
+                self.plotting_frame = frame;
+            }
             ViewCommand::Focus { body } => {
                 self.focus_body = body;
                 if body.is_none() {
@@ -274,9 +293,23 @@ impl Presentation {
                 void_view::camera_spin(&view, self.path_frame(), reference, navigation);
             let elapsed = sim.fleet.time() - self.last_time;
             assert!(elapsed >= 0.0, "view: world clock moved backwards");
-            if elapsed > 0.0 && weight > 0.0 {
+            if elapsed > 0.0 {
                 let rotation = &sim.fleet.ephemeris.bodies()[body].rotation;
-                camera.corotate(rotation.axis(), rotation.rate() * elapsed * weight);
+                camera.corotate(
+                    rotation.axis(),
+                    rotation.rate() * elapsed * weight * (1.0 - view.map_weight),
+                );
+                let mut evaluator =
+                    void_orbit::FrameEvaluator::new(&sim.fleet.ephemeris, self.plotting_frame);
+                let before = evaluator.evaluate(&sim.fleet.ephemeris, self.last_time);
+                let after = evaluator.evaluate(&sim.fleet.ephemeris, sim.fleet.time());
+                let q = |axes: [DVec3; 3]| {
+                    DQuat::from_mat3(&glam::DMat3::from_cols(axes[0], axes[1], axes[2]))
+                };
+                let delta = q(after.axes) * q(before.axes).inverse();
+                camera.direction = (DQuat::IDENTITY.slerp(delta.normalize(), view.map_weight)
+                    * camera.direction)
+                    .normalize();
             }
             camera.clamp_to_up(view.up);
             self.direction = camera.direction;

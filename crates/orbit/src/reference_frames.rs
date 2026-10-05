@@ -1,11 +1,12 @@
 //! The orbit lab's four plotting frames (`ReferenceFrames.ts`). These describe where paths are
 //! plotted, not the physical integration frame. Evaluate each path sample at its own time.
 use glam::DVec3;
+use serde::{Deserialize, Serialize};
 use void_frames::{BodyId, FrameId};
 
 use crate::{EphemerisSource, SystemFrames};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FrameSpec {
     Barycentric,
     BodyInertial { body: usize },

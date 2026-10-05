@@ -316,7 +316,9 @@ struct Lab {
     focus_position: DVec3,
     orbits: void_view::MapOrbits,
     path: void_view::MapPath,
-    plan_path: void_view::MapPath,
+    body_plots: void_view::plot::BodyPlots,
+    plot_path: void_view::plot::PlotPath,
+    plot_plan: void_view::plot::PlotPath,
     plan_vessel: String,
     prediction_at: f64,
     prediction_generation: u64,
@@ -868,7 +870,9 @@ fn new_lab(session: FlightSession, craft: Craft) -> Lab {
         focus_position: DVec3::ZERO,
         orbits,
         path: void_view::MapPath::new(),
-        plan_path: void_view::MapPath::new(),
+        body_plots: Default::default(),
+        plot_path: Default::default(),
+        plot_plan: Default::default(),
         plan_vessel: String::new(),
         prediction_at: f64::NEG_INFINITY,
         prediction_generation: 0,
@@ -1323,8 +1327,93 @@ fn controls(
     if warp_was_active && !lab.session.sim().maneuver_warp.active() {
         lab.rate = 0;
     }
+    if lab.main_game {
+        plot_controls(lab, &keys);
+    }
     view_controls(lab, &keys, &buttons, &motion, &scroll);
 }
+fn plot_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
+    use void_orbit::FrameSpec;
+    let sim = lab.session.sim();
+    let bodies = sim.fleet.ephemeris.bodies();
+    let current = sim.presentation.plotting_frame;
+    let (mut primary, mut secondary, mut mode) = match current {
+        FrameSpec::Barycentric => (sim.home, None, 0),
+        FrameSpec::BodyInertial { body } => (body, None, 1),
+        FrameSpec::BodySurface { body } => (body, None, 2),
+        FrameSpec::TwoBodyRotating { primary, secondary } => (primary, Some(secondary), 3),
+    };
+    let mut changed = false;
+    for (key, value) in [
+        (KeyCode::Digit1, 0),
+        (KeyCode::Digit2, 1),
+        (KeyCode::Digit3, 2),
+        (KeyCode::Digit4, 3),
+    ] {
+        if keys.just_pressed(key) {
+            mode = value;
+            changed = true;
+        }
+    }
+    if keys.just_pressed(KeyCode::KeyG) {
+        mode = (mode + 1) % 4;
+        changed = true;
+    }
+    if keys.just_pressed(KeyCode::KeyJ) {
+        if keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+            let candidates: Vec<_> = bodies
+                .iter()
+                .filter(|b| b.index != primary)
+                .map(|b| b.index)
+                .collect();
+            if candidates.is_empty() {
+                lab.notice = "Two-body plot requires two bodies".into();
+                return;
+            }
+            let next = secondary
+                .and_then(|s| candidates.iter().position(|&i| i == s))
+                .map_or(0, |i| (i + 1) % candidates.len());
+            secondary = Some(candidates[next]);
+            mode = 3;
+        } else {
+            primary = (primary + 1) % bodies.len();
+            if secondary == Some(primary) {
+                secondary = None;
+            }
+        }
+        changed = true;
+    }
+    if !changed {
+        return;
+    }
+    let frame = match mode {
+        0 => FrameSpec::Barycentric,
+        1 => FrameSpec::BodyInertial { body: primary },
+        2 => FrameSpec::BodySurface { body: primary },
+        3 => {
+            let secondary = secondary
+                .or_else(|| {
+                    bodies
+                        .iter()
+                        .find(|b| b.parent_index == Some(primary))
+                        .map(|b| b.index)
+                })
+                .or(bodies[primary].parent_index)
+                .or_else(|| bodies.iter().find(|b| b.index != primary).map(|b| b.index));
+            let Some(secondary) = secondary else {
+                lab.notice = "Two-body plot requires two bodies".into();
+                return;
+            };
+            FrameSpec::TwoBodyRotating { primary, secondary }
+        }
+        _ => unreachable!(),
+    };
+    lab.session.execute(Action::View {
+        command: ViewCommand::PlotFrame { frame },
+    });
+    lab.notice = "Plotting frame changed; physics frame unchanged".into();
+}
+
 fn plan_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
     use void_orbit::{ManeuverSpec, ReferenceMode};
     let id = lab.session.sim().selected.clone();
@@ -1511,7 +1600,6 @@ fn view_controls(
         (KeyCode::F5, Toggle::Terrain),
         (KeyCode::KeyK, Toggle::AltitudeAgl),
         (KeyCode::KeyL, Toggle::SpeedSurface),
-        (KeyCode::KeyG, Toggle::PathFrame),
     ] {
         if keys.just_pressed(key) {
             lab.session.execute(Action::View {
@@ -1932,7 +2020,7 @@ fn draw(
         .map(|p| p.fuel_kg)
         .sum();
     **hud = Text::new(format!(
-        "{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels\nP pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS\nTab vessel | Shift+Tab body focus | click map labels | G path frame\nN nearby craft | O orbital craft | R reset | , . warp | K altitude | L speed\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
+        "{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels\nP pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN nearby craft | O orbital craft | R reset | , . warp | K altitude | L speed\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
         if lab.main_game {
             "VOID"
         } else {
@@ -1978,8 +2066,9 @@ fn draw(
         (orbital.apoapsis_radius_meters - body.radius_meters) / 1000.0,
         f.vessel_ids().len(),
         format_args!(
-            "{}\n{}\n{}",
+            "{}\nplot {:?}\n{}\n{}",
             lab.notice,
+            sim.presentation.plotting_frame,
             if lab.main_game {
                 docking_description(lab)
             } else {
@@ -3088,32 +3177,42 @@ fn draw_map(
         // Simulation time makes refresh cadence independent of replay rendering speed.
         wall_ms: fleet.time() * 1000.0,
     };
-    lab.orbits.update(bodies, &frame);
+    let spec = lab.session.sim().presentation.plotting_frame;
+    let apsis_reference = match spec {
+        void_orbit::FrameSpec::BodyInertial { body }
+        | void_orbit::FrameSpec::BodySurface { body } => body,
+        void_orbit::FrameSpec::TwoBodyRotating { primary, .. } => primary,
+        void_orbit::FrameSpec::Barycentric => reference,
+    };
     if let Some(prediction) = &lab.prediction {
-        lab.path.update(
+        lab.plot_path.update(
             &fleet.ephemeris,
             &prediction.trajectory,
+            spec,
             lab.prediction_generation,
-            &frame,
-            true,
+            fleet.time(),
+            frame.origin,
+            apsis_reference,
         );
     } else {
-        lab.path.hide();
+        lab.plot_path = Default::default();
     }
     if lab.plan_vessel != lab.session.sim().selected {
-        lab.plan_path = void_view::MapPath::new();
+        lab.plot_plan = Default::default();
         lab.plan_vessel = lab.session.sim().selected.clone();
     }
     if let Some(p) = lab.session.sim().plans.get(&lab.plan_vessel) {
-        lab.plan_path.update(
+        lab.plot_plan.update(
             &fleet.ephemeris,
             &p.plan.trajectory,
+            spec,
             p.plan.generation,
-            &frame,
-            true,
+            fleet.time(),
+            frame.origin,
+            apsis_reference,
         );
     } else {
-        lab.plan_path.hide();
+        lab.plot_plan = Default::default();
     }
     let eye_inertial = fleet
         .frames()
@@ -3124,23 +3223,33 @@ fn draw_map(
         transform.translation = render(positions[body.0] - frame.origin);
         transform.scale = Vec3::splat(bodies[body.0].radius_meters as f32);
     }
-    crate::map::draw_map_lines(
-        &mut gizmos,
-        bodies,
-        &lab.orbits,
-        &[
-            (&lab.path, crate::map::color(crate::map::PATH_COLOR)),
-            (&lab.plan_path, Color::srgb(1.0, 0.6, 0.15)),
-        ],
-        &frame,
-        view.map_weight as f32,
-        &render,
-    );
+    if view.map_weight > 0.0 {
+        for (body, points) in bodies.iter().zip(lab.body_plots.update(
+            &fleet.ephemeris,
+            spec,
+            fleet.time(),
+            frame.origin,
+        )) {
+            gizmos.linestrip(
+                points.into_iter().map(&render),
+                crate::map::color(&body.color).with_alpha(view.map_weight as f32),
+            );
+        }
+        for (path, color) in [
+            (&lab.plot_path, crate::map::color(crate::map::PATH_COLOR)),
+            (&lab.plot_plan, Color::srgb(1.0, 0.6, 0.15)),
+        ] {
+            gizmos.linestrip(
+                path.points.iter().copied().map(&render),
+                color.with_alpha(view.map_weight as f32),
+            );
+        }
+    }
     let wanted = void_view::map_labels(
         bodies,
         &frame,
         lab.session.sim().presentation.focus_body,
-        &lab.path.apsis_positions(&frame),
+        &lab.plot_path.apsides,
     );
     let (camera, transform) = *camera;
     crate::map::place_map_labels(

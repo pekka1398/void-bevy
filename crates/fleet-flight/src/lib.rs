@@ -52,11 +52,12 @@ impl FleetFlight {
         let selected = fleet.launch_landed(craft, home, site);
         fleet.advance(0.0);
         let ship = fleet.snapshot(&selected);
-        let presentation = presentation::Presentation::new(
+        let mut presentation = presentation::Presentation::new(
             ship.position,
             fleet.ephemeris.body_position(home, fleet.time()),
             fleet.time(),
         );
+        presentation.plotting_frame = void_orbit::FrameSpec::BodyInertial { body: home };
         Self {
             presentation,
             fleet,

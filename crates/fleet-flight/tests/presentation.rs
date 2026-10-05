@@ -291,3 +291,50 @@ fn camera_tracks_the_upper_command_part_before_and_after_staging() {
         assert!((in_camera + after.offset).length() < 1e-8);
     }
 }
+
+#[test]
+fn all_plot_frames_survive_checkpoint_and_journal_without_changing_physics() {
+    use void_orbit::FrameSpec;
+    let planet = void_landing::aurelia();
+    let mut original = FlightSession::new(InitialWorld::new(
+        &planet,
+        &demo_craft(),
+        flat_site(&planet),
+        false,
+    ))
+    .with_recording();
+    let before = original.sim().fleet.snapshot(&original.sim().selected);
+    let count = original.sim().fleet.ephemeris.bodies().len();
+    let mut frames = vec![
+        FrameSpec::Barycentric,
+        FrameSpec::BodyInertial { body: 0 },
+        FrameSpec::BodySurface { body: 0 },
+    ];
+    if count > 1 {
+        frames.push(FrameSpec::TwoBodyRotating {
+            primary: 0,
+            secondary: 1,
+        });
+    }
+    for frame in frames {
+        view(&mut original, ViewCommand::PlotFrame { frame });
+        original.execute(Action::EndFrame {
+            paused: true,
+            rate: 0,
+        });
+        original.mark();
+        let checkpoint =
+            FlightCheckpoint::capture(original.sim(), original.recording_initial().clone());
+        let restored = FlightSession::from_checkpoint(checkpoint);
+        assert_eq!(restored.sim().presentation.plotting_frame, frame);
+        assert_eq!(world_mark(restored.sim()), world_mark(original.sim()));
+        let after = original.sim().fleet.snapshot(&original.sim().selected);
+        assert_eq!(before.position, after.position);
+        assert_eq!(before.velocity, after.velocity);
+        assert_eq!(before.mass_kg, after.mass_kg);
+    }
+    assert_eq!(
+        world_mark(FlightSession::from_recording(original.recording()).sim()),
+        world_mark(original.sim())
+    );
+}
