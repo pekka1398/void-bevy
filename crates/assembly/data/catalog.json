@@ -867,7 +867,12 @@
           "maxDynamicPressurePa": 25000.0,
           "fullDeployAltitudeMeters": 1500.0,
           "semiSeconds": 1.0,
-          "fullSeconds": 2.0
+          "fullSeconds": 2.0,
+          "point": [
+            0,
+            0,
+            0
+          ]
         }
       }
     ]
@@ -1441,6 +1446,169 @@
           0.7,
           0.35
         ]
+      }
+    ]
+  },
+  {
+    "id": "aero-stabilizer-pod",
+    "name": "固定翼穩定艙",
+    "category": "command",
+    "description": "Fleet氣動力矩驗收：兩個垂直固定翼面位於質心後方",
+    "dryMassKg": 250,
+    "height": 3,
+    "radius": 0.625,
+    "shape": "cone",
+    "color": "#e5e9ec",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.8,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "command",
+        "id": "command"
+      },
+      {
+        "kind": "liftingSurface",
+        "id": "fin-x",
+        "parameters": {
+          "point": [
+            0,
+            -2,
+            0
+          ],
+          "chord": [
+            0,
+            1,
+            0
+          ],
+          "normal": [
+            1,
+            0,
+            0
+          ],
+          "areaM2": 1.5,
+          "aspectRatio": 3,
+          "chordMeters": 1,
+          "sweepRadians": 0,
+          "incidenceRadians": 0,
+          "zeroLiftRadians": 0,
+          "stallRadians": 0.3,
+          "cd0": 0.02,
+          "efficiency": 0.85,
+          "pitchingMoment": 0
+        }
+      },
+      {
+        "kind": "liftingSurface",
+        "id": "fin-z",
+        "parameters": {
+          "point": [
+            0,
+            -2,
+            0
+          ],
+          "chord": [
+            0,
+            1,
+            0
+          ],
+          "normal": [
+            0,
+            0,
+            1
+          ],
+          "areaM2": 1.5,
+          "aspectRatio": 3,
+          "chordMeters": 1,
+          "sweepRadians": 0,
+          "incidenceRadians": 0,
+          "zeroLiftRadians": 0,
+          "stallRadians": 0.3,
+          "cd0": 0.02,
+          "efficiency": 0.85,
+          "pitchingMoment": 0
+        }
+      }
+    ]
+  },
+  {
+    "id": "eccentric-chute-pod",
+    "name": "偏心傘艙",
+    "category": "command",
+    "description": "Fleet氣動力矩驗收：傘施力點偏離part origin一公尺",
+    "dryMassKg": 300,
+    "height": 1.6,
+    "radius": 0.625,
+    "shape": "cone",
+    "color": "#e5e9ec",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.8,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      },
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.8,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "command",
+        "id": "command1"
+      },
+      {
+        "kind": "parachute",
+        "id": "parachute1",
+        "parameters": {
+          "semiAreaM2": 2.0,
+          "fullAreaM2": 80.0,
+          "dragCoefficient": 1.5,
+          "minPressurePa": 100.0,
+          "maxDynamicPressurePa": 25000.0,
+          "fullDeployAltitudeMeters": 1500.0,
+          "semiSeconds": 1.0,
+          "fullSeconds": 2.0,
+          "point": [
+            1,
+            0,
+            0
+          ]
+        }
       }
     ]
   }

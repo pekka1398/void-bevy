@@ -27,11 +27,22 @@ use void_sas::{SAS_TUNING, SasPhase, StabilityAssist};
 use void_terrain::Terrain;
 
 mod guidance;
+mod wrenches;
 pub use guidance::{GuidanceStatus, GuidedBurn};
+use wrenches::{GuidedAirSource, RigidFlightSource, SceneStepSource};
 
 type SceneGroup = (Option<usize>, Vec<String>, Vec<(u64, usize)>);
+/// Explicit physics configurations; full air dynamics is accepted in its lab before opting
+/// the main game in. ForceOnly retains the original no-spin air sampling and force pathway.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AirDynamics {
+    ForceOnly,
+    ForceAndTorque,
+}
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct FleetOptions {
+    pub air_dynamics: AirDynamics,
     pub step_seconds: f64,
     pub tolerances: Tolerances,
     pub encounter: EncounterRanges,
@@ -44,6 +55,7 @@ pub struct FleetOptions {
 impl Default for FleetOptions {
     fn default() -> Self {
         Self {
+            air_dynamics: AirDynamics::ForceOnly,
             step_seconds: 1.0 / 60.0,
             tolerances: Tolerances {
                 position_meters: 1e-6,
@@ -463,6 +475,47 @@ impl Fleet {
         )
         .map(|air| Arc::new(air) as Arc<dyn AirSource>)
     }
+    /// Current passive aerodynamic load in the origin frame, about the live COM. No state is
+    /// prepared/committed and no force is applied; useful to HUDs and acceptance diagnostics.
+    pub fn aerodynamic_wrench(&self, id: &str) -> void_modules::Wrench {
+        let v = self.vessel(id);
+        let snap = self.snapshot_of(v);
+        vessel_air_at(
+            &self.environment,
+            &self.parts,
+            &v.members,
+            self.centre(&v.members),
+            snap.rotation,
+            self.time,
+        )
+        .map_or(
+            void_modules::Wrench::zero(self.origin_frame(), snap.position),
+            |air| {
+                if self.options.air_dynamics == AirDynamics::ForceOnly {
+                    return void_modules::Wrench {
+                        force: air.acceleration(
+                            &*self.ephemeris,
+                            self.time,
+                            snap.position,
+                            snap.velocity,
+                            snap.mass_kg,
+                        ) * snap.mass_kg,
+                        ..void_modules::Wrench::zero(self.origin_frame(), snap.position)
+                    };
+                }
+                air.wrench(
+                    &*self.ephemeris,
+                    self.time,
+                    State {
+                        position: snap.position,
+                        velocity: snap.velocity,
+                    },
+                    snap.rotation,
+                    snap.angular_velocity,
+                )
+            },
+        )
+    }
     /// Commands are addressed to immutable part/module identities, never vector positions.
     pub fn set_module_stage(&mut self, part: &str, module: &str, stage: Option<u32>) {
         let id = self.vessel_of_part(part);
@@ -514,8 +567,10 @@ impl Fleet {
                         else {
                             panic!("parachute state mismatch")
                         };
-                        let position =
-                            snap.position + snap.rotation * (part.pose.position - centre);
+                        let position = snap.position
+                            + snap.rotation
+                                * (part.pose.position + part.pose.rotation * parameters.point
+                                    - centre);
                         let velocity =
                             snap.velocity + snap.angular_velocity.cross(position - snap.position);
                         let frames = self.environment.frames();
@@ -1455,14 +1510,37 @@ impl Fleet {
             Owner::Scene { scene, push, .. } => self.axes(scene) * push,
             Owner::Orbit { .. } => {
                 let thrust = self.propulsion_of(&v);
-                let air = self.air_source(&v).map_or(DVec3::ZERO, |source| {
-                    source.acceleration(
-                        &*self.ephemeris,
-                        self.time,
-                        snap.position,
-                        snap.velocity,
-                        snap.mass_kg,
-                    )
+                let air = vessel_air_at(
+                    &self.environment,
+                    &self.parts,
+                    &v.members,
+                    self.centre(&v.members),
+                    snap.rotation,
+                    self.time,
+                )
+                .map_or(DVec3::ZERO, |source| {
+                    if self.options.air_dynamics == AirDynamics::ForceOnly {
+                        return source.acceleration(
+                            &*self.ephemeris,
+                            self.time,
+                            snap.position,
+                            snap.velocity,
+                            snap.mass_kg,
+                        );
+                    }
+                    source
+                        .wrench(
+                            &*self.ephemeris,
+                            self.time,
+                            State {
+                                position: snap.position,
+                                velocity: snap.velocity,
+                            },
+                            snap.rotation,
+                            snap.angular_velocity,
+                        )
+                        .force
+                        / snap.mass_kg
                 });
                 snap.rotation * thrust.force / snap.mass_kg + air
             }
@@ -2090,6 +2168,9 @@ impl Fleet {
         control: Option<Control>,
         air: Option<Arc<dyn void_orbit::AirSource>>,
     ) {
+        if air.is_some() || self.propagator.has_air_source() {
+            run.invalidate_force_derivative();
+        }
         self.propagator.set_air_source(air);
         let outcome =
             self.propagator
@@ -2099,6 +2180,130 @@ impl Fleet {
             AdvanceOutcome::Reached,
             "fleet: orbital propagation failed"
         );
+    }
+    /// Advance one accepted coupled leg through the same orbit propagator. A predictor supplies
+    /// the midpoint load; rotation during every adaptive translation trial is derived from it.
+    fn coupled_orbit_leg(&mut self, v: &mut Vessel, p: &Propulsion, end: f64) {
+        let Owner::Orbit {
+            run,
+            rotation: q,
+            angular_velocity: w,
+        } = &v.owner
+        else {
+            unreachable!()
+        };
+        let (t, q, w, state) = (run.time, *q, *w, run.state());
+        let dt = end - t;
+        // A final fuel interval can be smaller than this clock's ulp. It is an accepted fuel
+        // exhaustion event at the same representable time, not a zero-duration rotation step.
+        assert!(
+            dt > 0.0 || (p.flow_kg_per_second > 0.0 && end == t + p.seconds_to_flameout),
+            "coupled leg has no accepted time or fuel event"
+        );
+        let burn_seconds = if end == t + p.seconds_to_flameout {
+            p.seconds_to_flameout
+        } else {
+            dt
+        };
+        let inertia = rows(self.inertia_of(&v.members, self.centre(&v.members)));
+        let air = vessel_air_at(
+            &self.environment,
+            &self.parts,
+            &v.members,
+            self.centre(&v.members),
+            q,
+            t,
+        )
+        .map(Arc::new);
+        let initial = air.as_ref().map(|air| {
+            air.wrench(
+                &*self.ephemeris,
+                t,
+                State {
+                    position: state.position,
+                    velocity: state.velocity,
+                },
+                q,
+                w,
+            )
+        });
+        let steering = if dt == 0.0 {
+            DVec3::ZERO
+        } else {
+            self.steering(v, q, w, dt)
+        };
+        let tau0 = p.torque + steering + initial.map_or(DVec3::ZERO, |a| q.conjugate() * a.torque);
+        let (qm, wm) = if dt == 0.0 {
+            (q, w)
+        } else {
+            rotation_step(q, w, &inertia, tau0, DVec3::ZERO, dt / 2.0)
+        };
+        let gravity = self
+            .propagator
+            .gravity_at(&*self.ephemeris, t, state.position);
+        let acceleration =
+            gravity + (q * p.force + initial.map_or(DVec3::ZERO, |a| a.force)) / state.mass_kg;
+        self.ephemeris.extend_to(t + dt / 2.0);
+        let middle = State {
+            position: state.position + state.velocity * (dt / 2.0) + acceleration * (dt * dt / 8.0),
+            velocity: state.velocity + acceleration * (dt / 2.0),
+        };
+        let mid_air = air
+            .as_ref()
+            .map(|air| air.wrench(&*self.ephemeris, t + dt / 2.0, middle, qm, wm));
+        let tau = p.torque + steering + mid_air.map_or(DVec3::ZERO, |a| qm.conjugate() * a.torque);
+        let source = Arc::new(RigidFlightSource {
+            air,
+            start: t,
+            rotation: q,
+            angular_velocity: w,
+            inertia,
+            torque_local: tau,
+            force_local: p.force,
+        });
+        let control = (p.flow_kg_per_second > 0.0).then_some(Control::Force(ForceControl {
+            // The source supplies thrust in its evolving attitude; Control owns only mass flow.
+            force: DVec3::ZERO,
+            mass_flow_kg_per_second: p.flow_kg_per_second,
+            minimum_mass_kg: self.mass(&v.members)
+                - p.groups.iter().map(|g| g.fuel_kg).sum::<f64>(),
+        }));
+        let Owner::Orbit { run, .. } = &mut v.owner else {
+            unreachable!()
+        };
+        self.propagate(run, end, control, Some(source.clone()));
+        let (next_q, next_w) = source.attitude(end);
+        if p.flow_kg_per_second > 0.0 {
+            burn(&mut self.parts, &p.groups, burn_seconds);
+        }
+        let mass = self.mass(&v.members);
+        let centre_shift = self.recentre(&v.members);
+        let Owner::Orbit {
+            run,
+            rotation,
+            angular_velocity,
+        } = &mut v.owner
+        else {
+            unreachable!()
+        };
+        assert!(
+            (run.y[6] - mass).abs() < 1e-9 * mass,
+            "fleet: mass mismatch"
+        );
+        run.y[6] = mass;
+        *rotation = next_q;
+        *angular_velocity = next_w;
+        if centre_shift != DVec3::ZERO {
+            let d = next_q * centre_shift;
+            let velocity_shift = next_w.cross(d);
+            for (i, x) in d.to_array().iter().enumerate() {
+                run.y[i] += x;
+            }
+            for (i, x) in velocity_shift.to_array().iter().enumerate() {
+                run.y[i + 3] += x;
+            }
+            **run = run.restarted();
+        }
     }
     fn advance_orbit(&mut self, id: &str, end: f64) {
         let mut v = self.vessels.remove(id).unwrap();
@@ -2153,6 +2358,11 @@ impl Fleet {
                 .cloned();
             let p = self.propulsion_at(&v, &conditions, t);
             let burning = p.flow_kg_per_second > 0.0;
+            // Even a torque-free vessel outside the ceiling can enter air during a trial.
+            // Full dynamics therefore couples every leg in an atmospheric world; checking
+            // only the accepted boundary load would omit the first entry leg's torque.
+            let aerodynamic = self.options.air_dynamics == AirDynamics::ForceAndTorque
+                && has_atmosphere(&self.environment);
             let turning = !(burning && guide.is_some())
                 && (w != DVec3::ZERO
                     || p.torque != DVec3::ZERO
@@ -2170,7 +2380,16 @@ impl Fleet {
                     g.end_time
                 });
             }
-            if burning && turning {
+            let ideal_pointing = burning && guide.is_some() && p.force.length() > 0.0;
+            let coupled = self.options.air_dynamics == AirDynamics::ForceAndTorque
+                && !ideal_pointing
+                && (aerodynamic || turning);
+            if coupled
+                || (burning && turning)
+                || (self.options.air_dynamics == AirDynamics::ForceAndTorque
+                    && aerodynamic
+                    && guide.is_some())
+            {
                 leg = leg.min(t + self.options.step_seconds);
             }
             if burning {
@@ -2181,6 +2400,10 @@ impl Fleet {
             // so the run keeps the fleet's time and a checkpoint taken now restores.
             if leg + 1e-12 >= end {
                 leg = end;
+            }
+            if coupled {
+                self.coupled_orbit_leg(&mut v, &p, leg);
+                continue;
             }
             let control = if burning
                 && let Some(g) = &guide
@@ -2222,6 +2445,41 @@ impl Fleet {
             } else {
                 None
             };
+            let guided_air = if self.options.air_dynamics == AirDynamics::ForceAndTorque
+                && burning
+                && p.force.length() > 0.0
+                && air.is_some()
+                && let Some(g) = &guide
+            {
+                let Owner::Orbit { rotation, .. } = &v.owner else {
+                    unreachable!()
+                };
+                let geometry = vessel_air_at(
+                    &self.environment,
+                    &self.parts,
+                    &v.members,
+                    self.centre(&v.members),
+                    *rotation,
+                    t,
+                )
+                .unwrap();
+                Some(Arc::new(GuidedAirSource {
+                    air: Arc::new(geometry),
+                    rotation: *rotation,
+                    thrust_axis: p.force.normalize(),
+                    law: g.attitude,
+                    evaluator: std::sync::Mutex::new(VesselPropagator::new(
+                        &*self.ephemeris,
+                        self.options.tolerances,
+                    )),
+                }))
+            } else {
+                None
+            };
+            let air = guided_air
+                .as_ref()
+                .map(|a| a.clone() as Arc<dyn AirSource>)
+                .or(air);
             let Owner::Orbit { run, .. } = &mut v.owner else {
                 unreachable!()
             };
@@ -2279,9 +2537,20 @@ impl Fleet {
                     state.position,
                     state.velocity,
                 );
-                *rotation = (DQuat::from_rotation_arc(*rotation * p.force.normalize(), direction)
-                    * *rotation)
-                    .normalize();
+                *rotation = if let Some(source) = &guided_air {
+                    source.attitude(
+                        &*self.ephemeris,
+                        leg,
+                        State {
+                            position: state.position,
+                            velocity: state.velocity,
+                        },
+                    )
+                } else {
+                    (DQuat::from_rotation_arc(*rotation * p.force.normalize(), direction)
+                        * *rotation)
+                        .normalize()
+                };
                 *angular_velocity = DVec3::ZERO;
                 if leg == g.end_time {
                     self.guidance.get_mut(id).unwrap().status = GuidanceStatus::Completed;
@@ -2326,6 +2595,11 @@ impl Fleet {
     }
     fn step_scene(&mut self, scene: u64) {
         let dt = self.options.step_seconds;
+        let full_air = self.options.air_dynamics == AirDynamics::ForceAndTorque;
+        self.ephemeris.extend_to(self.time + dt);
+        if let SceneFrame::Bubble(f) = &mut self.scenes.get_mut(&scene).unwrap().world.frame {
+            f.advance_origin(&mut self.ephemeris, self.time + dt);
+        }
         let ids = self.scenes[&scene].members.clone();
         let mut plans = vec![];
         for id in ids {
@@ -2340,7 +2614,7 @@ impl Fleet {
             let c = vec64(b.local_center_of_mass());
             let p = self.propulsion_of(&v);
             let snapshot = self.snapshot_of(&v);
-            let air_acceleration = vessel_air_at(
+            let air_wrench = vessel_air_at(
                 &self.environment,
                 &self.parts,
                 &v.members,
@@ -2348,28 +2622,91 @@ impl Fleet {
                 snapshot.rotation,
                 self.time,
             )
-            .map_or(DVec3::ZERO, |source| {
-                let local = world.state(&*self.ephemeris, body, push);
-                source.acceleration_in(
+            .map(|source| {
+                let local = if full_air {
+                    self.scene_centre(&v)
+                } else {
+                    world.state(&*self.ephemeris, body, push)
+                };
+                if !full_air {
+                    return void_modules::Wrench {
+                        force: source.acceleration_in(
+                            &self.frames(),
+                            self.scenes[&scene].contact,
+                            state_of(local),
+                            snapshot.mass_kg,
+                        ) * snapshot.mass_kg,
+                        ..void_modules::Wrench::zero(self.scenes[&scene].contact, local.position)
+                    };
+                }
+                source.wrench_in(
                     &self.frames(),
                     self.scenes[&scene].contact,
                     State {
                         position: local.position,
                         velocity: local.velocity,
                     },
-                    snapshot.mass_kg,
+                    q,
+                    w,
                 )
             });
+            let local = self.scene_centre(&v);
+            let spin = world.frame.spin();
+            let frame_acceleration = world.frame.acceleration(
+                &*self.ephemeris,
+                self.time,
+                local.position,
+                local.velocity,
+            );
+            let air_acceleration = air_wrench.map_or(DVec3::ZERO, |w| w.force / snapshot.mass_kg);
+            let air_torque = air_wrench.map_or(DVec3::ZERO, |w| q.conjugate() * w.torque);
             let (force, tau, burned) = step_thrust(&p, dt, c);
             let resting =
                 b.is_sleeping() && self.controls[&id].turn == DVec3::ZERO && p.groups.is_empty();
+            let active =
+                q * force / (self.mass(&v.members) - if full_air { 0.0 } else { burned / 2.0 });
+            let now = active + air_acceleration;
             let torque = if resting {
                 DVec3::ZERO
             } else {
-                tau + self.steering(&v, q, w, dt)
+                let steering = self.steering(&v, q, w, dt);
+                if !full_air {
+                    tau + steering
+                } else {
+                    let initial = tau + air_torque + steering;
+                    let inertia = rows(self.inertia_of(&v.members, self.centre(&v.members)));
+                    let (qm, wm) = rotation_step(q, w, &inertia, initial, spin, dt / 2.0);
+                    let acceleration = frame_acceleration + now;
+                    let middle = State {
+                        position: local.position
+                            + local.velocity * (dt / 2.0)
+                            + acceleration * (dt * dt / 8.0),
+                        velocity: local.velocity + acceleration * (dt / 2.0),
+                    };
+                    let source = SceneStepSource {
+                        fleet: self,
+                        scene,
+                        start: self.time,
+                        end: self.time + dt,
+                    };
+                    let at = self.frames.tree.at(self.time + dt / 2.0, &source);
+                    let mid_torque = vessel_air_at(
+                        &self.environment,
+                        &self.parts,
+                        &v.members,
+                        self.centre(&v.members),
+                        q,
+                        self.time,
+                    )
+                    .map_or(DVec3::ZERO, |air| {
+                        qm.conjugate()
+                            * air
+                                .wrench_in(&at, self.scenes[&scene].contact, middle, qm, wm)
+                                .torque
+                    });
+                    tau + steering + mid_torque
+                }
             };
-            let active = q * force / (self.mass(&v.members) - burned / 2.0);
-            let now = active + air_acceleration;
             self.scenes
                 .get_mut(&scene)
                 .unwrap()
@@ -2404,21 +2741,69 @@ impl Fleet {
             if let Owner::Scene { push, .. } = &mut self.vessels.get_mut(&id).unwrap().owner {
                 *push = now;
             }
-            if p.groups.is_empty() {
+            if !p.groups.is_empty() {
+                burn(&mut self.parts, &p.groups, dt);
+            }
+            if !p.groups.is_empty() {
+                let masses: Vec<_> = self
+                    .vessel(&id)
+                    .members
+                    .iter()
+                    .map(|id| self.part_mass(id))
+                    .collect();
+                self.scenes
+                    .get_mut(&scene)
+                    .unwrap()
+                    .world
+                    .set_piece_masses(body, &masses);
+            }
+            if !full_air {
                 continue;
             }
-            burn(&mut self.parts, &p.groups, dt);
-            let masses: Vec<_> = self
-                .vessel(&id)
-                .members
-                .iter()
-                .map(|id| self.part_mass(id))
-                .collect();
-            self.scenes
-                .get_mut(&scene)
-                .unwrap()
-                .world
-                .set_piece_masses(body, &masses);
+            // The staggered velocity reconstruction needs the load at the new boundary. Keeping
+            // the start load here delays every attitude-dependent thrust/drag by half a step.
+            let v = self.vessel(&id);
+            let local = self.scene_centre(v);
+            let b = self.scenes[&scene].world.body(body);
+            let q = quat64(*b.rotation());
+            let w = vec64(b.angvel());
+            let source = SceneStepSource {
+                fleet: self,
+                scene,
+                start: self.time,
+                end: self.time + dt,
+            };
+            let at = self.frames.tree.at(self.time + dt, &source);
+            let contact = self.scenes[&scene].contact;
+            let conditions = Conditions {
+                air: (0..self.environment.bodies().len()).find_map(|body| {
+                    self.environment
+                        .surroundings(
+                            &at,
+                            self.environment.frames(),
+                            contact,
+                            state_of(local),
+                            body,
+                        )
+                        .air
+                }),
+            };
+            let rating = self.propulsion_at(v, &conditions, self.time + dt);
+            let next_air = vessel_air_at(
+                &self.environment,
+                &self.parts,
+                &v.members,
+                self.centre(&v.members),
+                q,
+                self.time,
+            )
+            .map_or(DVec3::ZERO, |air| {
+                air.wrench_in(&at, contact, state_of(local), q, w).force
+            });
+            let next = (q * rating.force + next_air) / self.mass(&v.members);
+            if let Owner::Scene { push, .. } = &mut self.vessels.get_mut(&id).unwrap().owner {
+                *push = next;
+            }
         }
     }
     fn step_all(&mut self) {
@@ -2503,6 +2888,14 @@ impl Fleet {
                 return Some(format!(
                     "active parachute requires physics in atmospheric world on {id}"
                 ));
+            }
+            let resting = matches!(v.owner, Owner::Scene { scene, body, .. }
+                if self.scenes[&scene].ground.is_some() && self.scenes[&scene].world.body(body).is_sleeping());
+            if !resting && self.options.air_dynamics == AirDynamics::ForceAndTorque {
+                let load = self.aerodynamic_wrench(id);
+                if load.force != DVec3::ZERO || load.torque != DVec3::ZERO {
+                    return Some(format!("aerodynamic load requires physics on {id}"));
+                }
             }
             if self.propulsion_of(self.vessel(id)).flow_kg_per_second > 0.0 {
                 return Some(format!("engine firing on {id}"));

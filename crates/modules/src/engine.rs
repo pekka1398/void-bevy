@@ -57,3 +57,23 @@ pub fn thrust_rating(
         flow_kg_per_second: thrust / (engine.isp_seconds * G0),
     }
 }
+
+impl Thrust {
+    /// Express this parts-frame force as the shared wrench in `frame`, about an explicit point.
+    /// `origin`/`rotation` place the parts frame in that frame. No second moment arm is added.
+    pub fn wrench_in(
+        self,
+        frame: void_frames::FrameId,
+        origin: DVec3,
+        rotation: glam::DQuat,
+        reference_point: DVec3,
+    ) -> crate::Wrench {
+        crate::Wrench::at_point(
+            frame,
+            reference_point,
+            origin + rotation * self.point,
+            rotation * self.force,
+            DVec3::ZERO,
+        )
+    }
+}

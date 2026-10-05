@@ -5468,6 +5468,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-aero-flight-lab"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "glam 0.32.1",
+ "void-assembly",
+ "void-fleet-flight",
+ "void-frames",
+ "void-landing",
+ "void-modules",
+ "void-vessels",
+]
+
+[[package]]
 name = "void-aero-lab"
 version = "0.0.0"
 dependencies = [

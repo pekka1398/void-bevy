@@ -29,6 +29,10 @@ pub struct FlightCheckpoint {
 impl FlightCheckpoint {
     pub fn capture(sim: &FleetFlight, initial: InitialWorld) -> Self {
         assert_eq!(
+            sim.fleet.options.air_dynamics, initial.air_dynamics,
+            "world checkpoint: air dynamics differs from initial world"
+        );
+        assert_eq!(
             sim.planet.body_id, initial.launch_body,
             "world checkpoint: launch body changed"
         );
@@ -79,6 +83,10 @@ impl FlightCheckpoint {
         built.ephemeris.extend_to(self.ephemeris_end);
         let (ephemeris, environment) = (built.ephemeris, built.environment);
         let fleet = Fleet::from_checkpoint(ephemeris, environment, self.fleet.clone());
+        assert_eq!(
+            fleet.options.air_dynamics, self.initial.air_dynamics,
+            "world checkpoint: air dynamics differs from initial world"
+        );
         let mut sim = FleetFlight {
             fleet,
             world: self.initial.world.clone(),

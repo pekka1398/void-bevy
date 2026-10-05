@@ -43,6 +43,10 @@ pub enum Module {
         node_id: String,
         parameters: DockingDefinition,
     },
+    LiftingSurface {
+        id: String,
+        parameters: LiftingSurfaceDefinition,
+    },
     Parachute {
         id: String,
         parameters: ParachuteDefinition,
@@ -696,7 +700,8 @@ impl Module {
             | Self::Tank { id, .. }
             | Self::Engine { id, .. }
             | Self::Decoupler { id, .. }
-            | Self::Parachute { id, .. } => id,
+            | Self::Parachute { id, .. }
+            | Self::LiftingSurface { id, .. } => id,
         }
     }
 }
@@ -775,6 +780,8 @@ pub fn migrate_legacy_craft(value: serde_json::Value) -> ModelResult<Craft> {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ParachuteDefinition {
+    /// Aerodynamic attachment point in part axes, metres.
+    pub point: DVec3,
     pub semi_area_m2: f64,
     pub full_area_m2: f64,
     pub drag_coefficient: f64,
@@ -805,6 +812,24 @@ impl ParachuteState {
         phase: ParachutePhase::Stowed,
         elapsed_seconds: 0.0,
     };
+}
+/// Fixed aerodynamic section in part axes; offset is its centre of pressure from part origin.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LiftingSurfaceDefinition {
+    pub point: DVec3,
+    pub chord: DVec3,
+    pub normal: DVec3,
+    pub area_m2: f64,
+    pub aspect_ratio: f64,
+    pub chord_meters: f64,
+    pub sweep_radians: f64,
+    pub incidence_radians: f64,
+    pub zero_lift_radians: f64,
+    pub stall_radians: f64,
+    pub cd0: f64,
+    pub efficiency: f64,
+    pub pitching_moment: f64,
 }
 pub fn validate_definition(d: &PartDefinition) -> ModelResult<()> {
     let mut ids = HashSet::new();
@@ -850,6 +875,38 @@ pub fn validate_definition(d: &PartDefinition) -> ModelResult<()> {
                     return Err("invalid docking parameters".into());
                 }
             }
+            Module::LiftingSurface { parameters: p, .. }
+                if !p.point.is_finite()
+                    || !p.chord.is_finite()
+                    || !p.normal.is_finite()
+                    || (p.chord.length() - 1.0).abs() > 1e-8
+                    || (p.normal.length() - 1.0).abs() > 1e-8
+                    || p.chord.dot(p.normal).abs() > 1e-8
+                    || [
+                        p.area_m2,
+                        p.aspect_ratio,
+                        p.chord_meters,
+                        p.stall_radians,
+                        p.efficiency,
+                    ]
+                    .iter()
+                    .any(|v| !v.is_finite() || *v <= 0.0)
+                    || [
+                        p.sweep_radians,
+                        p.incidence_radians,
+                        p.zero_lift_radians,
+                        p.cd0,
+                        p.pitching_moment,
+                    ]
+                    .iter()
+                    .any(|v| !v.is_finite())
+                    || p.cd0 < 0.0
+                    || p.efficiency > 1.0
+                    || p.stall_radians >= std::f64::consts::FRAC_PI_2
+                    || p.sweep_radians.abs() >= std::f64::consts::FRAC_PI_2 =>
+            {
+                return Err("invalid lifting surface parameters".into());
+            }
             Module::Tank { capacity_kg, .. } if !capacity_kg.is_finite() || *capacity_kg <= 0.0 => {
                 return Err("invalid tank capacity".into());
             }
@@ -871,18 +928,19 @@ pub fn validate_definition(d: &PartDefinition) -> ModelResult<()> {
                 return Err("invalid engine rating".into());
             }
             Module::Parachute { parameters: p, .. }
-                if [
-                    p.semi_area_m2,
-                    p.full_area_m2,
-                    p.drag_coefficient,
-                    p.min_pressure_pa,
-                    p.max_dynamic_pressure_pa,
-                    p.full_deploy_altitude_meters,
-                    p.semi_seconds,
-                    p.full_seconds,
-                ]
-                .iter()
-                .any(|v| !v.is_finite() || *v <= 0.0)
+                if !p.point.is_finite()
+                    || [
+                        p.semi_area_m2,
+                        p.full_area_m2,
+                        p.drag_coefficient,
+                        p.min_pressure_pa,
+                        p.max_dynamic_pressure_pa,
+                        p.full_deploy_altitude_meters,
+                        p.semi_seconds,
+                        p.full_seconds,
+                    ]
+                    .iter()
+                    .any(|v| !v.is_finite() || *v <= 0.0)
                     || p.full_area_m2 < p.semi_area_m2 =>
             {
                 return Err("invalid parachute parameters".into());

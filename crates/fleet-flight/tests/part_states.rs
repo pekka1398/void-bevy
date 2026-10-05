@@ -208,6 +208,7 @@ fn second_body_parachute_state_and_optical_world_resume_together() {
         Some(void_scenery::atmosphere_scene::AtmosphereProfile::EarthScaled { density_scale: 0.1 });
     let radius = world.landing_planet("selene").terrain.radius_meters;
     let initial = InitialWorld {
+        air_dynamics: void_vessels::AirDynamics::ForceOnly,
         world,
         launch_body: "aurelia".into(),
         craft: craft(),

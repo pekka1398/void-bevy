@@ -537,7 +537,10 @@ fn check_modules(part: &Part) {
                 (Module::Engine { .. }, ModuleState::Engine { activated, enabled }) =>
                     !enabled || *activated,
                 (Module::Decoupler { .. }, ModuleState::Decoupler { .. }) => true,
-                (Module::Command { .. } | Module::Tank { .. }, ModuleState::Passive) => true,
+                (
+                    Module::Command { .. } | Module::Tank { .. } | Module::LiftingSurface { .. },
+                    ModuleState::Passive,
+                ) => true,
                 (Module::Parachute { parameters: p, .. }, ModuleState::Parachute { state: s }) =>
                     s.elapsed_seconds.is_finite()
                         && s.elapsed_seconds >= 0.0

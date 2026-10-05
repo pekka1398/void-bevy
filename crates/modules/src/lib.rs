@@ -1,8 +1,10 @@
-//! Part modules: what each part does in its surroundings, for its vessel to sum and hand to its
-//! physics owner. Thrust-like modules act for a whole leg or step with the surroundings read once
-//! at the vessel's centre of mass; fluid-like ones (drag) keep their shape for the leg and read
-//! the air again at every integrator stage. No Bevy and no Fleet; see `docs/part-modules.md`.
+//! Pure part-module loads, shared by Fleet owners. Wrenches name their frame and moment
+//! reference; the caller supplies trial attitude/point velocity and commits state only after
+//! accepted time. Geometry, resources, and deployment states are never mutated by evaluation.
+//! No Bevy and no Fleet; see `docs/aero-wrenches.md`.
 mod air;
+pub mod wrench;
+pub use wrench::Wrench;
 pub mod body;
 pub mod engine;
 pub mod parachute;
