@@ -143,3 +143,97 @@ pub fn step_thrust(p: &Propulsion, dt: f64, centre: DVec3) -> (DVec3, DVec3, f64
     }
     (force, torque, burned)
 }
+
+/// RCS uses the same typed crossfeed pools and fuel exhaustion semantics as engines.
+pub fn rcs_propulsion(
+    graph: &PartGraph,
+    members: &[String],
+    centre: DVec3,
+    control: void_modules::rcs::RcsControl,
+) -> Propulsion {
+    let allocation = void_modules::rcs::allocate(graph, members, centre, control);
+    let mut out = Propulsion {
+        force: DVec3::ZERO,
+        torque: DVec3::ZERO,
+        flow_kg_per_second: 0.0,
+        groups: vec![],
+        seconds_to_flameout: f64::INFINITY,
+    };
+    for n in allocation.nozzles {
+        if n.throttle == 0.0 {
+            continue;
+        }
+        let tanks = graph.resource_tanks(members, &n.part, n.resource);
+        let fuel_kg = tanks
+            .iter()
+            .map(|t| graph.part(t).resource(n.resource))
+            .sum();
+        let force = n.full_force * n.throttle;
+        let flow = force.length() / (n.isp_seconds * void_assembly::G0);
+        let engine = EngineForce {
+            part_id: n.part,
+            module_id: n.module,
+            force,
+            point: n.point,
+        };
+        if let Some(g) = out
+            .groups
+            .iter_mut()
+            .find(|g| g.resource == n.resource && g.tanks == tanks)
+        {
+            g.engines.push(engine);
+            g.flow_kg_per_second += flow;
+        } else {
+            out.groups.push(FuelGroup {
+                tanks,
+                resource: n.resource,
+                engines: vec![engine],
+                flow_kg_per_second: flow,
+                fuel_kg,
+            });
+        }
+    }
+    for g in &out.groups {
+        for e in &g.engines {
+            out.force += e.force;
+            out.torque += (e.point - centre).cross(e.force);
+        }
+        out.flow_kg_per_second += g.flow_kg_per_second;
+        out.seconds_to_flameout = out
+            .seconds_to_flameout
+            .min(g.fuel_kg / g.flow_kg_per_second);
+    }
+    out
+}
+impl Propulsion {
+    /// Merge consumers sharing exactly one supply pool before computing exhaustion/burn.
+    pub fn combined(mut self, other: Self) -> Self {
+        self.force += other.force;
+        self.torque += other.torque;
+        self.flow_kg_per_second += other.flow_kg_per_second;
+        for g in other.groups {
+            assert!(
+                !self.groups.iter().any(|a| a.resource == g.resource
+                    && a.tanks != g.tanks
+                    && a.tanks.iter().any(|t| g.tanks.contains(t))),
+                "partially overlapping supply pools unsupported"
+            );
+            if let Some(a) = self
+                .groups
+                .iter_mut()
+                .find(|a| a.resource == g.resource && a.tanks == g.tanks)
+            {
+                a.engines.extend(g.engines);
+                a.flow_kg_per_second += g.flow_kg_per_second;
+            } else {
+                self.groups.push(g);
+            }
+        }
+        self.seconds_to_flameout = self
+            .groups
+            .iter()
+            .map(|g| g.fuel_kg / g.flow_kg_per_second)
+            .fold(f64::INFINITY, f64::min);
+        self
+    }
+}

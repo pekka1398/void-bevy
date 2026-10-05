@@ -57,6 +57,8 @@ pub struct FleetCheckpoint {
     vessels: Vec<Vessel>,
     order: Vec<String>,
     controls: BTreeMap<String, VesselControl>,
+    #[serde(deserialize_with = "void_assembly::unique_map")]
+    rcs_controls: BTreeMap<String, RcsControl>,
     sas: BTreeMap<String, Sas>,
     guidance: BTreeMap<String, GuidedBurn>,
     scenes: Vec<SavedScene>,
@@ -79,7 +81,7 @@ impl Fleet {
             })
             .collect();
         FleetCheckpoint {
-            version: 4,
+            version: 5,
             options: self.options,
             time: self.time,
             pending: self.pending,
@@ -105,6 +107,7 @@ impl Fleet {
                 .iter()
                 .map(|(id, c)| (id.clone(), *c))
                 .collect(),
+            rcs_controls: self.rcs_controls.clone(),
             sas: self
                 .sas
                 .iter()
@@ -138,7 +141,7 @@ impl Fleet {
         environment: Arc<Environment>,
         saved: FleetCheckpoint,
     ) -> Self {
-        assert_eq!(saved.version, 4, "fleet checkpoint: unsupported version");
+        assert_eq!(saved.version, 5, "fleet checkpoint: unsupported version");
         assert!(
             saved.time.is_finite()
                 && saved.pending.is_finite()
@@ -182,6 +185,7 @@ impl Fleet {
         fleet.parts.restore_connections(saved.connections);
         fleet.order = saved.order;
         fleet.controls = saved.controls.into_iter().collect();
+        fleet.rcs_controls = saved.rcs_controls;
         fleet.sas = saved.sas.into_iter().collect();
         fleet.guidance = saved.guidance;
         fleet.pending = saved.pending;
@@ -255,6 +259,14 @@ impl Fleet {
                 1,
                 "fleet checkpoint: vessel {id} is not one connected component"
             );
+            let rcs = self
+                .rcs_controls
+                .get(id)
+                .expect("fleet checkpoint: missing RCS control");
+            assert!(
+                rcs.force.is_finite() && rcs.torque.is_finite(),
+                "fleet checkpoint: invalid RCS control"
+            );
             let control = self
                 .controls
                 .get(id)
@@ -301,6 +313,11 @@ impl Fleet {
             used.len(),
             self.parts.parts().count(),
             "fleet checkpoint: orphan parts"
+        );
+        assert_eq!(
+            self.rcs_controls.len(),
+            self.vessels.len(),
+            "orphan RCS controls"
         );
         assert_eq!(
             self.controls.len(),

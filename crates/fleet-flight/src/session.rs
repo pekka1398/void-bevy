@@ -15,7 +15,7 @@ pub mod durable;
 
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 13;
+pub const MODEL_VERSION: u32 = 15;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -50,6 +50,29 @@ impl InitialWorld {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum Action {
+    RcsNozzle {
+        part: String,
+        module: String,
+        enabled: bool,
+    },
+    Rcs {
+        control: void_vessels::RcsControl,
+    },
+    Dock {
+        part_a: String,
+        module_a: String,
+        part_b: String,
+        module_b: String,
+    },
+    Undock {
+        part: String,
+        module: String,
+    },
+    ArmDock {
+        part: String,
+        module: String,
+        armed: bool,
+    },
     SetModuleStage {
         part: String,
         module: String,
@@ -210,6 +233,46 @@ impl Action {
                 *sim = checkpoint.restore();
                 Outcome::Applied
             }
+            Self::RcsNozzle {
+                part,
+                module,
+                enabled,
+            } => {
+                sim.fleet.set_rcs_nozzle_enabled(part, module, *enabled);
+                Outcome::Applied
+            }
+            Self::Rcs { control } => {
+                sim.fleet.set_rcs_control(&sim.selected, *control);
+                Outcome::Applied
+            }
+            Self::ArmDock {
+                part,
+                module,
+                armed,
+            } => {
+                sim.fleet.arm_docking_port(part, module, *armed);
+                Outcome::Applied
+            }
+            Self::Dock {
+                part_a,
+                module_a,
+                part_b,
+                module_b,
+            } => match sim.fleet.dock(part_a, module_a, part_b, module_b) {
+                Ok(id) => {
+                    sim.select(&id);
+                    sim.update_plans();
+                    Outcome::Spawned(id)
+                }
+                Err(e) => Outcome::Refused(e),
+            },
+            Self::Undock { part, module } => match sim.fleet.undock(part, module) {
+                Ok(id) => {
+                    sim.update_plans();
+                    Outcome::Spawned(id)
+                }
+                Err(e) => Outcome::Refused(e),
+            },
             Self::Select { vessel } => {
                 sim.select(vessel);
                 sim.view_command(&crate::presentation::ViewCommand::Focus { body: None });
@@ -387,6 +450,7 @@ pub fn world_mark(sim: &FleetFlight) -> serde_json::Value {
             "scene": s.scene, "position": s.position, "velocity": s.velocity,
             "rotation": s.rotation, "angularVelocity": s.angular_velocity, "mass": s.mass_kg,
             "parts": parts, "control": { "throttle":c.throttle, "turn":c.turn },
+            "rcsControl": sim.fleet.rcs_control(id),
             "guidance": sim.fleet.guidance(id),
             "sasPhase": format!("{:?}",sim.fleet.sas_phase(id)), "sasTarget":sim.fleet.sas_target(id) })
     }).collect();

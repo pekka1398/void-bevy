@@ -147,6 +147,63 @@ fn armed_and_running_burns_restore_and_continue_without_rearming() {
     }
 }
 #[test]
+fn manual_rcs_and_ideal_guidance_cannot_own_attitude_together() {
+    use void_vessels::RcsControl;
+    let law = AttitudeLaw::Inertial {
+        direction: DVec3::Z,
+    };
+    for elapsed in [0.0, 0.1] {
+        let (mut sim, _, id) = fixture();
+        let t = sim.fleet.time();
+        sim.fleet
+            .arm_guided_burn(&id, t + 0.05, t + 0.5, law)
+            .unwrap();
+        sim.fleet.set_rcs_control(
+            &id,
+            RcsControl {
+                enabled: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            sim.fleet.guidance(&id).unwrap().status,
+            GuidanceStatus::Armed
+        );
+        if elapsed > 0.0 {
+            sim.advance(elapsed, false).unwrap();
+        }
+        sim.fleet.set_rcs_control(
+            &id,
+            RcsControl {
+                enabled: true,
+                force: DVec3::ZERO,
+                torque: DVec3::X,
+            },
+        );
+        assert_eq!(
+            sim.fleet.guidance(&id).unwrap().status,
+            GuidanceStatus::Aborted("manual RCS control".into())
+        );
+        assert_eq!(sim.fleet.control(&id).throttle, 0.0);
+        let t = sim.fleet.time();
+        assert_eq!(
+            sim.fleet.arm_guided_burn(&id, t + 0.1, t + 0.3, law),
+            Err("manual RCS control is active".into())
+        );
+        sim.fleet.set_rcs_control(
+            &id,
+            RcsControl {
+                enabled: false,
+                force: DVec3::ZERO,
+                torque: DVec3::X,
+            },
+        );
+        sim.fleet
+            .arm_guided_burn(&id, t + 0.1, t + 0.3, law)
+            .unwrap();
+    }
+}
+#[test]
 fn manual_control_and_staging_explicitly_abort_guidance() {
     for staging in [false, true] {
         let (mut sim, _, id) = fixture();

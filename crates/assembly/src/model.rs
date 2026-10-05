@@ -27,6 +27,22 @@ pub struct AttachNode {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Module {
+    Rcs {
+        id: String,
+        resource: ResourceId,
+        #[serde(rename = "thrustNewtons")]
+        thrust_newtons: f64,
+        #[serde(rename = "ispSeconds")]
+        isp_seconds: f64,
+        direction: DVec3,
+        point: DVec3,
+    },
+    DockingPort {
+        id: String,
+        #[serde(rename = "nodeId")]
+        node_id: String,
+        parameters: DockingDefinition,
+    },
     Parachute {
         id: String,
         parameters: ParachuteDefinition,
@@ -674,7 +690,9 @@ pub fn flight_rocket() -> Craft {
 impl Module {
     pub fn id(&self) -> &str {
         match self {
-            Self::Command { id }
+            Self::Rcs { id, .. }
+            | Self::DockingPort { id, .. }
+            | Self::Command { id }
             | Self::Tank { id, .. }
             | Self::Engine { id, .. }
             | Self::Decoupler { id, .. }
@@ -795,6 +813,43 @@ pub fn validate_definition(d: &PartDefinition) -> ModelResult<()> {
             return Err("empty/duplicate module ID".into());
         }
         match m {
+            Module::Rcs {
+                thrust_newtons,
+                isp_seconds,
+                direction,
+                point,
+                ..
+            } if !thrust_newtons.is_finite()
+                || *thrust_newtons <= 0.0
+                || !isp_seconds.is_finite()
+                || *isp_seconds <= 0.0
+                || !point.is_finite()
+                || !direction.is_finite()
+                || (direction.length() - 1.0).abs() > 1e-9 =>
+            {
+                return Err("invalid RCS nozzle".into());
+            }
+            Module::DockingPort {
+                node_id,
+                parameters: p,
+                ..
+            } => {
+                node(d, node_id)?;
+                if [
+                    p.capture_distance_m,
+                    p.max_angle_radians,
+                    p.max_speed_mps,
+                    p.max_spin_radians_per_second,
+                ]
+                .iter()
+                .any(|v| !v.is_finite() || *v <= 0.0)
+                    || p.max_angle_radians > std::f64::consts::FRAC_PI_2
+                    || !p.separation_impulse_ns.is_finite()
+                    || p.separation_impulse_ns < 0.0
+                {
+                    return Err("invalid docking parameters".into());
+                }
+            }
             Module::Tank { capacity_kg, .. } if !capacity_kg.is_finite() || *capacity_kg <= 0.0 => {
                 return Err("invalid tank capacity".into());
             }
@@ -866,4 +921,24 @@ where
         }
     }
     deserializer.deserialize_map(Unique(std::marker::PhantomData))
+}
+
+/// Capture is inelastic: poses remain unchanged and the compound preserves momentum.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DockingDefinition {
+    pub capture_distance_m: f64,
+    pub max_angle_radians: f64,
+    pub max_speed_mps: f64,
+    pub max_spin_radians_per_second: f64,
+    pub separation_impulse_ns: f64,
+}
+
+/// A self-contained near-rendezvous vehicle, using the same authored catalog as other craft.
+pub fn rendezvous_pod() -> Craft {
+    let mut craft = fresh_craft();
+    craft.name = "Rendezvous pod".into();
+    craft.parts[0].definition_id = "rcs-pod".into();
+    craft.parts[0].resources = full_resources(definition("rcs-pod").expect("authored pod"));
+    craft
 }
