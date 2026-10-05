@@ -79,7 +79,7 @@ impl Fleet {
             })
             .collect();
         FleetCheckpoint {
-            version: 4,
+            version: 6,
             options: self.options,
             time: self.time,
             pending: self.pending,
@@ -138,7 +138,7 @@ impl Fleet {
         environment: Arc<Environment>,
         saved: FleetCheckpoint,
     ) -> Self {
-        assert_eq!(saved.version, 4, "fleet checkpoint: unsupported version");
+        assert_eq!(saved.version, 6, "fleet checkpoint: unsupported version");
         assert!(
             saved.time.is_finite()
                 && saved.pending.is_finite()

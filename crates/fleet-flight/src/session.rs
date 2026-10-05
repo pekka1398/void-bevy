@@ -15,11 +15,12 @@ pub mod durable;
 
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 13;
+pub const MODEL_VERSION: u32 = 16;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct InitialWorld {
+    pub air_dynamics: void_vessels::AirDynamics,
     pub world: crate::world::WorldDescription,
     pub launch_body: String,
     pub craft: Craft,
@@ -28,6 +29,7 @@ pub struct InitialWorld {
 impl InitialWorld {
     pub fn new(planet: &LandingPlanet, craft: &Craft, site: DVec3, air: bool) -> Self {
         Self {
+            air_dynamics: void_vessels::AirDynamics::ForceOnly,
             world: crate::world::WorldDescription::single(planet, air),
             launch_body: planet.body_id.clone(),
             craft: craft.clone(),
@@ -37,13 +39,19 @@ impl InitialWorld {
     pub fn planet(&self) -> LandingPlanet {
         self.world.landing_planet(&self.launch_body)
     }
+    pub fn with_air_dynamics(mut self, mode: void_vessels::AirDynamics) -> Self {
+        self.air_dynamics = mode;
+        self
+    }
     pub fn build(&self) -> FleetFlight {
-        FleetFlight::from_world(
+        let mut sim = FleetFlight::from_world(
             self.world.clone(),
             &self.launch_body,
             &self.craft,
             self.launch_site,
-        )
+        );
+        sim.fleet.options.air_dynamics = self.air_dynamics;
+        sim
     }
 }
 
@@ -411,7 +419,7 @@ pub fn world_mark(sim: &FleetFlight) -> serde_json::Value {
             json!({"id":sim.fleet.ephemeris.bodies()[i].id,"position":position,"velocity":velocity})
         })
         .collect();
-    json!({ "world":sim.world, "launchBody":sim.planet.body_id, "time":sim.fleet.time(), "pending":sim.fleet.pending_seconds(),
+    json!({ "world":sim.world, "airDynamics":sim.fleet.options.air_dynamics, "launchBody":sim.planet.body_id, "time":sim.fleet.time(), "pending":sim.fleet.pending_seconds(),
         "selected":sim.selected, "presentation":sim.presentation, "maneuverWarp":sim.maneuver_warp, "ships":ships, "scenes":scenes,
         "connections":connections, "bodies":bodies, "plans":sim.plan_checkpoints() })
 }

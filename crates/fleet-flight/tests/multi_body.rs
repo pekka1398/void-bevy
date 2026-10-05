@@ -8,6 +8,7 @@ fn initial() -> InitialWorld {
     let planet = void_landing::aurelia();
     let site = flat_site(&planet);
     InitialWorld {
+        air_dynamics: void_vessels::AirDynamics::ForceOnly,
         world: aurelia_selene(&planet),
         launch_body: "aurelia".into(),
         craft: pod_tank("Two bodies"),

@@ -234,6 +234,13 @@ impl PropagationRun {
         }
     }
 
+    /// A caller changed an external force field/attitude while preserving Control. The FSAL
+    /// derivative belongs to the old field and must be evaluated again at this accepted state.
+    /// This preserves step memory and any impact; never call it during a trial evaluation.
+    pub fn invalidate_force_derivative(&mut self) {
+        self.derivative_control = None;
+    }
+
     /// An independent copy with the same state and step memory, as the lab's `clone`: the
     /// derivative is re-evaluated and an impact is not carried over.
     pub fn restarted(&self) -> Self {

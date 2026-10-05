@@ -143,3 +143,23 @@ pub fn step_thrust(p: &Propulsion, dt: f64, centre: DVec3) -> (DVec3, DVec3, f64
     }
     (force, torque, burned)
 }
+
+impl EngineForce {
+    /// Shared module-force contract. A nozzle's point and force are in parts axes; placement into
+    /// `frame` and the requested moment reference are explicit here.
+    pub fn wrench_in(
+        &self,
+        frame: void_frames::FrameId,
+        origin: DVec3,
+        rotation: glam::DQuat,
+        reference_point: DVec3,
+    ) -> void_modules::Wrench {
+        void_modules::Wrench::at_point(
+            frame,
+            reference_point,
+            origin + rotation * self.point,
+            rotation * self.force,
+            DVec3::ZERO,
+        )
+    }
+}

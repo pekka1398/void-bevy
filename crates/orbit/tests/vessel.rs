@@ -416,3 +416,61 @@ fn advancing_after_impact_panics() {
     propagator.advance(&mut ephemeris, &mut run, end, 1_000_000, None, None);
     propagator.advance(&mut ephemeris, &mut run, end, 1_000_000, None, None);
 }
+
+#[test]
+fn changing_external_force_invalidates_fsal_at_the_accepted_boundary() {
+    use std::sync::Arc;
+    struct Field(DVec3);
+    impl void_orbit::AirSource for Field {
+        fn acceleration(
+            &self,
+            _: &dyn void_orbit::EphemerisSource,
+            _: f64,
+            _: DVec3,
+            _: DVec3,
+            _: f64,
+        ) -> DVec3 {
+            self.0
+        }
+    }
+    let g = golden();
+    let mut eph = ephemeris();
+    let mut run = PropagationRun::new(state(&g["start"]));
+    let mut prop = VesselPropagator::new(
+        &eph,
+        Tolerances {
+            position_meters: 1e-6,
+            velocity_meters_per_second: 1e-9,
+        },
+    );
+    prop.set_air_source(Some(Arc::new(Field(DVec3::X))));
+    let end = run.time + 1.0;
+    assert_eq!(
+        prop.advance(&mut eph, &mut run, end, 100000, None, None),
+        AdvanceOutcome::Reached
+    );
+    let mut fresh = run.restarted();
+    let mut stale = run.clone();
+    let hint = run.step_hint;
+    prop.set_air_source(None);
+    run.invalidate_force_derivative();
+    assert_eq!(run.step_hint, hint);
+    assert_eq!(
+        prop.advance(&mut eph, &mut run, end + 1.0, 100000, None, None),
+        AdvanceOutcome::Reached
+    );
+    assert_eq!(
+        prop.advance(&mut eph, &mut fresh, end + 1.0, 100000, None, None),
+        AdvanceOutcome::Reached
+    );
+    assert_eq!(
+        run.y, fresh.y,
+        "same Control, new field must match a fresh derivative"
+    );
+    // A deliberately stale run must distinguish this test from a constant-field continuation.
+    assert_eq!(
+        prop.advance(&mut eph, &mut stale, end + 1.0, 100000, None, None),
+        AdvanceOutcome::Reached
+    );
+    assert_ne!(stale.y, fresh.y);
+}

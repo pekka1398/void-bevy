@@ -114,6 +114,7 @@ fn initial_with_atmospheres(two: bool) -> InitialWorld {
         });
     }
     InitialWorld {
+        air_dynamics: void_vessels::AirDynamics::ForceOnly,
         world,
         launch_body: "aurelia".into(),
         craft: void_assembly::flight_rocket(),
