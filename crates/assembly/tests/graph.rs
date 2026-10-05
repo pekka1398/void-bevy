@@ -10,6 +10,43 @@ fn panics(f: impl FnOnce()) -> bool {
 }
 
 #[test]
+fn rendezvous_rocket_keeps_flight_geometry_and_separate_rcs_supply() {
+    use void_assembly::{Module, ResourceId, node, rcs_flight_rocket};
+    let original = compile(&flight_rocket()).unwrap();
+    let equipped = compile(&rcs_flight_rocket()).unwrap();
+    assert_eq!(original.parts.len(), equipped.parts.len());
+    for (old, new) in original.parts.iter().zip(&equipped.parts) {
+        assert_eq!(old.instance.id, new.instance.id);
+        assert_eq!(old.pose, new.pose);
+        assert_eq!(old.definition.shape, new.definition.shape);
+        assert_eq!(old.definition.height, new.definition.height);
+        assert_eq!(old.definition.radius, new.definition.radius);
+        assert_eq!(old.definition.dry_mass_kg, new.definition.dry_mass_kg);
+        assert_eq!(old.instance.stage, new.instance.stage);
+        assert_eq!(old.instance.attachment, new.instance.attachment);
+    }
+    assert_eq!(
+        equipped.summary(None).mass_kg - original.summary(None).mass_kg,
+        20.0
+    );
+    let pod = &equipped.parts[0];
+    assert_eq!(pod.instance.resources[&ResourceId::Monopropellant], 20.0);
+    assert!(
+        pod.definition
+            .modules
+            .iter()
+            .any(|m| matches!(m, Module::Rcs { .. }))
+    );
+    for module in &pod.definition.modules {
+        if let Module::DockingPort { node_id, .. } = module {
+            let port = node(pod.definition, node_id).unwrap();
+            assert_eq!(port.position, glam::DVec3::Y * 0.5);
+            assert_eq!(port.direction, glam::DVec3::Y);
+        }
+    }
+}
+
+#[test]
 fn a_launched_craft_is_its_compiled_graph() {
     for craft in [demo_craft(), flight_rocket()] {
         let c = compile(&craft).unwrap();

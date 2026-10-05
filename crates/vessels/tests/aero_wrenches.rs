@@ -399,7 +399,7 @@ fn force_only_is_the_explicit_default_and_checkpoint_mode_is_required() {
         "rotating point flow belongs only to full mode"
     );
     let mut value = serde_json::to_value(f.checkpoint()).unwrap();
-    assert_eq!(value["version"], 6);
+    assert_eq!(value["version"], 7);
     value["options"]
         .as_object_mut()
         .unwrap()

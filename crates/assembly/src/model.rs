@@ -691,6 +691,23 @@ pub fn flight_rocket() -> Craft {
     import_craft(include_str!("../data/flight-rocket.json")).expect("authored flight rocket")
 }
 
+/// Main-game rocket with an addressed nose port and a separate finite RCS supply.
+/// Preserve the original flight fixture and all engine, tank, leg and attachment geometry.
+pub fn rcs_flight_rocket() -> Craft {
+    let mut craft = flight_rocket();
+    craft.name = "VOID two-stage rendezvous rocket".into();
+    let pod = craft
+        .parts
+        .iter_mut()
+        .find(|p| p.id == "p1")
+        .expect("flight command pod");
+    assert_eq!(pod.definition_id, "flight-pod");
+    pod.definition_id = "flight-rcs-pod".into();
+    pod.resources = full_resources(definition(&pod.definition_id).expect("flight RCS pod"));
+    compile(&craft).expect("authored RCS flight rocket");
+    craft
+}
+
 impl Module {
     pub fn id(&self) -> &str {
         match self {
