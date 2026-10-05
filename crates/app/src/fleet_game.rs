@@ -10,7 +10,7 @@ use bevy::{
     prelude::*,
     render::settings::{WgpuFeatures, WgpuSettings},
 };
-use glam::DVec3;
+use glam::{DQuat, DVec3};
 use std::collections::{HashMap, HashSet};
 use void_assembly::{Craft, Module, import_craft};
 use void_assembly_lab::parts::RenderAssets;
@@ -23,9 +23,293 @@ use void_vessels::nearby_site;
 
 use void_fleet_flight::presentation::{Toggle, ViewCommand};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PortAddress {
+    vessel: String,
+    part: String,
+    module: String,
+}
+
+fn ports(lab: &Lab, own: bool) -> Vec<PortAddress> {
+    let f = &lab.session.sim().fleet;
+    let selected = &lab.session.sim().selected;
+    f.vessel_ids()
+        .iter()
+        .filter(|id| (*id == selected) == own)
+        .flat_map(|id| {
+            f.part_snapshots(id).into_iter().flat_map(move |p| {
+                p.definition.modules.iter().filter_map(move |m| match m {
+                    Module::DockingPort { id: module, .. } => Some(PortAddress {
+                        vessel: id.clone(),
+                        part: p.id.clone(),
+                        module: module.clone(),
+                    }),
+                    _ => None,
+                })
+            })
+        })
+        .collect()
+}
+fn port_pose(lab: &Lab, port: &PortAddress) -> (DVec3, DVec3) {
+    let f = &lab.session.sim().fleet;
+    let p = f.parts().part(&port.part);
+    let Module::DockingPort { node_id, .. } = p
+        .definition
+        .modules
+        .iter()
+        .find(|m| m.id() == port.module)
+        .expect("port module")
+    else {
+        panic!("not a port")
+    };
+    let n = p
+        .definition
+        .nodes
+        .iter()
+        .find(|n| n.id == *node_id)
+        .expect("port node");
+    (
+        p.pose.position + p.pose.rotation * n.position - f.centre_of_mass_local(&port.vessel),
+        p.pose.rotation * n.direction,
+    )
+}
+fn neutral_pilot(lab: &mut Lab) {
+    let id = &lab.session.sim().selected;
+    let c = lab.session.sim().fleet.control(id);
+    let rcs = lab.session.sim().fleet.rcs_control(id);
+    if c.turn != DVec3::ZERO {
+        lab.session.execute(Action::Control {
+            throttle: c.throttle,
+            turn: DVec3::ZERO,
+        });
+    }
+    if rcs.force != DVec3::ZERO || rcs.torque != DVec3::ZERO {
+        lab.session.execute(Action::Rcs {
+            control: void_vessels::RcsControl {
+                enabled: rcs.enabled,
+                ..Default::default()
+            },
+        });
+    }
+}
+fn select_pilot(lab: &mut Lab, id: &str) {
+    lab.session.sim().fleet.snapshot(id);
+    neutral_pilot(lab);
+    // Dock already selects its surviving owner. Reselecting it resets the user's camera.
+    if lab.session.sim().selected != id {
+        lab.session.execute(Action::Select { vessel: id.into() });
+    }
+    neutral_pilot(lab);
+    lab.own_port = ports(lab, true).first().cloned();
+    lab.target_port = None;
+    refresh_ports(lab);
+}
+fn rendezvous_fixture(lab: &mut Lab) {
+    let Outcome::Spawned(a) = lab.session.execute(Action::LaunchOrbit {
+        craft: lab.craft.clone(),
+        offset: DVec3::ZERO,
+    }) else {
+        unreachable!()
+    };
+    select_pilot(lab, &a);
+    let own = lab
+        .own_port
+        .clone()
+        .expect("--rendezvous craft requires a docking port");
+    let ship = lab.session.sim().fleet.snapshot(&a);
+    let (mount, normal) = port_pose(lab, &own);
+    let rotation = ship.rotation * DQuat::from_rotation_z(std::f64::consts::PI);
+    let Outcome::Spawned(b) = lab.session.execute(Action::LaunchState {
+        craft: lab.craft.clone(),
+        position: ship.position + ship.rotation * mount - rotation * mount
+            + ship.rotation * normal * 0.15,
+        velocity: ship.velocity,
+        rotation,
+        angular_velocity: DVec3::ZERO,
+    }) else {
+        unreachable!()
+    };
+    lab.target_port = ports(lab, false).into_iter().find(|p| p.vessel == b);
+    for p in [Some(own), lab.target_port.clone()].into_iter().flatten() {
+        lab.session.execute(Action::ArmDock {
+            part: p.part,
+            module: p.module,
+            armed: false,
+        });
+    }
+    // A quarter orbit around the local up axis reveals both nose-to-nose rockets.
+    lab.session.execute(Action::View {
+        command: ViewCommand::Drag {
+            x: std::f64::consts::FRAC_PI_2 / 0.005,
+            y: 0.0,
+        },
+    });
+    lab.paused = true;
+    lab.rate = 0;
+    lab.session.execute(Action::EndFrame {
+        paused: true,
+        rate: 0,
+    });
+    lab.notice = "Rendezvous preset: nose ports within capture range; arm both with F12 then Enter. P resumes.".into();
+}
+fn cycle_port(selected: &mut Option<PortAddress>, candidates: Vec<PortAddress>) {
+    *selected = if candidates.is_empty() {
+        None
+    } else {
+        let next = selected
+            .as_ref()
+            .and_then(|p| candidates.iter().position(|c| c == p))
+            .map_or(0, |i| (i + 1) % candidates.len());
+        Some(candidates[next].clone())
+    };
+}
+// Port highlights are derived UI state, not checkpoint/journal data. Revalidate ownership
+// after keyboard actions, replay and accepted simulation steps before drawing.
+fn refresh_ports(lab: &mut Lab) {
+    let own = ports(lab, true);
+    let mut target = ports(lab, false);
+    let f = &lab.session.sim().fleet;
+    target.sort_by(|a, b| {
+        f.relative(&a.vessel, &lab.session.sim().selected)
+            .position
+            .length_squared()
+            .total_cmp(
+                &f.relative(&b.vessel, &lab.session.sim().selected)
+                    .position
+                    .length_squared(),
+            )
+    });
+    if lab.own_port.as_ref().is_none_or(|p| !own.contains(p)) {
+        lab.own_port = own.first().cloned();
+    }
+    if lab.target_port.as_ref().is_none_or(|p| !target.contains(p)) {
+        lab.target_port = target.first().cloned();
+    }
+}
+fn docking_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
+    refresh_ports(lab);
+    let own = ports(lab, true);
+    let target = ports(lab, false);
+    if keys.just_pressed(KeyCode::F10) {
+        cycle_port(&mut lab.own_port, own);
+    }
+    if keys.just_pressed(KeyCode::F11) {
+        cycle_port(&mut lab.target_port, target);
+    }
+    if keys.just_pressed(KeyCode::F12) {
+        for p in [lab.own_port.clone(), lab.target_port.clone()]
+            .into_iter()
+            .flatten()
+        {
+            lab.session.execute(Action::ArmDock {
+                part: p.part,
+                module: p.module,
+                armed: true,
+            });
+        }
+        lab.notice = "Selected ports armed".into();
+    }
+    let action = if keys.just_pressed(KeyCode::Enter) {
+        match (&lab.own_port, &lab.target_port) {
+            (Some(a), Some(b)) => Some(Action::Dock {
+                part_a: a.part.clone(),
+                module_a: a.module.clone(),
+                part_b: b.part.clone(),
+                module_b: b.module.clone(),
+            }),
+            _ => {
+                lab.notice = "Dock refused: select own and target ports".into();
+                None
+            }
+        }
+    } else if keys.just_pressed(KeyCode::Backspace) {
+        lab.own_port.as_ref().map(|p| Action::Undock {
+            part: p.part.clone(),
+            module: p.module.clone(),
+        })
+    } else {
+        None
+    };
+    if let Some(action) = action {
+        neutral_pilot(lab);
+        match lab.session.execute(action) {
+            Outcome::Spawned(_) => {
+                let id = lab.session.sim().selected.clone();
+                select_pilot(lab, &id);
+                lab.dirty = true;
+                lab.prediction = None;
+                lab.notice = "Docking topology updated".into();
+            }
+            Outcome::Refused(reason) => lab.notice = format!("Docking refused: {reason}"),
+            other => panic!("unexpected docking outcome {other:?}"),
+        }
+    }
+}
+fn docking_description(lab: &Lab) -> String {
+    let f = &lab.session.sim().fleet;
+    let id = &lab.session.sim().selected;
+    let rcs = f.rcs_control(id);
+    let allocation = f.rcs_allocation(id);
+    let mono: f64 = f
+        .part_snapshots(id)
+        .iter()
+        .map(|p| {
+            p.resources
+                .get(&void_assembly::ResourceId::Monopropellant)
+                .copied()
+                .unwrap_or(0.0)
+        })
+        .sum();
+    let label = |port: &Option<PortAddress>| {
+        port.as_ref().map_or("none".into(), |p| {
+            format!(
+                "{}/{} {:?}",
+                p.part,
+                p.module,
+                f.parts().part(&p.part).modules[&p.module]
+            )
+        })
+    };
+    let mut text = format!(
+        "RCS {} mono {:.3}kg | delivered F {:.1}N τ {:.1}Nm | residual {:.1}N/{:.1}Nm\nH RCS | manual RCS torque disengages SAS reaction wheel | Alt+W/S ±Z D/A ±X E/Q ±Y translate | WASD QE RCS torque\nF10 own {} | F11 target {} | F12 arm both | Enter dock | Backspace undock",
+        if rcs.enabled { "ON" } else { "OFF" },
+        mono,
+        allocation.force.length(),
+        allocation.torque.length(),
+        allocation.force_residual.length(),
+        allocation.torque_residual.length(),
+        label(&lab.own_port),
+        label(&lab.target_port)
+    );
+    if let (Some(a), Some(b)) = (&lab.own_port, &lab.target_port) {
+        let sa = f.snapshot(&a.vessel);
+        let sb = f.snapshot(&b.vessel);
+        let (pa, na) = port_pose(lab, a);
+        let (pb, nb) = port_pose(lab, b);
+        let relative = f.relative(&b.vessel, &a.vessel);
+        let ar = sa.rotation * pa;
+        let br = sb.rotation * pb;
+        text.push_str(&format!(
+            "\nPorts {:.3}m | speed {:.3}m/s | angle {:.2}° | spin {:.3}rad/s",
+            (relative.position + br - ar).length(),
+            (relative.velocity + sb.angular_velocity.cross(br) - sa.angular_velocity.cross(ar))
+                .length(),
+            (-(sa.rotation * na).dot(sb.rotation * nb))
+                .clamp(-1.0, 1.0)
+                .acos()
+                .to_degrees(),
+            (sb.angular_velocity - sa.angular_velocity).length()
+        ));
+    }
+    text
+}
+
 const RATES: [f64; 9] = crate::flight::TIME_RATES;
 struct Lab {
     main_game: bool,
+    rendezvous: bool,
+    own_port: Option<PortAddress>,
+    target_port: Option<PortAddress>,
     pointer_over_label: bool,
     view: Option<void_view::ViewState>,
     eye: DVec3,
@@ -168,6 +452,12 @@ fn argument(name: &str) -> Option<String> {
         .map(|i| args.get(i + 1).expect("argument needs a value").clone())
 }
 pub fn run(main_game: bool) {
+    if std::env::args().any(|a| a == "--help") {
+        println!(
+            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording"
+        );
+        return;
+    }
     if let Some(path) = argument("--recover-recording") {
         let output = argument("--output").expect("--recover-recording requires --output");
         let recovery = void_fleet_flight::session::durable::Recovery::read(path);
@@ -209,9 +499,19 @@ pub fn run(main_game: bool) {
     }
     let id = argument("--planet").unwrap_or("aurelia".into());
     let planet = game_planet_by_id(&id, argument("--terrain").as_deref());
-    let craft = argument("--craft").map_or_else(void_assembly::flight_rocket, |path| {
-        import_craft(&std::fs::read_to_string(path).expect("read craft")).expect("invalid craft")
-    });
+    let craft = argument("--craft").map_or_else(
+        || {
+            if main_game {
+                void_assembly::rcs_flight_rocket()
+            } else {
+                void_assembly::flight_rocket()
+            }
+        },
+        |path| {
+            import_craft(&std::fs::read_to_string(path).expect("read craft"))
+                .expect("invalid craft")
+        },
+    );
     let site = planet
         .launch_site
         .unwrap_or_else(|| demo_rocket(&planet.planet.terrain).launch_site.normalize());
@@ -223,12 +523,24 @@ pub fn run(main_game: bool) {
         "--replay cannot be combined with --load or --record"
     );
     let session = argument("--load").map_or_else(
-        || FlightSession::new(InitialWorld::new(&planet.planet, &craft, site, air)),
+        || {
+            let initial = InitialWorld::new(&planet.planet, &craft, site, air);
+            FlightSession::new(if main_game {
+                initial.with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque)
+            } else {
+                initial
+            })
+        },
         FlightSession::load_checkpoint,
     );
     let craft = session.recording_initial().craft.clone();
     let mut lab = new_lab(session, craft);
     lab.main_game = main_game;
+    lab.rendezvous = main_game && std::env::args().any(|a| a == "--rendezvous");
+    assert!(
+        !lab.rendezvous || (argument("--load").is_none() && replay_path.is_none()),
+        "--rendezvous cannot be combined with --load or --replay"
+    );
     lab.paused = !main_game || argument("--load").is_some();
     if argument("--load").is_none() && replay_path.is_none() {
         lab.session.execute(Action::View {
@@ -254,6 +566,9 @@ pub fn run(main_game: bool) {
     lab.record_path = argument("--record").map(Into::into);
     if let Some(path) = &lab.record_path {
         lab.session.begin_stream(path);
+    }
+    if lab.rendezvous && argument("--load").is_none() && lab.playback.is_none() {
+        rendezvous_fixture(&mut lab);
     }
     lab.profile =
         argument("--profile").map(|path| (void_diagnostics::Profiler::new(), path.into()));
@@ -544,6 +859,9 @@ fn new_lab(session: FlightSession, craft: Craft) -> Lab {
     let orbits = void_view::MapOrbits::new(f.ephemeris.bodies());
     Lab {
         main_game: false,
+        rendezvous: false,
+        own_port: None,
+        target_port: None,
         pointer_over_label: false,
         view: None,
         eye: DVec3::ZERO,
@@ -783,13 +1101,7 @@ fn controls(
     lab.pointer_over_label = over_label;
     if !window.focused {
         if lab.playback.is_none() {
-            let control = lab.session.sim().fleet.control(&lab.session.sim().selected);
-            if control.turn != DVec3::ZERO {
-                lab.session.execute(Action::Control {
-                    throttle: control.throttle,
-                    turn: DVec3::ZERO,
-                });
-            }
+            neutral_pilot(lab);
         }
         return;
     }
@@ -813,6 +1125,9 @@ fn controls(
         lab.prediction = None;
         lab.paused = true;
         lab.rate = 0;
+        lab.own_port = None;
+        lab.target_port = None;
+        neutral_pilot(lab);
         lab.notice = format!("Loaded {}", lab.save_path.display());
     }
     if keys.just_pressed(KeyCode::F8) {
@@ -833,6 +1148,9 @@ fn controls(
     }
     if keys.just_pressed(KeyCode::KeyP) {
         lab.paused = !lab.paused;
+        if lab.paused {
+            neutral_pilot(lab);
+        }
     }
     if keys.just_pressed(KeyCode::KeyR) {
         let initial = lab.session.recording_initial().clone();
@@ -844,7 +1162,12 @@ fn controls(
         lab.paused = true;
         lab.rate = 0;
         lab.spawned = 0;
+        lab.own_port = None;
+        lab.target_port = None;
         lab.notice.clear();
+        if lab.rendezvous {
+            rendezvous_fixture(lab);
+        }
     }
     if keys.just_pressed(KeyCode::Tab)
         && lab.main_game
@@ -866,17 +1189,7 @@ fn controls(
             .iter()
             .position(|id| *id == old)
             .expect("selected vessel");
-        let mut c = lab.session.sim().fleet.control(&old);
-        c.turn = DVec3::ZERO;
-        if c.turn != lab.session.sim().fleet.control(&old).turn {
-            lab.session.execute(Action::Control {
-                throttle: c.throttle,
-                turn: c.turn,
-            });
-        }
-        lab.session.execute(Action::Select {
-            vessel: ids[(i + 1) % ids.len()].clone(),
-        });
+        select_pilot(lab, &ids[(i + 1) % ids.len()]);
         lab.prediction = None;
     }
     if keys.just_pressed(KeyCode::KeyO) {
@@ -886,7 +1199,7 @@ fn controls(
         }) else {
             unreachable!()
         };
-        lab.session.execute(Action::Select { vessel: id });
+        select_pilot(lab, &id);
     }
     if keys.just_pressed(KeyCode::KeyN) {
         lab.spawned += 1;
@@ -916,13 +1229,14 @@ fn controls(
     let dt = time.delta_secs_f64().min(0.05);
     let throttle_axis = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) as i32
         - keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]) as i32;
-    if !keys.just_pressed(KeyCode::Tab) {
+    if !keys.just_pressed(KeyCode::Tab) && !keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
+    {
         c.throttle = (c.throttle + f64::from(throttle_axis) * dt * 0.5).clamp(0.0, 1.0);
     }
     if keys.just_pressed(KeyCode::KeyX) {
         c.throttle = 0.0;
     }
-    c.turn = if commanded {
+    let turn = if commanded && !lab.paused {
         DVec3::new(
             axis(&keys, KeyCode::KeyS, KeyCode::KeyW),
             axis(&keys, KeyCode::KeyE, KeyCode::KeyQ),
@@ -931,6 +1245,53 @@ fn controls(
     } else {
         DVec3::ZERO
     };
+    if lab.main_game {
+        let mut rcs = lab.session.sim().fleet.rcs_control(&id);
+        if keys.just_pressed(KeyCode::KeyH) && commanded {
+            let available = lab.session.sim().fleet.part_snapshots(&id).iter().any(|p| {
+                p.definition
+                    .modules
+                    .iter()
+                    .any(|m| matches!(m, Module::Rcs { .. }))
+            });
+            if available {
+                rcs.enabled = !rcs.enabled;
+            } else {
+                lab.notice = "RCS unavailable: selected vessel has no nozzles".into();
+            }
+        }
+        let translate = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
+        rcs.force = if commanded && !lab.paused && rcs.enabled && translate {
+            DVec3::new(
+                axis(&keys, KeyCode::KeyD, KeyCode::KeyA),
+                axis(&keys, KeyCode::KeyE, KeyCode::KeyQ),
+                axis(&keys, KeyCode::KeyW, KeyCode::KeyS),
+            ) * 80.0
+        } else {
+            DVec3::ZERO
+        };
+        rcs.torque = if rcs.enabled && !translate {
+            turn * 30.0
+        } else {
+            DVec3::ZERO
+        };
+        if rcs.torque != DVec3::ZERO
+            && lab.session.sim().fleet.sas_phase(&id) != void_vessels::SasPhase::Off
+        {
+            lab.session.execute(Action::Sas { enabled: false });
+            lab.notice = "Manual RCS torque disengaged SAS reaction wheel".into();
+        }
+        c.turn = if rcs.enabled || translate {
+            DVec3::ZERO
+        } else {
+            turn
+        };
+        if rcs != lab.session.sim().fleet.rcs_control(&id) {
+            lab.session.execute(Action::Rcs { control: rcs });
+        }
+    } else {
+        c.turn = turn;
+    }
     let previous = lab.session.sim().fleet.control(&id);
     if previous.throttle != c.throttle || previous.turn != c.turn {
         lab.session.execute(Action::Control {
@@ -938,8 +1299,13 @@ fn controls(
             turn: c.turn,
         });
     }
+    if lab.main_game {
+        docking_controls(lab, &keys);
+    }
     if keys.just_pressed(KeyCode::Space) {
         lab.session.execute(Action::Stage);
+        lab.own_port = None;
+        lab.target_port = None;
         lab.prediction = None;
     }
     if keys.just_pressed(KeyCode::Period) {
@@ -1298,6 +1664,7 @@ fn draw(
 ) {
     let started = std::time::Instant::now();
     let lab = &mut *lab;
+    refresh_ports(lab);
     if lab.dirty {
         for (_, entities) in lab.parts.drain() {
             for e in entities {
@@ -1505,6 +1872,31 @@ fn draw(
             Color::srgb(1.0, 0.6, 0.15),
         );
     }
+    if lab.main_game {
+        let into = to_camera(f.vessel_frame(&sim.selected));
+        let allocation = f.rcs_allocation(&sim.selected);
+        for nozzle in allocation.nozzles.iter().filter(|n| n.throttle > 0.001) {
+            let start = into.apply_point(nozzle.point);
+            let end = into
+                .apply_point(nozzle.point - nozzle.full_force.normalize() * nozzle.throttle * 1.5);
+            gizmos.line(start.as_vec3(), end.as_vec3(), Color::srgb(0.4, 0.8, 1.0));
+        }
+        for (port, color) in [
+            (&lab.own_port, Color::srgb(0.1, 1.0, 0.3)),
+            (&lab.target_port, Color::srgb(1.0, 0.5, 0.1)),
+        ] {
+            if let Some(port) = port {
+                let (mount, normal) = port_pose(lab, port);
+                let local = mount + f.centre_of_mass_local(&port.vessel);
+                let into = to_camera(f.vessel_frame(&port.vessel));
+                gizmos.line(
+                    into.apply_point(local).as_vec3(),
+                    into.apply_point(local + normal).as_vec3(),
+                    color,
+                );
+            }
+        }
+    }
     let p = f.thrust(&lab.session.sim().selected);
     let mut positions = vec![DVec3::ZERO; f.ephemeris.bodies().len()];
     let mut velocities = positions.clone();
@@ -1585,7 +1977,16 @@ fn draw(
         (orbital.periapsis_radius_meters - body.radius_meters) / 1000.0,
         (orbital.apoapsis_radius_meters - body.radius_meters) / 1000.0,
         f.vessel_ids().len(),
-        format_args!("{}\n{}", lab.notice, plan_description(lab)),
+        format_args!(
+            "{}\n{}\n{}",
+            lab.notice,
+            if lab.main_game {
+                docking_description(lab)
+            } else {
+                String::new()
+            },
+            plan_description(lab)
+        ),
     ));
     if let Some((profile, _)) = &mut lab.profile {
         profile.span("draw_lod_overlays", started, std::time::Instant::now());
@@ -1596,6 +1997,329 @@ fn draw(
 mod tests {
     use super::*;
     use void_assembly::demo_craft;
+    fn rendezvous_lab() -> Lab {
+        let planet = game_planet_by_id("aurelia", None);
+        let craft = void_assembly::rcs_flight_rocket();
+        let site = demo_rocket(&planet.planet.terrain).launch_site.normalize();
+        let initial = InitialWorld::new(&planet.planet, &craft, site, true)
+            .with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque);
+        let mut lab = new_lab(FlightSession::new(initial).with_recording(), craft);
+        lab.main_game = true;
+        lab.rendezvous = true;
+        lab.session.execute(Action::View {
+            command: ViewCommand::Configure { main_camera: true },
+        });
+        rendezvous_fixture(&mut lab);
+        lab
+    }
+    #[test]
+    fn main_rendezvous_actions_capture_undock_and_replay() {
+        let mut lab = rendezvous_lab();
+        assert_eq!(
+            lab.session.sim().fleet.options.air_dynamics,
+            void_vessels::AirDynamics::ForceAndTorque
+        );
+        assert!(lab.paused);
+        let a = lab.own_port.clone().unwrap();
+        let b = lab.target_port.clone().unwrap();
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::Enter);
+        docking_controls(&mut lab, &keys);
+        assert!(lab.notice.contains("disarmed"));
+        keys.release_all();
+        keys.clear();
+        keys.press(KeyCode::F12);
+        docking_controls(&mut lab, &keys);
+        keys.release_all();
+        keys.clear();
+        keys.press(KeyCode::Enter);
+        let direction = lab.session.sim().presentation.direction;
+        let distance = lab.session.sim().presentation.distance;
+        docking_controls(&mut lab, &keys);
+        assert_eq!(lab.session.sim().presentation.direction, direction);
+        assert_eq!(lab.session.sim().presentation.distance, distance);
+        assert_eq!(
+            lab.session.sim().fleet.vessel_ids().len(),
+            2,
+            "{}",
+            lab.notice
+        );
+        assert_eq!(
+            lab.session.sim().fleet.vessel_of_part(&a.part),
+            lab.session.sim().fleet.vessel_of_part(&b.part)
+        );
+        assert!(
+            lab.session
+                .sim()
+                .fleet
+                .parts()
+                .part(&a.part)
+                .definition
+                .modules
+                .iter()
+                .any(|m| matches!(m, Module::Command { .. }))
+        );
+        keys.release_all();
+        keys.clear();
+        keys.press(KeyCode::Backspace);
+        docking_controls(&mut lab, &keys);
+        assert_eq!(lab.session.sim().presentation.direction, direction);
+        assert_eq!(lab.session.sim().presentation.distance, distance);
+        assert_eq!(lab.session.sim().fleet.vessel_ids().len(), 3);
+        assert_ne!(
+            lab.session.sim().fleet.vessel_of_part(&a.part),
+            lab.session.sim().fleet.vessel_of_part(&b.part)
+        );
+        assert_eq!(
+            lab.session.sim().fleet.parts().part(&a.part).modules[&a.module],
+            void_assembly::ModuleState::DockingPort { armed: false }
+        );
+        let mark = void_fleet_flight::session::world_mark(lab.session.sim());
+        let replayed = FlightSession::from_recording(lab.session.recording());
+        assert_eq!(mark, void_fleet_flight::session::world_mark(replayed.sim()));
+    }
+    #[test]
+    fn main_pilot_handoff_clears_transient_controls_and_preserves_rcs_enable() {
+        let mut lab = rendezvous_lab();
+        let old = lab.session.sim().selected.clone();
+        let target = lab.target_port.as_ref().unwrap().vessel.clone();
+        lab.session.execute(Action::Rcs {
+            control: void_vessels::RcsControl {
+                enabled: true,
+                force: DVec3::X * 80.0,
+                torque: DVec3::Y * 30.0,
+            },
+        });
+        lab.session.execute(Action::Control {
+            throttle: 0.2,
+            turn: DVec3::X,
+        });
+        select_pilot(&mut lab, &target);
+        let rcs = lab.session.sim().fleet.rcs_control(&old);
+        assert!(rcs.enabled);
+        assert_eq!(rcs.force, DVec3::ZERO);
+        assert_eq!(rcs.torque, DVec3::ZERO);
+        assert_eq!(lab.session.sim().fleet.control(&old).turn, DVec3::ZERO);
+        assert_eq!(lab.session.sim().fleet.control(&old).throttle, 0.2);
+        assert!(!lab.session.sim().fleet.rcs_control(&target).enabled);
+    }
+    #[test]
+    fn main_rendezvous_mounts_and_checkpoint_continuation() {
+        let mut lab = rendezvous_lab();
+        let a = lab.own_port.clone().unwrap();
+        let b = lab.target_port.clone().unwrap();
+        let f = &lab.session.sim().fleet;
+        let sa = f.snapshot(&a.vessel);
+        let sb = f.snapshot(&b.vessel);
+        let (pa, na) = port_pose(&lab, &a);
+        let (pb, nb) = port_pose(&lab, &b);
+        assert!(
+            (f.relative(&b.vessel, &a.vessel).position + sb.rotation * pb - sa.rotation * pa)
+                .length()
+                < 0.151
+        );
+        assert!((sa.rotation * na).dot(sb.rotation * nb) < -0.999);
+        // Independent frame-tree mount lookup checks the rendered attachment geometry.
+        let frames = f.frames();
+        let mount = |port: &PortAddress| {
+            let part = f.parts().part(&port.part);
+            let Module::DockingPort { node_id, .. } = part
+                .definition
+                .modules
+                .iter()
+                .find(|m| m.id() == port.module)
+                .unwrap()
+            else {
+                unreachable!()
+            };
+            let node = part
+                .definition
+                .nodes
+                .iter()
+                .find(|n| n.id == *node_id)
+                .unwrap();
+            let into = frames.transform(f.part_frame(&port.part), f.part_frame(&a.part));
+            (
+                into.apply_point(node.position),
+                into.rotation() * node.direction,
+            )
+        };
+        let (am, an) = mount(&a);
+        let (bm, bn) = mount(&b);
+        // LaunchState adds the setup displacement at solar-origin f64 precision (about 15 µm).
+        assert!(
+            ((bm - am).length() - 0.15).abs() < 2e-5,
+            "frame mounts {:?} {:?}, distance {}",
+            am,
+            bm,
+            (bm - am).length()
+        );
+        assert!(an.dot(bn) < -0.999999);
+        assert!(
+            lab.session
+                .sim()
+                .presentation
+                .direction
+                .dot(sa.rotation * na)
+                .abs()
+                < 0.1
+        );
+        assert_eq!(
+            lab.craft
+                .parts
+                .iter()
+                .find(|p| p.attachment.is_none())
+                .unwrap()
+                .id,
+            "p1"
+        );
+        lab.session.execute(Action::Rcs {
+            control: void_vessels::RcsControl {
+                enabled: true,
+                force: DVec3::X * 80.0,
+                ..Default::default()
+            },
+        });
+        lab.session.execute(Action::Advance {
+            seconds: 0.05,
+            rails: false,
+        });
+        let checkpoint = void_fleet_flight::checkpoint::FlightCheckpoint::capture(
+            lab.session.sim(),
+            lab.session.recording_initial().clone(),
+        );
+        let serialized = serde_json::to_string(&checkpoint).unwrap();
+        let mut loaded = FlightSession::from_checkpoint(serde_json::from_str(&serialized).unwrap());
+        let advance = Action::Advance {
+            seconds: 0.05,
+            rails: false,
+        };
+        lab.session.execute(advance.clone());
+        loaded.execute(advance);
+        assert_eq!(
+            void_fleet_flight::session::world_mark(lab.session.sim()),
+            void_fleet_flight::session::world_mark(loaded.sim())
+        );
+    }
+    #[test]
+    fn main_keyboard_focus_pause_and_held_handoff_neutralize_requests() {
+        let mut lab = rendezvous_lab();
+        lab.paused = false;
+        let old = lab.session.sim().selected.clone();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_non_send(lab)
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(AccumulatedMouseMotion::default())
+            .insert_resource(AccumulatedMouseScroll::default())
+            .add_systems(Update, controls);
+        app.world_mut().spawn(Window::default());
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.press(KeyCode::KeyH);
+            keys.press(KeyCode::AltLeft);
+            keys.press(KeyCode::KeyW);
+        }
+        app.update();
+        assert_eq!(
+            app.world()
+                .non_send::<Lab>()
+                .session
+                .sim()
+                .fleet
+                .rcs_control(&old)
+                .force,
+            DVec3::Z * 80.0
+        );
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.clear();
+            keys.press(KeyCode::Tab);
+        }
+        app.update();
+        let lab = app.world().non_send::<Lab>();
+        assert_ne!(lab.session.sim().selected, old);
+        assert_eq!(lab.session.sim().fleet.rcs_control(&old).force, DVec3::ZERO);
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release_all();
+            keys.clear();
+            keys.press(KeyCode::KeyH);
+            keys.press(KeyCode::AltLeft);
+            keys.press(KeyCode::KeyW);
+        }
+        app.update();
+        let selected = app.world().non_send::<Lab>().session.sim().selected.clone();
+        assert_eq!(
+            app.world()
+                .non_send::<Lab>()
+                .session
+                .sim()
+                .fleet
+                .rcs_control(&selected)
+                .force,
+            DVec3::Z * 80.0
+        );
+        app.world_mut()
+            .non_send_mut::<Lab>()
+            .session
+            .execute(Action::Sas { enabled: true });
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.clear();
+            keys.release(KeyCode::AltLeft);
+        }
+        app.update();
+        assert_eq!(
+            app.world()
+                .non_send::<Lab>()
+                .session
+                .sim()
+                .fleet
+                .sas_phase(&selected),
+            void_vessels::SasPhase::Off
+        );
+        assert!(
+            app.world()
+                .non_send::<Lab>()
+                .notice
+                .contains("disengaged SAS")
+        );
+        app.world_mut()
+            .query::<&mut Window>()
+            .single_mut(app.world_mut())
+            .unwrap()
+            .focused = false;
+        app.update();
+        assert_eq!(
+            app.world()
+                .non_send::<Lab>()
+                .session
+                .sim()
+                .fleet
+                .rcs_control(&selected)
+                .force,
+            DVec3::ZERO
+        );
+        app.world_mut()
+            .query::<&mut Window>()
+            .single_mut(app.world_mut())
+            .unwrap()
+            .focused = true;
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.clear();
+            keys.press(KeyCode::KeyP);
+        }
+        app.update();
+        let lab = app.world().non_send::<Lab>();
+        assert!(lab.paused);
+        assert_eq!(
+            lab.session.sim().fleet.rcs_control(&selected).force,
+            DVec3::ZERO
+        );
+    }
     fn initialized_scene(main_game: bool) -> App {
         let planet = game_planet_by_id(if main_game { "aurelia" } else { "pebble" }, None);
         let craft = void_assembly::flight_rocket();
