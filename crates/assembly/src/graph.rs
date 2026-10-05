@@ -299,7 +299,10 @@ impl PartGraph {
                     },
                 }
             }
-            ModuleState::Rcs { .. } | ModuleState::DockingPort { .. } | ModuleState::Passive => {
+            ModuleState::Thermal { .. }
+            | ModuleState::Rcs { .. }
+            | ModuleState::DockingPort { .. }
+            | ModuleState::Passive => {
                 panic!("passive module has no stage action")
             }
         };
@@ -483,6 +486,7 @@ impl PartGraph {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ModuleState {
+    Thermal { state: crate::PartThermalState },
     Parachute { state: crate::ParachuteState },
     Rcs { enabled: bool },
     DockingPort { armed: bool },
@@ -498,6 +502,9 @@ pub fn initial_modules(definition: &PartDefinition) -> BTreeMap<String, ModuleSt
             (
                 m.id().to_string(),
                 match m {
+                    Module::Thermal { parameters, .. } => ModuleState::Thermal {
+                        state: parameters.initial(),
+                    },
                     Module::Rcs { .. } => ModuleState::Rcs { enabled: true },
                     Module::DockingPort { .. } => ModuleState::DockingPort { armed: true },
                     Module::Parachute { .. } => ModuleState::Parachute {
@@ -532,6 +539,14 @@ fn check_modules(part: &Part) {
             .expect("part graph: missing module state");
         assert!(
             match (m, state) {
+                (Module::Thermal { parameters, .. }, ModuleState::Thermal { state }) =>
+                    state.skin_k.is_finite()
+                        && state.skin_k > 0.0
+                        && state.core_k.is_finite()
+                        && state.core_k > 0.0
+                        && (state.failed
+                            || (state.skin_k <= parameters.max_skin_k
+                                && state.core_k <= parameters.max_core_k)),
                 (Module::Rcs { .. }, ModuleState::Rcs { .. })
                 | (Module::DockingPort { .. }, ModuleState::DockingPort { .. }) => true,
                 (Module::Engine { .. }, ModuleState::Engine { activated, enabled }) =>
@@ -558,6 +573,11 @@ fn check_modules(part: &Part) {
     }
 }
 impl Part {
+    pub fn thermally_failed(&self) -> bool {
+        self.modules
+            .values()
+            .any(|m| matches!(m, ModuleState::Thermal { state } if state.failed))
+    }
     pub fn resource(&self, r: ResourceId) -> f64 {
         self.resources.get(&r).copied().unwrap_or(0.0)
     }
@@ -593,6 +613,9 @@ fn check_transition(old: &ModuleState, new: &ModuleState) {
         | (ModuleState::Decoupler { activated: a }, ModuleState::Decoupler { activated: b }) => {
             !a || *b
         }
+        (ModuleState::Thermal { state: a }, ModuleState::Thermal { state: b }) => {
+            !a.failed || b.failed
+        }
         (ModuleState::Rcs { .. }, ModuleState::Rcs { .. })
         | (ModuleState::DockingPort { .. }, ModuleState::DockingPort { .. })
         | (ModuleState::Passive, ModuleState::Passive) => true,
@@ -625,9 +648,10 @@ impl Part {
                 *activated
             }
             ModuleState::Parachute { state } => state.phase != crate::ParachutePhase::Stowed,
-            ModuleState::Rcs { .. } | ModuleState::DockingPort { .. } | ModuleState::Passive => {
-                false
-            }
+            ModuleState::Thermal { .. }
+            | ModuleState::Rcs { .. }
+            | ModuleState::DockingPort { .. }
+            | ModuleState::Passive => false,
         }
     }
     pub fn decoupler_module(&self, id: &str) -> (&'static str, f64) {

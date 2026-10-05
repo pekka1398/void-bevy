@@ -328,6 +328,28 @@
       {
         "kind": "command",
         "id": "command1"
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 7500,
+          "coreCapacityJk": 35000,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 10.744246875277092,
+          "heatingArea": 2.5446900494077327,
+          "convectionArea": 10.744246875277092,
+          "emissivity": 0.8,
+          "noseRadius": 0.9,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -378,6 +400,28 @@
         "capacityKg": 1470,
         "id": "tank1",
         "resource": "liquidPropellant"
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 30000,
+          "coreCapacityJk": 140000,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 18.472564803107982,
+          "heatingArea": 3.463605900582747,
+          "convectionArea": 18.472564803107982,
+          "emissivity": 0.8,
+          "noseRadius": 1.05,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -435,6 +479,28 @@
         ],
         "id": "engine1",
         "resource": "liquidPropellant"
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 7500,
+          "coreCapacityJk": 35000,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 2.161415745669778,
+          "heatingArea": 0.5808804816487527,
+          "convectionArea": 2.161415745669778,
+          "emissivity": 0.8,
+          "noseRadius": 0.43,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -485,6 +551,28 @@
         "nodeId": "top",
         "impulseNs": 100,
         "id": "decoupler1"
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 3000.0,
+          "coreCapacityJk": 14000,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 7.586946258419351,
+          "heatingArea": 3.463605900582747,
+          "convectionArea": 7.586946258419351,
+          "emissivity": 0.8,
+          "noseRadius": 1.05,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -591,6 +679,28 @@
         "capacityKg": 5350,
         "id": "tank1",
         "resource": "liquidPropellant"
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 33000,
+          "coreCapacityJk": 154000,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 28.274333882308138,
+          "heatingArea": 4.908738521234052,
+          "convectionArea": 28.274333882308138,
+          "emissivity": 0.8,
+          "noseRadius": 1.25,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -648,6 +758,28 @@
         ],
         "id": "engine1",
         "resource": "liquidPropellant"
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 27000,
+          "coreCapacityJk": 126000,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 3.4620351042559516,
+          "heatingArea": 1.0568317686676063,
+          "convectionArea": 3.4620351042559516,
+          "emissivity": 0.8,
+          "noseRadius": 0.58,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -692,7 +824,30 @@
         "size": 1
       }
     ],
-    "modules": []
+    "modules": [
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 3000.0,
+          "coreCapacityJk": 10500,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 1.0844244567004602,
+          "heatingArea": 0.031415926535897934,
+          "convectionArea": 1.0844244567004602,
+          "emissivity": 0.8,
+          "noseRadius": 0.1,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
+      }
+    ]
   },
   {
     "id": "flight-foot-0",
@@ -721,7 +876,30 @@
         "size": 1
       }
     ],
-    "modules": []
+    "modules": [
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 3000.0,
+          "coreCapacityJk": 10000.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 0.409035363497391,
+          "heatingArea": 0.13854423602330987,
+          "convectionArea": 0.409035363497391,
+          "emissivity": 0.8,
+          "noseRadius": 0.21,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
+      }
+    ]
   },
   {
     "id": "flight-foot-1",
@@ -750,7 +928,30 @@
         "size": 1
       }
     ],
-    "modules": []
+    "modules": [
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 3000.0,
+          "coreCapacityJk": 10000.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 0.409035363497391,
+          "heatingArea": 0.13854423602330987,
+          "convectionArea": 0.409035363497391,
+          "emissivity": 0.8,
+          "noseRadius": 0.21,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
+      }
+    ]
   },
   {
     "id": "flight-foot-2",
@@ -779,7 +980,30 @@
         "size": 1
       }
     ],
-    "modules": []
+    "modules": [
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 3000.0,
+          "coreCapacityJk": 10000.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 0.409035363497391,
+          "heatingArea": 0.13854423602330987,
+          "convectionArea": 0.409035363497391,
+          "emissivity": 0.8,
+          "noseRadius": 0.21,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
+      }
+    ]
   },
   {
     "id": "flight-foot-3",
@@ -808,7 +1032,30 @@
         "size": 1
       }
     ],
-    "modules": []
+    "modules": [
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 3000.0,
+          "coreCapacityJk": 10000.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 0.409035363497391,
+          "heatingArea": 0.13854423602330987,
+          "convectionArea": 0.409035363497391,
+          "emissivity": 0.8,
+          "noseRadius": 0.21,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
+      }
+    ]
   },
   {
     "id": "parachute-pod",
@@ -2083,6 +2330,93 @@
           -0.25,
           0.5
         ]
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 7500,
+          "coreCapacityJk": 35000,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 10.744246875277092,
+          "heatingArea": 2.5446900494077327,
+          "convectionArea": 10.744246875277092,
+          "emissivity": 0.8,
+          "noseRadius": 0.9,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
+      }
+    ]
+  },
+  {
+    "id": "heat-shield",
+    "name": "Ablative heat shield",
+    "description": "Finite ablative disk; protects parts behind its outward face",
+    "category": "structure",
+    "dryMassKg": 40.0,
+    "height": 0.2,
+    "radius": 1.25,
+    "shape": "cylinder",
+    "color": "#4b3023",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.1,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 2
+      }
+    ],
+    "modules": [
+      {
+        "kind": "tank",
+        "id": "ablator",
+        "resource": "ablator",
+        "capacityKg": 30.0
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 18000.0,
+          "coreCapacityJk": 45000.0,
+          "conductanceWk": 2.0,
+          "connectionConductanceWk": 1.0,
+          "radiatingArea": 4.908738521234052,
+          "heatingArea": 4.908738521234052,
+          "convectionArea": 4.908738521234052,
+          "emissivity": 0.8,
+          "noseRadius": 1.25,
+          "heatingFactor": 1.0,
+          "maxSkinK": 2600.0,
+          "maxCoreK": 1400.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": [
+            0,
+            -1,
+            0
+          ],
+          "ablation": {
+            "activationK": 850.0,
+            "latentJKg": 3000000.0
+          }
+        }
       }
     ]
   }

@@ -205,6 +205,27 @@ pub fn advance_thermal(
     dt: f64,
     external_core_w: f64,
 ) -> ThermalBudget {
+    advance_with_limit(spec, state, env, dt, external_core_w, 0.05)
+}
+/// The same solver without the lab's fixed 50 ms accuracy cap. Stable adaptive exchange bounds
+/// remain; used for accepted Fleet cooling/rails intervals rather than millions of idle steps.
+pub fn advance_thermal_adaptive(
+    spec: &ThermalSpec,
+    state: &mut ThermalState,
+    env: &HeatEnvironment,
+    dt: f64,
+    external_core_w: f64,
+) -> ThermalBudget {
+    advance_with_limit(spec, state, env, dt, external_core_w, f64::INFINITY)
+}
+fn advance_with_limit(
+    spec: &ThermalSpec,
+    state: &mut ThermalState,
+    env: &HeatEnvironment,
+    dt: f64,
+    external_core_w: f64,
+    max_step: f64,
+) -> ThermalBudget {
     positive(dt, "thermal step");
     finite(external_core_w, "core heat");
     let start_energy = state.skin_k * spec.skin_capacity_jk + state.core_k * spec.core_capacity_jk;
@@ -222,7 +243,7 @@ pub fn advance_thermal(
             0.0
         };
         let step = left
-            .min(0.05)
+            .min(max_step)
             .min(
                 0.2 * spec.skin_capacity_jk
                     / 1.0_f64.max(spec.conductance_wk + radiation_slope + h),

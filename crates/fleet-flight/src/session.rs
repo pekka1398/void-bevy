@@ -15,7 +15,7 @@ pub mod durable;
 
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 18;
+pub const MODEL_VERSION: u32 = 19;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -250,6 +250,17 @@ impl Action {
                 Outcome::Applied
             }
             Self::Rcs { control } => {
+                assert!(
+                    control.force.is_finite() && control.torque.is_finite(),
+                    "invalid RCS command"
+                );
+                if (control.enabled
+                    || control.force != DVec3::ZERO
+                    || control.torque != DVec3::ZERO)
+                    && !sim.fleet.has_command(&sim.selected)
+                {
+                    return Outcome::Refused("RCS requires a functioning command part".into());
+                }
                 sim.fleet.set_rcs_control(&sim.selected, *control);
                 Outcome::Applied
             }
@@ -287,6 +298,15 @@ impl Action {
                 Outcome::Applied
             }
             Self::Control { throttle, turn } => {
+                assert!(
+                    throttle.is_finite() && (0.0..=1.0).contains(throttle) && turn.is_finite(),
+                    "invalid vessel control"
+                );
+                if sim.fleet.command_failed(&sim.selected)
+                    && (*throttle > 0.0 || *turn != DVec3::ZERO)
+                {
+                    return Outcome::Refused("command part thermally failed".into());
+                }
                 sim.control(VesselControl {
                     throttle: *throttle,
                     turn: *turn,
@@ -294,6 +314,9 @@ impl Action {
                 Outcome::Applied
             }
             Self::Sas { enabled } => {
+                if *enabled && !sim.fleet.has_command(&sim.selected) {
+                    return Outcome::Refused("SAS requires a functioning command part".into());
+                }
                 sim.sas(*enabled);
                 Outcome::Applied
             }
@@ -339,7 +362,12 @@ impl Action {
                 sim.abort_maneuver(&sim.selected.clone());
                 Outcome::Applied
             }
-            Self::Stage => Outcome::Staged(sim.stage()),
+            Self::Stage => {
+                if sim.fleet.command_failed(&sim.selected) {
+                    return Outcome::Refused("command part thermally failed".into());
+                }
+                Outcome::Staged(sim.stage())
+            }
             Self::LaunchState {
                 craft,
                 position,

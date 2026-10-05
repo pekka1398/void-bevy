@@ -6,3 +6,6 @@ mod runtime;
 pub use graph::*;
 pub use model::*;
 pub use runtime::*;
+
+mod thermal;
+pub use thermal::*;

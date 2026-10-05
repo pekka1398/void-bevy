@@ -27,6 +27,7 @@ use void_sas::{SAS_TUNING, SasPhase, StabilityAssist};
 use void_terrain::Terrain;
 
 mod guidance;
+mod thermal;
 mod wrenches;
 pub use guidance::{GuidanceStatus, GuidedBurn};
 use wrenches::{GuidedAirSource, RigidFlightSource, SceneStepSource};
@@ -707,8 +708,21 @@ impl Fleet {
         let v = self.vessel(id);
         rows(self.inertia_of(&v.members, self.centre(&v.members)))
     }
+    pub fn has_command(&self, id: &str) -> bool {
+        self.commanded(self.vessel(id))
+    }
+    pub fn command_failed(&self, id: &str) -> bool {
+        !self.has_command(id)
+            && self
+                .vessel(id)
+                .members
+                .iter()
+                .any(|p| self.parts.part(p).is_command() && self.parts.part(p).thermally_failed())
+    }
     fn commanded(&self, v: &Vessel) -> bool {
-        v.members.iter().any(|id| self.parts.part(id).is_command())
+        v.members
+            .iter()
+            .any(|id| self.parts.part(id).is_command() && !self.parts.part(id).thermally_failed())
     }
     fn propulsion_at(&self, v: &Vessel, conditions: &Conditions, time: f64) -> Propulsion {
         propulsion(
@@ -775,7 +789,13 @@ impl Fleet {
             control.force.is_finite() && control.torque.is_finite(),
             "invalid RCS control"
         );
-        assert!(self.commanded(self.vessel(id)), "RCS requires command part");
+        assert!(
+            self.commanded(self.vessel(id))
+                || (!control.enabled
+                    && control.force == DVec3::ZERO
+                    && control.torque == DVec3::ZERO),
+            "RCS requires command part"
+        );
         if control.enabled && (control.force != DVec3::ZERO || control.torque != DVec3::ZERO) {
             self.cancel_guidance(id, "manual RCS control");
         }
@@ -1955,6 +1975,9 @@ impl Fleet {
         let (na, pa) = self.docking_port(part_a, module_a);
         let (nb, pb) = self.docking_port(part_b, module_b);
         for (part, module, node_id) in [(part_a, module_a, na), (part_b, module_b, nb)] {
+            if self.parts.part(part).thermally_failed() {
+                return Err("port has thermally failed".into());
+            }
             if self.parts.part(part).modules[module]
                 != (void_assembly::ModuleState::DockingPort { armed: true })
             {
@@ -2819,6 +2842,7 @@ impl Fleet {
         }
         self.commit_parachutes(self.options.step_seconds);
         self.time = end;
+        self.commit_thermal(self.options.step_seconds);
         for scene in self.scenes.keys().copied().collect::<Vec<_>>() {
             let s = &self.scenes[&scene];
             let mut mass = 0.0;
@@ -2852,7 +2876,10 @@ impl Fleet {
                 step
             };
             self.reconcile(lookahead);
-            if !self.scenes.is_empty() || self.active_parachutes() {
+            if !self.scenes.is_empty()
+                || self.active_parachutes()
+                || self.thermal_rails_blocker().is_some()
+            {
                 if self.time + step > target + 1e-12 {
                     self.pending = (target - self.time).max(0.0);
                     return;
@@ -2866,14 +2893,19 @@ impl Fleet {
                 let end = target
                     .min(self.time + self.options.flight_chunk_seconds)
                     .min(self.time + self.band_safe_seconds());
+                let elapsed = end - self.time;
                 for id in self.order.clone() {
                     self.advance_orbit(&id, end);
                 }
                 self.time = end;
+                self.commit_thermal(elapsed);
             }
         }
     }
     pub fn rails_blocker(&self) -> Option<String> {
+        if let Some(reason) = self.thermal_rails_blocker() {
+            return Some(reason);
+        }
         if self
             .guidance
             .values()
@@ -2988,8 +3020,10 @@ impl Fleet {
             for s in self.scenes.values_mut() {
                 s.world.idle_to(&mut self.ephemeris, end);
             }
-            self.commit_parachutes(end - self.time);
+            let elapsed = end - self.time;
+            self.commit_parachutes(elapsed);
             self.time = end;
+            self.commit_thermal(elapsed);
         }
         for sas in self.sas.values_mut() {
             sas.assist.set_enabled(true);

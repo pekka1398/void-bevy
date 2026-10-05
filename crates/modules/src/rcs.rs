@@ -59,7 +59,8 @@ pub fn allocate(
             let ModuleState::Rcs { enabled } = p.modules[module] else {
                 panic!("invalid RCS state")
             };
-            if !control.enabled
+            if p.thermally_failed()
+                || !control.enabled
                 || !enabled
                 || !graph
                     .resource_tanks(members, id, *resource)

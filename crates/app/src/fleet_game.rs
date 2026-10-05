@@ -104,6 +104,39 @@ fn select_pilot(lab: &mut Lab, id: &str) {
     lab.target_port = None;
     refresh_ports(lab);
 }
+fn reentry_fixture(lab: &mut Lab) {
+    let sim = lab.session.sim();
+    let fleet = &sim.fleet;
+    let transform = fleet
+        .frames()
+        .transform(fleet.body_frames(sim.home).1, fleet.origin_frame());
+    let local_velocity = DVec3::new(-500.0, 7500.0, 0.0);
+    let state = transform.apply_state(void_frames::State {
+        position: DVec3::X * (fleet.ephemeris.bodies()[sim.home].radius_meters + 110000.0),
+        velocity: local_velocity,
+    });
+    let rotation =
+        transform.rotation() * DQuat::from_rotation_arc(-DVec3::Y, local_velocity.normalize());
+    let Outcome::Spawned(vessel) = lab.session.execute(Action::LaunchState {
+        craft: lab.craft.clone(),
+        position: state.position,
+        velocity: state.velocity,
+        rotation,
+        angular_velocity: DVec3::ZERO,
+    }) else {
+        unreachable!()
+    };
+    select_pilot(lab, &vessel);
+    lab.session.execute(Action::Sas { enabled: true });
+    lab.paused = true;
+    lab.rate = 0;
+    lab.session.execute(Action::EndFrame {
+        paused: true,
+        rate: 0,
+    });
+    lab.notice="Reentry: 110 km, 7.5 km/s surface flow, shield forward. P resumes; thermal HUD shows skin/core, ablator and failure.".into();
+}
+
 fn rendezvous_fixture(lab: &mut Lab) {
     let Outcome::Spawned(a) = lab.session.execute(Action::LaunchOrbit {
         craft: lab.craft.clone(),
@@ -245,6 +278,61 @@ fn docking_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
         }
     }
 }
+fn plotting_description(sim: &void_fleet_flight::FleetFlight) -> String {
+    use void_orbit::FrameSpec;
+    let bodies = sim.fleet.ephemeris.bodies();
+    match sim.presentation.plotting_frame {
+        FrameSpec::Barycentric => "plot: barycentric".into(),
+        FrameSpec::BodyInertial { body } => format!("plot: body inertial / {}", bodies[body].name),
+        FrameSpec::BodySurface { body } => format!("plot: body surface / {}", bodies[body].name),
+        FrameSpec::TwoBodyRotating { primary, secondary } => format!(
+            "plot: two-body rotating / {} + {}",
+            bodies[primary].name, bodies[secondary].name
+        ),
+    }
+}
+
+fn thermal_description(lab: &Lab) -> String {
+    let parts = lab
+        .session
+        .sim()
+        .fleet
+        .part_snapshots(&lab.session.sim().selected);
+    let mut hottest = (0.0, String::new());
+    let mut core = 0.0_f64;
+    let mut failed = 0;
+    let mut shields = String::new();
+    for p in parts {
+        for state in p.modules.values() {
+            if let void_assembly::ModuleState::Thermal { state } = state {
+                if state.skin_k > hottest.0 {
+                    hottest = (state.skin_k, p.id.clone());
+                }
+                core = core.max(state.core_k);
+                failed += usize::from(state.failed);
+                if let Some(m) = p.resources.get(&void_assembly::ResourceId::Ablator) {
+                    shields.push_str(&format!(
+                        "\n{} skin {:.0} K core {:.0} K ablator {:.3} kg{}",
+                        p.id,
+                        state.skin_k,
+                        state.core_k,
+                        m,
+                        if state.failed { " FAILED" } else { "" }
+                    ));
+                }
+            }
+        }
+    }
+    if hottest.0 == 0.0 {
+        String::new()
+    } else {
+        format!(
+            "Heat: {} skin {:.0} K | max core {:.0} K | failed {}{}",
+            hottest.1, hottest.0, core, failed, shields
+        )
+    }
+}
+
 fn docking_description(lab: &Lab) -> String {
     let f = &lab.session.sim().fleet;
     let id = &lab.session.sim().selected;
@@ -308,6 +396,7 @@ const RATES: [f64; 9] = crate::flight::TIME_RATES;
 struct Lab {
     main_game: bool,
     rendezvous: bool,
+    reentry: bool,
     own_port: Option<PortAddress>,
     target_port: Option<PortAddress>,
     pointer_over_label: bool,
@@ -503,7 +592,9 @@ pub fn run(main_game: bool) {
     let planet = game_planet_by_id(&id, argument("--terrain").as_deref());
     let craft = argument("--craft").map_or_else(
         || {
-            if main_game {
+            if main_game && std::env::args().any(|a| a == "--reentry") {
+                void_assembly::reentry_capsule()
+            } else if main_game {
                 void_assembly::rcs_flight_rocket()
             } else {
                 void_assembly::flight_rocket()
@@ -539,6 +630,15 @@ pub fn run(main_game: bool) {
     let mut lab = new_lab(session, craft);
     lab.main_game = main_game;
     lab.rendezvous = main_game && std::env::args().any(|a| a == "--rendezvous");
+    lab.reentry = main_game && std::env::args().any(|a| a == "--reentry");
+    assert!(
+        !(lab.rendezvous && lab.reentry),
+        "choose either --reentry or --rendezvous"
+    );
+    assert!(
+        !lab.reentry || (argument("--load").is_none() && replay_path.is_none()),
+        "--reentry cannot be combined with --load or --replay"
+    );
     assert!(
         !lab.rendezvous || (argument("--load").is_none() && replay_path.is_none()),
         "--rendezvous cannot be combined with --load or --replay"
@@ -571,6 +671,9 @@ pub fn run(main_game: bool) {
     }
     if lab.rendezvous && argument("--load").is_none() && lab.playback.is_none() {
         rendezvous_fixture(&mut lab);
+    }
+    if lab.reentry {
+        reentry_fixture(&mut lab);
     }
     lab.profile =
         argument("--profile").map(|path| (void_diagnostics::Profiler::new(), path.into()));
@@ -862,6 +965,7 @@ fn new_lab(session: FlightSession, craft: Craft) -> Lab {
     Lab {
         main_game: false,
         rendezvous: false,
+        reentry: false,
         own_port: None,
         target_port: None,
         pointer_over_label: false,
@@ -1172,6 +1276,9 @@ fn controls(
         if lab.rendezvous {
             rendezvous_fixture(lab);
         }
+        if lab.reentry {
+            reentry_fixture(lab);
+        }
     }
     if keys.just_pressed(KeyCode::Tab)
         && lab.main_game
@@ -1219,12 +1326,7 @@ fn controls(
     }
     let warp_was_active = lab.session.sim().maneuver_warp.active();
     let id = lab.session.sim().selected.clone();
-    let commanded = lab.session.sim().fleet.part_snapshots(&id).iter().any(|p| {
-        p.definition
-            .modules
-            .iter()
-            .any(|m| matches!(m, Module::Command { .. }))
-    });
+    let commanded = lab.session.sim().fleet.has_command(&id);
     if keys.just_pressed(KeyCode::KeyT) && commanded {
         let enabled = lab.session.sim().fleet.sas_phase(&id) == void_vessels::SasPhase::Off;
         lab.session.execute(Action::Sas { enabled });
@@ -1233,7 +1335,9 @@ fn controls(
     let dt = time.delta_secs_f64().min(0.05);
     let throttle_axis = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) as i32
         - keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]) as i32;
-    if !keys.just_pressed(KeyCode::Tab) && !keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
+    if !lab.session.sim().fleet.command_failed(&id)
+        && !keys.just_pressed(KeyCode::Tab)
+        && !keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
     {
         c.throttle = (c.throttle + f64::from(throttle_axis) * dt * 0.5).clamp(0.0, 1.0);
     }
@@ -2066,9 +2170,10 @@ fn draw(
         (orbital.apoapsis_radius_meters - body.radius_meters) / 1000.0,
         f.vessel_ids().len(),
         format_args!(
-            "{}\nplot {:?}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}",
             lab.notice,
-            sim.presentation.plotting_frame,
+            plotting_description(sim),
+            thermal_description(lab),
             if lab.main_game {
                 docking_description(lab)
             } else {
@@ -2084,6 +2189,66 @@ fn draw(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn main_reentry_heat_survives_checkpoint_and_journal() {
+        let planet = void_landing::earth_size();
+        let craft = void_assembly::reentry_capsule();
+        let initial = InitialWorld::new(&planet, &craft, void_vessels::flat_site(&planet), true)
+            .with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque);
+        let mut lab = new_lab(FlightSession::new(initial).with_recording(), craft);
+        lab.main_game = true;
+        reentry_fixture(&mut lab);
+        lab.session.execute(Action::Advance {
+            seconds: 120.0,
+            rails: false,
+        });
+        lab.session.execute(Action::EndFrame {
+            paused: true,
+            rate: 0,
+        });
+        lab.session.mark();
+        let id = format!("{}/shield", lab.session.sim().selected);
+        let shield = lab.session.sim().fleet.parts().part(&id);
+        let remaining = shield.resource(void_assembly::ResourceId::Ablator);
+        println!(
+            "reentry at 120 seconds: {remaining} kg ablator, {}",
+            thermal_description(&lab)
+        );
+        assert!(
+            remaining < 30.0,
+            "the playable fixture must actually enter the atmosphere and spend ablator"
+        );
+        assert!(thermal_description(&lab).contains("ablator"));
+        let checkpoint = void_fleet_flight::checkpoint::FlightCheckpoint::capture(
+            lab.session.sim(),
+            lab.session.recording_initial().clone(),
+        );
+        let mut loaded = FlightSession::from_checkpoint(checkpoint);
+        assert_eq!(
+            void_fleet_flight::session::world_mark(loaded.sim()),
+            void_fleet_flight::session::world_mark(lab.session.sim())
+        );
+        for s in [&mut loaded, &mut lab.session] {
+            s.execute(Action::Advance {
+                seconds: 0.25,
+                rails: false,
+            });
+            s.execute(Action::EndFrame {
+                paused: true,
+                rate: 0,
+            });
+        }
+        assert_eq!(
+            void_fleet_flight::session::world_mark(loaded.sim()),
+            void_fleet_flight::session::world_mark(lab.session.sim())
+        );
+        lab.session.mark();
+        let replayed = FlightSession::from_recording(lab.session.recording());
+        assert_eq!(
+            void_fleet_flight::session::world_mark(replayed.sim()),
+            void_fleet_flight::session::world_mark(lab.session.sim())
+        );
+    }
     use super::*;
     use void_assembly::demo_craft;
     fn rendezvous_lab() -> Lab {

@@ -44,7 +44,7 @@ pub fn propulsion(
         for id in members {
             let p = graph.part(id);
             for (module_id, rating) in p.engines() {
-                if !p.engine_enabled(module_id) {
+                if p.thermally_failed() || !p.engine_enabled(module_id) {
                     continue;
                 }
                 let resource = rating.resource;

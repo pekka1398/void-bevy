@@ -5801,6 +5801,7 @@ dependencies = [
  "rapier3d",
  "serde",
  "serde_json",
+ "void-aero",
  "void-assembly",
  "void-environment",
  "void-frames",

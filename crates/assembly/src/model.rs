@@ -13,6 +13,7 @@ pub type ModelResult<T> = Result<T, String>;
 pub enum ResourceId {
     LiquidPropellant,
     Monopropellant,
+    Ablator,
 }
 pub type Resources = BTreeMap<ResourceId, f64>;
 
@@ -27,6 +28,10 @@ pub struct AttachNode {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Module {
+    Thermal {
+        id: String,
+        parameters: crate::ThermalDefinition,
+    },
     Rcs {
         id: String,
         resource: ResourceId,
@@ -135,7 +140,7 @@ pub struct PartInstance {
     pub attachment: Option<Attachment>,
 }
 // Missing nullable fields are invalid data; explicit JSON null is legal.
-fn explicit_option<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+pub(super) fn explicit_option<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: Deserialize<'de>,
@@ -708,10 +713,43 @@ pub fn rcs_flight_rocket() -> Craft {
     craft
 }
 
+/// A command pod with a finite ablative disk on its bottom stack node.
+pub fn reentry_capsule() -> Craft {
+    let craft = Craft {
+        version: 2,
+        name: "VOID shielded reentry capsule".into(),
+        parts: vec![
+            PartInstance {
+                id: "pod".into(),
+                definition_id: "flight-rcs-pod".into(),
+                resources: full_resources(definition("flight-rcs-pod").unwrap()),
+                module_stages: BTreeMap::new(),
+                stage: None,
+                attachment: None,
+            },
+            PartInstance {
+                id: "shield".into(),
+                definition_id: "heat-shield".into(),
+                resources: full_resources(definition("heat-shield").unwrap()),
+                module_stages: BTreeMap::new(),
+                stage: None,
+                attachment: Some(Attachment {
+                    parent_id: "pod".into(),
+                    parent_node_id: "bottom".into(),
+                    node_id: "top".into(),
+                }),
+            },
+        ],
+    };
+    compile(&craft).expect("authored reentry capsule");
+    craft
+}
+
 impl Module {
     pub fn id(&self) -> &str {
         match self {
-            Self::Rcs { id, .. }
+            Self::Thermal { id, .. }
+            | Self::Rcs { id, .. }
             | Self::DockingPort { id, .. }
             | Self::Command { id }
             | Self::Tank { id, .. }
@@ -849,12 +887,30 @@ pub struct LiftingSurfaceDefinition {
     pub pitching_moment: f64,
 }
 pub fn validate_definition(d: &PartDefinition) -> ModelResult<()> {
+    if d.modules
+        .iter()
+        .filter(|m| matches!(m, Module::Thermal { .. }))
+        .count()
+        > 1
+    {
+        return Err("only one thermal module per part".into());
+    }
+    if d.modules
+        .iter()
+        .any(|m| matches!(m, Module::Thermal { parameters, .. } if parameters.ablation.is_some()))
+        && capacity(d, ResourceId::Ablator) <= 0.0
+    {
+        return Err("ablative thermal module requires an ablator tank".into());
+    }
     let mut ids = HashSet::new();
     for m in &d.modules {
         if m.id().is_empty() || !ids.insert(m.id()) {
             return Err("empty/duplicate module ID".into());
         }
         match m {
+            Module::Thermal { parameters, .. } => {
+                parameters.validate()?;
+            }
             Module::Rcs {
                 thrust_newtons,
                 isp_seconds,
