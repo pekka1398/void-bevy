@@ -77,7 +77,7 @@ fn crashing_command_survives_in_a_separate_process() {
         .output()
         .unwrap();
     assert!(!child.status.success());
-    assert!(String::from_utf8_lossy(&child.stderr).contains("invalid control"));
+    assert!(String::from_utf8_lossy(&child.stderr).contains("invalid vessel control"));
     assert!(std::panic::catch_unwind(|| Recording::read(&path)).is_err());
     let recovered = Recovery::read(&path);
     assert!(!recovered.ended_normally);

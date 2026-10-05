@@ -106,7 +106,7 @@ impl FleetFlight {
     pub fn observation_body(&self) -> usize {
         self.presentation
             .focus_body
-            .unwrap_or_else(|| self.nearby_body(&self.selected))
+            .unwrap_or_else(|| self.navigation_body(&self.selected))
     }
     pub fn launch_ground_at(&mut self, body_id: &str, craft: &Craft, site: DVec3) -> String {
         self.world.validate_launch(body_id, site);

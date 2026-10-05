@@ -55,6 +55,10 @@ pub fn table_image(data: &[f32], width: usize, height: usize) -> Image {
         width * height * 4,
         "table_image: {width}×{height}"
     );
+    assert!(
+        data.iter().all(|v| v.is_finite() && v.abs() <= 65504.0),
+        "scenery LUT cannot be represented as finite RGBA16Float"
+    );
     let bytes = data
         .iter()
         .flat_map(|&v| half::f16::from_f32(v).to_le_bytes())

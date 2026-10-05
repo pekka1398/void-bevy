@@ -4,13 +4,25 @@
 
 ## 一句話
 
-TS→Rust 搬遷與主要架構重構已完成。主遊戲已具備 assembly／Fleet、多船、完整氣動力與力矩、有限 RCS、物理對接／解除、分級、SAS、機動、warp、存讀、錄放與量測。使用者操作對接場景後表示正常並授權合併，整合已於 `134bb37` 合入本地 master。Scenery 十天體第一輪仍留在分支，細緻美術後續逐顆規劃。
+TS→Rust 搬遷與主要架構重構已完成。主遊戲具備 assembly／Fleet、多船、完整氣動力矩、有限 RCS、對接／解除、分級、SAS、機動、warp、存讀、錄放與量測。RCS／氣動整合已推送至 origin（`0cd5012`）。本輪另將四種繪圖框架、熱／傳熱／燒蝕／防熱盾與十天體第一輪 scenery 接入主遊戲，仍待使用者驗收；十天體外觀不是最終美術版。
 
-## 本輪主遊戲整合已合入
+## 本輪 master 直接整合（待人類驗收）
 
-`1fb8ac9` 完成主遊戲控制、HUD、預設 RCS 火箭、對接操作及可重播的近距場景，使用者授權後於 `134bb37` 合入 master。root 審查、針對性測試／lint、TigerVNC、真實 journal／save 核對已完成；合併後再核對，見 [main-flight-integration.md](main-flight-integration.md)。model 17／FleetCheckpoint 7 不變，尚未 push。
+使用者授權主 agent 直接在 master、無子 agent。繪圖框架 `168fcf2`、熱系統 `a625be9`；scenery 接線與驗證見 [main-solar-scenery.md](main-solar-scenery.md)。
 
-使用者實際操作並認可對接場景，未逐項記錄所有操作的人類驗收；undock、RCS、SAS、相機與存讀／錄放另有 root smoke 及回歸證據。以下「整理時」表保留曾經暫停的歷史狀態；本輪最新狀態以本節為準。
+| 項目 | 主遊戲行為 | 限制／文件 |
+| --- | --- | --- |
+| 繪圖框架 | 1–4／G 四模式、J／Shift+J 選天體，逐樣本換框架；相機／存讀／journal 共用 | 天體路徑限已存星曆窗口，見 [main-plot-frames.md](main-plot-frames.md) |
+| 熱系統 | PartGraph 熱模組、連接傳熱、有限 ablator、防熱盾、失效能力停用；`--reentry`、HUD、存讀／journal | 初版參數、270 K 輻射背景；無碎裂／撞擊毀損，見 [main-thermal.md](main-thermal.md) |
+| Solar scenery | 預設十天體；固體共用 LOD／碰撞取樣；氣態雲帶、環、Sol；F1 視角、曝光、O 指定天體軌道 fixture | 三顆光學大氣，只有 Earth 物理大氣；非最終外觀，見 [main-solar-scenery.md](main-solar-scenery.md) |
+
+格式為 model 20／world schema 3／FleetCheckpoint 8／Craft 2，舊模型明確拒絕，沒有自動遷移。本輪採針對性檢查，沒有全 workspace；root TigerVNC／真實 journal 與 checkpoint 核對已通過；人類驗收未完成。scenery 最後核對為 26 app／77 Fleet／9 scenery 核心測試、相關 lint／fmt 通過，範圍見整合文件，尚未 push。
+
+## 已驗收 RCS／氣動整合
+
+`1fb8ac9` 完成主遊戲控制、HUD、預設 RCS 火箭及近距對接場景，使用者授權後於 `134bb37` 合入 master，之後已 push（origin `0cd5012`）。原 model 17 基線的 root 審查、針對性測試／lint、TigerVNC、journal／save 核對見 [main-flight-integration.md](main-flight-integration.md)。
+
+以下「整理時」表是歷史快照，不是目前進度。
 
 ## 文件整理時的歷史快照（整合恢復前）
 
@@ -35,7 +47,7 @@ cargo run -p void-assembly-lab               # 組船
 
 ## 多天體與零件狀態 lab
 
-多天體任務已建立同世界 Aurelia／Selene 地形與兩地 Fleet 船的獨立 lab；世界描述、InitialWorld、存讀檔與錄放已共用多天體配置。可執行 `cargo run -p void-app --example multi_body`；操作、數值檢查與 renderer 限制見 [multi-body-scenes.md](multi-body-scenes.md)。已依使用者授權審查後合併；多天體仍是獨立 lab，未啟用為主遊戲預設。
+多天體任務已建立同世界 Aurelia／Selene 地形與兩地 Fleet 船的獨立 lab；世界描述、InitialWorld、存讀檔與錄放已共用多天體配置。可執行 `cargo run -p void-app --example multi_body`；操作、數值檢查與 renderer 限制見 [multi-body-scenes.md](multi-body-scenes.md)。已依使用者授權審查後合併；該 lab 保留；本輪已在主遊戲啟用十天體 scenery，見上方新整合。
 
 ## 已驗收主遊戲基線（41da390）
 
@@ -73,7 +85,7 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 ## 待續工作
 
 - **RCS／氣動主遊戲接線**：本輪已合入；對接埠外觀、操作手感及有限 RCS 驅動 SAS 可另開後續工作，不混入這輪。
-- **Scenery**：第一輪分支保留；是否採用其中基礎、何時開始哪顆天體的細緻美術，待使用者安排。
+- **Scenery**：第一輪基礎已採入主遊戲，原 worktree 保留；逐顆細緻美術仍待安排。
 - 後續新功能按現行 branch／worktree 主遊戲流程開發。其他需求不因列在 NOTE 就自動啟動。
 
 ## 對照 NOTE.md 的願望清單
@@ -82,17 +94,17 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 | --- | --- | --- |
 | 1 | 零件組裝 | 完成：編輯器 lab＋主遊戲讀取。限制：仍以堆疊接點為主，沒有表面接合、對稱或結構破壞；核心已支持 typed 多資源 |
 | 2 | 軌道機動、N 體 | 完成：N 體星曆、有限燃燒計畫、逐船機動與導引 |
-| 3 | 軌道／飛行視角切換 | 完成：map 淡入、多天體 map、標籤焦點、inertial／surface path frame |
+| 3 | 軌道／飛行視角切換 | 完成：map 淡入、多天體 map、標籤焦點、四種 plot frame（本輪待驗收） |
 | 4 | profiling、GPU、SIMD、多執行緒 | profiling 完成（CPU／GPU）；效能優化本身尚未系統性進行 |
 | 5 | scenery | 大氣、海、體積雲、星空、分層地形已有。雲的移動與雲影、極光、天氣、植被、生物群系配色未做 |
 | 6 | 火箭／飛機零件 | 指令艙、油箱、引擎、分離器、著陸腿已有。降落傘 core／獨立 lab 已完成，主遊戲預設 craft 尚無傘；Fleet 核心新增可配置固定翼模組；完整飛機零件與組裝流程仍未完成 |
-| 7 | 空氣動力、燒蝕、熱 | aero-lab 完整（力矩、翼面、熱、燒蝕、再入）。Fleet 完整力矩／翼面及主遊戲氣動接線已合入；熱／燒蝕尚未接入 Fleet |
+| 7 | 空氣動力、燒蝕、熱 | aero-lab 完整（力矩、翼面、熱、燒蝕、再入）。Fleet 完整力矩／翼面及主遊戲氣動接線已合入；熱／傳熱／有限燒蝕與防熱盾已接入 Fleet／主遊戲（本輪待驗收），無結構碎裂 |
 | 8 | 交會、對接 | 交會基線完成；捕獲／解除核心和主遊戲操作已合入 |
 | 9 | 多船 | 完成 |
 | 10 | SAS、旋轉、RCS | SAS 穩定／鎖定姿態完成。順行等進階模式未做；理想機動導引仍直接指定姿態；有限 RCS 核心和主遊戲操作已合入 |
 | 11 | 存檔 | 完成：直接世界存檔＋錄放。沒有跨模型版本的存檔遷移 |
-| 12 | 參考框架切換 | 完成：frames 樹、orbit-lab 四種繪圖框架、multiscale 的跨星系換框架；已統一到同一棵樹並完成視窗驗收 |
-| 13 | 其他天體的程序地形 | 多天體 lab 已支持同世界多個可著陸天體；Solar 分支已有第一輪外觀／地形，未合入且非最終美術；主遊戲基線仍單近景 |
+| 12 | 參考框架切換 | 完成：frames 樹、orbit-lab 四種繪圖框架、multiscale 的跨星系換框架；已統一到同一棵樹並完成視窗驗收；四種主遊戲 plot frame 本輪接入、待驗收 |
+| 13 | 其他天體的程序地形 | 多天體 lab 已支持同世界多個可著陸天體；主遊戲已接第一輪十天體外觀／五個固體地形（待驗收），非最終美術 |
 | 14 | 水上漂浮 | 未做：環境介面已提供海平面與深度（`Surroundings::sea`），浮力、水阻力、濺落等水的物理之後做 |
 | 15 | UI | 只有 HUD 與按鍵操作，正式 UI 未做 |
 | 16 | 太空人 EVA | 未做 |
@@ -105,7 +117,7 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 
 ## 已知缺口與限制
 
-- 主遊戲沒有 scenery 開關與曝光調整（scenery example 有）。
+- 主遊戲已有曝光與天體視角操作；完整 scenery 開關／調參面板仍僅 example 有。
 - 噴嘴面積已是 catalog 的正式欄位（`nozzleExitAreaM2`）；新增引擎需在定義中提供，沒有額外的 engine ID 對照表。
 - 搬遷時列出、仍未補的觀察工具：`lod` example 的 preset 選擇、vessels-lab 的歷史軌跡、multiscale encounter 的任意天體／船選取。詳見 [port-audit.md](port-audit.md)（歷史頁）。
 - 存檔與錄影綁定模型版本、catalog 與 Rapier 版本，版本不同時直接拒絕，沒有遷移。

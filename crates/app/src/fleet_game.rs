@@ -104,6 +104,77 @@ fn select_pilot(lab: &mut Lab, id: &str) {
     lab.target_port = None;
     refresh_ports(lab);
 }
+fn scenery_preset(lab: &mut Lab, body: usize, view: &str) {
+    let sim = lab.session.sim();
+    let fleet = &sim.fleet;
+    let radius = fleet.ephemeris.bodies()[body].radius_meters;
+    let emissive = sim
+        .world
+        .bodies
+        .get(&fleet.ephemeris.bodies()[body].id)
+        .is_some_and(|d| {
+            matches!(
+                d.visual.surface,
+                void_scenery::solar::SurfaceRecipe::EmissiveStar { .. }
+            )
+        });
+    let root = fleet
+        .ephemeris
+        .bodies()
+        .iter()
+        .find(|b| b.parent_index.is_none())
+        .expect("world root")
+        .index;
+    let local = if body == root {
+        DVec3::new(1.0, 0.2, 0.3).normalize()
+    } else {
+        let sun = fleet
+            .frames()
+            .transform(fleet.body_frames(root).0, fleet.body_frames(body).1)
+            .apply_point(DVec3::ZERO)
+            .normalize();
+        let east = if sun.z.abs() < 0.99 {
+            DVec3::Z.cross(sun).normalize()
+        } else {
+            DVec3::X.cross(sun).normalize()
+        };
+        (sun + east * 0.7 + DVec3::Z * 0.15).normalize()
+    };
+    let direction = fleet
+        .frames()
+        .transform(fleet.body_frames(body).1, fleet.origin_frame())
+        .apply_direction(local);
+    let ratio = match view {
+        "near" => 1.025,
+        "orbit" => {
+            if fleet.ephemeris.bodies()[body].id == "halo" {
+                6.0
+            } else {
+                3.5
+            }
+        }
+        "far" => 12.0,
+        _ => panic!("view must be near/orbit/far"),
+    };
+    lab.session.execute(Action::View {
+        command: ViewCommand::BodyPreset {
+            body,
+            direction,
+            distance: radius * ratio,
+        },
+    });
+    lab.session.execute(Action::View {
+        command: ViewCommand::Exposure {
+            value: if emissive { 0.1 } else { 6.309_573 },
+        },
+    });
+    lab.notice = format!(
+        "{} {} scenery; O launches an orbital fixture, Home returns to ship",
+        lab.session.sim().fleet.ephemeris.bodies()[body].name,
+        view
+    );
+}
+
 fn reentry_fixture(lab: &mut Lab) {
     let sim = lab.session.sim();
     let fleet = &sim.fleet;
@@ -278,6 +349,25 @@ fn docking_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
         }
     }
 }
+fn scenery_description(sim: &void_fleet_flight::FleetFlight) -> String {
+    let id = &sim.fleet.ephemeris.bodies()[sim.observation_body()].id;
+    match sim.world.bodies.get(id) {
+        Some(d) => format!(
+            "scenery {} / {} | optical air {} | physical air {} | exposure {:.3}",
+            id,
+            match d.visual.surface {
+                void_scenery::solar::SurfaceRecipe::SolidSurface => "solid LOD",
+                void_scenery::solar::SurfaceRecipe::GasEnvelope { .. } => "gas visual",
+                void_scenery::solar::SurfaceRecipe::EmissiveStar { .. } => "emissive star",
+            },
+            d.visual.atmosphere,
+            d.air_density_scale.is_some(),
+            sim.presentation.exposure
+        ),
+        None => format!("scenery {} / map sphere; no authored terrain or optics", id),
+    }
+}
+
 fn plotting_description(sim: &void_fleet_flight::FleetFlight) -> String {
     use void_orbit::FrameSpec;
     let bodies = sim.fleet.ephemeris.bodies();
@@ -430,65 +520,74 @@ struct Lab {
 #[derive(Resource)]
 enum Ground {
     Plain(Box<TileField>, Handle<StandardMaterial>),
-    Shaded(
-        Box<TileField<crate::scenery::GroundMaterial>>,
-        Handle<crate::scenery::GroundMaterial>,
-    ),
-}
-macro_rules! ground_call {
-    ($self:expr, $field:ident => $body:expr) => {
-        match $self {
-            Ground::Plain($field, _) => $body,
-            Ground::Shaded($field, _) => $body,
-        }
-    };
+    World(Box<crate::world_scenery::WorldScenery>),
 }
 impl Ground {
     fn reset(&mut self, planet: &void_landing::LandingPlanet) {
-        let demo = demo_rocket(&planet.terrain);
-        let options = landing_lod_options(&planet.terrain, &demo.options.contact);
-        let terrain: Option<std::sync::Arc<dyn void_lod::SurfaceSampler + Send + Sync>> =
-            Some(planet.terrain.clone());
-        match self {
-            Ground::Plain(field, material) => {
-                **field = TileField::new(options, terrain, material.clone())
-            }
-            Ground::Shaded(field, material) => {
-                **field = TileField::new(options, terrain, material.clone());
-                field.no_frustum_culling = true;
-                field.wireframe_color = scene_color(Color::WHITE);
-            }
+        if let Self::Plain(field, material) = self {
+            let demo = demo_rocket(&planet.terrain);
+            **field = TileField::new(
+                landing_lod_options(&planet.terrain, &demo.options.contact),
+                Some(planet.terrain.clone()),
+                material.clone(),
+            );
         }
+        // World GPU/sampler caches are keyed by immutable world configuration, not Arc address.
     }
     fn finish_builds(&mut self) {
-        ground_call!(self, f => f.finish_builds());
+        match self {
+            Self::Plain(f, _) => f.finish_builds(),
+            Self::World(w) => w.finish_builds(),
+        }
     }
     fn readiness(&self) -> (usize, usize, usize, usize) {
-        ground_call!(self, f => (f.building_count(), f.last_requests, f.drawn_count(), f.lod.cached_mesh_bytes()))
+        match self {
+            Self::Plain(f, _) => (
+                f.building_count(),
+                f.last_requests,
+                f.drawn_count(),
+                f.lod.cached_mesh_bytes(),
+            ),
+            Self::World(w) => w.readiness(),
+        }
     }
     fn max_level(&self) -> u32 {
-        ground_call!(self, f => f.lod.options.max_level)
+        match self {
+            Self::Plain(f, _) => f.lod.options.max_level,
+            Self::World(w) => w.max_level(),
+        }
     }
     fn select(&mut self, view: &LodView) {
-        ground_call!(self, f => f.select(view));
+        match self {
+            Self::Plain(f, _) => f.select(view),
+            Self::World(w) => w.select(view),
+        }
     }
-    fn set_wireframe(&mut self, commands: &mut Commands, on: bool) {
-        ground_call!(self, f => f.set_wireframe(commands, on));
+    fn set_wireframe(&mut self, c: &mut Commands, on: bool) {
+        match self {
+            Self::Plain(f, _) => f.set_wireframe(c, on),
+            Self::World(w) => w.set_wireframe(c, on),
+        }
     }
     fn boundaries(&self, eye: DVec3) -> Vec<Vec<Vec3>> {
-        ground_call!(self, f => f.boundaries(eye))
+        match self {
+            Self::Plain(f, _) => f.boundaries(eye),
+            Self::World(w) => w.boundaries(),
+        }
     }
     fn draw<F: bevy::ecs::query::QueryFilter>(
         &mut self,
-        commands: &mut Commands,
-        meshes: &mut Assets<Mesh>,
-        tiles: &mut Query<&mut Transform, F>,
+        c: &mut Commands,
+        m: &mut Assets<Mesh>,
+        t: &mut Query<&mut Transform, F>,
         eye: DVec3,
     ) {
-        ground_call!(self, f => f.draw(commands, meshes, tiles, eye));
+        match self {
+            Self::Plain(f, _) => f.draw(c, m, t, eye),
+            Self::World(w) => w.draw(c, m, t),
+        }
     }
 }
-const EXPOSURE: f32 = 6.309_573;
 /// A part's placement in the render world, from its own parts frame.
 fn part_transform(
     to_camera: &mut impl FnMut(void_frames::FrameId) -> void_frames::Transform,
@@ -497,15 +596,6 @@ fn part_transform(
     let into = to_camera(p.frame);
     Transform::from_translation(into.apply_point(p.local_position).as_vec3())
         .with_rotation((into.rotation() * p.local_rotation).as_quat())
-}
-fn scene_color(color: Color) -> Color {
-    let c = color.to_linear();
-    Color::linear_rgba(
-        c.red / EXPOSURE,
-        c.green / EXPOSURE,
-        c.blue / EXPOSURE,
-        c.alpha,
-    )
 }
 impl Drop for Lab {
     fn drop(&mut self) {
@@ -545,7 +635,7 @@ fn argument(name: &str) -> Option<String> {
 pub fn run(main_game: bool) {
     if std::env::args().any(|a| a == "--help") {
         println!(
-            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording"
+            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
         );
         return;
     }
@@ -612,12 +702,41 @@ pub fn run(main_game: bool) {
         planet.planet.air_density_scale.is_some() && !std::env::args().any(|a| a == "--vacuum");
     let replay_path = argument("--replay");
     assert!(
+        argument("--world").is_none() || (argument("--load").is_none() && replay_path.is_none()),
+        "--world cannot override a checkpoint or replay world"
+    );
+    assert!(
         replay_path.is_none() || (argument("--load").is_none() && argument("--record").is_none()),
         "--replay cannot be combined with --load or --record"
     );
     let session = argument("--load").map_or_else(
         || {
-            let initial = InitialWorld::new(&planet.planet, &craft, site, air);
+            if let Some(path) = argument("--world") {
+                assert!(
+                    argument("--planet").is_none()
+                        && argument("--terrain").is_none()
+                        && argument("--craft").is_none()
+                        && !std::env::args().any(|a| a == "--vacuum"),
+                    "--world cannot be mixed with planet/terrain/craft/vacuum overrides"
+                );
+                let initial: InitialWorld =
+                    serde_json::from_str(&std::fs::read_to_string(path).expect("read world"))
+                        .expect("invalid initial world");
+                return FlightSession::new(initial);
+            }
+            let mut initial = InitialWorld::new(&planet.planet, &craft, site, air);
+            if main_game && planet.planet.body_id == "aurelia" {
+                initial.world = void_fleet_flight::world::solar_scenery(&planet.planet);
+                if !air {
+                    for body in initial.world.bodies.values_mut() {
+                        body.air_density_scale = None;
+                        body.visual.atmosphere = false;
+                        body.visual.scattering = None;
+                        body.visual.clouds = false;
+                        body.visual.cloud_profile = None;
+                    }
+                }
+            }
             FlightSession::new(if main_game {
                 initial.with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque)
             } else {
@@ -674,6 +793,31 @@ pub fn run(main_game: bool) {
     }
     if lab.reentry {
         reentry_fixture(&mut lab);
+    }
+    if let Some(body) = argument("--body") {
+        assert!(
+            argument("--replay").is_none(),
+            "--body cannot override replay camera"
+        );
+        let index = lab.session.sim().world.body_index(&body);
+        scenery_preset(
+            &mut lab,
+            index,
+            &argument("--view").unwrap_or("orbit".into()),
+        );
+    } else {
+        assert!(argument("--view").is_none(), "--view requires --body");
+    }
+    if let Some(value) = argument("--exposure") {
+        assert!(
+            argument("--replay").is_none(),
+            "exposure cannot override replay"
+        );
+        lab.session.execute(Action::View {
+            command: ViewCommand::Exposure {
+                value: value.parse().expect("exposure number"),
+            },
+        });
     }
     lab.profile =
         argument("--profile").map(|path| (void_diagnostics::Profiler::new(), path.into()));
@@ -1064,13 +1208,6 @@ fn setup(
         },
     ));
     if lab.main_game {
-        spawn_bodies(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            lab.session.sim().fleet.ephemeris.bodies(),
-            lab.session.sim().home,
-        );
         crate::map::spawn_map_labels(&mut commands, lab.session.sim().fleet.ephemeris.bodies());
         let ball = crate::navball::spawn_navball(
             &mut commands,
@@ -1163,7 +1300,7 @@ fn instruments(
         }
     }
 }
-/// A body's surface axes in origin-frame coordinates; the render world uses the home planet's.
+/// A body's surface axes in origin-frame coordinates; the render world uses the observed body's.
 fn surface_axes(fleet: &void_vessels::Fleet, body: usize) -> glam::DQuat {
     fleet
         .frames()
@@ -1304,7 +1441,11 @@ fn controls(
         lab.prediction = None;
     }
     if keys.just_pressed(KeyCode::KeyO) {
-        let Outcome::Spawned(id) = lab.session.execute(Action::LaunchOrbit {
+        let body = lab.session.sim().fleet.ephemeris.bodies()[lab.session.sim().observation_body()]
+            .id
+            .clone();
+        let Outcome::Spawned(id) = lab.session.execute(Action::LaunchOrbitAt {
+            body,
             craft: lab.craft.clone(),
             offset: DVec3::ZERO,
         }) else {
@@ -1407,7 +1548,7 @@ fn controls(
             turn: c.turn,
         });
     }
-    if lab.main_game {
+    if lab.main_game && !keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) {
         docking_controls(lab, &keys);
     }
     if keys.just_pressed(KeyCode::Space) {
@@ -1433,6 +1574,43 @@ fn controls(
     }
     if lab.main_game {
         plot_controls(lab, &keys);
+        if keys.just_pressed(KeyCode::F1) {
+            let sim = lab.session.sim();
+            let body = sim.observation_body();
+            let radius = sim.fleet.ephemeris.bodies()[body].radius_meters;
+            let ratio = sim.presentation.distance / radius;
+            let view = if ratio < 1.1 {
+                "orbit"
+            } else if ratio < 10.0 {
+                "far"
+            } else {
+                "near"
+            };
+            scenery_preset(lab, body, view);
+        }
+        if keys.just_pressed(KeyCode::Home)
+            && !keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
+        {
+            lab.session.execute(Action::View {
+                command: ViewCommand::Focus { body: None },
+            });
+        }
+        if keys.just_pressed(KeyCode::F10)
+            && keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
+        {
+            let value = (lab.session.sim().presentation.exposure / 2.0).max(0.001);
+            lab.session.execute(Action::View {
+                command: ViewCommand::Exposure { value },
+            });
+        }
+        if keys.just_pressed(KeyCode::F11)
+            && keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
+        {
+            let value = (lab.session.sim().presentation.exposure * 2.0).min(100.0);
+            lab.session.execute(Action::View {
+                command: ViewCommand::Exposure { value },
+            });
+        }
     }
     view_controls(lab, &keys, &buttons, &motion, &scroll);
 }
@@ -1586,7 +1764,11 @@ fn plan_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
     let prograde = axis(keys, KeyCode::ArrowUp, KeyCode::ArrowDown) * step;
     let normal = axis(keys, KeyCode::ArrowRight, KeyCode::ArrowLeft) * step;
     let radial = axis(keys, KeyCode::PageUp, KeyCode::PageDown) * step;
-    let seconds = axis(keys, KeyCode::End, KeyCode::Home) * step;
+    let seconds = (f64::from(keys.pressed(KeyCode::End))
+        - f64::from(
+            keys.pressed(KeyCode::Home) && keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]),
+        ))
+        * step;
     if prograde != 0.0 || normal != 0.0 || radial != 0.0 || seconds != 0.0 {
         spec.prograde += prograde;
         spec.normal += normal;
@@ -1686,7 +1868,7 @@ fn plan_description(lab: &Lab) -> String {
             status
         ));
     }
-    text.push_str("\nM add | [] select | arrows prograde/normal | PgUp/Dn radial | Home/End time | Y/U apsis | V reference | Del remove | Z warp | B execute first | Esc abort");
+    text.push_str("\nM add | [] select | arrows prograde/normal | PgUp/Dn radial | Alt+Home/End time | Y/U apsis | V reference | Del remove | Z warp | B execute first | Esc abort");
     text
 }
 
@@ -1742,7 +1924,9 @@ fn simulate(time: Res<Time>, window: Single<&Window>, mut lab: NonSendMut<Lab>) 
     if lab.main_game {
         let sim = lab.session.sim();
         let t = sim.fleet.time();
-        let clear = sim.fleet.clearance(&sim.selected, sim.home);
+        let clear = sim
+            .fleet
+            .clearance(&sim.selected, sim.nearby_body(&sim.selected));
         if clear > 20.0
             && (lab.prediction.is_none() || t < lab.prediction_at || t - lab.prediction_at >= 2.0)
         {
@@ -1788,12 +1972,13 @@ fn simulate_inner(time: &Time, window: &Window, lab: &mut Lab) {
     }
     if lab.rate > 2 {
         let f = &lab.session.sim().fleet;
-        let radius = lab.session.sim().planet.terrain.radius_meters;
+        let sim = lab.session.sim();
         while lab.rate > 2
             && f.vessel_ids().iter().any(|id| {
                 f.snapshot(id).mode == void_vessels::VesselMode::Orbit
-                    && f.clearance(id, lab.session.sim().home)
-                        < radius * crate::flight::rails_min_clearance_radii(RATES[lab.rate])
+                    && f.clearance(id, sim.nearby_body(id))
+                        < sim.terrains[&sim.nearby_body(id)].radius_meters
+                            * crate::flight::rails_min_clearance_radii(RATES[lab.rate])
             })
         {
             lab.rate -= 1;
@@ -1866,21 +2051,24 @@ fn draw(
         lab.collision.clear();
         lab.orbits = void_view::MapOrbits::new(lab.session.sim().fleet.ephemeris.bodies());
         lab.path = void_view::MapPath::new();
-        for entity in &tile_entities {
-            commands.entity(entity).despawn();
+        if matches!(*ground, Ground::Plain(..)) {
+            for entity in &tile_entities {
+                commands.entity(entity).despawn();
+            }
+            ground.reset(&lab.session.sim().planet);
         }
-        ground.reset(&lab.session.sim().planet);
         lab.dirty = false;
     }
     let sim = lab.session.sim();
     let f = &sim.fleet;
-    let surface = f.body_frames(sim.home).1;
-    // The render world: the home planet's surface axes, with the eye at the origin.
-    let q = surface_axes(f, sim.home);
+    let render_body = sim.observation_body();
+    let surface = f.body_frames(render_body).1;
+    // All world meshes/shaders use the observed body's axes, camera-relative.
+    let q = surface_axes(f, render_body);
     let selected = f.snapshot(&sim.selected);
     let up = sim
         .body_fixed(
-            sim.home,
+            render_body,
             FrameState {
                 position: selected.position,
                 velocity: selected.velocity,
@@ -1889,6 +2077,9 @@ fn draw(
         .position
         .normalize();
     let sample = sim.presentation.sample(sim);
+    if let Ground::World(world) = &mut *ground {
+        world.prepare(sim, &sample, q, &mut commands, &mut meshes);
+    }
     let mut to_camera = HashMap::new();
     let mut to_camera = |from: void_frames::FrameId| {
         *to_camera
@@ -2108,7 +2299,7 @@ fn draw(
         },
     );
     let altitude =
-        if lab.session.sim().presentation.altitude_agl && navigation == lab.session.sim().home {
+        if lab.session.sim().presentation.altitude_agl && sim.terrains.contains_key(&navigation) {
             f.clearance(&lab.session.sim().selected, navigation)
         } else {
             r.length() - body.radius_meters
@@ -2124,7 +2315,7 @@ fn draw(
         .map(|p| p.fuel_kg)
         .sum();
     **hud = Text::new(format!(
-        "{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels\nP pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN nearby craft | O orbital craft | R reset | , . warp | K altitude | L speed\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
+        "{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels\nP pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN nearby craft | O orbital craft | R reset | , . warp | K altitude | L speed\nF1 near/orbit/far | Home ship | Alt+F10/F11 exposure\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
         if lab.main_game {
             "VOID"
         } else {
@@ -2148,7 +2339,7 @@ fn draw(
             lab.rate
         }],
         f.time(),
-        if lab.session.sim().presentation.altitude_agl && navigation == lab.session.sim().home {
+        if lab.session.sim().presentation.altitude_agl && sim.terrains.contains_key(&navigation) {
             "AGL"
         } else {
             "ALT"
@@ -2170,8 +2361,9 @@ fn draw(
         (orbital.apoapsis_radius_meters - body.radius_meters) / 1000.0,
         f.vessel_ids().len(),
         format_args!(
-            "{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}",
             lab.notice,
+            scenery_description(sim),
             plotting_description(sim),
             thermal_description(lab),
             if lab.main_game {
@@ -2578,8 +2770,11 @@ mod tests {
         let planet = game_planet_by_id(if main_game { "aurelia" } else { "pebble" }, None);
         let craft = void_assembly::flight_rocket();
         let site = demo_rocket(&planet.planet.terrain).launch_site.normalize();
-        let sim = FlightSession::new(InitialWorld::new(&planet.planet, &craft, site, false))
-            .with_recording();
+        let mut initial = InitialWorld::new(&planet.planet, &craft, site, main_game);
+        if main_game {
+            initial.world = void_fleet_flight::world::solar_scenery(&planet.planet);
+        }
+        let sim = FlightSession::new(initial).with_recording();
         let mut lab = new_lab(sim, craft);
         lab.main_game = main_game;
         lab.session.execute(Action::View {
@@ -2779,18 +2974,33 @@ mod tests {
     fn main_scene_draws_fleet_scenery_and_navball_without_a_window_or_renderer() {
         let mut app = initialized_scene(true);
         assert!(matches!(
-            app.world().resource::<Ground>(),
-            Ground::Shaded(..)
+            app.world_mut()
+                .query::<&Msaa>()
+                .single(app.world())
+                .unwrap(),
+            Msaa::Off
         ));
+        let camera = app
+            .world_mut()
+            .query::<&Camera3d>()
+            .single(app.world())
+            .unwrap();
+        assert!(
+            bevy::render::render_resource::TextureUsages::from(camera.depth_texture_usages)
+                .contains(bevy::render::render_resource::TextureUsages::TEXTURE_BINDING)
+        );
         assert_eq!(
             app.world_mut()
-                .query::<&crate::navball::Navball>()
+                .query::<&bevy::camera::Hdr>()
                 .iter(app.world())
                 .count(),
             1
         );
-        assert!(app.world().contains_resource::<crate::air::AirTextures>());
-        // Layered Aurelia's sky starts at the sea, where physics' air does, and so do its clouds.
+        let home = app.world().non_send::<Lab>().session.sim().home;
+        let Ground::World(world) = app.world().resource::<Ground>() else {
+            panic!("main world renderer");
+        };
+        let material = world.bodies[&home].material.clone();
         let sea = game_planet_by_id("aurelia", None)
             .planet
             .terrain
@@ -2798,19 +3008,32 @@ mod tests {
             + void_terrain::SEA_LEVEL;
         assert_eq!(
             app.world()
-                .resource::<SceneryState>()
-                .uniforms
+                .resource::<Assets<crate::scenery::GroundMaterial>>()
+                .get(&material)
+                .unwrap()
+                .ground
                 .bottom_radius,
             sea as f32
         );
-        let sky: Vec<(f32, f32)> = app
+        let layers = app
             .world_mut()
-            .query::<&crate::air::AirSettings>()
-            .iter(app.world())
-            .map(|air| (air.bottom_radius, air.sea_level))
-            .collect();
-        assert_eq!(sky, [(sea as f32, 0.0)]);
-        // Loading a world with a different terrain replaces shader inputs and the terrain source.
+            .query::<&crate::air::AirLayers>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(layers.0.len(), 3);
+        let earth = layers
+            .0
+            .iter()
+            .find(|(a, _)| a.bottom_radius == sea as f32)
+            .expect("Earth optical layer");
+        assert_eq!(earth.0.sea_level, 0.0);
+        assert_eq!(
+            app.world_mut()
+                .query::<&crate::navball::Navball>()
+                .iter(app.world())
+                .count(),
+            1
+        );
         let planet = game_planet_by_id("luna", None);
         let craft = demo_craft();
         let site = demo_rocket(&planet.planet.terrain).launch_site.normalize();
@@ -2822,13 +3045,95 @@ mod tests {
             lab.dirty = true;
         }
         app.update();
+        let Ground::World(world) = app.world().resource::<Ground>() else {
+            unreachable!()
+        };
+        let material = world.bodies[&0].material.clone();
         assert_eq!(
             app.world()
-                .resource::<SceneryState>()
-                .uniforms
+                .resource::<Assets<crate::scenery::GroundMaterial>>()
+                .get(&material)
+                .unwrap()
+                .ground
                 .bottom_radius,
             planet.planet.terrain.radius_meters as f32
         );
+    }
+
+    #[test]
+    fn solar_renderer_switches_all_bodies_and_reuses_assets_after_checkpoint_restore() {
+        let mut app = initialized_scene(true);
+        let images = app.world().resource::<Assets<Image>>().len();
+        let materials = app
+            .world()
+            .resource::<Assets<crate::scenery::GroundMaterial>>()
+            .len();
+        let ids: Vec<_> = app
+            .world()
+            .non_send::<Lab>()
+            .session
+            .sim()
+            .world
+            .bodies
+            .keys()
+            .cloned()
+            .collect();
+        let before = app
+            .world()
+            .non_send::<Lab>()
+            .session
+            .sim()
+            .fleet
+            .snapshot(&app.world().non_send::<Lab>().session.sim().selected);
+        for id in ids {
+            {
+                let mut lab = app.world_mut().non_send_mut::<Lab>();
+                let body = lab.session.sim().world.body_index(&id);
+                let radius = lab.session.sim().fleet.ephemeris.bodies()[body].radius_meters;
+                lab.session.execute(Action::View {
+                    command: ViewCommand::BodyPreset {
+                        body,
+                        direction: DVec3::new(1.0, 0.2, 0.3).normalize(),
+                        distance: radius * 3.5,
+                    },
+                });
+            }
+            app.update();
+            let lab = app.world().non_send::<Lab>();
+            let after = lab
+                .session
+                .sim()
+                .fleet
+                .snapshot(&lab.session.sim().selected);
+            assert_eq!(before.position, after.position);
+            assert_eq!(before.velocity, after.velocity);
+            let Ground::World(world) = app.world().resource::<Ground>() else {
+                unreachable!()
+            };
+            assert_eq!(world.active, lab.session.sim().observation_body());
+            assert_eq!(world.bodies.len(), 5);
+            assert_eq!(world.atmospheres.len(), 3);
+        }
+        for _ in 0..3 {
+            {
+                let mut lab = app.world_mut().non_send_mut::<Lab>();
+                let checkpoint = void_fleet_flight::checkpoint::FlightCheckpoint::capture(
+                    lab.session.sim(),
+                    lab.session.recording_initial().clone(),
+                );
+                lab.session = FlightSession::from_checkpoint(checkpoint).with_recording();
+                lab.dirty = true;
+            }
+            app.update();
+            assert_eq!(app.world().resource::<Assets<Image>>().len(), images);
+            assert_eq!(
+                app.world()
+                    .resource::<Assets<crate::scenery::GroundMaterial>>()
+                    .len(),
+                materials
+            );
+            assert!(!app.world().non_send::<Lab>().parts.is_empty());
+        }
     }
 
     #[test]
@@ -2967,173 +3272,13 @@ mod tests {
 
 #[derive(Component)]
 struct Sky;
-#[derive(Resource)]
-struct SceneryState {
-    terrain: std::sync::Arc<void_terrain::Terrain>,
-    uniforms: crate::scenery::GroundUniforms,
-    ground: Handle<crate::scenery::GroundMaterial>,
-    stars: Handle<crate::scenery::StarMaterial>,
-}
-
-/// The legacy renderer owns only the launch planet's scenery. Other worlds must use the
-/// multi-body lab until its renderer is deliberately integrated into the main app.
-fn validate_legacy_scenery(sim: &void_fleet_flight::FleetFlight) {
-    let mut preset = sim.planet.clone();
-    preset.sea_level = preset.terrain.sea_level_meters();
-    preset.air_datum = preset.sea_level.unwrap_or(0.0);
-    let expected = void_fleet_flight::world::WorldDescription::single(
-        &preset,
-        preset.air_density_scale.is_some(),
-    );
-    assert_eq!(
-        serde_json::to_value(&sim.world).unwrap(),
-        serde_json::to_value(expected).unwrap(),
-        "main renderer supports the legacy single-planet scenery preset; use --example multi_body for configured worlds"
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-fn build_scenery(
-    commands: &mut Commands,
-    lab: &Lab,
-    meshes: &mut Assets<Mesh>,
-    images: &mut Assets<Image>,
-    grounds: &mut Assets<crate::scenery::GroundMaterial>,
-    star_materials: &mut Assets<crate::scenery::StarMaterial>,
-    camera: Entity,
-) {
-    use crate::scenery::*;
-    use void_scenery::atmosphere::*;
-    use void_scenery::clouds::*;
-    use void_scenery::tables::*;
-    validate_legacy_scenery(lab.session.sim());
-    let planet = &lab.session.sim().planet;
-    // The sky starts where physics' air does (the sea on layered terrain).
-    let datum = lab
-        .session
-        .sim()
-        .fleet
-        .environment()
-        .body(lab.session.sim().home)
-        .expect("scenery: the home body has no environment")
-        .air_datum_meters;
-    let description = &lab.session.sim().world.bodies[&planet.body_id];
-    let visual = &description.visual;
-    let mut params = void_scenery::earth_like_atmosphere(planet.terrain.radius_meters + datum);
-    let density = description.air_density_scale.unwrap_or(0.0);
-    params.rayleigh_scattering = params.rayleigh_scattering.map(|x| x * density);
-    params.ozone_absorption = params.ozone_absorption.map(|x| x * density);
-    params.mie_scattering *= density;
-    params.mie_extinction *= density;
-    let transmittance = build_transmittance_table(&params);
-    let multiple = build_multiple_scattering_table(&params, &transmittance, 64, 20);
-    let irradiance = build_irradiance_table(&params, &transmittance, &multiple, 128, 24);
-    let mut uniforms = GroundUniforms::new(
-        &params,
-        visual.color_datum_meters,
-        visual.rock_height_meters,
-        visual.snow_height_meters,
-    );
-    uniforms.ocean_enabled = f32::from(u8::from(visual.ocean));
-    uniforms.atmosphere_enabled = f32::from(u8::from(visual.atmosphere));
-    let transmittance = images.add(table_image(
-        &transmittance,
-        TRANSMITTANCE_WIDTH,
-        TRANSMITTANCE_HEIGHT,
-    ));
-    let irradiance = images.add(table_image(
-        &irradiance,
-        IRRADIANCE_WIDTH,
-        IRRADIANCE_HEIGHT,
-    ));
-    let ground = grounds.add(GroundMaterial {
-        ground: uniforms,
-        transmittance: transmittance.clone(),
-        irradiance: irradiance.clone(),
-    });
-    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
-    commands.insert_resource(crate::air::AirTextures {
-        transmittance,
-        multiple: images.add(table_image(
-            &multiple,
-            MULTIPLE_SCATTERING_SIZE,
-            MULTIPLE_SCATTERING_SIZE,
-        )),
-        irradiance,
-        weather: images.add(crate::air::weather_image(
-            build_cloud_weather(threads),
-            WEATHER_WIDTH,
-            WEATHER_HEIGHT,
-        )),
-        shape: images.add(crate::air::noise_volume_image(
-            build_cloud_noise(SHAPE_SIZE, false),
-            SHAPE_SIZE,
-        )),
-        detail: images.add(crate::air::noise_volume_image(
-            build_cloud_noise(DETAIL_SIZE, true),
-            DETAIL_SIZE,
-        )),
-    });
-    let demo = demo_rocket(&planet.terrain);
-    let mut field = TileField::new(
-        landing_lod_options(&planet.terrain, &demo.options.contact),
-        Some(planet.terrain.clone()),
-        ground.clone(),
-    );
-    field.no_frustum_culling = true;
-    field.wireframe_color = scene_color(Color::WHITE);
-    commands.insert_resource(Ground::Shaded(Box::new(field), ground.clone()));
-    let (positions, colors) = void_scenery::generate_stars(&void_scenery::DEFAULT_STARS);
-    let stars = star_materials.add(StarMaterial { brightness: 0.08 });
-    commands.spawn((
-        Sky,
-        Mesh3d(meshes.add(star_mesh(positions, &colors))),
-        MeshMaterial3d(stars.clone()),
-        Transform::default(),
-        bevy::camera::visibility::NoFrustumCulling,
-    ));
-    let mut settings = crate::air::AirSettings::new(&params);
-    settings.exposure = EXPOSURE;
-    settings.enabled = f32::from(u8::from(visual.atmosphere));
-    settings.clouds_enabled = f32::from(u8::from(visual.clouds));
-    settings.sea_level = (f64::from(uniforms.sea_level) - datum) as f32;
-    settings.sun_disc_enabled = f32::from(u8::from(
-        lab.session.sim().fleet.ephemeris.bodies()[lab.session.sim().home]
-            .parent_index
-            .is_none(),
-    ));
-    commands.entity(camera).insert((
-        Camera3d {
-            depth_texture_usages: (bevy::render::render_resource::TextureUsages::RENDER_ATTACHMENT
-                | bevy::render::render_resource::TextureUsages::TEXTURE_BINDING)
-                .into(),
-            ..default()
-        },
-        settings,
-        bevy::camera::Hdr,
-        bevy::render::view::Msaa::Off,
-        bevy::core_pipeline::tonemapping::Tonemapping::None,
-        bevy::core_pipeline::tonemapping::DebandDither::Disabled,
-        Projection::Perspective(PerspectiveProjection {
-            fov: 58.0_f32.to_radians(),
-            far: 1e14,
-            ..default()
-        }),
-    ));
-    commands.insert_resource(SceneryState {
-        terrain: planet.terrain.clone(),
-        uniforms,
-        ground,
-        stars,
-    });
-}
-
 #[allow(clippy::too_many_arguments)]
 fn setup_scenery(
     mut commands: Commands,
     lab: NonSend<Lab>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
+    mut standard: ResMut<Assets<StandardMaterial>>,
     grounds: Option<ResMut<Assets<crate::scenery::GroundMaterial>>>,
     stars: Option<ResMut<Assets<crate::scenery::StarMaterial>>>,
     camera: Single<Entity, With<LabCamera>>,
@@ -3141,167 +3286,178 @@ fn setup_scenery(
     if !lab.main_game {
         return;
     }
-    build_scenery(
+    let world = crate::world_scenery::WorldScenery::new(
         &mut commands,
-        &lab,
-        &mut meshes,
+        lab.session.sim(),
+        grounds.expect("world ground assets").into_inner(),
         &mut images,
-        grounds.expect("main scenery materials").into_inner(),
-        stars.expect("main star materials").into_inner(),
-        *camera,
+        &mut meshes,
+        &mut standard,
     );
+    commands.insert_resource(Ground::World(Box::new(world)));
+    let (positions, colors) = void_scenery::generate_stars(&void_scenery::DEFAULT_STARS);
+    commands.spawn((
+        Sky,
+        Mesh3d(meshes.add(crate::scenery::star_mesh(positions, &colors))),
+        MeshMaterial3d(
+            stars
+                .expect("star assets")
+                .into_inner()
+                .add(crate::scenery::StarMaterial { brightness: 0.08 }),
+        ),
+        Transform::default(),
+        bevy::camera::visibility::NoFrustumCulling,
+    ));
+    commands.entity(*camera).insert((
+        Camera3d {
+            depth_texture_usages: (bevy::render::render_resource::TextureUsages::RENDER_ATTACHMENT
+                | bevy::render::render_resource::TextureUsages::TEXTURE_BINDING)
+                .into(),
+            ..default()
+        },
+        bevy::camera::Hdr,
+        bevy::core_pipeline::tonemapping::DebandDither::Disabled,
+        Projection::Perspective(PerspectiveProjection {
+            fov: 58.0_f32.to_radians(),
+            far: 1e14,
+            ..default()
+        }),
+        Msaa::Off,
+        bevy::core_pipeline::tonemapping::Tonemapping::None,
+        crate::air::AirLayers(vec![]),
+        crate::air::AirSettings::new(&void_scenery::earth_like_atmosphere(
+            lab.session.sim().planet.terrain.radius_meters,
+        )),
+    ));
 }
-
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn refresh_scenery(
     mut commands: Commands,
     lab: NonSend<Lab>,
-    state: Option<Res<SceneryState>>,
+    mut ground: ResMut<Ground>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut standard: ResMut<Assets<StandardMaterial>>,
     grounds: Option<ResMut<Assets<crate::scenery::GroundMaterial>>>,
-    stars: Option<ResMut<Assets<crate::scenery::StarMaterial>>>,
-    camera: Single<Entity, With<LabCamera>>,
-    old_scene: Query<Entity, Or<(With<Sky>, With<BodySphere>, With<crate::map::MapMarker>)>>,
+    far: Query<(Entity, &crate::world_scenery::FarBody)>,
+    markers: Query<Entity, With<crate::map::MapMarker>>,
 ) {
-    if !lab.main_game {
+    let Ground::World(world) = &mut *ground else {
         return;
-    }
-    if state
-        .as_ref()
-        .is_some_and(|s| std::sync::Arc::ptr_eq(&s.terrain, &lab.session.sim().planet.terrain))
+    };
+    if !lab.dirty
+        || serde_json::to_value(&world.world).unwrap()
+            == serde_json::to_value(&lab.session.sim().world).unwrap()
     {
         return;
     }
-    for e in &old_scene {
+    let grounds = grounds.expect("world ground assets").into_inner();
+    world.unload(&mut commands, &mut meshes, grounds, &mut images);
+    for (entity, body) in &far {
+        commands.entity(entity).despawn();
+        meshes.remove(body.1);
+        standard.remove(body.2);
+    }
+    for e in &markers {
         commands.entity(e).despawn();
     }
-    spawn_bodies(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        lab.session.sim().fleet.ephemeris.bodies(),
-        lab.session.sim().home,
-    );
     crate::map::spawn_map_labels(&mut commands, lab.session.sim().fleet.ephemeris.bodies());
-    build_scenery(
+    **world = crate::world_scenery::WorldScenery::new(
         &mut commands,
-        &lab,
-        &mut meshes,
+        lab.session.sim(),
+        grounds,
         &mut images,
-        grounds.expect("main scenery materials").into_inner(),
-        stars.expect("main star materials").into_inner(),
-        *camera,
+        &mut meshes,
+        &mut standard,
     );
 }
-
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn update_scenery(
     lab: NonSend<Lab>,
-    state: Option<ResMut<SceneryState>>,
+    ground: Res<Ground>,
     window: Single<&Window>,
     grounds: Option<ResMut<Assets<crate::scenery::GroundMaterial>>>,
-    stars: Option<ResMut<Assets<crate::scenery::StarMaterial>>>,
-    mut camera: Query<(&Transform, &mut crate::air::AirSettings, &Projection), With<LabCamera>>,
+    mut camera: Query<
+        (
+            &Transform,
+            &mut crate::air::AirSettings,
+            &Projection,
+            &mut crate::air::AirLayers,
+        ),
+        With<LabCamera>,
+    >,
     mut sky: Query<&mut Transform, (With<Sky>, Without<LabCamera>)>,
     mut light: Query<&mut Transform, (With<SceneSun>, Without<Sky>, Without<LabCamera>)>,
+    mut far: Query<
+        (
+            &crate::world_scenery::FarBody,
+            &mut Transform,
+            &mut Visibility,
+        ),
+        (Without<Sky>, Without<SceneSun>, Without<LabCamera>),
+    >,
 ) {
-    let Some(mut state) = state else {
+    let Ground::World(world) = &*ground else {
         return;
     };
     let sim = lab.session.sim();
-    let f = &sim.fleet;
-    let q = surface_axes(f, sim.home);
-    let radius = f.ephemeris.bodies()[sim.home].radius_meters;
-    let eye = lab.eye;
-    let bodies = f.ephemeris.bodies();
-    let root = bodies
-        .iter()
-        .find(|b| b.parent_index.is_none())
-        .expect("system root");
-    // Lone-planet lab presets deliberately have no luminous body; retain their fixed inertial sun.
-    let inertial_sun = if root.index == sim.home {
-        DVec3::X
-    } else {
-        let d = f.ephemeris.body_position(root.index, f.time())
-            - f.ephemeris.body_position(sim.home, f.time());
-        assert!(
-            d.is_finite() && d.length_squared() > 0.0,
-            "coincident sun and home planet"
-        );
-        d.normalize()
-    };
-    let sun = q.conjugate() * inertial_sun;
-    for mut transform in &mut light {
-        let up = if sun.z.abs() < 0.9999 {
-            Vec3::Z
-        } else {
-            Vec3::Y
+    let fleet = &sim.fleet;
+    let q = surface_axes(fleet, sim.observation_body());
+    let sample = sim.presentation.sample(sim);
+    let grounds = grounds.expect("world ground assets").into_inner();
+    for (transform, mut air, projection, mut layers) in &mut camera {
+        let Projection::Perspective(p) = projection else {
+            panic!("world camera requires perspective");
         };
-        *transform = Transform::default().looking_to((-sun).as_vec3(), up);
-    }
-    for (transform, mut air, projection) in &mut camera {
-        if let Projection::Perspective(p) = projection {
-            let focal =
-                f64::from(window.physical_height().max(1)) / (2.0 * (f64::from(p.fov) / 2.0).tan());
-            air.update(eye, transform.rotation, p, focal, sun);
+        let focal =
+            f64::from(window.physical_height().max(1)) / (2.0 * (f64::from(p.fov) / 2.0).tan());
+        let (settings, volumes, sun) = world.update_air(
+            sim,
+            &sample,
+            q,
+            crate::world_scenery::AirView {
+                camera: transform,
+                projection: p,
+                focal,
+            },
+            grounds,
+        );
+        *air = settings;
+        *layers = volumes;
+        for mut t in &mut light {
+            *t = Transform::default().looking_to(
+                (-sun).as_vec3(),
+                if sun.z.abs() < 0.99 { Vec3::Z } else { Vec3::Y },
+            );
         }
     }
-    crate::scenery::update_ground(&mut state.uniforms, eye, sun, f.time());
-    grounds
-        .expect("main scenery materials")
-        .get_mut(&state.ground)
-        .expect("ground material")
-        .ground = state.uniforms;
-    for mut transform in &mut sky {
-        transform.rotation = q.conjugate().as_quat();
+    for mut t in &mut sky {
+        *t = Transform::from_rotation(q.conjugate().as_quat());
     }
-    let altitude = eye.length() - radius;
-    let smooth = |a: f64, b: f64, x: f64| {
-        let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
-        t * t * (3.0 - 2.0 * t)
-    };
-    let daylight = smooth(-0.18, 0.02, eye.normalize().dot(sun))
-        * (1.0 - smooth(0.0, 60e3, altitude))
-        * f64::from(u8::from(sim.planet.air_density_scale.is_some()));
-    stars
-        .expect("main star materials")
-        .get_mut(&state.stars)
-        .expect("star material")
-        .brightness = (0.08 * (1.0 - daylight)) as f32;
-}
-
-#[derive(Component)]
-struct BodySphere(usize);
-fn spawn_bodies(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-    bodies: &[void_orbit::CelestialBody],
-    home: usize,
-) {
-    let sphere = meshes.add(Sphere::new(1.0).mesh().uv(64, 32));
-    for body in bodies.iter().filter(|b| b.index != home) {
-        let material = materials.add(StandardMaterial {
-            base_color: crate::map::color(&body.color),
-            unlit: body.parent_index.is_none(),
-            perceptual_roughness: 0.9,
-            ..default()
-        });
-        commands.spawn((
-            BodySphere(body.index),
-            Mesh3d(sphere.clone()),
-            MeshMaterial3d(material),
-            Transform::default(),
-        ));
+    for (body, mut t, mut visibility) in &mut far {
+        let into = sample.to_camera(fleet, fleet.body_frames(body.0).1, q);
+        *t = Transform::from_translation(into.apply_point(DVec3::ZERO).as_vec3())
+            .with_rotation(into.rotation().as_quat())
+            .with_scale(Vec3::splat(
+                fleet.ephemeris.bodies()[body.0].radius_meters as f32,
+            ));
+        let solid = world.bodies.get(&body.0);
+        *visibility = if solid.is_some()
+            && (!sim.presentation.terrain
+                || (body.0 == world.active
+                    && !body.3
+                    && solid.is_some_and(|b| b.field.drawn_count() > 0)))
+        {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
     }
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn draw_map(
     mut lab: NonSendMut<Lab>,
-    mut spheres: Query<(&BodySphere, &mut Transform), Without<LabCamera>>,
     camera: Single<(&Camera, &GlobalTransform), With<LabCamera>>,
     mut markers: Query<(
         &crate::map::MapMarker,
@@ -3318,7 +3474,7 @@ fn draw_map(
     }
     let view = lab.view.expect("main camera state");
     let fleet = &lab.session.sim().fleet;
-    let home = lab.session.sim().home;
+    let home = lab.session.sim().observation_body();
     let bodies = fleet.ephemeris.bodies();
     let mut positions = vec![DVec3::ZERO; bodies.len()];
     let mut velocities = positions.clone();
@@ -3384,10 +3540,6 @@ fn draw_map(
         .transform(fleet.body_frames(home).1, fleet.origin_frame())
         .apply_point(lab.eye);
     let render = |v: DVec3| (q.conjugate() * (v + frame.origin - eye_inertial)).as_vec3();
-    for (body, mut transform) in &mut spheres {
-        transform.translation = render(positions[body.0] - frame.origin);
-        transform.scale = Vec3::splat(bodies[body.0].radius_meters as f32);
-    }
     if view.map_weight > 0.0 {
         for (body, points) in bodies.iter().zip(lab.body_plots.update(
             &fleet.ephemeris,

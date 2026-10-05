@@ -1235,7 +1235,15 @@ mod tests {
         for moon_terrain in [true, false] {
             let mut config = initial_with_atmospheres(true);
             if !moon_terrain {
-                config.world.bodies.get_mut("selene").unwrap().terrain = None;
+                let body = config.world.bodies.get_mut("selene").unwrap();
+                body.terrain = None;
+                body.visual.surface = void_scenery::solar::SurfaceRecipe::GasEnvelope {
+                    low: [0.1; 3],
+                    high: [0.3; 3],
+                    bands: 4.0,
+                    turbulence: 0.0,
+                    storm: 0.0,
+                };
             }
             let session = FlightSession::new(config);
             let mut world = World::new();

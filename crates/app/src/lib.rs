@@ -14,3 +14,6 @@ pub mod session;
 pub mod tiles;
 
 pub mod multi_body;
+
+pub mod solar_mesh;
+pub mod world_scenery;

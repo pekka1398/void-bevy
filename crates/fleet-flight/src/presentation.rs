@@ -11,6 +11,7 @@ use void_view::{FocusGeometry, FocusKind, OrbitCamera, PathFrameKind, ViewMode, 
 #[serde(deny_unknown_fields)]
 pub struct Presentation {
     pub main_camera: bool,
+    pub exposure: f32,
     pub direction: DVec3,
     pub distance: f64,
     pub yaw: f64,
@@ -41,12 +42,33 @@ pub enum Toggle {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ViewCommand {
-    Configure { main_camera: bool },
-    PlotFrame { frame: void_orbit::FrameSpec },
-    Focus { body: Option<usize> },
-    Drag { x: f64, y: f64 },
-    Zoom { pixels: f64 },
-    Toggle { setting: Toggle },
+    Configure {
+        main_camera: bool,
+    },
+    PlotFrame {
+        frame: void_orbit::FrameSpec,
+    },
+    BodyPreset {
+        body: usize,
+        direction: DVec3,
+        distance: f64,
+    },
+    Exposure {
+        value: f32,
+    },
+    Focus {
+        body: Option<usize>,
+    },
+    Drag {
+        x: f64,
+        y: f64,
+    },
+    Zoom {
+        pixels: f64,
+    },
+    Toggle {
+        setting: Toggle,
+    },
 }
 pub struct CameraSample {
     /// Inertial (origin frame) eye and focus, for readouts; drawing goes through `to_camera`.
@@ -93,6 +115,7 @@ impl Presentation {
         };
         Self {
             main_camera: true,
+            exposure: 6.309_573,
             direction: (side + 0.3 * radial).normalize(),
             distance: 40.0,
             yaw: 0.4,
@@ -112,6 +135,10 @@ impl Presentation {
         }
     }
     pub fn validate(&self, sim: &FleetFlight) {
+        assert!(
+            self.exposure.is_finite() && self.exposure > 0.0 && self.exposure <= 100.0,
+            "view: invalid exposure"
+        );
         self.plotting_frame
             .assert_valid(sim.fleet.ephemeris.bodies().len());
         if let void_orbit::FrameSpec::TwoBodyRotating { primary, secondary } = self.plotting_frame {
@@ -202,13 +229,44 @@ impl Presentation {
                 evaluator.evaluate(&sim.fleet.ephemeris, sim.fleet.time());
                 self.plotting_frame = frame;
             }
+            ViewCommand::Exposure { value } => {
+                assert!(
+                    value.is_finite() && value > 0.0 && value <= 100.0,
+                    "invalid exposure"
+                );
+                self.exposure = value;
+            }
+            ViewCommand::BodyPreset {
+                body,
+                direction,
+                distance,
+            } => {
+                let radius = sim
+                    .fleet
+                    .ephemeris
+                    .bodies()
+                    .get(body)
+                    .expect("preset body")
+                    .radius_meters;
+                assert!(
+                    direction.is_finite()
+                        && (direction.length() - 1.0).abs() < 1e-9
+                        && distance.is_finite()
+                        && distance > radius,
+                    "invalid body preset"
+                );
+                self.main_camera = true;
+                self.focus_body = Some(body);
+                self.direction = direction;
+                self.distance = distance;
+            }
             ViewCommand::Focus { body } => {
                 self.focus_body = body;
                 if body.is_none() {
                     // Re-enter ship view relative to this ship's local ground, rather than
                     // keeping the previous planet's inertial direction below its horizon.
                     let fleet = &sim.fleet;
-                    let surface = fleet.body_frames(sim.nearby_body(&sim.selected)).1;
+                    let surface = fleet.body_frames(sim.navigation_body(&sim.selected)).1;
                     let frames = fleet.frames();
                     let radial = frames
                         .transform(fleet.vessel_frame(&sim.selected), surface)
@@ -331,7 +389,7 @@ impl Presentation {
         let direction = if self.main_camera {
             self.direction
         } else {
-            let surface = f.body_frames(sim.nearby_body(&sim.selected)).1;
+            let surface = f.body_frames(sim.navigation_body(&sim.selected)).1;
             let frames = f.frames();
             let up = frames
                 .transform(f.vessel_frame(&sim.selected), surface)

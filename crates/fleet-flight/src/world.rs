@@ -11,6 +11,8 @@ use void_vessels::GroundSpec;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct VisualSettings {
+    pub surface: void_scenery::solar::SurfaceRecipe,
+    pub rings: Option<void_scenery::solar::RingRecipe>,
     pub surface_color: Option<[f32; 3]>,
     pub atmosphere: bool,
     /// Explicit optical model; independent of physical pressure/density. None means no optical air.
@@ -63,7 +65,7 @@ impl WorldDescription {
         };
         let max = planet.terrain.max_height_meters;
         Self {
-            schema: 2,
+            schema: 3,
             system: planet.system.clone(),
             bodies: BTreeMap::from([(
                 planet.body_id.clone(),
@@ -74,6 +76,8 @@ impl WorldDescription {
                     air_datum_meters: planet.air_datum_meters(),
                     sea_level_meters: sea,
                     visual: VisualSettings {
+                        surface: void_scenery::solar::SurfaceRecipe::SolidSurface,
+                        rings: None,
                         surface_color: None,
                         atmosphere: air,
                         scattering: if air {
@@ -111,7 +115,7 @@ impl WorldDescription {
         }
     }
     pub fn build(&self) -> BuiltWorld {
-        assert_eq!(self.schema, 2, "world: unsupported schema");
+        assert_eq!(self.schema, 3, "world: unsupported schema");
         let system = build_system(&self.system);
         let step_seconds = if system.bodies.len() > 1 {
             suggested_step_seconds(&system.bodies, 256.0)
@@ -146,14 +150,23 @@ impl WorldDescription {
                     && description.visual.snow_height_meters.is_finite(),
                 "world: invalid visual heights"
             );
-            assert!(
-                !description.visual.atmosphere || description.air_density_scale.is_some(),
-                "world: visual atmosphere without physical atmosphere"
-            );
+            description.visual.surface.validate();
+            if let Some(rings) = &description.visual.rings {
+                rings.validate();
+            }
+            match description.visual.surface {
+                void_scenery::solar::SurfaceRecipe::SolidSurface => {
+                    assert!(description.terrain.is_some(), "solid recipe needs terrain")
+                }
+                _ => assert!(
+                    description.terrain.is_none() && description.sea_level_meters.is_none(),
+                    "gas/star recipe cannot have solid terrain or sea"
+                ),
+            }
             assert_eq!(
+                description.visual.atmosphere,
                 description.visual.scattering.is_some(),
-                description.air_density_scale.is_some(),
-                "world: optical profile must explicitly match atmosphere presence"
+                "enabled optical air needs profile"
             );
             if let Some(profile) = &description.visual.scattering {
                 profile.parameters(body.radius_meters + description.air_datum_meters);
@@ -216,6 +229,7 @@ impl WorldDescription {
                             && h.wavelength_meters.is_finite(),
                         "world: non-finite terrain"
                     ),
+                    TerrainConfig::Cratered(_) => {} // constructor validates every parameter
                     TerrainConfig::Layered(l) => {
                         assert!(l.radius_meters.is_finite(), "world: non-finite terrain")
                     }
@@ -310,6 +324,8 @@ pub fn aurelia_selene(planet: &LandingPlanet) -> WorldDescription {
             air_datum_meters: 0.0,
             sea_level_meters: None,
             visual: VisualSettings {
+                surface: void_scenery::solar::SurfaceRecipe::SolidSurface,
+                rings: None,
                 surface_color: Some([0.25, 0.25, 0.25]),
                 atmosphere: false,
                 scattering: None,
@@ -348,4 +364,167 @@ fn unique_bodies<'de, D: serde::Deserializer<'de>>(
         }
     }
     deserializer.deserialize_map(Unique)
+}
+
+/// Authored first-pass solar scenery used by the main-game Aurelia preset.
+/// Physical density is unchanged for Aurelia; other optical air is visual only.
+pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
+    use void_scenery::{
+        atmosphere_scene::{AtmosphereProfile, CloudProfile},
+        solar::{RingRecipe, SurfaceRecipe},
+    };
+    use void_terrain::CrateredOptions;
+    let mut world = WorldDescription::single(planet, true);
+    let system = build_system(&world.system);
+    for id in [
+        "sol", "cinder", "vesper", "ares", "selene", "velvet", "halo", "azure", "abyss",
+    ] {
+        let body = system
+            .bodies
+            .iter()
+            .find(|b| b.id == id)
+            .expect("solar body");
+        let mut visual = VisualSettings {
+            surface: SurfaceRecipe::SolidSurface,
+            rings: None,
+            surface_color: None,
+            atmosphere: false,
+            scattering: None,
+            clouds: false,
+            cloud_profile: None,
+            ocean: false,
+            color_datum_meters: 0.0,
+            rock_height_meters: 1.0e8,
+            snow_height_meters: 1.0e9,
+        };
+        let terrain = match id {
+            "cinder" | "selene" | "ares" | "vesper" => {
+                let (height, count, size, roughness, seed, low, high) = match id {
+                    "cinder" => (
+                        7000.0,
+                        180,
+                        0.11,
+                        0.7,
+                        31,
+                        [0.09, 0.07, 0.055],
+                        [0.52, 0.43, 0.34],
+                    ),
+                    "selene" => (
+                        8500.0,
+                        120,
+                        0.16,
+                        0.5,
+                        19,
+                        [0.07, 0.075, 0.08],
+                        [0.56, 0.55, 0.52],
+                    ),
+                    "ares" => (
+                        14000.0,
+                        48,
+                        0.20,
+                        1.0,
+                        47,
+                        [0.13, 0.035, 0.014],
+                        [0.65, 0.25, 0.09],
+                    ),
+                    "vesper" => (
+                        9000.0,
+                        22,
+                        0.12,
+                        1.0,
+                        73,
+                        [0.10, 0.07, 0.02],
+                        [0.48, 0.34, 0.12],
+                    ),
+                    _ => unreachable!(),
+                };
+                Some(TerrainConfig::Cratered(CrateredOptions {
+                    name: format!("{id} impact terrain"),
+                    radius_meters: body.radius_meters,
+                    max_height_meters: height,
+                    crater_count: count,
+                    crater_radius_radians: size,
+                    roughness,
+                    seed,
+                    low_color: low,
+                    high_color: high,
+                }))
+            }
+            "sol" => {
+                visual.surface = SurfaceRecipe::EmissiveStar {
+                    color: [1.0, 0.65, 0.28],
+                    radiance: 6.0,
+                    granulation: 0.6,
+                };
+                None
+            }
+            "velvet" | "halo" | "azure" | "abyss" => {
+                let (low, high, bands, turbulence, storm) = match id {
+                    "velvet" => ([0.26, 0.10, 0.045], [0.82, 0.66, 0.44], 18.0, 1.0, 1.0),
+                    "halo" => ([0.35, 0.25, 0.12], [0.80, 0.69, 0.43], 24.0, 0.3, 0.0),
+                    "azure" => ([0.12, 0.40, 0.43], [0.32, 0.68, 0.69], 8.0, 0.12, 0.0),
+                    "abyss" => ([0.025, 0.06, 0.28], [0.12, 0.32, 0.72], 12.0, 0.8, 0.7),
+                    _ => unreachable!(),
+                };
+                visual.surface = SurfaceRecipe::GasEnvelope {
+                    low,
+                    high,
+                    bands,
+                    turbulence,
+                    storm,
+                };
+                if id == "halo" {
+                    visual.rings = Some(RingRecipe {
+                        inner_radius: 1.25,
+                        outer_radius: 2.35,
+                        color: [0.65, 0.53, 0.34],
+                        opacity: 0.8,
+                    });
+                }
+                None
+            }
+            _ => unreachable!(),
+        };
+        if id == "vesper" || id == "ares" {
+            let venus = id == "vesper";
+            visual.atmosphere = true;
+            visual.scattering = Some(AtmosphereProfile::Custom {
+                height_meters: if venus { 120000.0 } else { 80000.0 },
+                rayleigh_scattering: if venus {
+                    [18e-6, 15e-6, 8e-6]
+                } else {
+                    [0.5e-6, 0.3e-6, 0.15e-6]
+                },
+                rayleigh_scale_height: if venus { 16000.0 } else { 11000.0 },
+                mie_scattering: if venus { 12e-6 } else { 0.4e-6 },
+                mie_extinction: if venus { 15e-6 } else { 0.5e-6 },
+                mie_scale_height: if venus { 18000.0 } else { 8000.0 },
+                mie_anisotropy: 0.7,
+                ozone_absorption: [0.0; 3],
+                ozone_center_height: 0.0,
+                ozone_width: 1.0,
+            });
+            if venus {
+                visual.clouds = true;
+                visual.cloud_profile = Some(CloudProfile {
+                    bottom_meters: 45000.0,
+                    top_meters: 70000.0,
+                    extinction_per_meter: 0.0008,
+                    coverage: 0.96,
+                });
+            }
+        }
+        world.bodies.insert(
+            id.into(),
+            BodyDescription {
+                label: format!("{} · SOLAR SCENERY", body.name),
+                terrain,
+                air_density_scale: None,
+                air_datum_meters: 0.0,
+                sea_level_meters: None,
+                visual,
+            },
+        );
+    }
+    world
 }
