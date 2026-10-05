@@ -299,7 +299,9 @@ impl PartGraph {
                     },
                 }
             }
-            ModuleState::Passive => panic!("passive module has no stage action"),
+            ModuleState::Rcs { .. } | ModuleState::DockingPort { .. } | ModuleState::Passive => {
+                panic!("passive module has no stage action")
+            }
         };
         self.set_module_state(id, module, state);
     }
@@ -482,6 +484,8 @@ impl PartGraph {
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ModuleState {
     Parachute { state: crate::ParachuteState },
+    Rcs { enabled: bool },
+    DockingPort { armed: bool },
     Passive,
     Engine { activated: bool, enabled: bool },
     Decoupler { activated: bool },
@@ -494,6 +498,8 @@ pub fn initial_modules(definition: &PartDefinition) -> BTreeMap<String, ModuleSt
             (
                 m.id().to_string(),
                 match m {
+                    Module::Rcs { .. } => ModuleState::Rcs { enabled: true },
+                    Module::DockingPort { .. } => ModuleState::DockingPort { armed: true },
                     Module::Parachute { .. } => ModuleState::Parachute {
                         state: crate::ParachuteState::STOWED,
                     },
@@ -526,6 +532,8 @@ fn check_modules(part: &Part) {
             .expect("part graph: missing module state");
         assert!(
             match (m, state) {
+                (Module::Rcs { .. }, ModuleState::Rcs { .. })
+                | (Module::DockingPort { .. }, ModuleState::DockingPort { .. }) => true,
                 (Module::Engine { .. }, ModuleState::Engine { activated, enabled }) =>
                     !enabled || *activated,
                 (Module::Decoupler { .. }, ModuleState::Decoupler { .. }) => true,
@@ -582,7 +590,9 @@ fn check_transition(old: &ModuleState, new: &ModuleState) {
         | (ModuleState::Decoupler { activated: a }, ModuleState::Decoupler { activated: b }) => {
             !a || *b
         }
-        (ModuleState::Passive, ModuleState::Passive) => true,
+        (ModuleState::Rcs { .. }, ModuleState::Rcs { .. })
+        | (ModuleState::DockingPort { .. }, ModuleState::DockingPort { .. })
+        | (ModuleState::Passive, ModuleState::Passive) => true,
         (ModuleState::Parachute { state: a }, ModuleState::Parachute { state: b }) => {
             if a.phase == b.phase {
                 b.elapsed_seconds >= a.elapsed_seconds
@@ -612,7 +622,9 @@ impl Part {
                 *activated
             }
             ModuleState::Parachute { state } => state.phase != crate::ParachutePhase::Stowed,
-            ModuleState::Passive => false,
+            ModuleState::Rcs { .. } | ModuleState::DockingPort { .. } | ModuleState::Passive => {
+                false
+            }
         }
     }
     pub fn decoupler_module(&self, id: &str) -> (&'static str, f64) {

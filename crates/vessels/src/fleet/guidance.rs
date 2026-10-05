@@ -61,6 +61,10 @@ impl Fleet {
         if !self.commanded(v) {
             return Err("vessel has no command part".into());
         }
+        let rcs = self.rcs_control(id);
+        if rcs.enabled && (rcs.force != DVec3::ZERO || rcs.torque != DVec3::ZERO) {
+            return Err("manual RCS control is active".into());
+        }
         assert!(
             start_time.is_finite() && end_time.is_finite() && end_time > start_time,
             "guidance: invalid burn times"

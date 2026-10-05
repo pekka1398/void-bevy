@@ -5626,6 +5626,7 @@ name = "void-modules"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
+ "serde",
  "void-aero",
  "void-assembly",
  "void-environment",
@@ -5692,6 +5693,20 @@ dependencies = [
 
 [[package]]
 name = "void-part-state-lab"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "glam 0.32.1",
+ "void-assembly",
+ "void-fleet-flight",
+ "void-frames",
+ "void-landing",
+ "void-modules",
+ "void-vessels",
+]
+
+[[package]]
+name = "void-rcs-docking-lab"
 version = "0.0.0"
 dependencies = [
  "bevy",

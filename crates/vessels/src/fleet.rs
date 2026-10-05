@@ -16,6 +16,7 @@ use void_landing::{
     BodyShape, ContactBodySpec, ContactFrame, ContactWorld, ContactWorldOptions,
     EncounterPhysicsGate, EncounterRanges, FrameState, Piece, PieceMass, PlanetFrame, SimpleShape,
 };
+pub use void_modules::rcs::RcsControl;
 use void_modules::{Conditions, has_atmosphere, vessel_air_at};
 use void_orbit::{
     AdvanceOutcome, AirSource, CelestialBody, Control, EphemerisSource, ForceControl,
@@ -259,6 +260,7 @@ pub struct Fleet {
     vessels: BTreeMap<String, Vessel>,
     order: Vec<String>,
     controls: HashMap<String, VesselControl>,
+    rcs_controls: BTreeMap<String, RcsControl>,
     guidance: BTreeMap<String, GuidedBurn>,
     sas: HashMap<String, Sas>,
     scenes: BTreeMap<u64, Scene>,
@@ -399,6 +401,7 @@ impl Fleet {
             vessels: BTreeMap::new(),
             order: vec![],
             controls: HashMap::new(),
+            rcs_controls: BTreeMap::new(),
             guidance: BTreeMap::new(),
             sas: HashMap::new(),
             scenes: BTreeMap::new(),
@@ -660,6 +663,12 @@ impl Fleet {
             self.centre(&v.members),
             conditions,
         )
+        .combined(crate::rcs_propulsion(
+            &self.parts,
+            &v.members,
+            self.centre(&v.members),
+            self.rcs_controls[&v.id],
+        ))
     }
     fn propulsion_of(&self, v: &Vessel) -> Propulsion {
         self.propulsion_at(v, &self.conditions(v, self.time), self.time)
@@ -698,6 +707,34 @@ impl Fleet {
         self.vessel(id);
         self.cancel_guidance(id, "manual control");
         self.controls.insert(id.into(), c);
+    }
+    pub fn set_rcs_nozzle_enabled(&mut self, part: &str, module: &str, enabled: bool) {
+        self.parts
+            .set_module_state(part, module, void_assembly::ModuleState::Rcs { enabled });
+    }
+    pub fn rcs_control(&self, id: &str) -> RcsControl {
+        self.rcs_controls[id]
+    }
+    pub fn set_rcs_control(&mut self, id: &str, control: RcsControl) {
+        assert!(
+            control.force.is_finite() && control.torque.is_finite(),
+            "invalid RCS control"
+        );
+        assert!(self.commanded(self.vessel(id)), "RCS requires command part");
+        if control.enabled && (control.force != DVec3::ZERO || control.torque != DVec3::ZERO) {
+            self.cancel_guidance(id, "manual RCS control");
+        }
+        self.rcs_controls.insert(id.into(), control);
+    }
+    /// Allocation/HUD observation is recomputed from the authoritative graph and controls.
+    pub fn rcs_allocation(&self, id: &str) -> void_modules::rcs::Allocation {
+        let v = self.vessel(id);
+        void_modules::rcs::allocate(
+            &self.parts,
+            &v.members,
+            self.centre(&v.members),
+            self.rcs_controls[id],
+        )
     }
     pub fn set_sas(&mut self, id: &str, on: bool) {
         let v = self.vessel(id);
@@ -775,6 +812,7 @@ impl Fleet {
         self.put(v);
         self.order.push(id.clone());
         self.controls.insert(id.clone(), VesselControl::default());
+        self.rcs_controls.insert(id.clone(), RcsControl::default());
         self.event(&id, None, Some(VesselMode::Orbit), None);
         id
     }
@@ -1751,6 +1789,14 @@ impl Fleet {
                 members,
                 owner: old.owner.clone(),
             };
+            self.rcs_controls.insert(
+                new_id.clone(),
+                if keeps {
+                    self.rcs_controls[&id]
+                } else {
+                    RcsControl::default()
+                },
+            );
             self.controls.insert(
                 new_id.clone(),
                 if keeps {
@@ -1784,6 +1830,137 @@ impl Fleet {
         world.world.bodies[a].apply_impulse_at_point(vec32(-normal * impulse), vec32(point), true);
         world.world.bodies[b].apply_impulse_at_point(vec32(normal * impulse), vec32(point), true);
         created
+    }
+    fn docking_port(
+        &self,
+        part: &str,
+        module: &str,
+    ) -> (&'static str, void_assembly::DockingDefinition) {
+        match self
+            .parts
+            .part(part)
+            .definition
+            .modules
+            .iter()
+            .find(|m| m.id() == module)
+            .expect("unknown docking module")
+        {
+            Module::DockingPort {
+                node_id,
+                parameters,
+                ..
+            } => (node_id.as_str(), *parameters),
+            _ => panic!("not a docking port"),
+        }
+    }
+    pub fn arm_docking_port(&mut self, part: &str, module: &str, armed: bool) {
+        self.docking_port(part, module);
+        self.parts.set_module_state(
+            part,
+            module,
+            void_assembly::ModuleState::DockingPort { armed },
+        );
+    }
+    /// Physical capture. Ordinary eligibility failures are explicit refusal reasons.
+    pub fn dock(
+        &mut self,
+        part_a: &str,
+        module_a: &str,
+        part_b: &str,
+        module_b: &str,
+    ) -> Result<String, String> {
+        let a = self.vessel_of_part(part_a);
+        let b = self.vessel_of_part(part_b);
+        if a == b {
+            return Err("self docking".into());
+        }
+        let (na, pa) = self.docking_port(part_a, module_a);
+        let (nb, pb) = self.docking_port(part_b, module_b);
+        for (part, module, node_id) in [(part_a, module_a, na), (part_b, module_b, nb)] {
+            if self.parts.part(part).modules[module]
+                != (void_assembly::ModuleState::DockingPort { armed: true })
+            {
+                return Err("port is disarmed".into());
+            }
+            if self.parts.connection_at(part, node_id).is_some() {
+                return Err("port is occupied".into());
+            }
+        }
+        let an = node(self.parts.part(part_a).definition, na).unwrap();
+        let bn = node(self.parts.part(part_b).definition, nb).unwrap();
+        if an.size != bn.size {
+            return Err("port sizes differ".into());
+        }
+        let sa = self.snapshot(&a);
+        let sb = self.snapshot(&b);
+        let ap = self.parts.part(part_a).pose;
+        let bp = self.parts.part(part_b).pose;
+        let ar =
+            sa.rotation * (ap.position + ap.rotation * an.position - self.centre_of_mass_local(&a));
+        let br =
+            sb.rotation * (bp.position + bp.rotation * bn.position - self.centre_of_mass_local(&b));
+        let relative_centres = self.relative(&b, &a);
+        let delta = relative_centres.position + br - ar;
+        if delta.length() > pa.capture_distance_m.min(pb.capture_distance_m) {
+            return Err("outside capture distance".into());
+        }
+        let normal_a = sa.rotation * ap.rotation * an.direction;
+        let normal_b = sb.rotation * bp.rotation * bn.direction;
+        if normal_a.dot(-normal_b) < pa.max_angle_radians.min(pb.max_angle_radians).cos() {
+            return Err("port directions misaligned".into());
+        }
+        let relative = relative_centres.velocity + sb.angular_velocity.cross(br)
+            - sa.angular_velocity.cross(ar);
+        if relative.length() > pa.max_speed_mps.min(pb.max_speed_mps) {
+            return Err("relative port speed too high".into());
+        }
+        if (sb.angular_velocity - sa.angular_velocity).length()
+            > pa.max_spin_radians_per_second
+                .min(pb.max_spin_radians_per_second)
+        {
+            return Err("relative spin too high".into());
+        }
+        match (sa.scene, sb.scene) {
+            (Some(x), Some(y)) if x != y => {
+                return Err("ports have different physics scenes".into());
+            }
+            (Some(scene), None) => self.move_to(&b, scene),
+            (None, Some(scene)) => self.move_to(&a, scene),
+            (None, None) => {
+                let scene = self.new_scene(None, &[a.clone(), b.clone()]);
+                self.move_to(&a, scene);
+                self.move_to(&b, scene);
+            }
+            _ => {}
+        }
+        Ok(self.join(part_a, na, part_b, nb))
+    }
+    pub fn undock(&mut self, part: &str, module: &str) -> Result<String, String> {
+        let (node_id, p) = self.docking_port(part, module);
+        let Some(connection) = self.parts.connection_at(part, node_id).cloned() else {
+            return Err("port is not connected".into());
+        };
+        let (other, other_node) = if connection.a == part {
+            (&connection.b, &connection.node_b)
+        } else {
+            (&connection.a, &connection.node_a)
+        };
+        let other_module = self
+            .parts
+            .part(other)
+            .definition
+            .modules
+            .iter()
+            .find_map(|m| match m {
+                Module::DockingPort { id, node_id, .. } if node_id == other_node => {
+                    Some(id.clone())
+                }
+                _ => None,
+            })
+            .ok_or("connection is not a docking pair")?;
+        self.arm_docking_port(part, module, false);
+        self.arm_docking_port(other, &other_module, false);
+        Ok(self.decouple_at(part, node_id, p.separation_impulse_ns))
     }
     pub fn join(&mut self, part_a: &str, node_a: &str, part_b: &str, node_b: &str) -> String {
         let a = self.vessel_of_part(part_a);
@@ -1864,6 +2041,7 @@ impl Fleet {
         self.forget_vessel_frame(&b);
         self.gate.remove_vessel(&b);
         self.controls.remove(&b);
+        self.rcs_controls.remove(&b);
         self.sas.remove(&b);
         self.guidance.remove(&b);
         self.event(&b, Some(self.scene_mode(scene)), None, Some(scene));
