@@ -1,6 +1,10 @@
 # Fleet 氣動力與力矩 lab
 
-本輪以 master `41da390`（model 13）為基線。分支 model 16，尚未 commit／合入；主遊戲預設 craft 不增加翼或降落傘，且維持明確的 `AirDynamics::ForceOnly` 物理配置；完整通路只由 lab 顯式 opt-in。熱、燒蝕、破壞不在範圍內。
+> 後續更新：主遊戲整合經 root 組合／GUI／錄放核對，使用者認可對接場景並授權合併後，已於 `134bb37` 合入本地 master；見 [主遊戲交付與驗收](main-flight-integration.md)。尚未 push。
+
+> 2026-10-05 狀態更新：核心由 `366f270` 合入 `0c60aad`，與 RCS 統一為 model 17／FleetCheckpoint 7。主遊戲 Full 模式接線暫停，新的主遊戲驗收與組合檢查未完成。以下實作／測試記錄保留分支當時的版本與 lab 範圍；分支舊檔不與 model 17 相容。現況見 [status.md](status.md)，後續工作規則見 [AGENTS.md](../AGENTS.md)。
+
+本輪以 master `41da390`（model 13）為基線。當時分支 model 16（之後已合入，見上方更新）；主遊戲預設 craft 不增加翼或降落傘，且維持明確的 `AirDynamics::ForceOnly` 物理配置；完整通路只由 lab 顯式 opt-in。熱、燒蝕、破壞不在範圍內。
 
 ## 共用施力契約
 

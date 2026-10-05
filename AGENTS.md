@@ -1,14 +1,38 @@
 # VOID 開發規則
 
-此 repository 是 VOID 的 Bevy／Rust／native Rapier 開發主線。工作規則延續 `NOTE.md`，其中 TS 路徑與完成狀態是搬遷時的歷史筆記；目前狀態以 `docs/status.md` 和程式碼為準，`docs/port-audit.md` 是搬遷時的歷史盤點。
+此 repository 是 VOID 的 Bevy／Rust／native Rapier 開發主線。使用者在當前任務中的明確指示優先；舊討論和已結束任務的指令不自動延續到新任務。
 
-- 不加入 fallback：不該發生的狀態應直接報錯／panic，不掩蓋問題。
-- 每項功能先在獨立 core crate 與 lab app／example 開發，做 headless 數值／行為檢查；使用者完成視窗驗收後再決定主遊戲整合。
-- Git 用來保存成果，不開開發 branch；維持 master，取捨與實驗用 lab。
-- 瀏覽器和 Bevy 視窗驗收由使用者操作。那個"視窗驗收"指的是最終commit或push之前的驗收 不是指一切agent的視窗操作跟截圖都禁止
-- Rust 核心測試使用已存 golden 資料，沒有 Node／舊 TS 執行依賴。重新產生 TS golden 時使用 `tools/regenerate-golden.py`，見 `docs/migration.md`。
-- 不放寬原 TS 門檻來掩蓋差異。native／WASM 不逐位元一致時仍需驗證行為門檻並記錄差異；Pebble 靜止傾角的 ignored 測試已結案為非缺陷（量到的是發射點坡度），見 `docs/vessels.md`。
-- 主遊戲 `void-app` 已改用 assembly＋Fleet runtime（`crates/app/src/fleet_game.rs`），並使用 aero 的大氣施力（force-only）。multiscale 與各 lab 仍獨立；新功能照上面的流程在 lab 驗收後再決定是否整合。
-- 修改後測試所屬 crate 與受影響整合場景。跨核心變更使用 `cargo test --workspace --all-targets`，lint 使用 `cargo clippy --workspace --all-targets -- -D warnings`。
-- 舊 `void` 為參考封存，後續程式開發與提交在此 repository。搬遷來源與歷史對應見 `docs/migration.md`。
-pgrep pkill絕對不可以用任何字串比對 你必須主動的獲取進程id並且以id來處理進程 
+## 文件分工
+
+- 本檔：目前有效的開發流程與架構約束。
+- `NOTE.md`：專案方向、需求與待決定事項，不是完成清單或額外的操作規則。
+- `docs/status.md`：現況，分別記錄核心能力、主遊戲接線、驗證及合併狀態；以對應的程式碼與 Git 證據核對。
+- `docs/specs/`：單項工作的範圍、接口、完成條件與限制。任務特定例外須明寫；共用規則引用本檔。
+- `docs/history/`、`docs/port-audit.md`：歷史資料，不作現行指令。舊 TS `void` 是參考封存；搬遷與 golden 重產見 `docs/migration.md`。
+
+## 開發與交付
+
+1. 主線在 `void-bevy/` 的 `master`。新功能由主 agent 建立 branch、獨立 worktree，交給 subagent 在該分支直接修改主遊戲與所屬核心；每個 agent 的修改範圍與共享接口先說明清楚。
+2. 一輪交付包含可玩的主遊戲行為、必要配置／觀察資訊、受影響測試與驗收操作。lab／example 可用於研究、診斷及固定場景，不要求每項功能再做一套獨立遊戲後才接線。
+3. 功能邏輯留在適當的 core crate，主遊戲負責控制、呈現與流程。直接修改主遊戲不代表把物理或資料模型塞進 app。
+4. 主 agent 親自審查 diff、接口、接縫和驗證證據，修正後交使用者驗收實際遊戲行為。agent 可以自行操作、截圖和重播作初步檢查；人類最終驗收不由 agent 截圖代替。
+5. 分支可 commit 保存可審查成果；PR／合入 master／push 依使用者指示執行。新的遊戲行為通常先完成人類驗收；使用者已明確授權相應步驟時，不重複詢問。
+6. 暫停或未完成的工作保留並記錄，不混入其他任務的提交。合併後再核對組合行為，分支各自通過不等於整合通過。
+
+## 架構與正確性
+
+- 不加入 fallback 掩蓋問題。非法內部狀態、非有限物理量或不相容格式明確報錯／panic；合法但不滿足操作條件的請求回傳明確拒絕原因，不偷偷換模型、天體或預設資料。
+- 船與零件狀態以 `PartGraph` 為權威；模組、資源、對接埠使用穩定 ID。擴充功能共用現有供應、分級、存檔與錄放語義。
+- 座標共用 `void-frames` 座標樹，位置與物理計算使用 f64。渲染先在相機附近取相對量，再轉 f32；不先經遠方絕對 f32 座標。
+- 環境量共用 `void-environment`；力與力矩明確標示座標、作用點及力矩參考點。trial 求值不提交耗油或模組狀態；只在接受步更新。
+- Orbit／Bubble／Ground／rails 是同一份船資料的不同推進方式。新增功能需核對 owner 交接、質量／慣量、睡眠及 rails 條件，不另開一套平行 runtime。
+- 繪圖地形與碰撞共用取樣器／配置；光學大氣與物理大氣分開。GPU 資產、背景 task 和場景重建需有明確 ownership。
+- 格式或模擬規則變更要更新相應版本、必要欄位與核對摘要，明確記錄相容性；不自動修補舊存檔。
+
+## 驗證與資源
+
+- 先跑所屬 crate 與受影響整合場景的測試／lint。跨核心變更列出依賴與接縫，再擴大範圍；全 workspace 檢查是另行安排的整合檢查，不在每輪修改後自動重跑。使用者要求不跑全量時遵守。
+- 檢查記錄註明範圍、commit／工作區版本及結果，區分 headless、agent GUI、人類驗收；不以測試數量或一次重播通過宣稱功能完全正確。
+- Rust golden 使用已存資料，不依賴 Node／舊 TS 執行。不得放寬既有門檻掩蓋差異；native／WASM 差異需核對行為。Pebble 靜止傾角的既有 ignored 已結案，見 `docs/vessels.md`。
+- 編譯預設 `-j 2`。多 agent 的昂貴 Bevy 連結／GUI 檢查由主 agent 協調；各 worktree 應備好可直接執行的驗收程式。共用 target 時核對本地 crate 的分支來源，不盲信快取。
+- GUI 操作用 TigerVNC，不用 xdotool。**禁止使用 pgrep／pkill 的字串比對**；先取得並確認進程 PID，只以數字 PID 處理進程。

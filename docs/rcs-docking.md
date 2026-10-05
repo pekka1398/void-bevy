@@ -1,5 +1,9 @@
 # RCS 與物理對接 lab
 
+> 後續更新：主遊戲整合經 root 組合／GUI／錄放核對，使用者認可對接場景並授權合併後，已於 `134bb37` 合入本地 master；見 [主遊戲交付與驗收](main-flight-integration.md)。尚未 push。
+
+> 2026-10-05 狀態更新：核心由 `4bd5322` 合入 `155a4f8`，並於 `0c60aad` 與氣動統一為 model 17／FleetCheckpoint 7。主遊戲接線暫停，新的主遊戲驗收與組合檢查未完成。以下實作／測試記錄保留分支當時的版本與 lab 範圍；分支舊檔不與 model 17 相容。現況見 [status.md](status.md)，後續工作規則見 [AGENTS.md](../AGENTS.md)。
+
 本輪基線 master `41da390`；暫用整合 `MODEL_VERSION 15`、Fleet checkpoint 5。主遊戲預設火箭沒有 RCS／對接埠，本輪新增能力供獨立 lab 驗收，未改主遊戲操作。舊 model／checkpoint 明確拒絕；Craft 仍為 2，catalog checksum 隨新定義改變，沒有假裝舊存檔可相容。
 
 ```sh

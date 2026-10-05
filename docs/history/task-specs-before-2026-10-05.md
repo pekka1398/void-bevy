@@ -1,8 +1,48 @@
+# 任務規格：2026-10-05 整理前
+
+以下完整保留該輪任務文件，含舊流程、branch／commit 限制與原驗收安排。這些是已發出的任務上下文，不作目前的全局指令。後續工作遵守 [AGENTS.md](../../AGENTS.md)；現況見 [status.md](../status.md)。
+
+---
+
+## 原檔：docs/specs/rcs-docking.md
+
+# RCS 與對接本輪實作
+
+共同基線：master 41da390（MODEL_VERSION 13）。使用者已授權本輪 branch/worktree 與三個 agent。先讀 AGENTS.md、NOTE.md、docs/status.md，歷史完成狀態以程式為準。
+只改自己的 worktree。不 commit/push/merge；交付可審查的 diff、設計理由、驗證結果和視窗驗收操作。不得加入 fallback 或放寬既有門檻。不跑全 workspace test/lint；只跑受影響 crates，編譯限制 -j 2，避免多份 Bevy 同時大量連結。GUI 使用 TigerVNC，禁用 xdotool；不要用 pgrep/pkill 字串比對，僅 numeric PID。GUI 與昂貴驗證開始前告知 root 以協調資源。
+保持主遊戲預設行為；新增能力在獨立 core + lab 驗證。必要格式變更明確拒絕舊版，不冒稱相容。不要改用第二套零件、資源或座標模型。
+先向 root 報告實作設計、涉及的共享接口和風險，再繼續實作；遇到跨任務接口修改先協調。不要因任務大就停在計畫，完成具體可驗收的一輪。
+
+建立可配置、按穩定 module ID 尋址的 RCS 噴嘴/對接埠，消耗現有 Monopropellant 資源。噴嘴提供局部方向、施力點、推力/Isp，混控要求平移與旋轉；有限且可解釋的分配算法，不憑空產生控制力，不以理想 steering 代替 RCS。用 PartGraph 共用供油語義，處理無燃料/飽和/非對稱/多資源。SAS 與 RCS 職責清楚。
+對接是實際捕獲流程：距離、埠方向、相對速度、旋轉條件，合法可用埠、防自接/重接；捕獲合併 graph/owner 時保持零件身份、世界 pose、質量/動量。解除對接與可配置小分離衝量，存檔/錄放完整保存埠和控制狀態。既有 debug join 不能冒充對接。
+獨立 lab 提供近距離兩船、平移/轉向/RCS切換、對接/解除、存讀/錄放與實際噴嘴狀態 HUD。headless 驗證分配、供油、捕獲邊界、旋轉與相對速度、多船 owner/pose/動量及續跑。不要要求使用者每次從發射台重玩。
+擁有 RCS/docking 模組/catalog/純核心/捕獲 graph 與 lab 控制。氣動 agent 擁有共用 wrench 與 Fleet 積分；先用既有 EngineForce/Propulsion 類似語義（f64 force、point、COM torque），共享 Fleet 修改協調，不自行寫第二個物理迴圈。檢查 git 是否有未合入舊 RCS 成果，若有評估重用但不得盲目 cherry-pick。
+
+
+---
+
+## 原檔：docs/specs/aero-wrenches.md
+
+# 完整氣動施力與力矩本輪實作
+
+共同基線：master 41da390（MODEL_VERSION 13）。使用者已授權本輪 branch/worktree 與三個 agent。先讀 AGENTS.md、NOTE.md、docs/status.md，歷史完成狀態以程式為準。
+只改自己的 worktree。不 commit/push/merge；交付可審查的 diff、設計理由、驗證結果和視窗驗收操作。不得加入 fallback 或放寬既有門檻。不跑全 workspace test/lint；只跑受影響 crates，編譯限制 -j 2，避免多份 Bevy 同時大量連結。GUI 使用 TigerVNC，禁用 xdotool；不要用 pgrep/pkill 字串比對，僅 numeric PID。GUI 與昂貴驗證開始前告知 root 以協調資源。
+保持主遊戲預設行為；新增能力在獨立 core + lab 驗證。必要格式變更明確拒絕舊版，不冒稱相容。不要改用第二套零件、資源或座標模型。
+先向 root 報告實作設計、涉及的共享接口和風險，再繼續實作；遇到跨任務接口修改先協調。不要因任務大就停在計畫，完成具體可驗收的一輪。
+
+把現有 aero 核心的力/力矩接入 PartGraph/Fleet，取代 production force-only 限制。在 modules 層建立清楚的 wrench（力、關於明確參考點的力矩）契約；engine/air/chute/RCS 能共同遵循，座標、COM、作用點一律 f64 且明確，不重複加 r×F。
+氣流速度包含剛體角速度與作用點偏移；air/chute 的力與力矩須進入 bubble/contact 及 orbit 的姿態/平移積分，姿態变化不能整段使用過期的 frozen attitude 而假稱完整耦合。環境 trial evaluation 純函式；耗油、降落傘等狀態只在接受步提交。質量/慣量動態變更、rails 不適用條件、睡眠地面不被被動空氣喚醒要保住。
+用既有 aero 係數/元素接入可配置翼面或穩定翼示例，展示風標效應/氣動阻尼與偏心降落傘力矩；不做熱/燒蝕/破壞。本輪先形成完整力矩通路和可驗收 flight lab，不替換主遊戲預設。headless 驗證零空氣極限、對稱零矩、偏心矩、旋轉局部風、耗散適用條件、不同 dt 收斂與 owner 接縫、存讀/錄放。
+擁有 modules::air、wrench契約、Fleet 共用施力/姿態積分與 aero lab。與 RCS agent 協調 assembly model/catalog 與 Fleet interfaces，對外接口先報 root；保持 scenery world optics 不受影響。
+
+
+---
+
+## 原檔：docs/specs/solar-scenery.md
+
 # 任務：太陽系各天體 scenery 與程序地形
 
-更新：2026-10-05。原開發入口已隨 model 13 多天體基礎合入 master；其後 `work/solar-scenery` 已有十天體第一輪外觀，尚未 commit／合入，細緻美術後續逐顆處理。現況見 [status.md](../status.md)。
-
-本檔記錄原交接接口與限制，下方「已備好的入口」及 lab 說明以當時 model 13 為基線。原交付順序屬於歷史計畫，不自動觸發後續開發；新任務遵守 [AGENTS.md](../../AGENTS.md) 的主遊戲分支流程。原完整規格保存在 [歷史任務規格](../history/task-specs-before-2026-10-05.md)。
+狀態：提供開發入口與交接邊界；實際天體外觀尚未實作。開發入口隨多天體分支合併 master；world schema 2 / MODEL_VERSION 13。
 
 ## 目的
 
@@ -60,7 +100,7 @@ Tab 切船；1/2 觀測母星／月球；Home 回船；O 生成觀測天體的�
 - 未實作：多恆星光照、遮食、環陰影、雲影、移動天氣、極光、植被、地形新生物群系，以及巨行星氣體的物理進入／毀損規則。
 - 共用 immutable noise 不代表共用 LUT 或配置。新增 texture/material/mesh 必須登記 per-world ownership，reset/load 釋放，舊 generation 的 task 不得污染新場景。
 
-## 原輪次建議交付順序（歷史）
+## 建議交付順序
 
 1. 先做 scenery solar lab 的任意 ID 選取與 body visual recipe（SolidSurface / GasEnvelope / EmissiveStar / Rings 的實際方案先寫設計，避免未使用的 placeholder enum）。保留既有世界存檔、frame tree 和 renderer cache。
 2. Selene / Cinder / Ares：補岩石地形、撞擊坑、配色；數值核對繪圖與碰撞。
@@ -69,8 +109,9 @@ Tab 切船；1/2 觀測母星／月球；Home 回船；O 生成觀測天體的�
 5. Velvet / Halo / Azure / Abyss：氣態表面與雲帶；Halo 的環是獨立幾何／光照工作。
 6. 多顆天體同畫面驗收、資產上限與錄放；使用者接受 lab 後才決定主遊戲整合。
 
-## 原輪次完成條件
+## 完成證據
 
 每顆附配置、近地或近雲層／軌道／遠景固定視角與限制說明。大氣 LUT 不得含 NaN/Inf；零散射真空極限保留；不放寬 golden。碰撞只測實際具有 solid terrain 的天體。存读檔保留自訂配置；切焦點不改 physics；反覆 reset/load 的 app-owned 資產回到可說明上限。GPU 驗收不能由 headless 通過代替。
 
 此任務不重做零件狀態、資源、對接、Fleet owner 或星系軌道，也不要求一次完成所有九顆才能交付第一顆。
+

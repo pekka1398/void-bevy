@@ -1,6 +1,6 @@
 # void-bevy
 
-VOID 的 Bevy／Rust／native Rapier 開發主線，從原 TS 專案的移植 lab 獨立而來。Rust Cargo workspace，每個功能一個 crate：`cargo test` 是 headless 檢查，`examples/` 是可開視窗的驗證場景。TS 各 lab 是參考實作，移植的 crate 以它們的輸出為對照。
+VOID 的 Bevy／Rust／native Rapier 開發主線，使用 Rust Cargo workspace。核心 crate、主遊戲、測試與 lab／example 分工；新功能在 branch／worktree 內直接形成完整主遊戲行為。現行流程見 AGENTS.md，實際進度與暫停草稿見 docs/status.md。舊 TS lab 與 golden 保留為歷史對照。
 
 ```sh
 cd void-bevy
