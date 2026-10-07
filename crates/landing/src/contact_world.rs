@@ -126,6 +126,8 @@ struct BodyRecord {
     contact_delta_v: f64,
     /// Velocity change the solver made in the last step (contacts, joints); zero in a free step.
     solver_delta: DVec3,
+    /// Proposed interval contact-model impulse, credited like native solver support in state().
+    pending_contact_delta: DVec3,
 }
 
 fn v32(v: DVec3) -> Vector {
@@ -557,6 +559,7 @@ impl<F: ContactFrame> ContactWorld<F> {
             torque: None,
             contact_delta_v: 0.0,
             solver_delta: DVec3::ZERO,
+            pending_contact_delta: DVec3::ZERO,
         };
         self.bodies.push((handle, record));
         self.stream_tiles();
@@ -699,8 +702,11 @@ impl<F: ContactFrame> ContactWorld<F> {
         assert!(linear.is_finite() && angular_about_com.is_finite());
         let b = &mut self.world.bodies[handle];
         assert!(b.is_dynamic(), "contact impulse requires dynamic body");
+        let before = v64(b.linvel());
         b.apply_impulse(v32(linear), linear != DVec3::ZERO);
         b.apply_torque_impulse(v32(angular_about_com), angular_about_com != DVec3::ZERO);
+        let delta = v64(b.linvel()) - before;
+        self.record_mut(handle).pending_contact_delta += delta;
     }
 
     /// Query actual collider geometry, including freshly streamed tiles before broad-phase rebuild.
@@ -1012,6 +1018,8 @@ impl<F: ContactFrame> ContactWorld<F> {
                 Some(v) if !free => DVec3::new(after.x - v.x, after.y - v.y, after.z - v.z),
                 _ => DVec3::ZERO,
             };
+            let solver_delta = solver_delta + self.record(handle).pending_contact_delta;
+            self.record_mut(handle).pending_contact_delta = DVec3::ZERO;
             let torque = self.record(handle).torque.unwrap_or(DVec3::ZERO);
             let turned = spinning
                 .get(&handle)
