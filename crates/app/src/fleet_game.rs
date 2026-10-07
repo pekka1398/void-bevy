@@ -1440,9 +1440,10 @@ fn instruments(
         .transform(fleet.body_frames(reference).0, fleet.origin_frame())
         .rotation();
     let q = surface_axes(fleet, reference);
+    let (nose, top) = vehicle_navball_axes(fleet.control_profile(&sim.selected));
     let input = void_navball::NavballInput {
-        nose: (ship.rotation * DVec3::Y).normalize(),
-        top: (ship.rotation * DVec3::Z).normalize(),
+        nose: (ship.rotation * nose).normalize(),
+        top: (ship.rotation * top).normalize(),
         up: q * local.position.normalize(),
         pole: fleet.ephemeris.bodies()[reference].rotation.axis(),
         prime_meridian: q * DVec3::X,
@@ -1460,6 +1461,15 @@ fn instruments(
                 reading.heading.round() as i64 % 360,
                 reading.pitch
             );
+        }
+    }
+}
+fn vehicle_navball_axes(profile: Option<void_assembly::ControlProfile>) -> (DVec3, DVec3) {
+    use void_assembly::ControlProfile;
+    match profile {
+        None | Some(ControlProfile::Flight) => (DVec3::Y, DVec3::Z),
+        Some(ControlProfile::Aircraft | ControlProfile::Rover | ControlProfile::Eva) => {
+            (DVec3::Z, DVec3::Y)
         }
     }
 }
@@ -1791,7 +1801,9 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyC) {
         lab.prediction = Some(lab.session.predict(600.0));
     }
-    plan_controls(lab, &keys);
+    if lab.session.sim().fleet.control_profile(&id) == Some(void_assembly::ControlProfile::Flight) {
+        plan_controls(lab, &keys);
+    }
     if warp_was_active && !lab.session.sim().maneuver_warp.active() {
         lab.rate = 0;
     }
@@ -2644,12 +2656,20 @@ fn draw(
     {
         let data = f.air_data(&sim.selected);
         let control = f.control(&sim.selected).turn;
+        let airflow = if data.dynamic_pressure_pa < 1.0 {
+            "low airflow; AoA/stall unavailable".to_owned()
+        } else {
+            format!(
+                "max section AoA {:.1}° stall {:.0}%",
+                data.maximum_angle_radians.to_degrees(),
+                data.maximum_stall * 100.0
+            )
+        };
         format!(
-            "\nAIR: {:.1}m/s q {:.1}kPa max section AoA {:.1}° stall {:.0}% | pitch {:.0}% yaw {:.0}% roll {:.0}%\nB hold brakes | Q/E nose steering | aerodynamic control, no reaction wheel",
+            "\nAIR: {:.1}m/s q {:.1}kPa {} | pitch {:.0}% yaw {:.0}% roll {:.0}%\nB hold brakes | Q/E nose steering | aerodynamic control, no reaction wheel",
             data.airspeed_mps,
             data.dynamic_pressure_pa / 1000.0,
-            data.maximum_angle_radians.to_degrees(),
-            data.maximum_stall * 100.0,
+            airflow,
             control.x * 100.0,
             control.y * 100.0,
             control.z * 100.0
