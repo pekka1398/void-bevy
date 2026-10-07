@@ -357,9 +357,8 @@ impl VesselWater {
                 && maximum_dt > 0.
         );
         let mut rate = 0.;
-        for (part, offset, pose) in &self.parts {
+        for (part, offset, _) in &self.parts {
             let arm = q * *offset;
-            let rotation = q * *pose;
             let reach = void_assembly::part_bound_radius(part);
             for body in 0..self.environment.bodies().len() {
                 let sample = self.environment.surroundings(
@@ -387,8 +386,11 @@ impl VesselWater {
                 if sea.depth < -(reach + speed * maximum_dt) {
                     continue;
                 }
-                let volume =
-                    displacement(part, rotation.conjugate() * sample.up, reach * 2.).volume;
+                let volume = match part.shape {
+                    Shape::Box => void_assembly::part_box_size(part).element_product(),
+                    Shape::Cylinder => std::f64::consts::PI * part.radius.powi(2) * part.height,
+                    Shape::Cone => std::f64::consts::PI * part.radius.powi(2) * part.height / 3.,
+                };
                 let size = if part.shape == Shape::Box {
                     void_assembly::part_box_size(part)
                 } else {
