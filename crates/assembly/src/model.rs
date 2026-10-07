@@ -1419,6 +1419,19 @@ pub fn crew_rover() -> Craft {
     )
     .expect("invalid crew rover fixture")
 }
+/// Existing two-stage rocket carrying the same reusable seat/hatch and finite backpack tank.
+/// The external seat is an explicit first-round fixture; there is no cabin traversal model.
+pub fn crewed_flight_rocket() -> Craft {
+    let mut base = rcs_flight_rocket();
+    base.version = 3;
+    base.name = "VOID crewed two-stage rocket".into();
+    base.parts
+        .iter_mut()
+        .find(|p| p.id == "p1")
+        .unwrap()
+        .definition_id = "crewed-flight-rcs-pod".into();
+    add_part(&base, "crew-seat", "p1", "crew-seat", "side").expect("invalid crewed rocket fixture")
+}
 pub fn eva_suit() -> Craft {
     import_craft(include_str!("../data/eva-suit.json")).expect("invalid EVA suit")
 }

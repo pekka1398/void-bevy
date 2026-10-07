@@ -150,7 +150,7 @@ fn spinning_remote_orbit_crew_transactions_keep_identity_and_split_momentum() {
     let radius = s.sim().fleet.ephemeris.bodies()[body].radius_meters;
     // Declared orbital initial state, not a claim about ordinary rocket travel.
     let Outcome::Spawned(carrier) = s.execute(Action::LaunchSplitState {
-        craft: crew_rover(),
+        craft: void_assembly::crewed_flight_rocket(),
         system: SystemId(1),
         position: SplitPosition::ORIGIN.translate(position + DVec3::X * (radius + 2e6)),
         velocity: velocity + DVec3::new(70.0, -30.0, 10.0),

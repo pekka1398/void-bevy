@@ -3880,6 +3880,20 @@
           0
         ],
         "size": 1
+      },
+      {
+        "id": "side",
+        "position": [
+          -0.3,
+          0,
+          0
+        ],
+        "direction": [
+          -1,
+          0,
+          0
+        ],
+        "size": 1
       }
     ],
     "modules": [
@@ -4730,6 +4744,517 @@
           "convectionArea": 0.24,
           "emissivity": 0.8,
           "noseRadius": 0.06,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
+      }
+    ]
+  },
+  {
+    "id": "crewed-flight-rcs-pod",
+    "name": "Crewed flight command pod",
+    "category": "command",
+    "description": "Existing flight pod with a healthy occupied-seat command requirement",
+    "dryMassKg": 50,
+    "height": 1,
+    "radius": 0.9,
+    "shape": "cone",
+    "color": "#cbd4dc",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "bottom",
+        "position": [
+          0,
+          -0.5,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 2
+      },
+      {
+        "id": "top",
+        "position": [
+          0,
+          0.5,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1
+      },
+      {
+        "id": "crew-seat",
+        "position": [
+          0.9,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "command",
+        "id": "command1",
+        "requiresCrew": true
+      },
+      {
+        "kind": "tank",
+        "id": "mono-tank",
+        "resource": "monopropellant",
+        "capacityKg": 20
+      },
+      {
+        "kind": "dockingPort",
+        "id": "dock",
+        "parameters": {
+          "captureDistanceM": 0.2,
+          "maxAngleRadians": 0.12,
+          "maxSpeedMps": 0.4,
+          "maxSpinRadiansPerSecond": 0.1,
+          "separationImpulseNs": 20
+        },
+        "nodeId": "top"
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-0-0--1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          -1,
+          0,
+          0
+        ],
+        "point": [
+          0.5,
+          -0.25,
+          0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-0-0-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "point": [
+          0.5,
+          -0.25,
+          0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-0-1--1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "point": [
+          0.5,
+          -0.25,
+          0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-0-1-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "point": [
+          0.5,
+          -0.25,
+          0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-0-2--1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          0,
+          -1
+        ],
+        "point": [
+          0.5,
+          -0.25,
+          0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-0-2-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0.5,
+          -0.25,
+          0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-1-0--1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          -1,
+          0,
+          0
+        ],
+        "point": [
+          -0.5,
+          -0.25,
+          -0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-1-0-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "point": [
+          -0.5,
+          -0.25,
+          -0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-1-1--1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "point": [
+          -0.5,
+          -0.25,
+          -0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-1-1-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "point": [
+          -0.5,
+          -0.25,
+          -0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-1-2--1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          0,
+          -1
+        ],
+        "point": [
+          -0.5,
+          -0.25,
+          -0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-1-2-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          -0.5,
+          -0.25,
+          -0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-2-0--1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          -1,
+          0,
+          0
+        ],
+        "point": [
+          0.5,
+          -0.25,
+          -0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-2-0-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "point": [
+          0.5,
+          -0.25,
+          -0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-2-1--1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "point": [
+          0.5,
+          -0.25,
+          -0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-2-1-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "point": [
+          0.5,
+          -0.25,
+          -0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-2-2--1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          0,
+          -1
+        ],
+        "point": [
+          0.5,
+          -0.25,
+          -0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-2-2-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0.5,
+          -0.25,
+          -0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-3-0--1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          -1,
+          0,
+          0
+        ],
+        "point": [
+          -0.5,
+          -0.25,
+          0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-3-0-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "point": [
+          -0.5,
+          -0.25,
+          0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-3-1--1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "point": [
+          -0.5,
+          -0.25,
+          0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-3-1-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "point": [
+          -0.5,
+          -0.25,
+          0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-3-2--1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          0,
+          -1
+        ],
+        "point": [
+          -0.5,
+          -0.25,
+          0.5
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "rcs-3-2-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 80,
+        "ispSeconds": 240,
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          -0.5,
+          -0.25,
+          0.5
+        ]
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 7500,
+          "coreCapacityJk": 35000,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 10.744246875277092,
+          "heatingArea": 2.5446900494077327,
+          "convectionArea": 10.744246875277092,
+          "emissivity": 0.8,
+          "noseRadius": 0.9,
           "heatingFactor": 1.0,
           "maxSkinK": 1800.0,
           "maxCoreK": 1100.0,

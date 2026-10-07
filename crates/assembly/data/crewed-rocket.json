@@ -1,0 +1,190 @@
+{
+  "version": 3,
+  "name": "VOID crewed two-stage rocket",
+  "parts": [
+    {
+      "id": "p1",
+      "definitionId": "crewed-flight-rcs-pod",
+      "resources": {
+        "monopropellant": 20.0
+      },
+      "moduleStages": {},
+      "stage": null,
+      "attachment": null
+    },
+    {
+      "id": "p2",
+      "definitionId": "flight-upper-tank",
+      "resources": {
+        "liquidPropellant": 1470.0
+      },
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "p1",
+        "parentNodeId": "bottom",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "p3",
+      "definitionId": "flight-upper-engine",
+      "resources": {},
+      "moduleStages": {},
+      "stage": 1,
+      "attachment": {
+        "parentId": "p2",
+        "parentNodeId": "bottom",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "p4",
+      "definitionId": "flight-decoupler",
+      "resources": {},
+      "moduleStages": {},
+      "stage": 1,
+      "attachment": {
+        "parentId": "p3",
+        "parentNodeId": "bottom",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "p5",
+      "definitionId": "flight-booster-tank",
+      "resources": {
+        "liquidPropellant": 5350.0
+      },
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "p4",
+        "parentNodeId": "bottom",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "p6",
+      "definitionId": "flight-booster-engine",
+      "resources": {},
+      "moduleStages": {},
+      "stage": 0,
+      "attachment": {
+        "parentId": "p5",
+        "parentNodeId": "bottom",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "leg0",
+      "definitionId": "flight-landing-strut",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "p5",
+        "parentNodeId": "leg0",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "foot0",
+      "definitionId": "flight-foot-0",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "leg0",
+        "parentNodeId": "bottom",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "leg1",
+      "definitionId": "flight-landing-strut",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "p5",
+        "parentNodeId": "leg1",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "foot1",
+      "definitionId": "flight-foot-1",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "leg1",
+        "parentNodeId": "bottom",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "leg2",
+      "definitionId": "flight-landing-strut",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "p5",
+        "parentNodeId": "leg2",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "foot2",
+      "definitionId": "flight-foot-2",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "leg2",
+        "parentNodeId": "bottom",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "leg3",
+      "definitionId": "flight-landing-strut",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "p5",
+        "parentNodeId": "leg3",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "foot3",
+      "definitionId": "flight-foot-3",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "leg3",
+        "parentNodeId": "bottom",
+        "nodeId": "top"
+      }
+    },
+    {
+      "id": "p7",
+      "definitionId": "crew-seat",
+      "resources": {
+        "monopropellant": 5.0
+      },
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "p1",
+        "parentNodeId": "crew-seat",
+        "nodeId": "side"
+      }
+    }
+  ]
+}

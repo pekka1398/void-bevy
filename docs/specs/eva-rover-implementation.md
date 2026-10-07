@@ -109,3 +109,14 @@ A combined dry-contact regression exposed ULP retiming by the water stepping wra
 cleared native solver history on nominal dry steps. The accepted dry cadence is now preserved;
 EVA 6, vehicles 3, water 6 and aircraft 3 targeted tests pass together after that fix. Main source
 has compiled, but root EVA dynamic GUI and human acceptance are still pending.
+
+## Crewed rocket acceptance craft
+
+`crewed_flight_rocket()` reuses the stock two-stage/RCS rocket and the same Seat module through
+an authored side socket. `crates/assembly/data/crewed-rocket.json` is the exported Craft3 input,
+usable directly by the existing main-game `--craft` loader. The external side seat is a declared
+first-round carrier fixture, not a cabin/ladder simulation. Its flight command requires a healthy
+occupied seat; the rocket RCS supply remains separate from the isolated five-kilogram backpack.
+For ordinary-spacecraft EVA inspection run `void-app --rendezvous --craft
+crates/assembly/data/crewed-rocket.json` and use F exit/board, H backpack and the profile HUD.
+The spinning remote Orbit transaction test also uses this craft and preserves crew mass/COM/P/L.
