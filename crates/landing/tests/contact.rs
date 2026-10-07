@@ -564,3 +564,40 @@ fn retiming_rebases_half_velocity_without_an_impulse() {
         assert_eq!(world.world.integration_parameters.dt, dt as f32);
     }
 }
+
+#[test]
+fn contact_constraint_keeps_real_micrometer_motion_in_native_local_authority() {
+    let Env {
+        mut ephemeris,
+        frame,
+        ..
+    } = plain_pebble();
+    let start = DVec3::new(100_000.0, 0.0, 0.0);
+    let mut world = ContactWorld::new(frame, None, options(), 0.0, start, &mut ephemeris);
+    let handle = world.add_body(
+        &ephemeris,
+        &spec(
+            SimpleShape::Box {
+                half_extents: DVec3::splat(0.2),
+            },
+            500.0,
+            0.0,
+            0.0,
+        ),
+        FrameState {
+            position: start,
+            velocity: DVec3::ZERO,
+        },
+        DQuat::IDENTITY,
+        DVec3::ZERO,
+    );
+    let speed = 0.00005;
+    world.apply_contact_wrench_impulse(handle, DVec3::Y * (500.0 * speed), DVec3::ZERO, true);
+    world.step(&mut ephemeris, None);
+    let displacement = world.position(handle) - start;
+    assert!(
+        (displacement.y - speed * options().step_seconds).abs() < 1e-8,
+        "real sub-micrometer native motion erased: {displacement:?}"
+    );
+    assert!(displacement.y > 0.5e-6);
+}

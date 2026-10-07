@@ -3097,8 +3097,6 @@ impl Fleet {
         if let SceneFrame::Bubble(f) = &mut self.scenes.get_mut(&scene).unwrap().world.frame {
             f.advance_origin(&mut self.ephemeris, self.time + dt);
         }
-        let mut wheel_loads = self.wheel_loads(scene);
-        self.add_eva_loads(scene, &mut wheel_loads);
         let ids = self.scenes[&scene].members.clone();
         let mut plans = vec![];
         let mut initial_water_acceleration = HashMap::new();
@@ -3247,6 +3245,12 @@ impl Fleet {
                 active + water_wrench.force / snapshot.mass_kg,
             ));
         }
+        let external_acceleration: HashMap<_, _> = plans
+            .iter()
+            .map(|(_, body, previous, current, _, _)| (*body, (*previous + *current) / 2.0))
+            .collect();
+        let mut wheel_loads = self.wheel_loads(scene, &external_acceleration);
+        self.add_eva_loads(scene, &mut wheel_loads);
         let world = &mut self.scenes.get_mut(&scene).unwrap().world;
         if let SceneFrame::Bubble(f) = &mut world.frame {
             f.advance_origin(&mut self.ephemeris, self.time + dt);

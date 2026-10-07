@@ -1058,7 +1058,13 @@ impl<F: ContactFrame> ContactWorld<F> {
         let handles: Vec<RigidBodyHandle> = self.body_handles().collect();
 
         for &handle in &handles {
-            if self.jointed(handle) || self.contacts(handle) {
+            // Raycast tires and finite boot traction are contact constraints too. Their
+            // native impulse must not enter the free-attitude override (a pose write marks
+            // collider POSITION and repeatedly wakes an otherwise settled supported body).
+            if self.jointed(handle)
+                || self.contacts(handle)
+                || self.record(handle).pending_contact_delta != DVec3::ZERO
+            {
                 constrained.push(handle);
             }
             self.record_mut(handle).contact_delta_v = 0.0;
@@ -1073,7 +1079,12 @@ impl<F: ContactFrame> ContactWorld<F> {
             // Rapier gets the f64 position, rounded, when it has drifted from it; setting it every
             // step would teleport resting bodies and drop the contact solver's warm start.
             let local = self.to_local(position);
-            if !same32(local, self.world.bodies[handle].translation()) {
+            // A contact owner keeps native-local pose authority. Reconstructing that
+            // pose via a planet-scale absolute f64 subtraction can cause a new POSITION
+            // mutation from rounding alone, which Rapier treats as an external teleport.
+            if !constrained.contains(&handle)
+                && !same32(local, self.world.bodies[handle].translation())
+            {
                 self.world.bodies[handle].set_translation(v32(local), false);
             }
             let body = &self.world.bodies[handle];
@@ -1183,7 +1194,8 @@ impl<F: ContactFrame> ContactWorld<F> {
             let moved = t - start;
             let rounding =
                 1e-6 * (hypot([t.x, t.y, t.z]) + hypot([start.x, start.y, start.z])) + 1e-9;
-            let free = v.is_some_and(|v| same32(v, body.linvel()))
+            let free = !constrained.contains(&handle)
+                && v.is_some_and(|v| same32(v, body.linvel()))
                 && hypot([moved.x - exact.x, moved.y - exact.y, moved.z - exact.z]) <= rounding;
             let solver_delta = match v {
                 Some(v) if !free => DVec3::new(after.x - v.x, after.y - v.y, after.z - v.z),

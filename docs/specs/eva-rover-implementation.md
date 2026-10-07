@@ -71,14 +71,28 @@ Physical body-fixed north/east tests, not navball convention, validate the direc
 Known integration work still required after this local-only milestone: use multiscale
 enter_vessel/restore_view scopes around exit/board, explicitly reject different systems, and run
 remote-system transfer tests; packed Orbit wheel spin/motor torque/rails needs acceptance updates.
-Passive support no longer resets native activation, but the existing single-sweep tire solver still
-has about 0.09m/s parked residual on the test terrain and does not settle to sleep in 20s. A failing
-regression is preserved at /tmp/void-eva-suspension-sleep-regression.rs for the next solver step;
-this milestone does not claim parked sleep or full wheel owner completion.
+The original local single-sweep milestone had about 0.09m/s parked residual. The subsequent
+coupled contact milestone replaces that sweep with 32 deterministic projected Gauss-Seidel passes
+on frozen live-collider geometry, including same-tire cross-axis effective mass and all upcoming
+frame/thrust/air/water acceleration. Each pass replaces a tire wrench; only the final batch applies
+native reciprocal impulses and commits wheel state. Finite spring/damper, tire friction circle,
+rotor inertia and brake limits remain authored physical limits.
+
+Virtual supports now use native-local pose authority like native contact constraints, avoiding
+planet-absolute f64 roundtrips and free-attitude pose writes that repeatedly wake native bodies.
+There is no new position/velocity approximation or relaxed sleep threshold. The restored sleep
+regression verifies a settled four-tire rover sleeps, remains fixed and wakes under driver input;
+a moderate real Terra incline test verifies brake hold then physical roll on brake release. A
+sub-micrometer contact-impulse test verifies real small native displacement is retained. Orbit
+wheel actuation/rails and shared owner completion remain subsequent work.
 
 Targeted local evidence: EVA transfer/checkpoint/replay, spinning-carrier conservation, dynamic
 walk/jump, low-gravity ballistic jump and finite orbital backpack resource/checkpoint/replay pass.
-Main EVA controls/avatar rendering and root TigerVNC/human acceptance are subsequent work.
+Main-game controls/avatar are committed in 65ac3f3: crewed --rover, F hatch/boarding, ground
+WASD/QE, Space jump, H finite backpack, profile-specific operation hints and visible suit body
+pieces inside the collision envelope. Root metadata validation passed; root TigerVNC and human
+acceptance remain separate. Dry water cadence fix 7c02354 preserves native solver history instead
+of rebasing unchanged timesteps due end-time subtraction rounding.
 
 ## Precise stellar crew transactions (root integration)
 

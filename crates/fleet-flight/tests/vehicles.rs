@@ -153,3 +153,91 @@ fn positive_steering_turns_right_in_body_fixed_north_east_coordinates() {
         delta.to_degrees()
     );
 }
+
+#[test]
+fn passive_suspension_can_sleep_and_driver_input_wakes_without_sinking() {
+    let mut s = make();
+    advance(&mut s, 20.0);
+    let sim = s.sim();
+    let id = sim.selected.clone();
+    let scene = sim.fleet.snapshot(&id).scene.unwrap();
+    let state = sim
+        .fleet
+        .scene_snapshots()
+        .into_iter()
+        .find(|x| x.id == scene)
+        .unwrap();
+    println!("parked sleep {}", state.asleep);
+    assert!(
+        state.asleep,
+        "passive support repeatedly reset native sleep activation"
+    );
+    let before = sim.fleet.body_fixed_state(&id, sim.home);
+    advance(&mut s, 2.0);
+    let after = s.sim().fleet.body_fixed_state(&id, s.sim().home);
+    assert!((after.position - before.position).length() < 1e-6);
+    s.execute(Action::Vehicle {
+        control: VehicleControl {
+            drive: 0.5,
+            steer: 0.0,
+            brake: 0.0,
+        },
+    });
+    advance(&mut s, 1.0);
+    let moved = s.sim().fleet.body_fixed_state(&id, s.sim().home);
+    assert!((moved.position - after.position).length() > 0.2);
+}
+
+#[test]
+fn four_tires_park_on_real_inclined_terrain_and_roll_when_brake_released() {
+    let planet = void_landing::earth_size();
+    let terrain = &planet.terrain;
+    let site = (0..160)
+        .find_map(|i| {
+            let u = i as f64 * 2.399963229728653;
+            let z = -0.8 + 1.6 * i as f64 / 159.0;
+            let r = (1.0 - z * z).sqrt();
+            let site = DVec3::new(r * u.cos(), r * u.sin(), z);
+            let east = DVec3::Z.cross(site).normalize();
+            let north = site.cross(east);
+            let height =
+                |axis: DVec3| terrain.height((site + axis / terrain.radius_meters).normalize());
+            let grade = ((height(east) - height(-east)) / 2.0)
+                .hypot((height(north) - height(-north)) / 2.0);
+            (grade > 0.12 && grade < 0.22).then_some(site)
+        })
+        .expect("authored Terra fixture must contain a moderate incline");
+    let mut session = FlightSession::new(InitialWorld::new(&planet, &rover(), site, false));
+    advance(&mut session, 20.0);
+    let id = session.sim().selected.clone();
+    let before = session
+        .sim()
+        .fleet
+        .body_fixed_state(&id, session.sim().home);
+    advance(&mut session, 3.0);
+    let parked = session
+        .sim()
+        .fleet
+        .body_fixed_state(&id, session.sim().home);
+    assert!(
+        (parked.position - before.position).length() < 0.02,
+        "four-tire park brake creeped: {:?}",
+        parked.position - before.position
+    );
+    session.execute(Action::Vehicle {
+        control: VehicleControl {
+            drive: 0.0,
+            steer: 0.0,
+            brake: 0.0,
+        },
+    });
+    advance(&mut session, 3.0);
+    let rolling = session
+        .sim()
+        .fleet
+        .body_fixed_state(&id, session.sim().home);
+    assert!(
+        (rolling.position - parked.position).length() > 0.2,
+        "unbraked finite-inertia tires artificially held slope"
+    );
+}

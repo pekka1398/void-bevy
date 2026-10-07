@@ -9,6 +9,23 @@ pub(super) struct WheelLoads {
     pub updates: Vec<(String, String, ModuleState)>,
     pub wake: HashSet<RigidBodyHandle>,
 }
+/// One tire evaluated from the accepted boundary, with immutable live-collider geometry.
+struct TireConstraint<'a> {
+    part: String,
+    module: String,
+    body: RigidBodyHandle,
+    support: Option<RigidBodyHandle>,
+    point: DVec3,
+    com: DVec3,
+    axle: DVec3,
+    definition: &'a void_assembly::WheelDefinition,
+    initial: void_assembly::WheelState,
+    control: VehicleControl,
+    actuator: VehicleControl,
+    contact: Option<WheelContact>,
+    previous_wrench: (DVec3, DVec3),
+    accepted: void_assembly::WheelState,
+}
 impl Fleet {
     /// Root command owns the selected vessel's operator profile, including docked mixed craft.
     pub fn control_profile(&self, vessel: &str) -> Option<void_assembly::ControlProfile> {
@@ -88,11 +105,16 @@ impl Fleet {
         }
         Ok(())
     }
-    pub(super) fn wheel_loads(&self, scene: u64) -> WheelLoads {
+    pub(super) fn wheel_loads(
+        &self,
+        scene: u64,
+        external_acceleration: &HashMap<RigidBodyHandle, DVec3>,
+    ) -> WheelLoads {
         let s = &self.scenes[&scene];
         let world = &s.world;
         let dt = self.options.step_seconds;
         let mut loads = WheelLoads::default();
+        let mut tires = Vec::new();
         for id in &s.members {
             let v = self.vessel(id);
             let Owner::Scene { body, push, .. } = v.owner else {
@@ -103,7 +125,6 @@ impl Fleet {
             let translation = world.position(body);
             let com = world.origin + vec64(b.center_of_mass());
             let accepted = world.state(&*self.ephemeris, body, push).velocity;
-            let half_correction = accepted - vec64(b.linvel());
             for pid in &v.members {
                 let part = self.parts.part(pid);
                 for module in &part.definition.modules {
@@ -140,18 +161,6 @@ impl Fleet {
                         }
                         let forward = projected.normalize();
                         let side = h.normal.cross(forward);
-                        let support_correction = h.body.map_or(DVec3::ZERO, |support| {
-                            s.members
-                                .iter()
-                                .find_map(|sid| match self.vessel(sid).owner {
-                                    Owner::Scene { body: b, push, .. } if b == support => Some(
-                                        world.state(&*self.ephemeris, b, push).velocity
-                                            - vec64(world.body(b).linvel()),
-                                    ),
-                                    _ => None,
-                                })
-                                .unwrap_or(DVec3::ZERO)
-                        });
                         let effective = |axis| {
                             world.inverse_point_mass(body, h.point, axis)
                                 + h.body.map_or(0.0, |support| {
@@ -163,32 +172,7 @@ impl Fleet {
                             normal: h.normal,
                             forward,
                             relative_point_velocity: world.point_velocity(body, h.point)
-                                + half_correction
-                                - h.point_velocity
-                                - support_correction
-                                + loads
-                                    .bodies
-                                    .get(&body)
-                                    .map_or(DVec3::ZERO, |(force, torque)| {
-                                        world.impulse_point_velocity_delta(
-                                            body,
-                                            *force * dt,
-                                            *torque * dt,
-                                            h.point,
-                                        )
-                                    })
-                                - h.body
-                                    .and_then(|support| {
-                                        loads.bodies.get(&support).map(|(force, torque)| {
-                                            world.impulse_point_velocity_delta(
-                                                support,
-                                                *force * dt,
-                                                *torque * dt,
-                                                h.point,
-                                            )
-                                        })
-                                    })
-                                    .unwrap_or(DVec3::ZERO),
+                                - h.point_velocity,
                             inverse_mass_normal: effective(h.normal),
                             inverse_mass_forward: effective(forward),
                             inverse_mass_side: effective(side),
@@ -228,36 +212,132 @@ impl Fleet {
                             loads.wake.insert(support);
                         }
                     }
-                    let (next, force, axle_torque) =
-                        void_assembly::step_wheel(d, state, actuator, contact, dt);
-                    // Positive spin is about normal cross forward. In the air use authored axle.
+                    let point = hit.map_or(origin, |h| h.point);
+                    let support = hit
+                        .and_then(|h| h.body)
+                        .filter(|b| world.body(*b).is_dynamic());
                     let axle =
                         contact.map_or((-down).cross(rolling), |c| c.normal.cross(c.forward));
-                    let point = hit.map_or(origin, |h| h.point);
-                    let torque = (point - com).cross(force) + axle * axle_torque;
-                    let entry = loads.bodies.entry(body).or_default();
-                    entry.0 += force;
-                    entry.1 += torque;
-                    if let Some(support) = hit
-                        .and_then(|h| h.body)
-                        .filter(|b| world.body(*b).is_dynamic())
-                    {
-                        let support_com =
-                            world.origin + vec64(world.body(support).center_of_mass());
-                        let entry = loads.bodies.entry(support).or_default();
-                        entry.0 -= force;
-                        entry.1 += (point - support_com).cross(-force);
-                    }
-                    loads.updates.push((
-                        pid.clone(),
-                        mid.clone(),
-                        ModuleState::Wheel {
-                            state: next,
-                            control,
-                        },
-                    ));
+                    let acceleration = world.frame.acceleration(
+                        &*self.ephemeris,
+                        self.time,
+                        world.state(&*self.ephemeris, body, push).position,
+                        accepted,
+                    );
+                    let support_acceleration = support.map_or(DVec3::ZERO, |handle| {
+                        let sv = s
+                            .members
+                            .iter()
+                            .find_map(|sid| match self.vessel(sid).owner {
+                                Owner::Scene { body: h, push, .. } if h == handle => {
+                                    Some(world.state(&*self.ephemeris, h, push))
+                                }
+                                _ => None,
+                            })
+                            .expect("dynamic support vessel");
+                        world.frame.acceleration(
+                            &*self.ephemeris,
+                            self.time,
+                            sv.position,
+                            sv.velocity,
+                        )
+                    });
+                    let contact = contact.map(|mut c| {
+                        c.relative_point_velocity += (acceleration + external_acceleration[&body]
+                            - support_acceleration
+                            - support.map_or(DVec3::ZERO, |h| external_acceleration[&h]))
+                            * dt;
+                        c
+                    });
+                    tires.push(TireConstraint {
+                        part: pid.clone(),
+                        module: mid.clone(),
+                        body,
+                        support,
+                        point,
+                        com,
+                        axle,
+                        definition: d,
+                        initial: state,
+                        control,
+                        actuator,
+                        contact,
+                        previous_wrench: (DVec3::ZERO, DVec3::ZERO),
+                        accepted: state,
+                    });
                 }
             }
+        }
+        // Projected Gauss-Seidel on frozen geometry. Each visit replaces its previous
+        // wrench; only the final batch is applied to Rapier and committed to PartGraph.
+        // This couples all support/brake contacts instead of biasing the last wheel.
+        for _ in 0..32 {
+            for tire in &mut tires {
+                let TireConstraint {
+                    body,
+                    support,
+                    point,
+                    com,
+                    axle,
+                    definition: d,
+                    initial: state,
+                    actuator,
+                    contact: base,
+                    previous_wrench: previous,
+                    accepted: next,
+                    ..
+                } = tire;
+                let predicted = |h| {
+                    loads.bodies.get(&h).map_or(DVec3::ZERO, |(f, t)| {
+                        world.impulse_point_velocity_delta(h, *f * dt, *t * dt, *point)
+                    })
+                };
+                let contact = base.map(|mut c| {
+                    c.relative_point_velocity +=
+                        predicted(*body) - support.map_or(DVec3::ZERO, predicted);
+                    let side = c.normal.cross(c.forward);
+                    // The local wheel kernel handles its own diagonal effective masses.
+                    // Keep cross-axis response in the predictor, including its axle reaction.
+                    c.relative_point_velocity -= dt
+                        * (c.normal * previous.0.dot(c.normal) * c.inverse_mass_normal
+                            + c.forward * previous.0.dot(c.forward) * c.inverse_mass_forward
+                            + side * previous.0.dot(side) * c.inverse_mass_side);
+                    c
+                });
+                let entry = loads.bodies.entry(*body).or_default();
+                entry.0 -= previous.0;
+                entry.1 -= previous.1;
+                if let Some(h) = support {
+                    let entry = loads.bodies.entry(*h).or_default();
+                    entry.0 += previous.0;
+                    let support_com = world.origin + vec64(world.body(*h).center_of_mass());
+                    entry.1 -= (*point - support_com).cross(-previous.0);
+                }
+                let (updated, force, reaction) =
+                    void_assembly::step_wheel(d, *state, *actuator, contact, dt);
+                *next = updated;
+                let torque = (*point - *com).cross(force) + *axle * reaction;
+                let entry = loads.bodies.entry(*body).or_default();
+                entry.0 += force;
+                entry.1 += torque;
+                if let Some(h) = support {
+                    let support_com = world.origin + vec64(world.body(*h).center_of_mass());
+                    let entry = loads.bodies.entry(*h).or_default();
+                    entry.0 -= force;
+                    entry.1 += (*point - support_com).cross(-force);
+                }
+                *previous = (force, torque);
+            }
+        }
+        for tire in tires {
+            loads.updates.push((
+                tire.part,
+                tire.module,
+                ModuleState::Wheel {
+                    state: tire.accepted,
+                    control: tire.control,
+                },
+            ));
         }
         loads
     }
