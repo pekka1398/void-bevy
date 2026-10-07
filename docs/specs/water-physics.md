@@ -51,3 +51,7 @@ ForceOnly coupled/guided air 沿用原 no-spin force evaluator、air torque 為�
 自己的 torque 不受 air mode 影響。no-ground Fleet 測試分別核對 dry-near-sea
 ForceOnly 與無海既有旋轉一致、Full 有氣動阻尼，以及 airless submerged 的兩模式
 water 角速度／線速度一致。這些測試及 near/far/incoming envelope 測試通過。
+
+Scene 後續修正：water torque 中點和 water boundary push 更新不再依赖 AirDynamics。
+ForceOnly 原 air force/start推力語義保留，仅从原 now 移除 start water 並加入 end
+water；airless Ground 中傾斜濺落 10s 兩模式 position／velocity／spin 一致（零差）。

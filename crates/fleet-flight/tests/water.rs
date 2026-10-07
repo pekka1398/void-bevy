@@ -143,3 +143,53 @@ fn detached_dense_engine_sinks_under_same_scene_owner() {
     println!("engine sunk {altitude}");
     assert!(altitude < -5.);
 }
+#[test]
+fn airless_ground_water_sampling_is_same_in_both_air_modes() {
+    let make = |mode| {
+        let mut planet = void_landing::earth_size();
+        planet.sea_level = Some(1800.);
+        let mut initial =
+            InitialWorld::new(&planet, &void_assembly::reentry_capsule(), DVec3::X, false)
+                .with_air_dynamics(mode);
+        initial
+            .world
+            .bodies
+            .get_mut("terra")
+            .unwrap()
+            .visual
+            .color_datum_meters = 1800.;
+        let mut session = FlightSession::new(initial);
+        let id = void_fleet_flight::water::splashdown_with(
+            &mut session,
+            &void_assembly::reentry_capsule(),
+            8.,
+            0.6,
+        );
+        (session, id)
+    };
+    let (mut only, a) = make(void_vessels::AirDynamics::ForceOnly);
+    let (mut full, b) = make(void_vessels::AirDynamics::ForceAndTorque);
+    for _ in 0..40 {
+        for session in [&mut only, &mut full] {
+            session.execute(Action::Advance {
+                seconds: 0.25,
+                rails: false,
+            });
+        }
+    }
+    let sa = only.sim().fleet.body_fixed_state(&a, only.sim().home);
+    let sb = full.sim().fleet.body_fixed_state(&b, full.sim().home);
+    println!(
+        "water modes dp {} dv {}",
+        (sa.position - sb.position).length(),
+        (sa.velocity - sb.velocity).length()
+    );
+    assert!((sa.position - sb.position).length() < 1e-8);
+    assert!((sa.velocity - sb.velocity).length() < 1e-8);
+    assert!(
+        (only.sim().fleet.snapshot(&a).angular_velocity
+            - full.sim().fleet.snapshot(&b).angular_velocity)
+            .length()
+            < 1e-8
+    );
+}

@@ -3026,6 +3026,7 @@ impl Fleet {
         let wheel_loads = self.wheel_loads(scene);
         let ids = self.scenes[&scene].members.clone();
         let mut plans = vec![];
+        let mut initial_water_acceleration = HashMap::new();
         for id in ids {
             let v = self.vessel(&id).clone();
             let Owner::Scene { body, push, .. } = v.owner else {
@@ -3096,6 +3097,7 @@ impl Fleet {
                 q,
                 w,
             );
+            initial_water_acceleration.insert(id.clone(), water_wrench.force / snapshot.mass_kg);
             let air_acceleration = (air_wrench.map_or(DVec3::ZERO, |w| w.force)
                 + water_wrench.force)
                 / snapshot.mass_kg;
@@ -3114,9 +3116,7 @@ impl Fleet {
                 DVec3::ZERO
             } else {
                 let steering = self.steering(&v, q, w, dt);
-                if !full_air {
-                    tau + steering + q.conjugate() * water_wrench.torque
-                } else {
+                {
                     let initial = tau + air_torque + steering;
                     let inertia = rows(self.inertia_of(&v.members, self.centre(&v.members)));
                     let (qm, wm) = rotation_step(q, w, &inertia, initial, spin, dt / 2.0);
@@ -3142,6 +3142,7 @@ impl Fleet {
                         q,
                         self.time,
                     )
+                    .filter(|_| full_air)
                     .map(|air| air.with_controls(self.controls[&v.id].turn))
                     .map_or(DVec3::ZERO, |air| {
                         qm.conjugate()
@@ -3222,9 +3223,6 @@ impl Fleet {
                     .world
                     .set_piece_masses(body, &masses);
             }
-            if !full_air {
-                continue;
-            }
             // The staggered velocity reconstruction needs the load at the new boundary. Keeping
             // the start load here delays every attitude-dependent thrust/drag by half a step.
             let v = self.vessel(&id);
@@ -3274,7 +3272,11 @@ impl Fleet {
             )
             .wrench_in(&at, contact, state_of(local), q, w)
             .force;
-            let next = (q * rating.force + next_air + next_water) / self.mass(&v.members);
+            let next = if full_air {
+                (q * rating.force + next_air + next_water) / self.mass(&v.members)
+            } else {
+                now - initial_water_acceleration[&id] + next_water / self.mass(&v.members)
+            };
             if let Owner::Scene { push, .. } = &mut self.vessels.get_mut(&id).unwrap().owner {
                 *push = next;
             }
