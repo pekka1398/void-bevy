@@ -378,3 +378,60 @@ fn remote_staging_burns_actual_fuel_and_continues_after_direct_restore() {
     }
     assert_eq!(world_mark(session.sim()), world_mark(restored.sim()));
 }
+
+#[test]
+fn aircraft_air_data_is_local_in_remote_system_and_journal_keeps_exact_part_poses() {
+    use glam::{DQuat, DVec3};
+    let planet = void_landing::aurelia();
+    let mut initial = InitialWorld::new(
+        &planet,
+        &void_assembly::demo_craft(),
+        void_vessels::flat_site(&planet),
+        true,
+    );
+    initial.world = stellar_neighborhood(&planet);
+    initial.launch_body = "Sol/aurelia".into();
+    let mut sim = initial.build();
+    let mut observations = vec![];
+    for (system, name) in [(SystemId(0), "Sol/aurelia"), (SystemId(1), "Beryl/aurelia")] {
+        let body = sim.world.body_index(name);
+        let def = &sim.fleet.ephemeris.bodies()[body];
+        let radial = DVec3::X * (def.radius_meters + 20_000.0);
+        let spin = def.rotation.axis() * def.rotation.rate();
+        let (p, v) = sim
+            .fleet
+            .ephemeris
+            .body_in_system(void_frames::BodyId(body), 0.0);
+        let id = sim.fleet.launch_in_system(
+            &void_assembly::aircraft(),
+            system,
+            void_landing::FrameState {
+                position: p + radial,
+                velocity: v + spin.cross(radial) + DVec3::Z * 100.0,
+            },
+            DQuat::IDENTITY,
+            DVec3::ZERO,
+        );
+        observations.push(sim.fleet.air_data(&id));
+        let marks = void_fleet_flight::session::world_mark(&sim);
+        let ship = marks["ships"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == id)
+            .unwrap();
+        for part in ship["parts"].as_array().unwrap() {
+            let pid = part["id"].as_str().unwrap();
+            assert_eq!(
+                part["localPose"],
+                serde_json::to_value(sim.fleet.parts().part(pid).pose).unwrap()
+            );
+        }
+    }
+    assert!((observations[0].airspeed_mps - 100.0).abs() < 1e-6);
+    assert!((observations[1].airspeed_mps - 100.0).abs() < 1e-6);
+    assert!(
+        (observations[0].dynamic_pressure_pa / observations[1].dynamic_pressure_pa - 1.0).abs()
+            < 1e-8
+    );
+}

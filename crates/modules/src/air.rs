@@ -125,12 +125,40 @@ impl VesselAir {
         rotation: DQuat,
         angular_velocity: DVec3,
     ) -> AirData {
+        let mut owned;
+        let (frames, query) = if ephemeris.physics_offset() == void_frames::SplitPosition::ORIGIN {
+            let frames = self.environment.frames();
+            (frames, frames.systems[ephemeris.origin_system().0])
+        } else {
+            owned = self.environment.frames().clone();
+            let query = owned.tree.add_split_fixed(
+                owned.systems[ephemeris.origin_system().0],
+                ephemeris.physics_offset(),
+            );
+            (&owned, query)
+        };
+        self.air_data_in(
+            &frames.tree.at(time, ephemeris),
+            query,
+            state,
+            rotation,
+            angular_velocity,
+        )
+    }
+    /// Read local air data without flattening a remote vessel through the home system.
+    pub fn air_data_in<S: FrameSource + ?Sized>(
+        &self,
+        at: &Snapshot<'_, S>,
+        query: FrameId,
+        state: State,
+        rotation: DQuat,
+        angular_velocity: DVec3,
+    ) -> AirData {
         let frames = self.environment.frames();
-        let at = frames.tree.at(time, ephemeris);
         let sample = |state| {
             self.bodies.iter().find_map(|&body| {
                 self.environment
-                    .surroundings(&at, frames, frames.origin, state, body)
+                    .surroundings(at, frames, query, state, body)
                     .air
             })
         };

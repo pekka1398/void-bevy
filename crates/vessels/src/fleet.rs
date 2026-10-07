@@ -518,7 +518,8 @@ impl Fleet {
     }
     pub fn air_data(&self, id: &str) -> void_modules::AirData {
         let v = self.vessel(id);
-        let snap = self.snapshot_of(v);
+        let query = self.query_frame(v);
+        let snap = self.snapshot_in_frame(v, query);
         vessel_air_at(
             &self.environment,
             &self.parts,
@@ -529,9 +530,9 @@ impl Fleet {
         )
         .map(|air| air.with_controls(self.controls[&v.id].turn))
         .map_or(void_modules::AirData::default(), |air| {
-            air.air_data(
-                &*self.ephemeris,
-                self.time,
+            air.air_data_in(
+                &self.frames(),
+                query,
                 State {
                     position: snap.position,
                     velocity: snap.velocity,

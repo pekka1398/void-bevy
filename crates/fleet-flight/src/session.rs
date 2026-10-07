@@ -515,6 +515,7 @@ pub fn world_mark(sim: &FleetFlight) -> serde_json::Value {
                 "session: invalid part state {}",p.id);
             json!({
             "id": p.id, "definition": p.definition.id, "position": p.position,
+            "localPose":sim.fleet.parts().part(&p.id).pose,
             "rotation": p.rotation, "fuel": p.fuel_kg, "stage": p.stage,
             "staged": p.staged, "lit": p.lit, "firing": p.firing,
             "resources":p.resources,"modules":p.modules,"moduleStages":p.module_stages,
