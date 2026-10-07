@@ -1,6 +1,6 @@
 # 任務：太陽系各天體 scenery 與程序地形
 
-狀態：提供開發入口與交接邊界；實際天體外觀尚未實作。開發入口隨多天體分支合併 master；world schema 2 / MODEL_VERSION 13。
+狀態：solar scenery 分支已提供第一輪十天體 recipe 與獨立 lab，待使用者視窗驗收；分支 world schema 3 / MODEL_VERSION 14。完成項、限制與操作見 [solar-scenery-lab.md](../solar-scenery-lab.md)。主遊戲預設不變。
 
 ## 目的
 
@@ -54,7 +54,7 @@ Tab 切船；1/2 觀測母星／月球；Home 回船；O 生成觀測天體的�
 
 - 已支持多個分離的大氣體積，每個有自己的 LUT、光學／雲參數及體座標；大氣可無 terrain。未觀測天體的大氣仍參與 transport。
 - 遠到近的整體積合成，只支持順序明確的視角；角向投影重疊且徑向範圍也重疊時拒絕。大氣球互相穿透時也拒絕。需要這些視角時，實作共同逐射線積分／逐像素排序，不能改成任意中心距離排序。
-- 現有視角仍要求觀測天體有 terrain；沒有 terrain 的大氣可在遠景渲染，但太陽／巨行星近景觀測仍待新增 renderer recipe。這是後續實作的一部分，不標為已完成。
+- 本輪 solar lab 已解除觀測焦點必須有 terrain 的限制；太陽／巨行星以明確 SurfaceRecipe 建立純視覺球殼，Halo 環為獨立幾何。近景為固定區域俯視；尚無低空地平線／氣體內部相機。
 - 未實作：多恆星光照、遮食、環陰影、雲影、移動天氣、極光、植被、地形新生物群系，以及巨行星氣體的物理進入／毀損規則。
 - 共用 immutable noise 不代表共用 LUT 或配置。新增 texture/material/mesh 必須登記 per-world ownership，reset/load 釋放，舊 generation 的 task 不得污染新場景。
 

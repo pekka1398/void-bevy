@@ -2,6 +2,7 @@
 //! `SurfaceContract.ts`) with scenery's layered planet and landing's hills. The same `Terrain`
 //! builds drawn tiles and collision tiles, so what is drawn is what is collided with.
 
+mod cratered;
 mod hills;
 mod layered;
 pub mod noise;
@@ -11,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use void_lod::{SurfaceSample, SurfaceSampler};
 use void_math::hypot;
 
+pub use cratered::{Cratered, CrateredOptions};
 pub use hills::{Hills, HillsOptions};
 pub use layered::{DEFAULT_LAYERED, Layered, LayeredOptions, MAX_HEIGHT, SEA_LEVEL};
 
@@ -20,6 +22,7 @@ pub use layered::{DEFAULT_LAYERED, Layered, LayeredOptions, MAX_HEIGHT, SEA_LEVE
 #[serde(tag = "kind", content = "options", rename_all = "lowercase")]
 pub enum TerrainConfig {
     Hills(HillsOptions),
+    Cratered(CrateredOptions),
     Layered(LayeredOptions),
 }
 
@@ -28,7 +31,7 @@ impl TerrainConfig {
     /// continents and basins are split at `SEA_LEVEL`; hills have no sea.
     pub fn sea_level_meters(&self) -> Option<f64> {
         match self {
-            TerrainConfig::Hills(_) => None,
+            TerrainConfig::Hills(_) | TerrainConfig::Cratered(_) => None,
             TerrainConfig::Layered(_) => Some(SEA_LEVEL),
         }
     }
@@ -37,6 +40,7 @@ impl TerrainConfig {
 #[derive(Clone, Debug)]
 enum Kind {
     Hills(Hills),
+    Cratered(Cratered),
     Layered(Layered),
 }
 
@@ -60,6 +64,13 @@ impl Terrain {
     }
     pub fn from_config(config: &TerrainConfig) -> Self {
         match config {
+            TerrainConfig::Cratered(o) => Self {
+                config: config.clone(),
+                name: o.name.clone(),
+                radius_meters: o.radius_meters,
+                max_height_meters: o.max_height_meters,
+                kind: Kind::Cratered(Cratered::new(o)),
+            },
             TerrainConfig::Hills(o) => Self {
                 config: config.clone(),
                 name: o.name.clone(),
@@ -82,6 +93,7 @@ impl Terrain {
     /// size; point queries pass None for full detail. Anything but a unit direction panics.
     pub fn sample(&self, direction: DVec3, cell_meters: Option<f64>) -> (f64, [f64; 3]) {
         match &self.kind {
+            Kind::Cratered(c) => c.sample(direction),
             Kind::Hills(h) => {
                 let length = hypot([direction.x, direction.y, direction.z]);
                 assert!(

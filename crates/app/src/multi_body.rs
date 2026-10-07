@@ -26,7 +26,7 @@ struct Sun;
 #[derive(Component)]
 struct Hud;
 #[derive(Component)]
-struct FarBody(usize, AssetId<Mesh>, AssetId<StandardMaterial>);
+struct FarBody(usize, AssetId<Mesh>, AssetId<StandardMaterial>, bool);
 #[derive(Component)]
 struct StarSky;
 #[derive(Component)]
@@ -38,7 +38,6 @@ struct Piece {
 struct BodyScene {
     field: TileField<GroundMaterial>,
     material: Handle<GroundMaterial>,
-    air: AirSettings,
     color: Option<[f32; 3]>,
 }
 struct AtmosphericBody {
@@ -84,12 +83,74 @@ fn arg(name: &str) -> Option<String> {
         .position(|a| a == name)
         .map(|i| args.get(i + 1).expect("argument value").clone())
 }
+fn solar_mode() -> bool {
+    std::env::args().any(|a| a == "--solar")
+        || std::env::args()
+            .next()
+            .expect("executable")
+            .contains("solar_scenery")
+}
+fn selene_terrain(sim: &void_fleet_flight::FleetFlight) -> Option<usize> {
+    sim.world.bodies.get("selene")?.terrain.as_ref()?;
+    Some(sim.world.body_index("selene"))
+}
+fn preset(s: &mut FlightSession, id: &str, view: &str) {
+    let body = s.sim().world.body_index(id);
+    assert!(
+        s.sim().world.bodies.contains_key(id),
+        "body has no authored scenery"
+    );
+    let fleet = &s.sim().fleet;
+    let radius = fleet.ephemeris.bodies()[body].radius_meters;
+    let surface = fleet.body_frames(body).1;
+    let direction = if id == "sol" {
+        DVec3::new(1.0, 0.2, 0.3).normalize()
+    } else {
+        let sun = illuminated_site(s.sim(), body);
+        let east = if sun.z.abs() < 0.99 {
+            DVec3::Z.cross(sun).normalize()
+        } else {
+            DVec3::X.cross(sun).normalize()
+        };
+        (sun + east * 0.7 + DVec3::Z * 0.15).normalize()
+    };
+    let direction = fleet
+        .frames()
+        .transform(surface, fleet.origin_frame())
+        .apply_direction(direction);
+    let distance = radius
+        * match view {
+            "near" => 1.025,
+            "orbit" => {
+                if id == "halo" {
+                    6.0
+                } else {
+                    3.5
+                }
+            }
+            "far" => 12.0,
+            _ => panic!("view must be near/orbit/far"),
+        };
+    s.execute(Action::View {
+        command: ViewCommand::BodyPreset {
+            body,
+            direction,
+            distance,
+        },
+    });
+}
 fn initial() -> InitialWorld {
     if let Some(path) = arg("--world") {
         return serde_json::from_reader(std::fs::File::open(path).expect("open authored world"))
             .expect("parse authored InitialWorld");
     }
-    initial_with_atmospheres(std::env::args().any(|a| a == "--two-atmospheres"))
+    let mut initial = initial_with_atmospheres(std::env::args().any(|a| a == "--two-atmospheres"));
+    if solar_mode() {
+        initial.world = void_fleet_flight::world::solar_scenery(
+            &crate::flight::game_planet_by_id("aurelia", Some("layered")).planet,
+        );
+    }
+    initial
 }
 fn initial_with_atmospheres(two: bool) -> InitialWorld {
     let p = crate::flight::game_planet_by_id("aurelia", Some("layered"));
@@ -133,6 +194,13 @@ fn fixture() -> FlightSession {
     s.execute(Action::View {
         command: ViewCommand::Configure { main_camera: true },
     });
+    if solar_mode() {
+        preset(
+            &mut s,
+            &arg("--body").unwrap_or_else(|| "selene".into()),
+            &arg("--view").unwrap_or_else(|| "orbit".into()),
+        );
+    }
     s.execute(Action::EndFrame {
         paused: true,
         rate: 0,
@@ -229,7 +297,11 @@ pub fn run() {
                 })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "VOID · multi-body world".into(),
+                        title: if solar_mode() {
+                            "VOID · solar scenery".into()
+                        } else {
+                            "VOID · multi-body world".into()
+                        },
                         ..default()
                     }),
                     ..default()
@@ -264,12 +336,7 @@ fn setup(
     let sim = scene.session.sim();
     let (scenes, atmospheres, owned_images) =
         build_scenes(&mut commands, sim, &mut grounds, &mut images);
-    spawn_far(
-        &mut commands,
-        sim.fleet.ephemeris.bodies(),
-        &mut meshes,
-        &mut standard,
-    );
+    spawn_far(&mut commands, sim, &mut meshes, &mut standard);
     let (p, c) = void_scenery::generate_stars(&void_scenery::DEFAULT_STARS);
     commands.spawn((
         StarSky,
@@ -278,7 +345,7 @@ fn setup(
         Transform::default(),
         bevy::camera::visibility::NoFrustumCulling,
     ));
-    let air = scenes[&scene.active].air;
+    let air = preview_air(sim, scene.active);
     commands.spawn((
         Camera,
         Camera3d {
@@ -456,17 +523,11 @@ fn build_scenes(
             material.clone(),
         );
         field.no_frustum_culling = true;
-        // Camera settings are now the single final HDR resolve, with no local transport.
-        air.enabled = 0.0;
-        air.clouds_enabled = 0.0;
-        air.exposure = EXPOSURE;
-        air.tone_mapping = crate::air::ToneMapping::AcesFilmic as u8 as f32;
         scenes.insert(
             body,
             BodyScene {
                 field,
                 material,
-                air,
                 color: d.visual.surface_color,
             },
         );
@@ -479,26 +540,135 @@ fn build_scenes(
         .collect();
     (scenes, atmospheres, owned)
 }
+fn preview_air(sim: &void_fleet_flight::FleetFlight, body: usize) -> AirSettings {
+    let id = &sim.fleet.ephemeris.bodies()[body].id;
+    let visual = &sim.world.bodies[id].visual;
+    let radius = sim.fleet.ephemeris.bodies()[body].radius_meters;
+    let mut air = if let Some(profile) = &visual.scattering {
+        AirSettings::new(&profile.parameters(radius + sim.world.bodies[id].air_datum_meters))
+    } else {
+        // Mandatory resolve uniforms, explicitly disabled vacuum.
+        AirSettings::new(&void_scenery::earth_like_atmosphere(radius))
+    };
+    air.enabled = 0.0; // Optical transport comes exclusively from AirLayers.
+    air.clouds_enabled = 0.0;
+    air.exposure = arg("--exposure").map_or(EXPOSURE, |v| {
+        let exposure: f32 = v.parse().expect("numeric exposure");
+        assert!(
+            exposure.is_finite() && exposure > 0.0,
+            "positive finite exposure"
+        );
+        exposure
+    });
+    air.tone_mapping = crate::air::ToneMapping::AcesFilmic as u8 as f32;
+    air.sun_disc_enabled = 0.0;
+    air
+}
 fn spawn_far(
     commands: &mut Commands,
-    bodies: &[void_orbit::CelestialBody],
+    sim: &void_fleet_flight::FleetFlight,
     meshes: &mut Assets<Mesh>,
     standard: &mut Assets<StandardMaterial>,
 ) {
-    for body in bodies {
-        let color = crate::map::color(&body.color);
-        let mesh = meshes.add(Sphere::new(1.0).mesh().uv(32, 16));
-        let material = standard.add(StandardMaterial {
-            base_color: color,
-            unlit: body.parent_index.is_none(),
+    use void_scenery::solar::SurfaceRecipe;
+    for body in sim.fleet.ephemeris.bodies() {
+        let descriptor = sim.world.bodies.get(&body.id);
+        let mut mesh = Sphere::new(1.0).mesh().uv(256, 128);
+        let mut positions = match mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .expect("sphere positions")
+        {
+            bevy::mesh::VertexAttributeValues::Float32x3(p) => p.clone(),
+            _ => panic!("sphere position format"),
+        };
+        // Bevy sphere uses y poles; body-fixed spin axis is z.
+        for p in &mut positions {
+            *p = [p[0], p[2], -p[1]];
+        }
+        let colors = positions
+            .iter_mut()
+            .map(|p| {
+                let d = DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2])).normalize();
+                if let Some(descriptor) = descriptor {
+                    match &descriptor.visual.surface {
+                        SurfaceRecipe::SolidSurface => {
+                            let terrain = &sim.terrains[&body.index];
+                            let (h, c) = terrain.sample(d, None);
+                            *p = (d * (1.0 + h / body.radius_meters)).as_vec3().to_array();
+                            let c = descriptor
+                                .visual
+                                .surface_color
+                                .unwrap_or(c.map(|v| v as f32));
+                            [c[0], c[1], c[2], 1.0]
+                        }
+                        recipe => recipe.color(d),
+                    }
+                } else {
+                    // System bodies without authored scenery keep the pre-existing map sphere.
+                    let c = crate::map::color(&body.color).to_linear();
+                    [c.red, c.green, c.blue, 1.0]
+                }
+            })
+            .collect::<Vec<_>>();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+        mesh.compute_smooth_normals();
+        let is_star = descriptor
+            .is_some_and(|d| matches!(d.visual.surface, SurfaceRecipe::EmissiveStar { .. }))
+            || body.parent_index.is_none();
+        let material = StandardMaterial {
+            base_color: Color::WHITE,
+            unlit: is_star,
+            perceptual_roughness: 1.0,
+            cull_mode: None,
             ..default()
-        });
+        };
+        let mesh = meshes.add(mesh);
+        let material = standard.add(material);
         commands.spawn((
-            FarBody(body.index, mesh.id(), material.id()),
+            FarBody(body.index, mesh.id(), material.id(), false),
             Mesh3d(mesh),
             MeshMaterial3d(material),
             Transform::default(),
         ));
+        if descriptor
+            .is_some_and(|d| matches!(d.visual.surface, SurfaceRecipe::EmissiveStar { .. }))
+        {
+            // Thin optically transparent emission shells: a visual corona, no solid/collider.
+            for layer in 0..48 {
+                let radius = 1.006 + f32::from(layer as u8) * 0.006;
+                let mesh = meshes.add(Sphere::new(radius).mesh().uv(64, 32));
+                let alpha = 0.004 * (1.0 - f32::from(layer as u8) / 48.0);
+                let material = standard.add(StandardMaterial {
+                    base_color: Color::linear_rgba(1.0, 0.48, 0.12, alpha),
+                    unlit: true,
+                    alpha_mode: AlphaMode::Add,
+                    ..default()
+                });
+                commands.spawn((
+                    FarBody(body.index, mesh.id(), material.id(), true),
+                    Mesh3d(mesh),
+                    MeshMaterial3d(material),
+                    Transform::default(),
+                ));
+            }
+        }
+        if let Some(ring) = descriptor.and_then(|d| d.visual.rings.as_ref()) {
+            let mesh = meshes.add(crate::solar_mesh::rings(ring));
+            let material = standard.add(StandardMaterial {
+                base_color: Color::WHITE,
+                alpha_mode: AlphaMode::Blend,
+                cull_mode: None,
+                perceptual_roughness: 1.0,
+                ..default()
+            });
+            commands.spawn((
+                FarBody(body.index, mesh.id(), material.id(), true),
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::default(),
+            ));
+        }
     }
 }
 fn controls(
@@ -530,12 +700,47 @@ fn controls(
             command: ViewCommand::Focus { body: None },
         });
     }
-    let configured: Vec<_> = scene.session.sim().terrains.keys().copied().collect();
+    if solar_mode() {
+        let ids: Vec<_> = scene.session.sim().world.bodies.keys().cloned().collect();
+        let current = &scene.session.sim().fleet.ephemeris.bodies()
+            [scene.session.sim().observation_body()]
+        .id;
+        let index = ids
+            .iter()
+            .position(|id| id == current)
+            .expect("configured focus");
+        if keys.just_pressed(KeyCode::BracketRight) || keys.just_pressed(KeyCode::BracketLeft) {
+            let offset = if keys.just_pressed(KeyCode::BracketRight) {
+                1
+            } else {
+                ids.len() - 1
+            };
+            preset(
+                &mut scene.session,
+                &ids[(index + offset) % ids.len()],
+                "orbit",
+            );
+        }
+        for (key, view) in [
+            (KeyCode::Digit7, "near"),
+            (KeyCode::Digit8, "orbit"),
+            (KeyCode::Digit9, "far"),
+        ] {
+            if keys.just_pressed(key) {
+                preset(&mut scene.session, &ids[index], view);
+            }
+        }
+    }
     for (slot, key) in [KeyCode::Digit1, KeyCode::Digit2].into_iter().enumerate() {
         if keys.just_pressed(key) {
-            let body = *configured
-                .get(slot)
-                .expect("focus slot has no configured terrain");
+            let body = if slot == 0 {
+                scene.session.sim().home
+            } else if let Some(body) = selene_terrain(scene.session.sim()) {
+                body
+            } else {
+                scene.notices = "Selene terrain is not configured".into();
+                continue;
+            };
             scene.session.execute(Action::View {
                 command: ViewCommand::Focus { body: Some(body) },
             });
@@ -576,7 +781,7 @@ fn controls(
         scene
             .session
             .save_checkpoint(arg("--save").unwrap_or("lab-log/multi-body-save.json".into()));
-        scene.notices = "Saved complete two-body world".into();
+        scene.notices = "Saved complete world and view".into();
     }
     if keys.just_pressed(KeyCode::F7) {
         let base = void_fleet_flight::checkpoint::FlightCheckpoint::read(
@@ -648,14 +853,10 @@ fn controls(
         });
     }
     if keys.just_pressed(KeyCode::KeyL) || keys.just_pressed(KeyCode::KeyI) {
-        let body = scene
-            .session
-            .sim()
-            .terrains
-            .keys()
-            .copied()
-            .find(|body| *body != scene.session.sim().home)
-            .expect("descent fixture needs a second terrain body");
+        let Some(body) = selene_terrain(scene.session.sim()) else {
+            scene.notices = "Selene descent requires configured Selene terrain".into();
+            return;
+        };
         let body_id = scene.session.sim().fleet.ephemeris.bodies()[body]
             .id
             .clone();
@@ -852,7 +1053,7 @@ fn draw(
         );
         spawn_far(
             &mut commands,
-            scene.session.sim().fleet.ephemeris.bodies(),
+            scene.session.sim(),
             &mut meshes,
             &mut standard,
         );
@@ -881,8 +1082,13 @@ fn draw(
     }
     let target = scene.session.sim().observation_body();
     assert!(
-        scene.bodies.contains_key(&target),
-        "multi-body lab observation needs configured terrain"
+        scene
+            .session
+            .sim()
+            .world
+            .bodies
+            .contains_key(&scene.session.sim().fleet.ephemeris.bodies()[target].id),
+        "unconfigured observation body"
     );
     if target != scene.active || scene.refresh {
         for body in scene.bodies.values_mut() {
@@ -954,20 +1160,26 @@ fn draw(
         .flat_map(|id| fleet.part_snapshots(id))
         .collect::<Vec<_>>();
     for (_, b, mut t, mut v) in &mut far {
-        let into = sample.to_camera(fleet, fleet.body_frames(b.0).0, q);
+        let into = sample.to_camera(fleet, fleet.body_frames(b.0).1, q);
         *t = Transform::from_translation(into.apply_point(DVec3::ZERO).as_vec3())
             .with_rotation(into.rotation().as_quat())
             .with_scale(Vec3::splat(
                 fleet.ephemeris.bodies()[b.0].radius_meters as f32,
             ));
-        *v = if b.0 == body && scene.bodies[&body].field.drawn_count() > 0 {
+        *v = if b.0 == body
+            && !b.3
+            && scene
+                .bodies
+                .get(&body)
+                .is_some_and(|s| s.field.drawn_count() > 0)
+        {
             Visibility::Hidden
         } else {
             Visibility::Inherited
         };
     }
-    let ground = scene.bodies.get(&body).expect("ground");
-    let mut setting = ground.air;
+    let ground = scene.bodies.get(&body);
+    let mut setting = preview_air(sim, body);
     let Projection::Perspective(projection) = projection else {
         panic!("perspective")
     };
@@ -1022,9 +1234,11 @@ fn draw(
         })
         .collect();
 
-    let mut uniforms = grounds.get(&ground.material).expect("material").ground;
-    crate::scenery::update_ground(&mut uniforms, eye, sun, fleet.time());
-    grounds.get_mut(&ground.material).expect("material").ground = uniforms;
+    if let Some(ground) = ground {
+        let mut uniforms = grounds.get(&ground.material).expect("material").ground;
+        crate::scenery::update_ground(&mut uniforms, eye, sun, fleet.time());
+        grounds.get_mut(&ground.material).expect("material").ground = uniforms;
+    }
     let ship = fleet.snapshot(&sim.selected);
     let selected = sim.selected.clone();
     let launch = sim.planet.body_id.clone();
@@ -1130,47 +1344,62 @@ fn draw(
     for (a, b) in collider_edges {
         gizmos.line(a, b, Color::srgb(0.2, 1.0, 0.4));
     }
-    let body_scene = scene.bodies.get_mut(&body).unwrap();
-    body_scene.field.finish_builds();
-    body_scene.field.select(&void_lod::LodView {
-        camera: Some(void_lod::LodCamera {
-            position: eye,
+    let (owned, pending, cache) = if let Some(body_scene) = scene.bodies.get_mut(&body) {
+        body_scene.field.finish_builds();
+        body_scene.field.select(&void_lod::LodView {
+            camera: Some(void_lod::LodCamera {
+                position: eye,
+                distance_scale: 1.0,
+                max_level: body_scene.field.lod.options.max_level,
+                focal_pixels: f64::from(window.physical_height())
+                    / (2.0 * (f64::from(projection.fov) / 2.0).tan()),
+                min_observer_cell_pixels: 3.0,
+            }),
+            observer_positions: vec![eye],
             distance_scale: 1.0,
-            max_level: body_scene.field.lod.options.max_level,
-            focal_pixels: f64::from(window.physical_height())
-                / (2.0 * (f64::from(projection.fov) / 2.0).tan()),
-            min_observer_cell_pixels: 3.0,
-        }),
-        observer_positions: vec![eye],
-        distance_scale: 1.0,
-        horizon_culling: true,
-    });
-    body_scene.field.set_wireframe(&mut commands, p.wire);
-    body_scene
-        .field
-        .draw(&mut commands, &mut meshes, &mut tile_transform, eye);
-    if p.bounds {
-        for line in body_scene.field.boundaries(eye) {
-            gizmos.linestrip(line, Color::srgb(1.0, 0.2, 0.2));
+            horizon_culling: true,
+        });
+        body_scene.field.set_wireframe(&mut commands, p.wire);
+        body_scene
+            .field
+            .draw(&mut commands, &mut meshes, &mut tile_transform, eye);
+        if p.bounds {
+            for line in body_scene.field.boundaries(eye) {
+                gizmos.linestrip(line, Color::srgb(1.0, 0.2, 0.2));
+            }
         }
-    }
-    for mut v in &mut tiles {
-        *v = if p.terrain {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-    }
-    let owned = body_scene.field.owned_mesh_count();
-    let pending = body_scene.field.building_count();
-    let cache = body_scene.field.lod.cached_mesh_bytes();
+        for mut v in &mut tiles {
+            *v = if p.terrain {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+        }
+        let owned = body_scene.field.owned_mesh_count();
+        let pending = body_scene.field.building_count();
+        let cache = body_scene.field.lod.cached_mesh_bytes();
+        (owned, pending, cache)
+    } else {
+        (0, 0, 0)
+    };
+    let radius = scene.session.sim().fleet.ephemeris.bodies()[body].radius_meters;
+    let camera_height = eye.length() - radius;
+    let descriptor = &scene.session.sim().world.bodies[&body_name];
+    let recipe = match descriptor.visual.surface {
+        void_scenery::solar::SurfaceRecipe::SolidSurface => "solid terrain",
+        void_scenery::solar::SurfaceRecipe::GasEnvelope { .. } => "gas cloud top (no collider)",
+        void_scenery::solar::SurfaceRecipe::EmissiveStar { .. } => "emissive star (no collider)",
+    };
+    let optical = descriptor.visual.atmosphere;
+    let physical_air = descriptor.air_density_scale.is_some();
+    let exposure = setting.exposure;
     hud.0 = format!(
-        "MULTI-BODY WORLD · T+{world_time:.2}s\nlaunch {launch} · observation {body_name} · navigation {navigation_name} · selected {selected} {:?}\nAGL {agl:.1}m on {ground_name} · mass {:.1}kg · {} ground owners · {collider_count} collider tiles\nscene generation {} · 1 active / {} configured bodies · {owned} terrain meshes · {pending} pending · {} MB cache · {} app meshes / {} materials / {} textures\nTab switch ship · 1/2 focus planets · Home ship · O orbit at observed body · L Selene descent · I transfer approach · T SAS · Space stage\nM add +20m/s maneuver · B execute · Z approach warp\nShift/Ctrl throttle · WASDQE attitude · P pause · ,/. warp · drag/scroll camera\nF2 wire F3 boundaries F4 colliders F5 terrain F6 save F7 load F8 stop recording · R reset\n{}",
+        "SCENERY WORLD · T+{world_time:.2}s\n{recipe} · radius {radius:.0}m · camera height {camera_height:.0}m · exposure {exposure:.3} · optical air {optical} / physical air {physical_air}\nlaunch {launch} · observation {body_name} · navigation {navigation_name} · selected {selected} {:?}\nAGL {agl:.1}m on {ground_name} · mass {:.1}kg · {} ground owners · {collider_count} collider tiles\nscene generation {} · 1 active / {} configured bodies · {owned} terrain meshes · {pending} pending · {} MB cache · {} app meshes / {} materials / {} textures\n[ / ] solar body · 7/8/9 near/orbit/far · Tab switch ship · 1/2 focus planets · Home ship · O orbit at observed body · L Selene descent · I transfer approach · T SAS · Space stage\nM add +20m/s maneuver · B execute · Z approach warp\nShift/Ctrl throttle · WASDQE attitude · P pause · ,/. warp · drag/scroll camera\nF2 wire F3 boundaries F4 colliders F5 terrain F6 save F7 load F8 stop recording · R reset\n{}",
         ship.mode,
         ship.mass_kg,
         scene_count,
         scene.generation,
-        scene.bodies.len(),
+        scene.session.sim().world.bodies.len(),
         cache / 1_000_000,
         meshes.len(),
         grounds.len() + standard.len(),
@@ -1234,7 +1463,15 @@ mod tests {
         for moon_terrain in [true, false] {
             let mut config = initial_with_atmospheres(true);
             if !moon_terrain {
-                config.world.bodies.get_mut("selene").unwrap().terrain = None;
+                let moon = config.world.bodies.get_mut("selene").unwrap();
+                moon.terrain = None;
+                moon.visual.surface = void_scenery::solar::SurfaceRecipe::GasEnvelope {
+                    low: [0.2; 3],
+                    high: [0.4; 3],
+                    bands: 8.0,
+                    turbulence: 0.0,
+                    storm: 0.0,
+                };
             }
             let session = FlightSession::new(config);
             let mut world = World::new();
@@ -1265,11 +1502,10 @@ mod tests {
                     .values()
                     .all(|a| a.air.exposure == 1.0 && a.air.tone_mapping == 3.0)
             );
-            assert!(
-                scenes
-                    .values()
-                    .all(|s| s.air.enabled == 0.0 && s.air.clouds_enabled == 0.0)
-            );
+            assert!(scenes.keys().all(|&id| {
+                let air = preview_air(session.sim(), id);
+                air.enabled == 0.0 && air.clouds_enabled == 0.0
+            }));
             queue.apply(&mut world);
         }
     }
@@ -1296,5 +1532,80 @@ mod tests {
         let mut world = World::new();
         let mut system = IntoSystem::into_system(draw);
         system.initialize(&mut world);
+    }
+    #[test]
+    fn moon_shortcuts_use_stable_identity_in_the_solar_world() {
+        let mut config = initial_with_atmospheres(false);
+        config.world = void_fleet_flight::world::solar_scenery(
+            &crate::flight::game_planet_by_id("aurelia", Some("layered")).planet,
+        );
+        let session = FlightSession::new(config.clone());
+        let moon = selene_terrain(session.sim()).expect("authored moon");
+        assert_eq!(session.sim().fleet.ephemeris.bodies()[moon].id, "selene");
+        assert_ne!(
+            session
+                .sim()
+                .terrains
+                .keys()
+                .copied()
+                .find(|body| *body != session.sim().home),
+            Some(moon)
+        );
+        config.world.bodies.remove("selene");
+        let session = FlightSession::new(config);
+        assert_eq!(selene_terrain(session.sim()), None);
+    }
+    #[test]
+    fn solar_visual_rebuild_releases_all_owned_assets() {
+        let mut initial = initial_with_atmospheres(false);
+        initial.world = void_fleet_flight::world::solar_scenery(
+            &crate::flight::game_planet_by_id("aurelia", Some("layered")).planet,
+        );
+        let session = FlightSession::new(initial);
+        let mut world = World::new();
+        let mut meshes = Assets::<Mesh>::default();
+        let mut standard = Assets::<StandardMaterial>::default();
+        let mut grounds = Assets::<GroundMaterial>::default();
+        let mut images = Assets::<Image>::default();
+        let mut baseline = None;
+        for _ in 0..3 {
+            let mut queue = bevy::ecs::world::CommandQueue::default();
+            let mut commands = Commands::new(&mut queue, &world);
+            let (scenes, atmospheres, owned) =
+                build_scenes(&mut commands, session.sim(), &mut grounds, &mut images);
+            spawn_far(&mut commands, session.sim(), &mut meshes, &mut standard);
+            queue.apply(&mut world);
+            let counts = (meshes.len(), standard.len(), grounds.len(), images.len());
+            if let Some(expected) = baseline {
+                assert_eq!(counts, expected);
+            } else {
+                baseline = Some(counts);
+            }
+            assert_eq!(scenes.len(), 5);
+            assert_eq!(atmospheres.len(), 3);
+            let owned_far: Vec<_> = world
+                .query::<(Entity, &FarBody)>()
+                .iter(&world)
+                .map(|(e, b)| (e, b.1, b.2))
+                .collect();
+            for (entity, mesh, material) in owned_far {
+                world.despawn(entity);
+                meshes.remove(mesh);
+                standard.remove(material);
+            }
+            for scene in scenes.values() {
+                grounds.remove(scene.material.id());
+            }
+            for image in owned {
+                images.remove(image);
+            }
+            world.remove_resource::<AirTextures>();
+            drop(scenes);
+            drop(atmospheres);
+            assert_eq!(
+                (meshes.len(), standard.len(), grounds.len(), images.len()),
+                (0, 0, 0, 0)
+            );
+        }
     }
 }

@@ -12,3 +12,5 @@ pub mod tables;
 pub use atmosphere::{AtmosphereParams, Rgb, earth_like_atmosphere};
 pub use orbit_view::{OrbitView, Pose};
 pub use stars::{DEFAULT_STARS, STAR_DISTANCE, StarFieldOptions, generate_stars};
+
+pub mod solar;

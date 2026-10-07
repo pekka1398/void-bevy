@@ -40,11 +40,27 @@ pub enum Toggle {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ViewCommand {
-    Configure { main_camera: bool },
-    Focus { body: Option<usize> },
-    Drag { x: f64, y: f64 },
-    Zoom { pixels: f64 },
-    Toggle { setting: Toggle },
+    Configure {
+        main_camera: bool,
+    },
+    BodyPreset {
+        body: usize,
+        direction: DVec3,
+        distance: f64,
+    },
+    Focus {
+        body: Option<usize>,
+    },
+    Drag {
+        x: f64,
+        y: f64,
+    },
+    Zoom {
+        pixels: f64,
+    },
+    Toggle {
+        setting: Toggle,
+    },
 }
 pub struct CameraSample {
     /// Inertial (origin frame) eye and focus, for readouts; drawing goes through `to_camera`.
@@ -183,6 +199,25 @@ impl Presentation {
     pub fn apply(&mut self, sim: &FleetFlight, command: &ViewCommand) {
         match *command {
             ViewCommand::Configure { main_camera } => self.main_camera = main_camera,
+            ViewCommand::BodyPreset {
+                body,
+                direction,
+                distance,
+            } => {
+                let radius = sim
+                    .fleet
+                    .ephemeris
+                    .bodies()
+                    .get(body)
+                    .expect("preset body")
+                    .radius_meters;
+                assert!(direction.is_finite() && (direction.length() - 1.0).abs() < 1e-9);
+                assert!(distance.is_finite() && distance > radius);
+                self.main_camera = true;
+                self.focus_body = Some(body);
+                self.direction = direction;
+                self.distance = distance;
+            }
             ViewCommand::Focus { body } => {
                 self.focus_body = body;
                 if body.is_none() {
