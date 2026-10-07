@@ -660,7 +660,7 @@ fn argument(name: &str) -> Option<String> {
 pub fn run(main_game: bool) {
     if std::env::args().any(|a| a == "--help") {
         println!(
-            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--stellar-neighborhood: three fictional systems at real stellar separation\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
+            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
         );
         return;
     }
@@ -718,11 +718,40 @@ pub fn run(main_game: bool) {
             "--rover is a new craft fixture and cannot replace explicit craft/world/load/replay or another fixture"
         );
     }
-    let id = argument("--planet").unwrap_or("aurelia".into());
-    let planet = game_planet_by_id(&id, argument("--terrain").as_deref());
+    let aircraft_mode = main_game && std::env::args().any(|a| a == "--aircraft");
+    if aircraft_mode {
+        assert!(
+            argument("--world").is_none()
+                && argument("--terrain").is_none()
+                && !std::env::args()
+                    .any(|a| ["--reentry", "--rendezvous", "--vacuum"].contains(&a.as_str())),
+            "--aircraft is an explicit atmospheric runway world; incompatible with --world/--terrain/--reentry/--rendezvous/--vacuum"
+        );
+    }
+    let id = argument("--planet").unwrap_or(if aircraft_mode { "terra" } else { "aurelia" }.into());
+    let requested_terrain = argument("--terrain");
+    let mut planet = game_planet_by_id(
+        &id,
+        if aircraft_mode {
+            Some("hills")
+        } else {
+            requested_terrain.as_deref()
+        },
+    );
+    if aircraft_mode {
+        planet.planet = void_fleet_flight::aircraft_acceptance_planet(planet.planet);
+        planet.terrain_id = crate::flight::GameTerrain::Hills;
+        planet.ocean = false;
+        planet.sea_level = 0.0;
+        planet.rock_height = 10.0;
+        planet.snow_height = 100.0;
+        planet.launch_site = Some(DVec3::new(0.8, 0.55, 0.25).normalize());
+    }
     let craft = argument("--craft").map_or_else(
         || {
-            if main_game && std::env::args().any(|a| a == "--rover") {
+            if aircraft_mode {
+                void_assembly::aircraft()
+            } else if main_game && std::env::args().any(|a| a == "--rover") {
                 void_assembly::rover()
             } else if main_game && std::env::args().any(|a| a == "--reentry") {
                 void_assembly::reentry_capsule()
@@ -767,7 +796,7 @@ pub fn run(main_game: bool) {
                 return FlightSession::new(initial);
             }
             let mut initial = InitialWorld::new(&planet.planet, &craft, site, air);
-            if main_game && planet.planet.body_id == "aurelia" {
+            if main_game && !aircraft_mode && planet.planet.body_id == "aurelia" {
                 initial.world = void_fleet_flight::world::solar_scenery(&planet.planet);
                 if !air {
                     for body in initial.world.bodies.values_mut() {
@@ -801,6 +830,9 @@ pub fn run(main_game: bool) {
     );
     let craft = session.recording_initial().craft.clone();
     let mut lab = new_lab(session, craft);
+    if aircraft_mode {
+        lab.notice = "Aircraft runway fixture: Space ignite | Shift throttle | B hold brakes | W/S elevator | A/D roll | Q/E yaw and nose steering".into();
+    }
     lab.main_game = main_game;
     lab.rendezvous = main_game && std::env::args().any(|a| a == "--rendezvous");
     lab.reentry = main_game && std::env::args().any(|a| a == "--reentry");
@@ -1636,6 +1668,23 @@ fn controls(
         }
     } else {
         c.turn = turn;
+    }
+    if lab.session.sim().fleet.control_profile(&id) == Some(void_assembly::ControlProfile::Aircraft)
+        && lab.session.sim().fleet.has_wheels(&id) {
+        let wheel_control = void_assembly::VehicleControl {
+            drive: 0.0,
+            steer: if lab.paused { 0.0 } else { turn.y },
+            brake: if lab.paused || keys.pressed(KeyCode::KeyB) {
+                1.0
+            } else {
+                0.0
+            },
+        };
+        if lab.session.sim().fleet.vehicle_control(&id) != Some(wheel_control) {
+            lab.session.execute(Action::Vehicle {
+                control: wheel_control,
+            });
+        }
     }
     let previous = lab.session.sim().fleet.control(&id);
     if previous.throttle != c.throttle || previous.turn != c.turn {

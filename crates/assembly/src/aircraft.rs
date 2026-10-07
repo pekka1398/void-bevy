@@ -14,18 +14,18 @@ pub fn aircraft_airframe() -> Craft {
         add_part(&craft, "aircraft-fuselage", "p1", "tail", "front").expect("aircraft fuselage");
     craft = mount_mirrored_pair(
         &craft,
-        "p1",
+        "p2",
         &SurfaceMount {
             definition_id: "aircraft-wing".into(),
-            parent_socket_id: "surface-0".into(),
+            parent_socket_id: "surface-3".into(),
             node_id: "root".into(),
             pose: PartPose {
-                position: DVec3::new(2.6, 0.0, -0.8),
+                position: DVec3::new(2.5, 0.0, 1.0),
                 rotation: DQuat::IDENTITY,
             },
         },
         "aircraft-wing-left",
-        "surface-1",
+        "surface-4",
         "root",
     )
     .expect("aircraft wings");
@@ -62,4 +62,40 @@ pub fn aircraft_airframe() -> Craft {
     .expect("aircraft rudder");
     craft = add_part(&craft, "aircraft-jet", "p2", "rear", "front").expect("aircraft jet");
     craft
+}
+
+/// Complete airplane: the same PartGraph carries passive shared Wheel landing gear.
+pub fn aircraft() -> Craft {
+    let craft = aircraft_airframe();
+    let craft = mount_mirrored_pair(
+        &craft,
+        "p2",
+        &SurfaceMount {
+            definition_id: "aircraft-gear-right".into(),
+            parent_socket_id: "surface-5".into(),
+            node_id: "root".into(),
+            pose: PartPose {
+                position: DVec3::new(0.5, -0.4, 0.0),
+                rotation: DQuat::IDENTITY,
+            },
+        },
+        "aircraft-gear-left",
+        "surface-6",
+        "root",
+    )
+    .expect("aircraft main gear");
+    mount_surface(
+        &craft,
+        "p1",
+        &SurfaceMount {
+            definition_id: "aircraft-gear-nose".into(),
+            parent_socket_id: "surface-2".into(),
+            node_id: "root".into(),
+            pose: PartPose {
+                position: DVec3::new(0.0, -0.4, 1.5),
+                rotation: DQuat::IDENTITY,
+            },
+        },
+    )
+    .expect("aircraft nose gear")
 }
