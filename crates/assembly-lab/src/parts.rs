@@ -180,6 +180,75 @@ impl RenderAssets {
                 }
                 outlines.insert(d.id.clone(), lines);
             }
+            if d.modules
+                .iter()
+                .any(|m| matches!(m, void_assembly::Module::Crew { .. }))
+            {
+                // The physical suit uses one box; visible body pieces stay within that envelope.
+                let white = materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.87, 0.88, 0.84),
+                    perceptual_roughness: 0.8,
+                    ..default()
+                });
+                let dark = materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.08, 0.10, 0.12),
+                    ..default()
+                });
+                let visor = materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.29, 0.19, 0.04),
+                    metallic: 0.8,
+                    perceptual_roughness: 0.25,
+                    ..default()
+                });
+                let mut pieces = Vec::new();
+                let mut box_piece =
+                    |size: Vec3, position: Vec3, material: Handle<StandardMaterial>| {
+                        pieces.push(RenderPiece {
+                            mesh: meshes.add(Cuboid::new(size.x, size.y, size.z)),
+                            material,
+                            local: Transform::from_translation(position),
+                            flame: false,
+                        });
+                    };
+                box_piece(
+                    Vec3::new(0.29, 0.65, 0.27),
+                    Vec3::new(0.0, 0.12, 0.0),
+                    white.clone(),
+                );
+                box_piece(
+                    Vec3::new(0.26, 0.37, 0.27),
+                    Vec3::new(0.0, 0.63, 0.0),
+                    white.clone(),
+                );
+                box_piece(
+                    Vec3::new(0.22, 0.19, 0.02),
+                    Vec3::new(0.0, 0.66, 0.145),
+                    visor,
+                );
+                box_piece(
+                    Vec3::new(0.25, 0.45, 0.04),
+                    Vec3::new(0.0, 0.13, -0.15),
+                    dark.clone(),
+                );
+                for side in [-1.0, 1.0] {
+                    box_piece(
+                        Vec3::new(0.075, 0.62, 0.19),
+                        Vec3::new(side * 0.18, 0.09, 0.0),
+                        white.clone(),
+                    );
+                    box_piece(
+                        Vec3::new(0.11, 0.55, 0.20),
+                        Vec3::new(side * 0.09, -0.50, 0.0),
+                        white.clone(),
+                    );
+                    box_piece(
+                        Vec3::new(0.13, 0.12, 0.29),
+                        Vec3::new(side * 0.09, -0.82, 0.015),
+                        dark.clone(),
+                    );
+                }
+                parts.insert(d.id.clone(), pieces);
+            }
             assert!(
                 parts.contains_key(&d.id),
                 "missing authored render model {}",

@@ -398,6 +398,21 @@ fn plotting_description(sim: &void_fleet_flight::FleetFlight) -> String {
     }
 }
 
+fn pilot_description(sim: &void_fleet_flight::FleetFlight) -> String {
+    use void_assembly::ControlProfile;
+    match sim.fleet.control_profile(&sim.selected) {
+        Some(ControlProfile::Rover) => "P pause | W/S drive | A/D steer | Space brake | X park | F exit seat".into(),
+        Some(ControlProfile::Aircraft) => "P pause | Space ignite/stage | Shift/Ctrl throttle | W/S pitch | A/D roll | Q/E yaw/steer | B brake".into(),
+        Some(ControlProfile::Eva) => {
+            let crew = sim.fleet.eva_crew(&sim.selected).expect("EVA profile crew");
+            let grounded = sim.fleet.part_snapshots(&sim.selected).iter().any(|p| p.modules.values().any(|m| matches!(m,void_assembly::ModuleState::Crew { grounded:true,.. })));
+            let fuel: f64 = sim.fleet.part_snapshots(&sim.selected).iter().map(|p|p.resources.get(&void_assembly::ResourceId::Monopropellant).copied().unwrap_or(0.0)).sum();
+            format!("{} | {} | pack {} {:.2}kg\nP pause | W/S walk | A/D strafe | Q/E turn | Space jump | H pack | F board\nPack ON: Alt+W/S forward/back, D/A right/left, E/Q up/down | WASD QE torque",crew.name,if grounded { "grounded" } else { "airborne" },if sim.fleet.rcs_control(&sim.selected).enabled { "ON" } else { "OFF" },fuel)
+        },
+        _ => "P pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS".into(),
+    }
+}
+
 fn vehicle_description(sim: &void_fleet_flight::FleetFlight) -> String {
     let Some(control) = sim.fleet.vehicle_control(&sim.selected) else {
         return String::new();
@@ -796,7 +811,7 @@ pub fn run(main_game: bool) {
             if aircraft_mode {
                 void_assembly::aircraft()
             } else if main_game && std::env::args().any(|a| a == "--rover") {
-                void_assembly::rover()
+                void_assembly::crew_rover()
             } else if main_game && std::env::args().any(|a| a == "--reentry") {
                 void_assembly::reentry_capsule()
             } else if main_game {
@@ -1507,6 +1522,56 @@ fn surface_axes(fleet: &void_vessels::Fleet, body: usize) -> glam::DQuat {
         .transform(fleet.body_frames(body).1, fleet.origin_frame())
         .rotation()
 }
+fn crew_transfer(lab: &mut Lab) {
+    let fleet = &lab.session.sim().fleet;
+    let selected = lab.session.sim().selected.clone();
+    let action = if fleet.eva_crew(&selected).is_some() {
+        let frames = fleet.frames();
+        let mut candidates = Vec::new();
+        for carrier in fleet.vessel_ids().into_iter().filter(|id| id != &selected) {
+            for seat in fleet
+                .crew_seats(&carrier)
+                .into_iter()
+                .filter(|s| s.occupant.is_none())
+            {
+                let hatch = frames
+                    .transform(fleet.part_frame(&seat.part), fleet.vessel_frame(&selected))
+                    .apply_point(seat.parameters.hatch_position);
+                candidates.push((hatch.length_squared(), seat.part, seat.module));
+            }
+        }
+        candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let Some((_, part, module)) = candidates.into_iter().next() else {
+            lab.notice = "Board refused: no empty seat".into();
+            return;
+        };
+        Action::EvaBoard { part, module }
+    } else {
+        let Some(seat) = fleet
+            .crew_seats(&selected)
+            .into_iter()
+            .find(|s| s.occupant.is_some())
+        else {
+            lab.notice = "Exit refused: no crew in selected vehicle".into();
+            return;
+        };
+        Action::EvaExit {
+            part: seat.part,
+            module: seat.module,
+        }
+    };
+    match lab.session.execute(action) {
+        Outcome::Refused(reason) => lab.notice = reason,
+        Outcome::Spawned(_) => {
+            lab.notice.clear();
+            lab.prediction = None;
+            lab.own_port = None;
+            lab.target_port = None;
+        }
+        other => panic!("unexpected crew transfer outcome {other:?}"),
+    }
+}
+
 fn axis(keys: &ButtonInput<KeyCode>, plus: KeyCode, minus: KeyCode) -> f64 {
     keys.pressed(plus) as i32 as f64 - keys.pressed(minus) as i32 as f64
 }
@@ -1665,11 +1730,35 @@ fn controls(
             site,
         });
     }
+    if lab.main_game && keys.just_pressed(KeyCode::KeyF) {
+        crew_transfer(lab);
+        return;
+    }
     let warp_was_active = lab.session.sim().maneuver_warp.active();
     let id = lab.session.sim().selected.clone();
     let commanded = lab.session.sim().fleet.has_command(&id);
+    if !commanded
+        && keys.any_pressed([
+            KeyCode::KeyW,
+            KeyCode::KeyA,
+            KeyCode::KeyS,
+            KeyCode::KeyD,
+            KeyCode::KeyQ,
+            KeyCode::KeyE,
+            KeyCode::ShiftLeft,
+            KeyCode::ShiftRight,
+        ])
+    {
+        lab.notice = if lab.session.sim().fleet.requires_crew(&id) {
+            "Control refused: healthy pilot must occupy a healthy seat".into()
+        } else {
+            "Control refused: command capability unavailable or thermally failed".into()
+        };
+    }
     let vehicle =
         lab.session.sim().fleet.control_profile(&id) == Some(void_assembly::ControlProfile::Rover);
+    let eva =
+        lab.session.sim().fleet.control_profile(&id) == Some(void_assembly::ControlProfile::Eva);
     if vehicle {
         let previous = lab
             .session
@@ -1705,7 +1794,29 @@ fn controls(
             lab.session.execute(Action::Vehicle { control });
         }
     }
-    if keys.just_pressed(KeyCode::KeyT) && commanded {
+    if eva {
+        let pack = lab.session.sim().fleet.rcs_control(&id).enabled;
+        let control = if commanded && !lab.paused && !pack {
+            void_assembly::EvaControl {
+                forward: axis(&keys, KeyCode::KeyW, KeyCode::KeyS),
+                strafe: axis(&keys, KeyCode::KeyD, KeyCode::KeyA),
+                yaw: axis(&keys, KeyCode::KeyE, KeyCode::KeyQ),
+            }
+        } else {
+            void_assembly::EvaControl::default()
+        };
+        if lab.session.sim().fleet.eva_control(&id) != Some(control) {
+            if let Outcome::Refused(reason) = lab.session.execute(Action::Eva { control }) {
+                lab.notice = reason;
+            }
+        }
+        if keys.just_pressed(KeyCode::Space) {
+            if let Outcome::Refused(reason) = lab.session.execute(Action::EvaJump) {
+                lab.notice = reason;
+            }
+        }
+    }
+    if keys.just_pressed(KeyCode::KeyT) && commanded && !eva {
         let enabled = lab.session.sim().fleet.sas_phase(&id) == void_vessels::SasPhase::Off;
         if enabled && !lab.session.sim().fleet.has_reaction_wheel(&id) {
             lab.notice =
@@ -1727,7 +1838,11 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyX) {
         c.throttle = 0.0;
     }
-    let turn = if commanded && !lab.paused && !vehicle {
+    let turn = if commanded
+        && !lab.paused
+        && !vehicle
+        && (!eva || lab.session.sim().fleet.rcs_control(&id).enabled)
+    {
         DVec3::new(
             axis(&keys, KeyCode::KeyS, KeyCode::KeyW),
             axis(&keys, KeyCode::KeyE, KeyCode::KeyQ),
@@ -1761,8 +1876,16 @@ fn controls(
         } else {
             DVec3::ZERO
         };
+        if eva {
+            rcs.force.x = -rcs.force.x;
+        }
+        let pack_turn = if eva {
+            DVec3::new(turn.x, -turn.y, turn.z)
+        } else {
+            turn
+        };
         rcs.torque = if rcs.enabled && !translate {
-            turn * 30.0
+            pack_turn * 30.0
         } else {
             DVec3::ZERO
         };
@@ -1808,10 +1931,14 @@ fn controls(
             turn: c.turn,
         });
     }
-    if lab.main_game && !keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) {
+    if lab.main_game
+        && lab.session.sim().fleet.control_profile(&id)
+            == Some(void_assembly::ControlProfile::Flight)
+        && !keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
+    {
         docking_controls(lab, &keys);
     }
-    if keys.just_pressed(KeyCode::Space) && !vehicle {
+    if keys.just_pressed(KeyCode::Space) && !vehicle && !eva {
         lab.session.execute(Action::Stage);
         lab.own_port = None;
         lab.target_port = None;
@@ -2719,7 +2846,7 @@ fn draw(
         })
         .unwrap_or_default();
     **hud = Text::new(format!(
-        "{}{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels\nP pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN nearby craft | O orbital craft | R reset | , . warp | K altitude | L speed\nF1 near/orbit/far | Home ship | Ctrl+Home stellar overview | Alt+F10/F11 exposure\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
+        "{}{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels\n{}\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN nearby craft | O orbital craft | R reset | , . warp | K altitude | L speed\nF1 near/orbit/far | Home ship | Ctrl+Home stellar overview | Alt+F10/F11 exposure\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
         if lab.main_game {
             "VOID"
         } else {
@@ -2765,6 +2892,7 @@ fn draw(
         (orbital.periapsis_radius_meters - body.radius_meters) / 1000.0,
         (orbital.apoapsis_radius_meters - body.radius_meters) / 1000.0,
         f.vessel_ids().len(),
+        pilot_description(sim),
         format_args!(
             "{}{}\n{}\n{}\n{}\n{}\n{}",
             lab.notice,
@@ -2777,7 +2905,9 @@ fn draw(
                 vehicle_description(sim),
                 sim.fleet.water_wrench(&sim.selected).force.length()
             ),
-            if lab.main_game {
+            if lab.main_game
+                && f.control_profile(&sim.selected) == Some(void_assembly::ControlProfile::Flight)
+            {
                 docking_description(lab)
             } else {
                 String::new()
