@@ -86,7 +86,8 @@ Beryl 地面船與 Cygnus 軌道船；預設暫停。這些遠方船是初始配
 ### 精確狀態與 owner 接縫
 
 - `Vessel` 與 contact `Scene` 持有 `SystemId` 和系統內 `SplitPosition` 錨點；
-  Orbit 的原有 `PropagationRun` 積分錨點附近的 f64 殘量，沒有第二份船 runtime。
+  Orbit 的原有 `PropagationRun` 積分錨點附近的 f64 殘量，Bubble 的原有自由落體
+  原點也在接受步重錨，避免長時間共同滑行後把光年放進 f64 原點。沒有第二份船 runtime。
   接受的邊界才把殘量納入 split 錨點並重啟導數；燃料、零件圖、姿態、慣量不因此重造。
 - `FrameTree` 的 split anchor 節點掛在恆星系之下。近船在星際空間也先精確相減
   split 錨點，再處理局部 f64／渲染 f32；不把數光年的絕對 f64 當接觸座標。
@@ -96,9 +97,16 @@ Beryl 地面船與 Cygnus 軌道船；預設暫停。這些遠方船是初始配
   再用于物理。物理／驗證使用 `precise_snapshot` 的 split `position`、`anchor`、
   `residual`，或 `vessel_anchor_frame`、`part_frame` 与 `body_fixed_state`。
   `local` 是系統質心下的顯示值；星際殘量才是控制／積分入口。
+  `launch_at_split` 的位置／速度明確是指定恆星系質心下的 split 狀態；不能把
+  `precise_snapshot.position`（銀河絕對值）直接傳入。絕對銀河狀態用
+  `launch_at_galaxy`，它先精確扣掉指定系統原點再建立同一 Fleet 船。
 - 物理来源只在 owner 求值期間切局部系统／split offset，結束後恢復主來源。
   讀取大氣、熱、地形、碰撞與相對速度使用相應樹／query frame。存檔拒絕仍留在
   暫時來源的非法狀態。機動計畫另外保存自己的固定 split 錨點，不隨主船重錨漂移。
+- 來源便利求值回傳的氣動 `Wrench` 必須標上共用 owner 樹的註冊 physics query
+  frame。來源／offset 改變即撤销標記；未註冊的 translated source 明確拒絕。
+  環境可在內部建立精確取樣樹，但不把那份暫時樹的 FrameId 冒充為 Fleet 的 frame。
+  `wrench_in` 持續使用呼叫者提供的同一份 Snapshot／FrameId。
 
 ### 存檔與相容性
 

@@ -435,3 +435,112 @@ fn aircraft_air_data_is_local_in_remote_system_and_journal_keeps_exact_part_pose
             < 1e-8
     );
 }
+
+#[test]
+fn handoff_chooses_the_closest_of_all_three_systems_before_hysteresis() {
+    use glam::{DQuat, DVec3};
+    let mut initial = neighborhood_initial();
+    let stellar = initial.world.stellar.as_mut().unwrap();
+    stellar.neighbors[1].placement.origin = stellar
+        .home
+        .origin
+        .translate(DVec3::X * (4.2 * void_multiscale::LIGHT_YEAR));
+    let mut sim = initial.build();
+    let id = sim.fleet.launch_at_split(
+        &void_vessels::pod_tank("Three-root decision · fixture"),
+        SystemId(0),
+        void_frames::SplitPosition::at(DVec3::X * (2.18 * void_multiscale::LIGHT_YEAR)),
+        DVec3::ZERO,
+        DQuat::IDENTITY,
+        DVec3::ZERO,
+    );
+    sim.fleet.advance(0.25);
+    assert_eq!(sim.fleet.vessel_system(&id), SystemId(2));
+}
+
+#[test]
+fn absolute_and_system_relative_spawns_agree_at_nonzero_galaxy_origin() {
+    use glam::{DQuat, DVec3};
+    let mut sim = neighborhood_initial().build();
+    let body = sim.world.body_index("Beryl/aurelia");
+    let system = SystemId(1);
+    let local_body = sim
+        .fleet
+        .ephemeris
+        .body_in_system(void_frames::BodyId(body), 0.0)
+        .0;
+    let local = void_frames::SplitPosition::at(local_body).translate(DVec3::X * 7_000_000.0);
+    let (origin, origin_velocity) = sim.fleet.ephemeris.system_state(system, 0.0);
+    let galaxy = origin.compose(&local);
+    let local_velocity = DVec3::Y * 7600.0;
+    let craft = void_vessels::pod_tank("Coordinate contract · fixture");
+    let a = sim.fleet.launch_at_split(
+        &craft,
+        system,
+        local,
+        local_velocity,
+        DQuat::IDENTITY,
+        DVec3::ZERO,
+    );
+    let b = sim.fleet.launch_at_galaxy(
+        &craft,
+        system,
+        galaxy.translate(DVec3::Z * 0.01),
+        origin_velocity + local_velocity,
+        DQuat::IDENTITY,
+        DVec3::ZERO,
+    );
+    assert!((sim.fleet.precise_snapshot(&a).position.relative(&galaxy)).length() < 1e-6);
+    assert!((sim.fleet.relative(&b, &a).position - DVec3::Z * 0.01).length() < 1e-6);
+    assert!(
+        (sim.fleet.precise_snapshot(&b).velocity - (origin_velocity + local_velocity)).length()
+            < 1e-8
+    );
+}
+
+#[test]
+fn moving_interstellar_bubble_keeps_its_free_fall_origin_bounded() {
+    use glam::{DQuat, DVec3};
+    let mut sim = neighborhood_initial().build();
+    let origin = void_frames::SplitPosition::at(DVec3::X * (2.0 * void_multiscale::LIGHT_YEAR));
+    let velocity = DVec3::X * 1_000_000.0;
+    let craft = void_vessels::pod_tank("Bubble reanchor · declared fixture");
+    let a = sim.fleet.launch_at_split(
+        &craft,
+        SystemId(0),
+        origin,
+        velocity,
+        DQuat::IDENTITY,
+        DVec3::ZERO,
+    );
+    let b = sim.fleet.launch_at_split(
+        &craft,
+        SystemId(0),
+        origin.translate(DVec3::Y * 10.0),
+        velocity,
+        DQuat::IDENTITY,
+        DVec3::ZERO,
+    );
+    sim.fleet.advance(0.0);
+    assert_eq!(
+        sim.fleet.snapshot(&a).mode,
+        void_vessels::VesselMode::Bubble
+    );
+    let before = sim.fleet.precise_snapshot(&a);
+    sim.fleet.advance(0.5);
+    let after = sim.fleet.precise_snapshot(&a);
+    // The initial bubble COM is 5 m in Y from the first ship's anchor; anchoring the accepted
+    // free-fall COM includes that legitimate offset. X measures the actual coasting advance.
+    assert!((after.anchor.relative(&before.anchor).x - velocity.x * 0.5).abs() < 1e-4);
+    let system_drift = sim
+        .fleet
+        .ephemeris
+        .system_state(SystemId(0), sim.fleet.time())
+        .0
+        .relative(&sim.fleet.ephemeris.system_state(SystemId(0), 0.0).0);
+    assert!(
+        (after.position.relative(&before.position) - system_drift - velocity * 0.5).length() < 1e-4
+    );
+    assert!(after.residual.position.length() < 20.0);
+    assert!((sim.fleet.relative(&b, &a).position - DVec3::Y * 10.0).length() < 1e-4);
+}

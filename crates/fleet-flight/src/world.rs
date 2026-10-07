@@ -68,9 +68,14 @@ impl StellarConfiguration {
                 !placement.id.is_empty() && !placement.id.contains('/'),
                 "world: invalid system ID"
             );
+            let system = build_system(spec);
+            assert!(
+                system.bodies.iter().all(|b| !b.id.contains('/')),
+                "stellar body IDs cannot contain namespace separators"
+            );
             void_multiscale::SystemSeed {
                 id: placement.id.clone(),
-                system: build_system(spec),
+                system,
                 origin: placement.origin,
                 velocity: placement.velocity,
             }
@@ -184,6 +189,14 @@ impl WorldDescription {
                     Some(saved) => void_multiscale::CoupledWorld::from_checkpoint(seeds, saved),
                     None => void_multiscale::CoupledWorld::new(seeds, step, 8192),
                 };
+                assert_eq!(
+                    world.step_seconds, step,
+                    "world checkpoint: coupled integration step changed"
+                );
+                assert_eq!(
+                    world.sample_limit, 8192,
+                    "world checkpoint: coupled history limit changed"
+                );
                 let shared = std::rc::Rc::new(std::cell::RefCell::new(world));
                 let source = void_multiscale::FrameEphemeris::new(shared.clone(), &stellar.home.id);
                 (Box::new(source), Some(shared))

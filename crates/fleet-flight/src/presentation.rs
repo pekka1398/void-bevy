@@ -150,7 +150,6 @@ impl Presentation {
         self.plotting_frame
             .assert_valid(sim.fleet.ephemeris.bodies().len());
         if let void_orbit::FrameSpec::TwoBodyRotating { primary, secondary } = self.plotting_frame {
-            use void_orbit::EphemerisSource;
             assert_eq!(
                 sim.fleet.ephemeris.system_of(primary),
                 sim.fleet.ephemeris.system_of(secondary),

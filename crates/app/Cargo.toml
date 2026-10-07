@@ -20,6 +20,7 @@ glam.workspace = true
 void-environment.workspace = true
 void-frames.workspace = true
 void-orbit.workspace = true
+void-multiscale.workspace = true
 void-lod.workspace = true
 # Session log lines keep the lab's field order ("wall" first).
 serde_json = { workspace = true, features = ["preserve_order"] }
@@ -34,4 +35,3 @@ void-sas.workspace = true
 void-view.workspace = true
 # The version Bevy already pulls in, for the half-float tables.
 half = "2.7"
-

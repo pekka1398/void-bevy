@@ -146,7 +146,8 @@ pub enum Action {
         rotation: glam::DQuat,
         angular_velocity: DVec3,
     },
-    /// Explicit split-state fixture/initial-state command, not a propulsion or teleport action.
+    /// Explicit SYSTEM-barycentre-relative split position/velocity initial state,
+    /// not a propulsion or teleport action. Galaxy coordinates must be converted first.
     LaunchSplitState {
         craft: Craft,
         system: void_frames::SystemId,

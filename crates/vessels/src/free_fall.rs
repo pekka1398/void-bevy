@@ -32,6 +32,17 @@ impl FreeFallFrame {
             previous: state,
         }
     }
+    /// Accepted scene boundary: translate the coordinate anchor by `delta` while preserving
+    /// both prepared physical endpoints and velocities. The owner commits the matching split
+    /// anchor change; this method alone is not a physical movement request.
+    pub fn reanchor_origin(&mut self, delta: DVec3) {
+        assert!(delta.is_finite(), "free fall: nonfinite reanchor");
+        for (i, value) in delta.to_array().iter().enumerate() {
+            self.run.y[i] -= value;
+        }
+        self.previous.position -= delta;
+        self.run = self.run.restarted();
+    }
     /// Latest propagated origin time.
     pub fn origin_time(&self) -> f64 {
         self.run.time

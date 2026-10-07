@@ -559,7 +559,8 @@ impl CoupledWorld {
                 .iter()
                 .map(|b| {
                     serde_json::json!({
-                        "id": b.id, "index": b.index, "parent": b.parent_index,
+                        "id": b.id, "name": b.name, "color": b.color,
+                        "index": b.index, "parent": b.parent_index,
                         "mass": b.mass_kg, "gm": b.gm, "radius": b.radius_meters,
                         "j2": b.j2, "j2_radius": b.j2_reference_radius_meters,
                         "soi": b.sphere_of_influence_meters,

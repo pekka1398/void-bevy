@@ -3014,6 +3014,7 @@ impl Fleet {
     fn step_scene(&mut self, scene: u64) {
         let previous = self.enter_scene(scene);
         self.step_scene_local(scene);
+        self.reanchor_scene(scene);
         self.restore_view(previous);
     }
     fn step_scene_local(&mut self, scene: u64) {

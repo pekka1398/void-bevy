@@ -117,30 +117,51 @@ impl Fleet {
             velocity,
         }
     }
-    /// Launch in an explicitly named system. The position is authoritative split state.
-    /// Fixture callers must identify their artificial starting state as such.
+    /// Launch in an explicitly named system: position and velocity are relative to that
+    /// system barycentre, NOT galaxy absolute coordinates. Fixture callers must label their
+    /// artificial starting state. For absolute coordinates use `launch_at_galaxy`.
     pub fn launch_at_split(
         &mut self,
         craft: &Craft,
         system: SystemId,
-        position: SplitPosition,
-        velocity: DVec3,
+        system_position: SplitPosition,
+        system_velocity: DVec3,
         rotation: DQuat,
         angular_velocity: DVec3,
     ) -> String {
         let previous = self.enter_system(system);
-        self.set_view_offset(position);
+        self.set_view_offset(system_position);
         let id = self.launch(
             craft,
             FrameState {
                 position: DVec3::ZERO,
-                velocity,
+                velocity: system_velocity,
             },
             rotation,
             angular_velocity,
         );
         self.restore_view(previous);
         id
+    }
+    /// Explicit GALAXY absolute position/velocity; split subtraction precedes local launch.
+    pub fn launch_at_galaxy(
+        &mut self,
+        craft: &Craft,
+        system: SystemId,
+        galaxy_position: SplitPosition,
+        galaxy_velocity: DVec3,
+        rotation: DQuat,
+        angular_velocity: DVec3,
+    ) -> String {
+        let (origin, velocity) = self.ephemeris.system_state(system, self.time);
+        self.launch_at_split(
+            craft,
+            system,
+            galaxy_position.difference(&origin),
+            galaxy_velocity - velocity,
+            rotation,
+            angular_velocity,
+        )
     }
     pub fn launch_in_system(
         &mut self,
@@ -154,6 +175,23 @@ impl Fleet {
         let id = self.launch(craft, state, rotation, angular_velocity);
         self.restore_view(previous);
         id
+    }
+    pub(super) fn reanchor_scene(&mut self, scene: u64) {
+        if self.ephemeris.system_count() == 1 {
+            return;
+        }
+        let scene = self.scenes.get_mut(&scene).expect("reanchor scene");
+        let SceneFrame::Bubble(origin) = &mut scene.world.frame else {
+            return;
+        };
+        let delta = origin.origin(origin.origin_time()).position;
+        scene.anchor = scene.anchor.translate(delta);
+        origin.reanchor_origin(delta);
+        for id in &scene.members {
+            let vessel = self.vessels.get_mut(id).expect("scene member missing");
+            vessel.anchor = scene.anchor;
+            self.anchor_positions.insert(id.clone(), scene.anchor);
+        }
     }
     /// Accepted boundary only: move the split anchor to the accepted COM and restart the local
     /// derivative. No fuel, attitude, module state or velocity is invented by a frame change.
@@ -173,16 +211,17 @@ impl Fleet {
         let (origin, origin_velocity) = self.ephemeris.system_state(vessel.system, run.time);
         let galaxy = origin.compose(&vessel.anchor);
         let mut nearest = vessel.system;
-        let mut distance = galaxy.relative(&origin).length();
+        let current_distance = galaxy.relative(&origin).length();
+        let mut distance = current_distance;
         for system in 0..self.ephemeris.system_count() {
             let (candidate, _) = self.ephemeris.system_state(SystemId(system), run.time);
             let d = galaxy.relative(&candidate).length();
-            if d * 1.05 < distance {
+            if d < distance {
                 distance = d;
                 nearest = SystemId(system);
             }
         }
-        if nearest != vessel.system {
+        if nearest != vessel.system && current_distance > 1.05 * distance {
             let (next_origin, next_velocity) = self.ephemeris.system_state(nearest, run.time);
             vessel.anchor = galaxy.difference(&next_origin);
             let delta = origin_velocity - next_velocity;

@@ -259,6 +259,10 @@ impl Fleet {
                     vessel.system, fleet.scenes[&scene].system,
                     "fleet checkpoint: owner anchor mismatch"
                 );
+                assert_eq!(
+                    vessel.anchor, fleet.scenes[&scene].anchor,
+                    "fleet checkpoint: scene split anchor mismatch"
+                );
             }
             fleet.put(vessel);
         }
