@@ -75,7 +75,7 @@ pub enum Module {
     },
     Command {
         id: String,
-        #[serde(default)]
+        #[serde(default, rename = "controlProfile")]
         control_profile: ControlProfile,
         #[serde(default = "default_true", rename = "reactionWheel")]
         reaction_wheel: bool,
