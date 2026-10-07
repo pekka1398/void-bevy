@@ -141,75 +141,6 @@ pub fn angular_drag(size: DVec3, volume: f64, rotation: DQuat, spin: DVec3) -> D
     ) * (1000. * volume / 12.);
     -(rotation * (inertia * (rotation.conjugate() * spin)))
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn part(shape: Shape) -> PartDefinition {
-        let mut p = void_assembly::catalog().first().unwrap().clone();
-        p.shape = shape;
-        p.radius = 1.;
-        p.height = 2.;
-        p.box_size_meters = Some(DVec3::splat(2.));
-        p
-    }
-    #[test]
-    fn box_half_and_tilt() {
-        let p = part(Shape::Box);
-        let d = displacement(&p, DVec3::Y, 0.);
-        assert!((d.volume - 4.).abs() < 1e-10);
-        assert!((d.centre.y + 0.5).abs() < 1e-10);
-        for n in [DVec3::new(1., 2., 3.).normalize(), DVec3::X] {
-            assert!((displacement(&p, n, 0.).volume - 4.).abs() < 1e-10);
-        }
-    }
-    #[test]
-    fn angular_resistance_dissipates_and_rotates() {
-        let size = DVec3::new(1., 2., 3.);
-        let spin = DVec3::new(2., -1., 3.);
-        let q = DQuat::from_rotation_y(0.8);
-        let a = angular_drag(size, 2., DQuat::IDENTITY, spin);
-        assert!(a.dot(spin) < 0.);
-        let b = angular_drag(size, 2., q, q * spin);
-        assert!((b - q * a).length() < 1e-10);
-    }
-    #[test]
-    fn partial_volume_continuity_and_wide_hull_righting_arm() {
-        let mut p = part(Shape::Box);
-        p.box_size_meters = Some(DVec3::new(4., 1., 2.));
-        let q = DQuat::from_rotation_z(0.2);
-        let normal = q.conjugate() * DVec3::Y;
-        let a = displacement(&p, normal, 0.);
-        let b = displacement(&p, normal, 1e-6);
-        assert!((b.volume - a.volume).abs() < 1e-4);
-        let arm = q * a.centre;
-        assert!(arm.cross(DVec3::Y).z < 0.);
-        assert_eq!(displacement(&p, normal, -10.).volume, 0.);
-    }
-    #[test]
-    fn dense_engine_displacement_cannot_balance_its_weight() {
-        let part = void_assembly::definition("flight-booster-engine").unwrap();
-        let wet = displacement(part, DVec3::Y, part.height);
-        assert!(1000. * wet.volume < part.dry_mass_kg);
-    }
-    #[test]
-    fn clipping_plane_through_vertices_closes_cap_once() {
-        let p = part(Shape::Box);
-        let normal = DVec3::ONE.normalize();
-        let volume = displacement(&p, normal, 1. / 3.0_f64.sqrt()).volume;
-        assert!((volume - 20. / 3.).abs() < 1e-10, "{volume}");
-        assert!((displacement(&p, DVec3::Y, 1.).volume - 8.).abs() < 1e-10);
-    }
-    #[test]
-    fn cylinder_and_cone_volumes() {
-        for (shape, volume) in [
-            (Shape::Cylinder, 2. * std::f64::consts::PI),
-            (Shape::Cone, 2. * std::f64::consts::PI / 3.),
-        ] {
-            let d = displacement(&part(shape), DVec3::Y, 2.);
-            assert!((d.volume - volume).abs() < 1e-10);
-        }
-    }
-}
 
 /// Immutable geometry assembled once per accepted leg; every trial queries the shared environment.
 pub struct StepParameters {
@@ -474,5 +405,75 @@ impl VesselWater {
                 .expect("translated water load requires registered query frame")
         };
         wrench
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn part(shape: Shape) -> PartDefinition {
+        let mut p = void_assembly::catalog().first().unwrap().clone();
+        p.shape = shape;
+        p.radius = 1.;
+        p.height = 2.;
+        p.box_size_meters = Some(DVec3::splat(2.));
+        p
+    }
+    #[test]
+    fn box_half_and_tilt() {
+        let p = part(Shape::Box);
+        let d = displacement(&p, DVec3::Y, 0.);
+        assert!((d.volume - 4.).abs() < 1e-10);
+        assert!((d.centre.y + 0.5).abs() < 1e-10);
+        for n in [DVec3::new(1., 2., 3.).normalize(), DVec3::X] {
+            assert!((displacement(&p, n, 0.).volume - 4.).abs() < 1e-10);
+        }
+    }
+    #[test]
+    fn angular_resistance_dissipates_and_rotates() {
+        let size = DVec3::new(1., 2., 3.);
+        let spin = DVec3::new(2., -1., 3.);
+        let q = DQuat::from_rotation_y(0.8);
+        let a = angular_drag(size, 2., DQuat::IDENTITY, spin);
+        assert!(a.dot(spin) < 0.);
+        let b = angular_drag(size, 2., q, q * spin);
+        assert!((b - q * a).length() < 1e-10);
+    }
+    #[test]
+    fn partial_volume_continuity_and_wide_hull_righting_arm() {
+        let mut p = part(Shape::Box);
+        p.box_size_meters = Some(DVec3::new(4., 1., 2.));
+        let q = DQuat::from_rotation_z(0.2);
+        let normal = q.conjugate() * DVec3::Y;
+        let a = displacement(&p, normal, 0.);
+        let b = displacement(&p, normal, 1e-6);
+        assert!((b.volume - a.volume).abs() < 1e-4);
+        let arm = q * a.centre;
+        assert!(arm.cross(DVec3::Y).z < 0.);
+        assert_eq!(displacement(&p, normal, -10.).volume, 0.);
+    }
+    #[test]
+    fn dense_engine_displacement_cannot_balance_its_weight() {
+        let part = void_assembly::definition("flight-booster-engine").unwrap();
+        let wet = displacement(part, DVec3::Y, part.height);
+        assert!(1000. * wet.volume < part.dry_mass_kg);
+    }
+    #[test]
+    fn clipping_plane_through_vertices_closes_cap_once() {
+        let p = part(Shape::Box);
+        let normal = DVec3::ONE.normalize();
+        let volume = displacement(&p, normal, 1. / 3.0_f64.sqrt()).volume;
+        assert!((volume - 20. / 3.).abs() < 1e-10, "{volume}");
+        assert!((displacement(&p, DVec3::Y, 1.).volume - 8.).abs() < 1e-10);
+    }
+    #[test]
+    fn cylinder_and_cone_volumes() {
+        for (shape, volume) in [
+            (Shape::Cylinder, 2. * std::f64::consts::PI),
+            (Shape::Cone, 2. * std::f64::consts::PI / 3.),
+        ] {
+            let d = displacement(&part(shape), DVec3::Y, 2.);
+            assert!((d.volume - volume).abs() < 1e-10);
+        }
     }
 }
