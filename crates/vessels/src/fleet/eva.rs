@@ -123,6 +123,13 @@ impl Fleet {
         self.put(v);
     }
     pub fn eva_exit(&mut self, part: &str, module: &str) -> Result<String, String> {
+        let carrier = self.vessel_of_part(part);
+        let previous = self.enter_vessel(&carrier);
+        let result = self.eva_exit_local(part, module);
+        self.restore_view(previous);
+        result
+    }
+    fn eva_exit_local(&mut self, part: &str, module: &str) -> Result<String, String> {
         let vessel = self.vessel_of_part(part);
         let seat = self
             .crew_seats(&vessel)
@@ -269,6 +276,16 @@ impl Fleet {
         Ok(actor)
     }
     pub fn board_eva(&mut self, actor: &str, part: &str, module: &str) -> Result<String, String> {
+        let carrier = self.vessel_of_part(part);
+        if self.vessel(actor).system != self.vessel(&carrier).system {
+            return Err("EVA and hatch belong to different stellar systems".into());
+        }
+        let previous = self.enter_vessel(&carrier);
+        let result = self.board_eva_local(actor, part, module);
+        self.restore_view(previous);
+        result
+    }
+    fn board_eva_local(&mut self, actor: &str, part: &str, module: &str) -> Result<String, String> {
         if !self.has_command(actor) {
             return Err("EVA command capability unavailable or thermally failed".into());
         }
@@ -565,6 +582,12 @@ impl Fleet {
         }
     }
     pub fn eva_jump(&mut self, vessel: &str) -> Result<(), String> {
+        let previous = self.enter_vessel(vessel);
+        let result = self.eva_jump_local(vessel);
+        self.restore_view(previous);
+        result
+    }
+    fn eva_jump_local(&mut self, vessel: &str) -> Result<(), String> {
         if !self.has_command(vessel) {
             return Err("EVA command capability unavailable or thermally failed".into());
         }

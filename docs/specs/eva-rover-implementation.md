@@ -79,3 +79,19 @@ this milestone does not claim parked sleep or full wheel owner completion.
 Targeted local evidence: EVA transfer/checkpoint/replay, spinning-carrier conservation, dynamic
 walk/jump, low-gravity ballistic jump and finite orbital backpack resource/checkpoint/replay pass.
 Main EVA controls/avatar rendering and root TigerVNC/human acceptance are subsequent work.
+
+## Precise stellar crew transactions (root integration)
+
+Exit, boarding and jumping now enter the carrier/actor's current source view and restore it on
+success or refusal. Boarding across different stellar systems returns an explicit refusal before
+any crew/resource change. Ground and spinning Orbit transactions in Beryl (4.24 light-years from
+Sol) preserve identity, mass, COM/P/L and exact checkpoint/recording continuation. Tests reduce
+COM in the common local frame before converting to split galaxy coordinates; summing an offset
+onto an already rounded AU-scale global point would test reduction order instead of conservation.
+The original conservation thresholds remain unchanged. Root evidence:
+`/tmp/void-next-feature-evidence/eva-stellar-transfer-root.log` (2 passed).
+
+A combined dry-contact regression exposed ULP retiming by the water stepping wrapper, which
+cleared native solver history on nominal dry steps. The accepted dry cadence is now preserved;
+EVA 6, vehicles 3, water 6 and aircraft 3 targeted tests pass together after that fix. Main source
+has compiled, but root EVA dynamic GUI and human acceptance are still pending.
