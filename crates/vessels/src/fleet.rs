@@ -2621,6 +2621,7 @@ impl Fleet {
             dt
         };
         let inertia = rows(self.inertia_of(&v.members, self.centre(&v.members)));
+        let wheels = self.wheel_airborne_step(v, dt);
         let air = vessel_air_at(
             &self.environment,
             &self.parts,
@@ -2685,7 +2686,15 @@ impl Fleet {
         let (qm, wm) = if dt == 0.0 {
             (q, w)
         } else {
-            rotation_step(q, w, &inertia, tau0, DVec3::ZERO, dt / 2.0)
+            void_rotation::rotation_step_with_rotor(
+                q,
+                w,
+                &inertia,
+                tau0,
+                wheels.initial_momentum,
+                (wheels.initial_momentum + wheels.final_momentum) / 2.0,
+                dt / 2.0,
+            )
         };
         let gravity = self
             .propagator
@@ -2717,6 +2726,9 @@ impl Fleet {
             inertia,
             torque_local: tau,
             force_local: p.force,
+            rotor_initial_local: wheels.initial_momentum,
+            rotor_final_local: wheels.final_momentum,
+            rotor_seconds: dt,
         });
         let control = (p.flow_kg_per_second > 0.0).then_some(Control::Force(ForceControl {
             // The source supplies thrust in its evolving attitude; Control owns only mass flow.
@@ -2730,6 +2742,9 @@ impl Fleet {
         };
         self.propagate(run, end, control, Some(source.clone()));
         let (next_q, next_w) = source.attitude(end);
+        for (pid, mid, state) in wheels.updates {
+            self.parts.set_module_state(&pid, &mid, state);
+        }
         if p.flow_kg_per_second > 0.0 {
             burn(&mut self.parts, &p.groups, burn_seconds);
         }
@@ -2849,24 +2864,31 @@ impl Fleet {
                     .body(b)
                     .is_some_and(|p| p.sea_level_meters.is_some())
             });
-            let coupled = !ideal_pointing
-                && (void_modules::water::VesselWater::new(
-                    &self.environment,
-                    &self.parts,
-                    &v.members,
-                    self.centre(&v.members),
-                )
-                .near_surface(
-                    &*self.ephemeris,
-                    t,
-                    State {
-                        position: run.state().position,
-                        velocity: run.state().velocity,
-                    },
-                    leg - t,
-                    p.force.length() / run.state().mass_kg,
-                ) || (self.options.air_dynamics == AirDynamics::ForceAndTorque
-                    && (aerodynamic || turning)));
+            if self.wheels_need_physics(&v) && guide.is_some() {
+                self.cancel_guidance(
+                    id,
+                    "wheel actuation or internal rotor motion requires dynamic attitude",
+                );
+            }
+            let coupled = self.wheels_need_physics(&v)
+                || !ideal_pointing
+                    && (void_modules::water::VesselWater::new(
+                        &self.environment,
+                        &self.parts,
+                        &v.members,
+                        self.centre(&v.members),
+                    )
+                    .near_surface(
+                        &*self.ephemeris,
+                        t,
+                        State {
+                            position: run.state().position,
+                            velocity: run.state().velocity,
+                        },
+                        leg - t,
+                        p.force.length() / run.state().mass_kg,
+                    ) || (self.options.air_dynamics == AirDynamics::ForceAndTorque
+                        && (aerodynamic || turning)));
             if coupled
                 || (burning && turning)
                 || (self.options.air_dynamics == AirDynamics::ForceAndTorque
@@ -2874,6 +2896,13 @@ impl Fleet {
                     && guide.is_some())
             {
                 leg = leg.min(t + self.options.step_seconds);
+            }
+            if self.wheels_need_physics(&v) {
+                leg = leg.min(t + self.wheel_safe_seconds(&v, w));
+                assert!(
+                    leg > t,
+                    "internal rotor stiffness exceeds orbital clock resolution"
+                );
             }
             if burning {
                 leg = leg.min(t + p.seconds_to_flameout);
@@ -3568,6 +3597,11 @@ impl Fleet {
                 return Some(format!("water load requires physics on {id}"));
             }
             let v = self.vessel(id);
+            if self.wheels_need_physics(v) {
+                return Some(format!(
+                    "wheel actuator or spinning rotor requires physics on {id}"
+                ));
+            }
             let active=v.members.iter().any(|pid|self.parts.part(pid).modules.values().any(|m|matches!(m,void_assembly::ModuleState::Parachute{state} if void_modules::parachute::active(*state))));
             if active && has_atmosphere(&self.environment) {
                 return Some(format!(

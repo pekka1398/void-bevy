@@ -70,7 +70,8 @@ Physical body-fixed north/east tests, not navball convention, validate the direc
 
 Known integration work still required after this local-only milestone: use multiscale
 enter_vessel/restore_view scopes around exit/board, explicitly reject different systems, and run
-remote-system transfer tests; packed Orbit wheel spin/motor torque/rails needs acceptance updates.
+remote-system transfer tests. Root owns these multiscale transaction wrappers and their remote
+Ground/Orbit validation.
 The original local single-sweep milestone had about 0.09m/s parked residual. The subsequent
 coupled contact milestone replaces that sweep with 32 deterministic projected Gauss-Seidel passes
 on frozen live-collider geometry, including same-tire cross-axis effective mass and all upcoming
@@ -83,8 +84,7 @@ planet-absolute f64 roundtrips and free-attitude pose writes that repeatedly wak
 There is no new position/velocity approximation or relaxed sleep threshold. The restored sleep
 regression verifies a settled four-tire rover sleeps, remains fixed and wakes under driver input;
 a moderate real Terra incline test verifies brake hold then physical roll on brake release. A
-sub-micrometer contact-impulse test verifies real small native displacement is retained. Orbit
-wheel actuation/rails and shared owner completion remain subsequent work.
+sub-micrometer contact-impulse test verifies real small native displacement is retained. Shared-owner and combined GUI verification remain integration work.
 
 Targeted local evidence: EVA transfer/checkpoint/replay, spinning-carrier conservation, dynamic
 walk/jump, low-gravity ballistic jump and finite orbital backpack resource/checkpoint/replay pass.
@@ -120,3 +120,29 @@ occupied seat; the rocket RCS supply remains separate from the isolated five-kil
 For ordinary-spacecraft EVA inspection run `void-app --rendezvous --craft
 crates/assembly/data/crewed-rocket.json` and use F exit/board, H backpack and the profile HUD.
 The spinning remote Orbit transaction test also uses this craft and preserves crew mass/COM/P/L.
+
+Accepted steering and airborne rotors
+-----------------------------------
+`steerRadians` is required accepted WheelState data, independent of operator demand. A finite-rate
+ideal servo (catalog `maxSteerRateRadiansPerSecond=1.5`) advances only accepted steps; drawing uses
+that accepted angle. Failed actuators or missing required crew hold the last accepted angle.
+The final combined checkpoint is version 12, coordinated by root; missing old wheel angle data is
+rejected, never silently initialized. Existing Craft3 templates keep their format version.
+
+Free-wheel drive/brake/spin/steering run inside the existing Orbit owner and PartGraph. Active or
+spinning rotors block rails with an explicit reason and select coupled rotation legs; idle stopped
+wheels remain eligible under existing scene/thermal/air conditions. Body and virtual rotor angular
+momentum `q (I omega_body + L_rotor)` is included in the pure trial attitude evaluation. Internal
+motor/brake and steering axis changes exchange that momentum with the chassis; immutable rotor
+boundary data supplies trials and only an accepted leg commits phase, spin and steering. Carrier
+precession from internal rotor momentum is included. Rotor stiffness limits accepted rotational
+leg duration. Active rotor motion cancels ideal prescribed-attitude guidance with an explicit reason.
+Scene contacts include rotor axis-change and inertial gyroscopic reaction in the same reciprocal
+batch; actual support forces remain native raycast contacts and lumped hub mass geometry.
+
+Validation: airborne rover motor reaction, steering change and brake return preserve total angular
+momentum below 1e-7 N m s; checkpoint/journal continuation remains exact. Pure rotor tests cover
+axis-change transfer and precession with total-H error below 1e-9. Assembly tests prove finite servo
+rate and rejection of missing saved angle. Existing runway taxi/takeoff, aerodynamic-wrench owner
+and Fleet owner/ground-sleep regressions pass. This does not replace combined root GUI/human
+acceptance or assert a separate rigid-body tire/cabin/resource model.

@@ -1,5 +1,5 @@
 //! Authored raycast suspension and finite-inertia tire contact. No runtime model fallback.
-use glam::DVec3;
+use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -21,6 +21,12 @@ pub struct WheelDefinition {
     pub brake_torque_nm: f64,
     pub friction_coefficient: f64,
     pub max_steer_radians: f64,
+    /// Finite-rate ideal steering servo; energy budgeting is deferred.
+    #[serde(default = "default_steer_rate")]
+    pub max_steer_rate_radians_per_second: f64,
+}
+fn default_steer_rate() -> f64 {
+    1.5
 }
 impl WheelDefinition {
     pub fn validate(&self) -> Result<(), String> {
@@ -41,6 +47,7 @@ impl WheelDefinition {
             self.damping_newton_seconds_per_meter,
             self.wheel_inertia_kg_m2,
             self.friction_coefficient,
+            self.max_steer_rate_radians_per_second,
         ];
         if positive.iter().any(|v| !v.is_finite() || *v <= 0.0)
             || [
@@ -59,6 +66,7 @@ impl WheelDefinition {
     }
     pub fn initial(&self) -> WheelState {
         WheelState {
+            steer_radians: 0.0,
             spin_radians: 0.0,
             spin_radians_per_second: 0.0,
             suspension_length_meters: self.rest_length_meters + self.travel_meters,
@@ -69,6 +77,8 @@ impl WheelDefinition {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WheelState {
+    /// Accepted servo angle, required in saved state; positive means player right.
+    pub steer_radians: f64,
     pub spin_radians: f64,
     pub spin_radians_per_second: f64,
     pub suspension_length_meters: f64,
@@ -128,6 +138,7 @@ pub fn step_wheel(
     control.validate();
     assert!(dt.is_finite() && dt > 0.0);
     let mut next = state;
+    next.steer_radians = wheel_steer_after(d, state, control, dt);
     let free_omega = state.spin_radians_per_second
         + control.drive * d.drive_torque_nm / d.wheel_inertia_kg_m2 * dt;
     let brake_limit = control.brake * d.brake_torque_nm;
@@ -204,4 +215,28 @@ pub fn step_wheel(
     // spin angular momentum credited to the virtual wheel, including motor/brake reaction.
     let axle_reaction_nm = -d.wheel_inertia_kg_m2 * (omega - state.spin_radians_per_second) / dt;
     (next, force, axle_reaction_nm)
+}
+
+/// Pure accepted servo evaluation, shared by contact geometry and airborne rotation.
+pub fn wheel_steer_after(
+    d: &WheelDefinition,
+    state: WheelState,
+    control: VehicleControl,
+    dt: f64,
+) -> f64 {
+    control.validate();
+    assert!(dt.is_finite() && dt > 0.0);
+    let target = control.steer * d.max_steer_radians;
+    let remaining = target - state.steer_radians;
+    let travel = d.max_steer_rate_radians_per_second * dt;
+    if remaining.abs() <= travel {
+        target
+    } else {
+        state.steer_radians + remaining.signum() * travel
+    }
+}
+/// Authored physical rotor axle in part coordinates, independent of the road's normal.
+pub fn wheel_axle(d: &WheelDefinition, steer_radians: f64) -> DVec3 {
+    let rolling = DQuat::from_axis_angle(d.suspension_direction, steer_radians) * d.forward;
+    (-d.suspension_direction).cross(rolling)
 }

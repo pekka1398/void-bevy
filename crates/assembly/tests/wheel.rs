@@ -15,6 +15,7 @@ fn wheel() -> WheelDefinition {
         brake_torque_nm: 300.0,
         friction_coefficient: 0.9,
         max_steer_radians: 0.5,
+        max_steer_rate_radians_per_second: 1.5,
     }
 }
 fn contact(velocity: DVec3) -> WheelContact {
@@ -149,4 +150,26 @@ fn motor_reaction_accounts_virtual_rotor_angular_momentum() {
             < 1e-12
     );
     assert!((reaction + d.drive_torque_nm).abs() < 1e-12);
+}
+
+#[test]
+fn steering_is_accepted_finite_rate_state_and_missing_saved_angle_is_rejected() {
+    let d = wheel();
+    let control = VehicleControl {
+        drive: 0.0,
+        steer: 1.0,
+        brake: 0.0,
+    };
+    let initial = d.initial();
+    let (next, _, _) = step_wheel(&d, initial, control, None, 0.1);
+    assert!((next.steer_radians - 0.15).abs() < 1e-15);
+    assert_eq!(
+        initial.steer_radians, 0.0,
+        "pure servo trial committed state"
+    );
+    let (final_state, _, _) = step_wheel(&d, next, control, None, 0.3);
+    assert_eq!(final_state.steer_radians, d.max_steer_radians);
+    let mut old = serde_json::to_value(final_state).unwrap();
+    old.as_object_mut().unwrap().remove("steerRadians");
+    assert!(serde_json::from_value::<void_assembly::WheelState>(old).is_err());
 }

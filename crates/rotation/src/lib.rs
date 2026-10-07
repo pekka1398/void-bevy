@@ -229,3 +229,57 @@ pub fn rotation_step(
     );
     (q, w + kick(q))
 }
+
+/// Body rotation with internal rotor angular momentum, expressed in body axes.
+/// The carrier inertia already includes locked rotor mass/inertia. Internal motor, brake and
+/// steering changes exchange momentum with the carrier; only `torque_local` is external.
+/// Pure trial evaluation: callers commit rotor state only after accepting the whole step.
+pub fn rotation_step_with_rotor(
+    rotation: DQuat,
+    angular_velocity: DVec3,
+    inertia_local: &Mat3,
+    torque_local: DVec3,
+    rotor_initial_local: DVec3,
+    rotor_final_local: DVec3,
+    dt: f64,
+) -> (DQuat, DVec3) {
+    assert!(dt.is_finite() && dt > 0.0);
+    finite(angular_velocity, "rotor carrier angular velocity");
+    finite(torque_local, "rotor external torque");
+    finite(rotor_initial_local, "initial rotor momentum");
+    finite(rotor_final_local, "final rotor momentum");
+    if rotor_initial_local == DVec3::ZERO && rotor_final_local == DVec3::ZERO {
+        return rotation_step(
+            rotation,
+            angular_velocity,
+            inertia_local,
+            torque_local,
+            DVec3::ZERO,
+            dt,
+        );
+    }
+    let inertia = glam::DMat3::from_cols_array(inertia_local).transpose();
+    let inverse = inertia.inverse();
+    assert!(inverse.is_finite(), "singular rotor carrier inertia");
+    let half_momentum = rotation
+        * (inertia * (rotation.conjugate() * angular_velocity)
+            + rotor_initial_local
+            + torque_local * (dt / 2.0));
+    let midpoint_rotor = (rotor_initial_local + rotor_final_local) / 2.0;
+    let mut midpoint_rotation =
+        (DQuat::from_scaled_axis(angular_velocity * (dt / 2.0)) * rotation).normalize();
+    let mut midpoint_velocity = angular_velocity;
+    for _ in 0..16 {
+        midpoint_velocity = midpoint_rotation
+            * (inverse * (midpoint_rotation.conjugate() * half_momentum - midpoint_rotor));
+        midpoint_rotation =
+            (DQuat::from_scaled_axis(midpoint_velocity * (dt / 2.0)) * rotation).normalize();
+    }
+    let next_rotation = (DQuat::from_scaled_axis(midpoint_velocity * dt) * rotation).normalize();
+    let final_momentum = half_momentum + next_rotation * torque_local * (dt / 2.0);
+    let next_velocity = next_rotation
+        * (inverse * (next_rotation.conjugate() * final_momentum - rotor_final_local));
+    finite(next_velocity, "rotor carrier result");
+    assert!(next_rotation.is_finite());
+    (next_rotation, next_velocity)
+}

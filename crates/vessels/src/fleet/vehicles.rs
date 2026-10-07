@@ -18,6 +18,8 @@ struct TireConstraint<'a> {
     point: DVec3,
     com: DVec3,
     axle: DVec3,
+    initial_axle: DVec3,
+    inertial_angular_velocity: DVec3,
     definition: &'a void_assembly::WheelDefinition,
     initial: void_assembly::WheelState,
     control: VehicleControl,
@@ -26,7 +28,118 @@ struct TireConstraint<'a> {
     previous_wrench: (DVec3, DVec3),
     accepted: void_assembly::WheelState,
 }
+pub(super) struct FreeWheelStep {
+    pub initial_momentum: DVec3,
+    pub final_momentum: DVec3,
+    pub updates: Vec<(String, String, ModuleState)>,
+}
 impl Fleet {
+    fn wheel_actuator(
+        &self,
+        v: &Vessel,
+        part: &void_assembly::Part,
+        control: VehicleControl,
+        state: void_assembly::WheelState,
+        d: &void_assembly::WheelDefinition,
+    ) -> VehicleControl {
+        if !part.thermally_failed() && self.commanded(v) {
+            return control;
+        }
+        VehicleControl {
+            drive: 0.0,
+            steer: if d.max_steer_radians == 0.0 {
+                0.0
+            } else {
+                state.steer_radians / d.max_steer_radians
+            },
+            brake: if part.thermally_failed() {
+                0.0
+            } else {
+                control.brake
+            },
+        }
+    }
+
+    pub(super) fn wheel_airborne_step(&self, v: &Vessel, dt: f64) -> FreeWheelStep {
+        let mut result = FreeWheelStep {
+            initial_momentum: DVec3::ZERO,
+            final_momentum: DVec3::ZERO,
+            updates: Vec::new(),
+        };
+        for pid in &v.members {
+            let part = self.parts.part(pid);
+            for module in &part.definition.modules {
+                let Module::Wheel {
+                    id: mid,
+                    parameters: d,
+                } = module
+                else {
+                    continue;
+                };
+                let ModuleState::Wheel { state, control } = part.modules[mid] else {
+                    panic!("wheel state mismatch")
+                };
+                let next = if dt > 0.0 {
+                    void_assembly::step_wheel(
+                        d,
+                        state,
+                        self.wheel_actuator(v, part, control, state, d),
+                        None,
+                        dt,
+                    )
+                    .0
+                } else {
+                    state
+                };
+                result.initial_momentum += part.pose.rotation
+                    * void_assembly::wheel_axle(d, state.steer_radians)
+                    * (d.wheel_inertia_kg_m2 * state.spin_radians_per_second);
+                result.final_momentum += part.pose.rotation
+                    * void_assembly::wheel_axle(d, next.steer_radians)
+                    * (d.wheel_inertia_kg_m2 * next.spin_radians_per_second);
+                if dt > 0.0 {
+                    result.updates.push((
+                        pid.clone(),
+                        mid.clone(),
+                        ModuleState::Wheel {
+                            state: next,
+                            control,
+                        },
+                    ));
+                }
+            }
+        }
+        result
+    }
+    pub(super) fn wheel_safe_seconds(&self, v: &Vessel, angular_velocity: DVec3) -> f64 {
+        let momentum = self.wheel_airborne_step(v, 0.0).initial_momentum;
+        let inverse = self
+            .inertia_of(&v.members, self.centre(&v.members))
+            .inverse();
+        let frequency = angular_velocity.length() + (inverse * momentum).length();
+        if frequency == 0.0 {
+            self.options.step_seconds
+        } else {
+            self.options.step_seconds.min(0.1 / frequency)
+        }
+    }
+    pub(super) fn wheels_need_physics(&self, v: &Vessel) -> bool {
+        v.members.iter().any(|pid| {
+            let part = self.parts.part(pid);
+            part.definition.modules.iter().any(|module| {
+                let Module::Wheel { id, parameters: d } = module else {
+                    return false;
+                };
+                let ModuleState::Wheel { state, control } = part.modules[id] else {
+                    panic!("wheel state mismatch")
+                };
+                let actuator = self.wheel_actuator(v, part, control, state, d);
+                state.spin_radians_per_second != 0.0
+                    || actuator.drive * d.drive_torque_nm != 0.0
+                    || actuator.steer * d.max_steer_radians != state.steer_radians
+            })
+        })
+    }
     /// Root command owns the selected vessel's operator profile, including docked mixed craft.
     pub fn control_profile(&self, vessel: &str) -> Option<void_assembly::ControlProfile> {
         let v = self.vessel(vessel);
@@ -142,7 +255,13 @@ impl Fleet {
                     let down = rotation * d.suspension_direction;
                     let origin = translation
                         + q * (part.pose.position + part.pose.rotation * d.suspension_origin);
-                    let steer = DQuat::from_axis_angle(down, control.steer * d.max_steer_radians);
+                    let steer_angle = void_assembly::wheel_steer_after(
+                        d,
+                        state,
+                        self.wheel_actuator(v, part, control, state, d),
+                        dt,
+                    );
+                    let steer = DQuat::from_axis_angle(down, steer_angle);
                     let rolling = steer * (rotation * d.forward);
                     let hit = world.suspension_ray(
                         body,
@@ -178,22 +297,7 @@ impl Fleet {
                             inverse_mass_side: effective(side),
                         })
                     });
-                    let actuator = if part.thermally_failed() {
-                        VehicleControl {
-                            drive: 0.0,
-                            steer: control.steer,
-                            brake: 0.0,
-                        }
-                    } else if !self.has_command(id) {
-                        // A latched mechanical parking brake stays set when the crew leaves.
-                        VehicleControl {
-                            drive: 0.0,
-                            steer: control.steer,
-                            brake: control.brake,
-                        }
-                    } else {
-                        control
-                    };
+                    let actuator = self.wheel_actuator(v, part, control, state, d);
                     let moving_support = hit.and_then(|h| h.body).is_some_and(|support| {
                         let b = world.body(support);
                         !b.is_sleeping()
@@ -216,8 +320,8 @@ impl Fleet {
                     let support = hit
                         .and_then(|h| h.body)
                         .filter(|b| world.body(*b).is_dynamic());
-                    let axle =
-                        contact.map_or((-down).cross(rolling), |c| c.normal.cross(c.forward));
+                    let axle = rotation * void_assembly::wheel_axle(d, steer_angle);
+                    let initial_axle = rotation * void_assembly::wheel_axle(d, state.steer_radians);
                     let acceleration = world.frame.acceleration(
                         &*self.ephemeris,
                         self.time,
@@ -257,6 +361,8 @@ impl Fleet {
                         point,
                         com,
                         axle,
+                        initial_axle,
+                        inertial_angular_velocity: vec64(b.angvel()) + world.frame.spin(),
                         definition: d,
                         initial: state,
                         control,
@@ -279,6 +385,8 @@ impl Fleet {
                     point,
                     com,
                     axle,
+                    initial_axle,
+                    inertial_angular_velocity,
                     definition: d,
                     initial: state,
                     actuator,
@@ -313,10 +421,16 @@ impl Fleet {
                     let support_com = world.origin + vec64(world.body(*h).center_of_mass());
                     entry.1 -= (*point - support_com).cross(-previous.0);
                 }
-                let (updated, force, reaction) =
+                let (updated, force, _) =
                     void_assembly::step_wheel(d, *state, *actuator, contact, dt);
                 *next = updated;
-                let torque = (*point - *com).cross(force) + *axle * reaction;
+                let initial_momentum =
+                    *initial_axle * (d.wheel_inertia_kg_m2 * state.spin_radians_per_second);
+                let final_momentum =
+                    *axle * (d.wheel_inertia_kg_m2 * updated.spin_radians_per_second);
+                let rotor_reaction = -(final_momentum - initial_momentum) / dt
+                    - inertial_angular_velocity.cross((initial_momentum + final_momentum) / 2.0);
+                let torque = (*point - *com).cross(force) + rotor_reaction;
                 let entry = loads.bodies.entry(*body).or_default();
                 entry.0 += force;
                 entry.1 += torque;

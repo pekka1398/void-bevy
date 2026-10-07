@@ -647,7 +647,9 @@ fn check_modules(part: &Part) {
                             .iter()
                             .all(|v| v.is_finite() && v.abs() <= 1.0),
                 (Module::Wheel { parameters, .. }, ModuleState::Wheel { state, control }) => {
-                    state.spin_radians.is_finite()
+                    state.steer_radians.is_finite()
+                        && state.steer_radians.abs() <= parameters.max_steer_radians
+                        && state.spin_radians.is_finite()
                         && state.spin_radians_per_second.is_finite()
                         && state.suspension_length_meters.is_finite()
                         && state.suspension_length_meters >= 0.0

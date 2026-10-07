@@ -6,7 +6,7 @@ use std::sync::Arc;
 use void_frames::State;
 use void_modules::VesselAir;
 use void_orbit::{AirSource, EphemerisSource};
-use void_rotation::{Mat3, rotation_step};
+use void_rotation::Mat3;
 
 pub(super) struct RigidFlightSource {
     pub air: Option<Arc<VesselAir>>,
@@ -18,6 +18,9 @@ pub(super) struct RigidFlightSource {
     pub inertia: Mat3,
     pub torque_local: DVec3,
     pub force_local: DVec3,
+    pub rotor_initial_local: DVec3,
+    pub rotor_final_local: DVec3,
+    pub rotor_seconds: f64,
 }
 impl RigidFlightSource {
     pub fn attitude(&self, t: f64) -> (DQuat, DVec3) {
@@ -28,13 +31,17 @@ impl RigidFlightSource {
         if t == self.start {
             return (self.rotation, self.angular_velocity);
         }
-        rotation_step(
+        let seconds = t - self.start;
+        let rotor = self.rotor_initial_local
+            + (self.rotor_final_local - self.rotor_initial_local) * (seconds / self.rotor_seconds);
+        void_rotation::rotation_step_with_rotor(
             self.rotation,
             self.angular_velocity,
             &self.inertia,
             self.torque_local,
-            DVec3::ZERO,
-            t - self.start,
+            self.rotor_initial_local,
+            rotor,
+            seconds,
         )
     }
 }

@@ -241,3 +241,124 @@ fn four_tires_park_on_real_inclined_terrain_and_roll_when_brake_released() {
         "unbraked finite-inertia tires artificially held slope"
     );
 }
+
+fn carrier_and_rotor_momentum(sim: &FleetFlight, id: &str) -> DVec3 {
+    let snapshot = sim.fleet.snapshot(id);
+    let inertia = glam::DMat3::from_cols_array(&sim.fleet.inertia(id)).transpose();
+    let mut rotor = DVec3::ZERO;
+    for pid in snapshot.part_ids {
+        let part = sim.fleet.parts().part(&pid);
+        for module in &part.definition.modules {
+            let void_assembly::Module::Wheel { id, parameters } = module else {
+                continue;
+            };
+            let ModuleState::Wheel { state, .. } = part.modules[id] else {
+                panic!()
+            };
+            rotor += part.pose.rotation
+                * void_assembly::wheel_axle(parameters, state.steer_radians)
+                * (parameters.wheel_inertia_kg_m2 * state.spin_radians_per_second);
+        }
+    }
+    snapshot.rotation
+        * (inertia * (snapshot.rotation.conjugate() * snapshot.angular_velocity) + rotor)
+}
+
+#[test]
+fn airborne_motor_steering_braking_and_gyro_conserve_total_momentum_and_continue_saved_journal() {
+    use void_fleet_flight::session::Outcome;
+    let planet = void_landing::pebble();
+    let mut session = FlightSession::new(InitialWorld::new(
+        &planet,
+        &rover(),
+        flat_site(&planet),
+        false,
+    ))
+    .with_recording();
+    advance(&mut session, 5.0);
+    let Outcome::Spawned(id) = session.execute(Action::LaunchOrbit {
+        craft: rover(),
+        offset: DVec3::ZERO,
+    }) else {
+        panic!()
+    };
+    session.execute(Action::Select { vessel: id.clone() });
+    let before = carrier_and_rotor_momentum(session.sim(), &id);
+    session.execute(Action::Vehicle {
+        control: VehicleControl {
+            drive: 0.4,
+            steer: 0.0,
+            brake: 0.0,
+        },
+    });
+    assert!(
+        session
+            .sim()
+            .fleet
+            .rails_blocker()
+            .unwrap()
+            .contains("wheel")
+    );
+    advance(&mut session, 0.2);
+    assert!(
+        session.sim().fleet.snapshot(&id).angular_velocity.length() > 0.01,
+        "motor reaction missing from Orbit owner"
+    );
+    assert!((carrier_and_rotor_momentum(session.sim(), &id) - before).length() < 1e-7);
+    session.execute(Action::Vehicle {
+        control: VehicleControl {
+            drive: 0.0,
+            steer: 1.0,
+            brake: 0.0,
+        },
+    });
+    advance(&mut session, 0.1);
+    let states: Vec<_> = session
+        .sim()
+        .fleet
+        .part_snapshots(&id)
+        .iter()
+        .flat_map(|p| p.modules.values())
+        .filter_map(|m| match m {
+            ModuleState::Wheel { state, .. } => Some(*state),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        states
+            .iter()
+            .any(|s| s.steer_radians > 0.0 && s.steer_radians < 0.45)
+    );
+    assert!(states.iter().all(|s| !s.grounded));
+    assert!(
+        (carrier_and_rotor_momentum(session.sim(), &id) - before).length() < 1e-7,
+        "steering axis-change reaction missing"
+    );
+    let saved = FlightCheckpoint::capture(session.sim(), session.recording_initial().clone());
+    let saved: FlightCheckpoint =
+        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let mut restored = FlightSession::from_checkpoint(saved).with_recording();
+    for action in [
+        Action::Advance {
+            seconds: 0.15,
+            rails: false,
+        },
+        Action::Vehicle {
+            control: VehicleControl::default(),
+        },
+        Action::Advance {
+            seconds: 0.5,
+            rails: false,
+        },
+    ] {
+        assert_eq!(session.execute(action.clone()), restored.execute(action));
+        assert_eq!(world_mark(session.sim()), world_mark(restored.sim()));
+        assert!((carrier_and_rotor_momentum(session.sim(), &id) - before).length() < 1e-7);
+    }
+    assert!(
+        session.sim().fleet.snapshot(&id).angular_velocity.length() < 1e-7,
+        "brake failed to return rotor momentum to carrier"
+    );
+    let replay = FlightSession::from_recording(session.recording());
+    assert_eq!(world_mark(session.sim()), world_mark(replay.sim()));
+}
