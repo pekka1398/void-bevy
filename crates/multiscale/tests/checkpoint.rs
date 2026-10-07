@@ -59,3 +59,21 @@ fn vessel_gravity_retains_oblateness_in_nonzero_system() {
     );
     assert!(correction.length() > 1e-5);
 }
+
+#[test]
+fn altered_placement_and_initial_velocity_are_rejected() {
+    let seeds = wide_seeds(SplitPosition::ORIGIN);
+    let world = CoupledWorld::new(seeds.clone(), 86400.0, 8192);
+    for change in 0..3 {
+        let mut changed = seeds.clone();
+        match change {
+            0 => changed[0].origin = changed[0].origin.translate(DVec3::X),
+            1 => changed[0].velocity += DVec3::Y,
+            _ => changed[0].system.velocities[1] += DVec3::Z,
+        }
+        let saved = world.checkpoint();
+        assert!(
+            std::panic::catch_unwind(|| CoupledWorld::from_checkpoint(changed, saved)).is_err()
+        );
+    }
+}

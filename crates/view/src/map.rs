@@ -343,7 +343,7 @@ pub fn map_labels(
     let mut labels: Vec<MapLabel> = bodies
         .iter()
         .map(|b| MapLabel {
-            kind: if b.parent_index.is_none() {
+            kind: if b.parent_index.is_none() && b.index == 0 {
                 LabelKind::Star
             } else {
                 LabelKind::Body(b.index)

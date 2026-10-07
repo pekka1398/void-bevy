@@ -68,3 +68,55 @@
 - HUD 顯示船的 owner、scene、質量、相對位置／速度、接點距離及 split 座標。
 
 所有繪圖座標先做 split 相減與距離縮放，再轉 f32。已通過 headless 系統存取檢查與物理測試；視窗外觀由使用者在本機驗收，agent 實作時沒有開啟視窗。
+
+## 主遊戲多星系第一輪（work/galactic-flight，2026-10-07）
+
+`void-app --stellar-neighborhood` 建立 Sol、Beryl、Cygnus 三個虛構恆星系；相鄰系統
+相隔 4.24 與約 5.92 光年，主船仍是正常地面火箭，燃料／引擎／分級沿用既有模型。
+不增加特殊引擎、傳送、蟲洞、相對論或整個銀河重力。銀河座標仍是精度配置，沒有
+銀河勢能模型。天體互相積分仍與既有 orbit 一樣使用質點；天體的 J2 資料保留，
+船受力則繼續使用共用 `void_orbit::gravity` 的 J2 與正確自轉軸，沒有偷偷關掉。
+
+`--stellar-neighborhood --stellar-fixture` 是明確的驗收初始場景：Sol 地面主船、
+Beryl 地面船與 Cygnus 軌道船；預設暫停。這些遠方船是初始配置，不代表火箭已完成
+星際航程。Tab 切船、普通引擎／姿態／分級操作仍有效；F6/F7 存讀、record/replay
+沿用同一套 command journal。Ctrl+Home 看 12 光年鄰近星系，點恆星標籤切焦點，
+滾輪可縮放到 30 光年，Home 回船。HUD 顯示所選船的系統；視角改變不移動船。
+
+### 精確狀態與 owner 接縫
+
+- `Vessel` 與 contact `Scene` 持有 `SystemId` 和系統內 `SplitPosition` 錨點；
+  Orbit 的原有 `PropagationRun` 積分錨點附近的 f64 殘量，沒有第二份船 runtime。
+  接受的邊界才把殘量納入 split 錨點並重啟導數；燃料、零件圖、姿態、慣量不因此重造。
+- `FrameTree` 的 split anchor 節點掛在恆星系之下。近船在星際空間也先精確相減
+  split 錨點，再處理局部 f64／渲染 f32；不把數光年的絕對 f64 當接觸座標。
+- 系統選擇使用 5% 遲滯。實際滑行越過界線才換框架；split 絕對位置、速度及
+  慣量／零件 ID 保留。換框架不替換引力来源，所有天體仍在同一 `CoupledWorld`。
+- 舊 `Fleet::snapshot` 的位置是主來源座標下的觀察值，远方可能损失小量精度，不能
+  再用于物理。物理／驗證使用 `precise_snapshot` 的 split `position`、`anchor`、
+  `residual`，或 `vessel_anchor_frame`、`part_frame` 与 `body_fixed_state`。
+  `local` 是系統質心下的顯示值；星際殘量才是控制／積分入口。
+- 物理来源只在 owner 求值期間切局部系统／split offset，結束後恢復主來源。
+  讀取大氣、熱、地形、碰撞與相對速度使用相應樹／query frame。存檔拒絕仍留在
+  暫時來源的非法狀態。機動計畫另外保存自己的固定 split 錨點，不隨主船重錨漂移。
+
+### 存檔與相容性
+
+此分支的世界描述 schema 是 4，Flight model 是 21，Fleet checkpoint 是 9；整合
+分支可以再指定組合版本，不自動讀舊規則或修補舊存檔。多星系 checkpoint 必須
+保存 `CoupledCheckpoint`，包含 live 狀態、Kahan 補償量、保留的 Hermite 樣本、
+步長及初始 seed／天體摘要。恢復直接接續，不從起始年代重新積分數百年。缺少
+耦合狀態、界線不符、seed 位置／速度／軌道、天體 J2／SOI 改變，都明確拒絕。
+`LaunchSplitState` 是可錄放的明確初始狀態指令，不能冒稱是正常推進或轉移功能。
+
+### 驗證範圍與限制
+
+針對性測試覆蓋遠方 Orbit 船、遠方 Ground 地形／大氣、數光年處 Bubble 船的
+公分相對量、對接／解除與存讀、真實滑行系統交接、遠方分級燃燒和 journal 精確
+狀態核對；保留原 golden 門檻。本分支 GUI／整合及人類驗收由主 agent 另外記錄，
+核心測試通過不當作這些驗收已完成。
+
+真實普通火箭的星際旅程很長。本輪交付多星系世界、同船控制與精度接縫，不承諾
+數分鐘內完成數光年航程。時間推進仍受原 rails 條件、天體／軌道步長及積分預算
+限制；不得以跳時、換船或省略引力來源掩蓋效能不足。兩個鄰近星系目前使用明確
+配置的星球／衛星與既有外觀資產，沒有新增逐顆專屬美術。

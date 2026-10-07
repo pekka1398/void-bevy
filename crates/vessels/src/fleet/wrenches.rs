@@ -73,6 +73,14 @@ impl void_frames::FrameSource for SceneStepSource<'_> {
     fn body_in_system(&self, id: void_frames::BodyId, t: f64) -> (DVec3, DVec3) {
         self.fleet.ephemeris.body_in_system(id, t)
     }
+    fn dynamic_split_state(&self, key: u64, t: f64) -> (void_frames::SplitPosition, DVec3) {
+        match self.fleet.dynamic[&key] {
+            super::Dynamic::SceneAnchor(scene) if scene == self.scene => {
+                (self.fleet.scenes[&scene].anchor, DVec3::ZERO)
+            }
+            _ => panic!("scene trial source cannot read other split anchors at {t}"),
+        }
+    }
     fn dynamic_motion(&self, key: u64, t: f64) -> void_frames::Motion {
         assert!(
             t >= self.start && t <= self.end,

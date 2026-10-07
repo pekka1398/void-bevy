@@ -8,7 +8,7 @@ pub struct FrameId(u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BodyId(pub usize);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SystemId(pub usize);
 
 /// Barycentric states of the bodies, from the ephemeris.
@@ -27,6 +27,10 @@ pub trait FrameSource {
     fn body_in_system(&self, body: BodyId, t: f64) -> (DVec3, DVec3);
     /// The motion of a dynamic frame relative to its parent, computed from the owner's live
     /// state (a contact scene, a vessel). Sources without dynamic frames panic.
+    /// A nonrotating split translation below a system, for a precise moving vessel/scene anchor.
+    fn dynamic_split_state(&self, key: u64, t: f64) -> (SplitPosition, DVec3) {
+        panic!("split dynamic frame {key} at {t}: source has no precise anchor")
+    }
     fn dynamic_motion(&self, key: u64, t: f64) -> Motion {
         panic!("dynamic frame {key} at t = {t}: this source has no dynamic frames")
     }
@@ -39,9 +43,14 @@ enum Kind {
     /// A star system's barycentre. Parent: the root. Its axes are the root's.
     System(SystemId),
     /// Centred on the body, non-rotating equatorial axes. Parent: the body's system.
-    BodyInertial { body: BodyId, axes: DQuat },
+    BodyInertial {
+        body: BodyId,
+        axes: DQuat,
+    },
     /// Turning with the body about its spin axis. Parent: the body's inertial frame.
-    BodySurface { spin: Spin },
+    BodySurface {
+        spin: Spin,
+    },
     /// Centred on two bodies' barycentre; x from the primary to the secondary, z along their
     /// relative angular momentum. Parent: the bodies' system. `weights` are the bodies' GM.
     TwoBody {
@@ -55,6 +64,8 @@ enum Kind {
     Free(Option<(f64, Motion)>),
     /// Asked of the source every time, so it always follows the owner's live state.
     Dynamic(u64),
+    SplitDynamic(u64),
+    SplitFixed(SplitPosition),
 }
 
 #[derive(Clone, Debug)]
@@ -92,6 +103,21 @@ impl FrameTree {
         }
     }
 
+    /// Static nonrotating anchor in system axes. Never flatten its split translation.
+    pub fn add_split_fixed(&mut self, parent: FrameId, position: SplitPosition) -> FrameId {
+        assert!(
+            matches!(self.node(parent).kind, Kind::System(_)),
+            "split anchor needs system parent"
+        );
+        self.add(parent, Kind::SplitFixed(position))
+    }
+    pub fn add_split_dynamic(&mut self, parent: FrameId, key: u64) -> FrameId {
+        assert!(
+            matches!(self.node(parent).kind, Kind::System(_)),
+            "split anchor needs system parent"
+        );
+        self.add(parent, Kind::SplitDynamic(key))
+    }
     fn add(&mut self, parent: FrameId, kind: Kind) -> FrameId {
         let depth = self.node(parent).depth + 1;
         let id = FrameId(u32::try_from(self.nodes.len()).expect("frame count exceeds u32"));
@@ -234,7 +260,11 @@ impl FrameTree {
         assert!(
             matches!(
                 self.node(id).kind,
-                Kind::Free(_) | Kind::Fixed(_) | Kind::Dynamic(_)
+                Kind::Free(_)
+                    | Kind::Fixed(_)
+                    | Kind::Dynamic(_)
+                    | Kind::SplitDynamic(_)
+                    | Kind::SplitFixed(_)
             ),
             "only free, fixed and dynamic frames move between parents"
         );
@@ -243,6 +273,15 @@ impl FrameTree {
             Self::ROOT,
             "frames below the galaxy hang under a system"
         );
+        if matches!(
+            self.node(id).kind,
+            Kind::SplitDynamic(_) | Kind::SplitFixed(_)
+        ) {
+            assert!(
+                matches!(self.node(parent).kind, Kind::System(_)),
+                "split anchor needs system parent"
+            );
+        }
         let mut up = Some(parent);
         while let Some(p) = up {
             assert_ne!(p, id, "{id:?} cannot hang under itself");
@@ -391,6 +430,11 @@ impl<S: FrameSource + ?Sized> Snapshot<'_, S> {
                 )
             }
             Kind::Fixed(motion) => *motion,
+            Kind::SplitFixed(position) => Motion::fixed(position.vector(), DQuat::IDENTITY),
+            Kind::SplitDynamic(key) => {
+                let (position, velocity) = self.source.dynamic_split_state(*key, self.t);
+                Motion::new(position.vector(), velocity, DQuat::IDENTITY, DVec3::ZERO)
+            }
             Kind::Dynamic(key) => {
                 let motion = self.source.dynamic_motion(*key, self.t);
                 motion.assert_valid();
@@ -449,23 +493,43 @@ impl<S: FrameSource + ?Sized> Snapshot<'_, S> {
         match system.map(|s| &self.tree.node(s).kind) {
             None => (SplitPosition::ORIGIN, DVec3::ZERO),
             Some(Kind::System(id)) => self.source.system_state(*id, self.t),
+            Some(Kind::SplitFixed(position)) => {
+                let (origin, velocity) = self.top(self.tree.node(system.unwrap()).parent);
+                (origin.compose(position), velocity)
+            }
+            Some(Kind::SplitDynamic(key)) => {
+                let (origin, velocity) = self.top(self.tree.node(system.unwrap()).parent);
+                let (position, local_velocity) = self.source.dynamic_split_state(*key, self.t);
+                (origin.compose(&position), velocity + local_velocity)
+            }
             Some(other) => unreachable!("system_of returned {other:?}"),
         }
     }
 
+    fn precision_anchor(&self, mut id: FrameId) -> Option<FrameId> {
+        loop {
+            if matches!(
+                self.tree.node(id).kind,
+                Kind::System(_) | Kind::SplitDynamic(_) | Kind::SplitFixed(_)
+            ) {
+                return Some(id);
+            }
+            id = self.tree.node(id).parent?;
+        }
+    }
     /// Maps coordinates in `from` to coordinates in `to`, through their nearest common ancestor
     /// only, so the error is set by the distances below it, never by the root's. Paths that meet
     /// at the galaxy subtract the two systems' split positions exactly.
     pub fn transform(&self, from: FrameId, to: FrameId) -> Transform {
         let meet = self.common_ancestor(from, to);
-        if meet != FrameTree::ROOT {
+        let (upper, lower) = (self.precision_anchor(from), self.precision_anchor(to));
+        if meet != FrameTree::ROOT && upper == lower {
             return Transform {
                 up: self.to_ancestor(from, meet),
                 bridge: None,
                 down: self.to_ancestor(to, meet),
             };
         }
-        let (upper, lower) = (self.tree.system_of(from), self.tree.system_of(to));
         let (a, va) = self.top(upper);
         let (b, vb) = self.top(lower);
         Transform {
@@ -477,7 +541,7 @@ impl<S: FrameSource + ?Sized> Snapshot<'_, S> {
 
     /// A galaxy position in `to`'s coordinates: split subtraction from `to`'s system first.
     pub fn from_galaxy(&self, position: &SplitPosition, to: FrameId) -> DVec3 {
-        let system = self.tree.system_of(to);
+        let system = self.precision_anchor(to);
         let (origin, _) = self.top(system);
         self.to_ancestor(to, system.unwrap_or(FrameTree::ROOT))
             .unapply_point(position.relative(&origin))
@@ -485,7 +549,7 @@ impl<S: FrameSource + ?Sized> Snapshot<'_, S> {
 
     /// A point of `from` as a galaxy position, exactly from its system's split position.
     pub fn to_galaxy(&self, from: FrameId, p: DVec3) -> SplitPosition {
-        let system = self.tree.system_of(from);
+        let system = self.precision_anchor(from);
         let (origin, _) = self.top(system);
         origin.translate(
             self.to_ancestor(from, system.unwrap_or(FrameTree::ROOT))

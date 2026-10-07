@@ -562,6 +562,8 @@ impl CoupledWorld {
                         "id": b.id, "index": b.index, "parent": b.parent_index,
                         "mass": b.mass_kg, "gm": b.gm, "radius": b.radius_meters,
                         "j2": b.j2, "j2_radius": b.j2_reference_radius_meters,
+                        "soi": b.sphere_of_influence_meters,
+                        "period": b.orbit_period_seconds, "periapsis": b.periapsis_fraction,
                         "rotation": [b.rotation.period_seconds, b.rotation.obliquity_radians,
                             b.rotation.pole_longitude_radians, b.rotation.angle_at_epoch_radians],
                     })

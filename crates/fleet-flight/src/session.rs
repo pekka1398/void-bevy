@@ -146,6 +146,15 @@ pub enum Action {
         rotation: glam::DQuat,
         angular_velocity: DVec3,
     },
+    /// Explicit split-state fixture/initial-state command, not a propulsion or teleport action.
+    LaunchSplitState {
+        craft: Craft,
+        system: void_frames::SystemId,
+        position: void_frames::SplitPosition,
+        velocity: DVec3,
+        rotation: glam::DQuat,
+        angular_velocity: DVec3,
+    },
     LaunchFlightAt {
         body: String,
         craft: Craft,
@@ -395,6 +404,21 @@ impl Action {
                 *rotation,
                 *angular_velocity,
             )),
+            Self::LaunchSplitState {
+                craft,
+                system,
+                position,
+                velocity,
+                rotation,
+                angular_velocity,
+            } => Outcome::Spawned(sim.fleet.launch_at_split(
+                craft,
+                *system,
+                *position,
+                *velocity,
+                *rotation,
+                *angular_velocity,
+            )),
             Self::LaunchFlightAt {
                 body,
                 craft,
@@ -476,6 +500,7 @@ pub fn world_mark(sim: &FleetFlight) -> serde_json::Value {
     });
     let ships: Vec<_> = sim.fleet.vessel_ids().iter().map(|id| {
         let s = sim.fleet.snapshot(id);
+        let precise = sim.fleet.precise_snapshot(id);
         let c = sim.fleet.control(id);
         assert!(s.position.is_finite() && s.velocity.is_finite() && s.rotation.is_finite()
             && s.angular_velocity.is_finite() && s.mass_kg.is_finite() && s.mass_kg > 0.0
@@ -495,6 +520,10 @@ pub fn world_mark(sim: &FleetFlight) -> serde_json::Value {
             "resources":p.resources,"modules":p.modules,"moduleStages":p.module_stages,
         })}).collect();
         json!({ "id": s.id, "name": s.name, "mode": format!("{:?}",s.mode),
+            "system": precise.system, "galaxyPosition": precise.position,
+            "systemPosition": precise.local.position, "systemVelocity": precise.local.velocity,
+            "anchor": precise.anchor, "residualPosition": precise.residual.position,
+            "residualVelocity": precise.residual.velocity,
             "scene": s.scene, "position": s.position, "velocity": s.velocity,
             "rotation": s.rotation, "angularVelocity": s.angular_velocity, "mass": s.mass_kg,
             "parts": parts, "control": { "throttle":c.throttle, "turn":c.turn },

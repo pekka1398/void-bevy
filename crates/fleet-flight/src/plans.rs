@@ -9,6 +9,8 @@ use void_orbit::{
 use void_vessels::GuidanceStatus;
 
 pub struct VesselPlan {
+    pub system: void_frames::SystemId,
+    pub origin: void_frames::SplitPosition,
     pub plan: FlightPlan,
     pub selected: usize,
     pub executing: bool,
@@ -17,6 +19,8 @@ pub struct VesselPlan {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedVesselPlan {
+    system: void_frames::SystemId,
+    origin: void_frames::SplitPosition,
     plan: FlightPlanCheckpoint,
     selected: usize,
     executing: bool,
@@ -30,6 +34,8 @@ impl FleetFlight {
                 (
                     id.clone(),
                     SavedVesselPlan {
+                        system: p.system,
+                        origin: p.origin,
                         plan: p.plan.checkpoint(),
                         selected: p.selected,
                         executing: p.executing,
@@ -42,7 +48,9 @@ impl FleetFlight {
     pub(crate) fn restore_plans(&mut self, saved: BTreeMap<String, SavedVesselPlan>) {
         for (id, p) in saved {
             self.fleet.snapshot(&id);
-            let plan = FlightPlan::from_checkpoint(&self.fleet.ephemeris, p.plan);
+            let view = self.plan_view(&id);
+            let source = view.as_deref().unwrap_or(self.fleet.ephemeris.as_ref());
+            let plan = FlightPlan::from_checkpoint(source, p.plan);
             assert!(
                 p.selected < plan.count().max(1),
                 "world checkpoint: invalid selected maneuver"
@@ -58,6 +66,8 @@ impl FleetFlight {
             self.plans.insert(
                 id,
                 VesselPlan {
+                    system: p.system,
+                    origin: p.origin,
                     plan,
                     selected: p.selected,
                     executing: p.executing,
@@ -66,13 +76,48 @@ impl FleetFlight {
             );
         }
     }
+    fn plan_view(&self, id: &str) -> Option<Box<dyn void_orbit::EphemerisSource>> {
+        let (system, origin) = self
+            .plans
+            .get(id)
+            .map(|p| (p.system, p.origin))
+            .unwrap_or_else(|| {
+                let s = self.fleet.precise_snapshot(id);
+                (s.system, s.anchor)
+            });
+        let mut view = self.fleet.ephemeris.local_view(system);
+        if let Some(view) = &mut view {
+            view.set_physics_offset(origin);
+        } else {
+            assert_eq!(
+                origin,
+                void_frames::SplitPosition::ORIGIN,
+                "plan: unsupported anchor"
+            );
+        }
+        view
+    }
     fn plan_state(&self, id: &str) -> PropagationRun {
-        let ship = self.fleet.snapshot(id);
+        let precise = self.fleet.precise_snapshot(id);
+        let (position, velocity) = if let Some(plan) = self.plans.get(id) {
+            let (system_origin, system_velocity) = self
+                .fleet
+                .ephemeris
+                .system_state(plan.system, self.fleet.time());
+            (
+                precise
+                    .position
+                    .relative(&system_origin.compose(&plan.origin)),
+                precise.velocity - system_velocity,
+            )
+        } else {
+            (precise.residual.position, precise.residual.velocity)
+        };
         PropagationRun::new(VesselState {
             time: self.fleet.time(),
-            position: ship.position,
-            velocity: ship.velocity,
-            mass_kg: ship.mass_kg,
+            position,
+            velocity,
+            mass_kg: precise.local.mass_kg,
         })
     }
     pub(crate) fn refresh_plan(&mut self, id: &str) -> Result<(), String> {
@@ -88,6 +133,8 @@ impl FleetFlight {
             self.plans.insert(
                 id.into(),
                 VesselPlan {
+                    system: self.fleet.vessel_system(id),
+                    origin: self.fleet.precise_snapshot(id).anchor,
                     plan: self.new_plan(id, 6000.0)?,
                     selected: 0,
                     executing: false,
@@ -134,10 +181,13 @@ impl FleetFlight {
         self.cancel_maneuver_warp("maneuver edited");
         self.refresh_plan(id)?;
         let time = self.fleet.time();
+        let mut view = self.plan_view(id);
+        let source: &mut dyn void_orbit::EphemerisSource = match view.as_mut() {
+            Some(view) => view.as_mut(),
+            None => self.fleet.ephemeris.as_mut(),
+        };
         let p = self.plans.get_mut(id).unwrap();
-        let start = p
-            .plan
-            .start_at_apsis(&mut self.fleet.ephemeris, index, kind, time)?;
+        let start = p.plan.start_at_apsis(source, index, kind, time)?;
         let mut spec = p.plan.maneuver(index);
         spec.start_time = start;
         p.plan.replace(index, spec);
@@ -153,6 +203,11 @@ impl FleetFlight {
         self.cancel_maneuver_warp("maneuver armed");
         self.refresh_plan(id)?;
         // Auto references follow the predicted ignition point, not today's position.
+        let mut view = self.plan_view(id);
+        let source: &mut dyn void_orbit::EphemerisSource = match view.as_mut() {
+            Some(view) => view.as_mut(),
+            None => self.fleet.ephemeris.as_mut(),
+        };
         let count = self.plans[id].plan.count();
         for i in 0..count {
             let mut spec = self.plans[id].plan.maneuver(i);
@@ -160,14 +215,12 @@ impl FleetFlight {
                 let p = self.plans.get_mut(id).unwrap();
                 let position = p
                     .plan
-                    .position_at(&mut self.fleet.ephemeris, spec.start_time)
+                    .position_at(source, spec.start_time)
                     .ok_or("planned ignition is beyond an impact")?;
-                let mut positions = vec![glam::DVec3::ZERO; self.fleet.ephemeris.bodies().len()];
-                self.fleet
-                    .ephemeris
-                    .positions_at(spec.start_time, &mut positions);
-                spec.reference_body = void_orbit::DominanceTree::new(self.fleet.ephemeris.bodies())
-                    .dominant(&positions, position);
+                let mut positions = vec![glam::DVec3::ZERO; source.bodies().len()];
+                source.positions_at(spec.start_time, &mut positions);
+                spec.reference_body =
+                    void_orbit::DominanceTree::new(source.bodies()).dominant(&positions, position);
                 p.plan.replace(i, spec);
             }
         }
@@ -200,6 +253,7 @@ impl FleetFlight {
                 continue;
             }
             let state = self.plan_state(&id);
+            let mut view = self.plan_view(&id);
             let p = self.plans.get_mut(&id).unwrap();
             if p.executing {
                 match &self
@@ -222,7 +276,11 @@ impl FleetFlight {
                     }
                 }
             }
-            p.plan.extend(&mut self.fleet.ephemeris, 256);
+            let source: &mut dyn void_orbit::EphemerisSource = match view.as_mut() {
+                Some(view) => view.as_mut(),
+                None => self.fleet.ephemeris.as_mut(),
+            };
+            p.plan.extend(source, 256);
         }
     }
 }

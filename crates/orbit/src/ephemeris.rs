@@ -393,6 +393,35 @@ pub trait EphemerisSource: BodyStates + FrameSource {
     fn system_of(&self, body: usize) -> SystemId;
     /// The system whose barycentre the physics view is relative to.
     fn origin_system(&self) -> SystemId;
+    /// Select a local physics view. Definitions, body indices and galaxy states never change.
+    /// Sources without multiple local views reject an unsupported request explicitly.
+    fn set_origin_system(&mut self, system: SystemId) {
+        assert_eq!(
+            system,
+            self.origin_system(),
+            "ephemeris: unsupported local view"
+        );
+    }
+    /// Independent view over the same world; no celestial state copy or model replacement.
+    /// Constant split offset from the origin-system barycentre for this local integration view.
+    fn physics_offset(&self) -> SplitPosition {
+        SplitPosition::ORIGIN
+    }
+    fn set_physics_offset(&mut self, offset: SplitPosition) {
+        assert_eq!(
+            offset,
+            SplitPosition::ORIGIN,
+            "ephemeris: unsupported split physics origin"
+        );
+    }
+    fn local_view(&self, system: SystemId) -> Option<Box<dyn EphemerisSource>> {
+        assert_eq!(
+            system,
+            self.origin_system(),
+            "ephemeris: unsupported independent local view"
+        );
+        None
+    }
     fn bodies(&self) -> &[CelestialBody];
     fn step_seconds(&self) -> f64;
     fn start_time(&self) -> f64;
@@ -475,6 +504,18 @@ impl EphemerisSource for Box<dyn EphemerisSource> {
     }
     fn origin_system(&self) -> SystemId {
         (**self).origin_system()
+    }
+    fn set_origin_system(&mut self, system: SystemId) {
+        (**self).set_origin_system(system)
+    }
+    fn physics_offset(&self) -> SplitPosition {
+        (**self).physics_offset()
+    }
+    fn set_physics_offset(&mut self, offset: SplitPosition) {
+        (**self).set_physics_offset(offset)
+    }
+    fn local_view(&self, system: SystemId) -> Option<Box<dyn EphemerisSource>> {
+        (**self).local_view(system)
     }
     fn bodies(&self) -> &[CelestialBody] {
         (**self).bodies()

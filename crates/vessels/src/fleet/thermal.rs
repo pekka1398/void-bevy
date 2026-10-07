@@ -8,6 +8,7 @@ impl Fleet {
         let mut inputs = Vec::new();
         for id in &self.order {
             let v = self.vessel(id);
+            let query = self.query_frame(v);
             let visible_members: Vec<_> = v
                 .members
                 .iter()
@@ -24,14 +25,14 @@ impl Fleet {
                 {
                     continue;
                 }
-                let transform = at.transform(self.part_frame(pid), self.origin_frame());
+                let transform = at.transform(self.part_frame(pid), query);
                 let state = transform.apply_state(State {
                     position: DVec3::ZERO,
                     velocity: DVec3::ZERO,
                 });
                 let air = (0..self.environment.bodies().len()).find_map(|body| {
                     self.environment
-                        .surroundings(&at, frames, self.origin_frame(), state, body)
+                        .surroundings(&at, frames, query, state, body)
                         .air
                 });
                 for module in &part.definition.modules {
@@ -91,7 +92,7 @@ impl Fleet {
                             if shield.thermally_failed() || !shield.definition.modules.iter().any(|m| matches!(m, Module::Thermal {parameters,..} if parameters.normal.is_some() && parameters.ablation.is_some())) {
                                 return false;
                             }
-                            let placed = at.transform(self.part_frame(other), self.origin_frame());
+                            let placed = at.transform(self.part_frame(other), query);
                             shield.definition.modules.iter().any(|m| {
                                 let Module::Thermal { parameters: p, .. } = m else {
                                     return false;

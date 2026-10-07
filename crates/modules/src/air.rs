@@ -32,11 +32,22 @@ fn air_at(
     t: f64,
     state: State,
 ) -> Option<AirSample> {
-    let frames = environment.frames();
+    let mut owned;
+    let (frames, query) = if ephemeris.physics_offset() == void_frames::SplitPosition::ORIGIN {
+        let frames = environment.frames();
+        (frames, frames.systems[ephemeris.origin_system().0])
+    } else {
+        owned = environment.frames().clone();
+        let parent = owned.systems[ephemeris.origin_system().0];
+        let query = owned
+            .tree
+            .add_split_fixed(parent, ephemeris.physics_offset());
+        (&owned, query)
+    };
     let at = frames.tree.at(t, ephemeris);
     bodies.iter().find_map(|&body| {
         environment
-            .surroundings(&at, frames, frames.origin, state, body)
+            .surroundings(&at, frames, query, state, body)
             .air
     })
 }
@@ -314,10 +325,21 @@ impl VesselAir {
         rotation: DQuat,
         angular_velocity: DVec3,
     ) -> crate::Wrench {
-        let frames = self.environment.frames();
+        let mut owned;
+        let (frames, query) = if ephemeris.physics_offset() == void_frames::SplitPosition::ORIGIN {
+            let frames = self.environment.frames();
+            (frames, frames.systems[ephemeris.origin_system().0])
+        } else {
+            owned = self.environment.frames().clone();
+            let parent = owned.systems[ephemeris.origin_system().0];
+            let query = owned
+                .tree
+                .add_split_fixed(parent, ephemeris.physics_offset());
+            (&owned, query)
+        };
         self.wrench_in(
             &frames.tree.at(t, ephemeris),
-            frames.origin,
+            query,
             state,
             rotation,
             angular_velocity,
@@ -338,10 +360,21 @@ impl AirSource for VesselAir {
         velocity: DVec3,
         mass: f64,
     ) -> DVec3 {
-        let frames = self.environment.frames();
+        let mut owned;
+        let (frames, query) = if ephemeris.physics_offset() == void_frames::SplitPosition::ORIGIN {
+            let frames = self.environment.frames();
+            (frames, frames.systems[ephemeris.origin_system().0])
+        } else {
+            owned = self.environment.frames().clone();
+            let parent = owned.systems[ephemeris.origin_system().0];
+            let query = owned
+                .tree
+                .add_split_fixed(parent, ephemeris.physics_offset());
+            (&owned, query)
+        };
         self.force_only_in(
             &frames.tree.at(t, ephemeris),
-            frames.origin,
+            query,
             State { position, velocity },
             self.rotation,
         ) / mass

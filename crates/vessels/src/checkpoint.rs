@@ -23,6 +23,8 @@ enum SavedFrame {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SavedScene {
+    system: SystemId,
+    anchor: SplitPosition,
     id: u64,
     frame: SavedFrame,
     world: ContactWorldCheckpoint,
@@ -66,6 +68,16 @@ pub struct FleetCheckpoint {
 }
 impl Fleet {
     pub fn checkpoint(&self) -> FleetCheckpoint {
+        assert_eq!(
+            self.ephemeris.origin_system(),
+            self.primary_system,
+            "fleet checkpoint: active temporary system view"
+        );
+        assert_eq!(
+            self.ephemeris.physics_offset(),
+            SplitPosition::ORIGIN,
+            "fleet checkpoint: active temporary split view"
+        );
         // By ID.
         let parts = self
             .parts
@@ -81,7 +93,7 @@ impl Fleet {
             })
             .collect();
         FleetCheckpoint {
-            version: 10,
+            version: 11,
             options: self.options,
             time: self.time,
             pending: self.pending,
@@ -117,6 +129,8 @@ impl Fleet {
                 .scenes
                 .iter()
                 .map(|(id, scene)| SavedScene {
+                    system: scene.system,
+                    anchor: scene.anchor,
                     id: *id,
                     frame: match &scene.world.frame {
                         SceneFrame::Ground(_) => SavedFrame::Ground {
@@ -141,7 +155,7 @@ impl Fleet {
         environment: Arc<Environment>,
         saved: FleetCheckpoint,
     ) -> Self {
-        assert_eq!(saved.version, 10, "fleet checkpoint: unsupported version");
+        assert_eq!(saved.version, 11, "fleet checkpoint: unsupported version");
         assert!(
             saved.time.is_finite()
                 && saved.pending.is_finite()
@@ -192,12 +206,24 @@ impl Fleet {
         fleet.next_vessel = saved.next_vessel;
         fleet.next_scene = saved.next_scene;
         for scene in saved.scenes {
+            let previous = fleet.enter_system(scene.system);
+            fleet.ephemeris.set_physics_offset(scene.anchor);
             let (frame, ground, terrain) = match scene.frame {
                 SavedFrame::Ground { index } => {
                     let g = fleet
                         .grounds
                         .get(index)
                         .expect("fleet checkpoint: unknown ground");
+                    assert_eq!(
+                        scene.anchor,
+                        SplitPosition::ORIGIN,
+                        "fleet checkpoint: ground split offset"
+                    );
+                    assert_eq!(
+                        fleet.ephemeris.system_of(g.spec.body_index),
+                        scene.system,
+                        "fleet checkpoint: ground anchor mismatch"
+                    );
                     (
                         SceneFrame::Ground(Box::new(g.frame.clone())),
                         Some(index),
@@ -220,9 +246,20 @@ impl Fleet {
                 "fleet checkpoint: scene clock differs"
             );
             fleet.insert_scene(scene.id, world, ground, scene.members);
+            fleet.restore_view(previous);
         }
         // After the scenes, so each vessel's frame can hang under its scene.
         for vessel in saved.vessels {
+            assert!(
+                vessel.system.0 < fleet.frames.systems.len(),
+                "fleet checkpoint: unknown vessel anchor"
+            );
+            if let Owner::Scene { scene, .. } = vessel.owner {
+                assert_eq!(
+                    vessel.system, fleet.scenes[&scene].system,
+                    "fleet checkpoint: owner anchor mismatch"
+                );
+            }
             fleet.put(vessel);
         }
         fleet.gate.restore_pairs(saved.active_pairs);

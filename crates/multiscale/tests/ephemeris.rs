@@ -120,3 +120,25 @@ fn split_probe_focus_keeps_metre_offsets_between_systems() {
     let old = snapshot.from_galaxy(&anchor, system) - snapshot.from_galaxy(&body_position, system);
     assert!((old - DVec3::new(1.0, 0.125, -0.25)).length() > 0.1);
 }
+
+#[test]
+fn translated_source_subtracts_split_anchor_exactly_once_in_every_query() {
+    use void_frames::{BodyId, BodyStates, SplitPosition, SystemId};
+    use void_orbit::EphemerisSource;
+    let world = std::rc::Rc::new(std::cell::RefCell::new(void_multiscale::wide_world(
+        SplitPosition::ORIGIN,
+    )));
+    let mut view = void_multiscale::FrameEphemeris::new(world.clone(), "Beryl");
+    let p = view.body_state(BodyId(3), 0.0).0;
+    let offset = SplitPosition::at(p).translate(glam::DVec3::new(0.01, 20.0, 30.0));
+    view.set_physics_offset(offset);
+    let expected = glam::DVec3::new(-0.01, -20.0, -30.0);
+    let scalar = view.body_state(BodyId(3), 0.0).0;
+    let mut positions = vec![glam::DVec3::ZERO; view.bodies().len()];
+    view.positions_at(0.0, &mut positions);
+    assert_eq!(scalar, positions[3]);
+    assert!((scalar - expected).length() < 1e-6, "{scalar:?}");
+    let clone = view.local_view(SystemId(1)).unwrap();
+    assert_eq!(clone.physics_offset(), SplitPosition::ORIGIN);
+    assert_eq!(clone.body_state(BodyId(3), 0.0).0, p);
+}

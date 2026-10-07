@@ -475,13 +475,16 @@ impl WorldScenery {
             focal,
         } = view;
         let fleet = &sim.fleet;
-        let root = fleet
-            .ephemeris
-            .bodies()
-            .iter()
-            .find(|b| b.parent_index.is_none())
-            .expect("world root");
         let sun_local = |body, eye: DVec3| {
+            let root = fleet
+                .ephemeris
+                .bodies()
+                .iter()
+                .find(|b| {
+                    b.parent_index.is_none()
+                        && fleet.ephemeris.system_of(b.index) == fleet.ephemeris.system_of(body)
+                })
+                .expect("world system star");
             if root.index == sim.home {
                 fleet
                     .frames()

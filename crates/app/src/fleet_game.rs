@@ -122,8 +122,11 @@ fn scenery_preset(lab: &mut Lab, body: usize, view: &str) {
         .ephemeris
         .bodies()
         .iter()
-        .find(|b| b.parent_index.is_none())
-        .expect("world root")
+        .find(|b| {
+            b.parent_index.is_none()
+                && fleet.ephemeris.system_of(b.index) == fleet.ephemeris.system_of(body)
+        })
+        .expect("world system root")
         .index;
     let local = if body == root {
         DVec3::new(1.0, 0.2, 0.3).normalize()
@@ -669,7 +672,7 @@ fn argument(name: &str) -> Option<String> {
 pub fn run(main_game: bool) {
     if std::env::args().any(|a| a == "--help") {
         println!(
-            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
+            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--stellar-fixture: declared remote ground/orbit starting ships for acceptance\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
         );
         return;
     }
@@ -893,6 +896,33 @@ pub fn run(main_game: bool) {
     }
     if lab.reentry {
         reentry_fixture(&mut lab);
+    }
+    if std::env::args().any(|a| a == "--stellar-fixture") {
+        assert!(
+            main_game && lab.session.sim().world.stellar.is_some(),
+            "--stellar-fixture needs a stellar world"
+        );
+        assert!(
+            argument("--load").is_none() && lab.playback.is_none(),
+            "stellar fixture cannot override load/replay"
+        );
+        let site = lab.session.sim().launch_site;
+        lab.session.execute(Action::LaunchGroundAt {
+            body: "Beryl/aurelia".into(),
+            craft: lab.craft.clone(),
+            site,
+        });
+        lab.session.execute(Action::LaunchOrbitAt {
+            body: "Cygnus/aurelia".into(),
+            craft: lab.craft.clone(),
+            offset: DVec3::ZERO,
+        });
+        lab.paused = true;
+        lab.notice = "STELLAR ACCEPTANCE FIXTURE: local ships in three systems; these are declared starting states, not completed interstellar trips. Tab selects ship.".into();
+        lab.session.execute(Action::EndFrame {
+            paused: true,
+            rate: lab.rate,
+        });
     }
     if let Some(body) = argument("--body") {
         assert!(
@@ -1361,32 +1391,42 @@ fn instruments(
     let sim = lab.session.sim();
     let fleet = &sim.fleet;
     let ship = fleet.snapshot(&sim.selected);
-    let mut positions = vec![DVec3::ZERO; fleet.ephemeris.bodies().len()];
-    fleet.ephemeris.positions_at(fleet.time(), &mut positions);
-    let reference = void_orbit::DominanceTree::new(fleet.ephemeris.bodies())
-        .dominant(&positions, ship.position);
-    let local = sim.body_fixed(
-        reference,
-        FrameState {
-            position: ship.position,
-            velocity: ship.velocity,
-        },
-    );
+    let reference = sim.navigation_body(&sim.selected);
+    let local = fleet
+        .frames()
+        .transform(
+            fleet.vessel_frame(&sim.selected),
+            fleet.body_frames(reference).1,
+        )
+        .apply_state(void_frames::State {
+            position: fleet.centre_of_mass_local(&sim.selected),
+            velocity: DVec3::ZERO,
+        });
+    let inertial = fleet
+        .frames()
+        .transform(
+            fleet.vessel_frame(&sim.selected),
+            fleet.body_frames(reference).0,
+        )
+        .apply_state(void_frames::State {
+            position: fleet.centre_of_mass_local(&sim.selected),
+            velocity: DVec3::ZERO,
+        });
+    let inertial_axes = fleet
+        .frames()
+        .transform(fleet.body_frames(reference).0, fleet.origin_frame())
+        .rotation();
     let q = surface_axes(fleet, reference);
     let input = void_navball::NavballInput {
         nose: (ship.rotation * DVec3::Y).normalize(),
         top: (ship.rotation * DVec3::Z).normalize(),
-        up: (ship.position - fleet.ephemeris.body_position(reference, fleet.time())).normalize(),
+        up: q * local.position.normalize(),
         pole: fleet.ephemeris.bodies()[reference].rotation.axis(),
         prime_meridian: q * DVec3::X,
         velocity: if lab.session.sim().presentation.speed_surface {
             q * local.velocity
         } else {
-            ship.velocity
-                - fleet
-                    .ephemeris
-                    .body_state(void_frames::BodyId(reference), fleet.time())
-                    .1
+            inertial_axes * inertial.velocity
         },
     };
     for mut ball in &mut balls {
@@ -1749,6 +1789,24 @@ fn controls(
             scenery_preset(lab, body, view);
         }
         if keys.just_pressed(KeyCode::Home)
+            && keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
+        {
+            if lab.session.sim().world.stellar.is_some() {
+                lab.session.execute(Action::View {
+                    command: ViewCommand::BodyPreset {
+                        body: 0,
+                        direction: DVec3::new(0.1, 0.2, 1.0).normalize(),
+                        distance: 12.0 * void_multiscale::LIGHT_YEAR,
+                    },
+                });
+                lab.notice =
+                    "Stellar neighborhood · real distances; select star labels then zoom in".into();
+            } else {
+                lab.notice = "Stellar overview requires --stellar-neighborhood".into();
+            }
+        }
+        if keys.just_pressed(KeyCode::Home)
+            && !keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
             && !keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
         {
             lab.session.execute(Action::View {
@@ -2242,15 +2300,10 @@ fn draw(
     // All world meshes/shaders use the observed body's axes, camera-relative.
     let q = surface_axes(f, render_body);
     let selected = f.snapshot(&sim.selected);
-    let up = sim
-        .body_fixed(
-            render_body,
-            FrameState {
-                position: selected.position,
-                velocity: selected.velocity,
-            },
-        )
-        .position
+    let up = f
+        .frames()
+        .transform(f.vessel_frame(&sim.selected), surface)
+        .apply_point(f.centre_of_mass_local(&sim.selected))
         .normalize();
     let sample = sim.presentation.sample(sim);
     if let Ground::World(world) = &mut *ground {
@@ -2524,23 +2577,29 @@ fn draw(
         }
     }
     let p = f.thrust(&lab.session.sim().selected);
-    let mut positions = vec![DVec3::ZERO; f.ephemeris.bodies().len()];
-    let mut velocities = positions.clone();
-    f.ephemeris
-        .states_at(f.time(), &mut positions, Some(&mut velocities));
-    let navigation = void_orbit::DominanceTree::new(f.ephemeris.bodies())
-        .dominant(&positions, selected.position);
+    let navigation = sim.navigation_body(&sim.selected);
     let body = &f.ephemeris.bodies()[navigation];
-    let r = selected.position - positions[navigation];
-    let v = selected.velocity - velocities[navigation];
+    let relative = f
+        .frames()
+        .transform(f.vessel_frame(&sim.selected), f.body_frames(navigation).0)
+        .apply_state(void_frames::State {
+            position: f.centre_of_mass_local(&sim.selected),
+            velocity: DVec3::ZERO,
+        });
+    let axes = f
+        .frames()
+        .transform(f.body_frames(navigation).0, f.origin_frame())
+        .rotation();
+    let r = axes * relative.position;
+    let v = axes * relative.velocity;
     let orbital = void_orbit::osculating_orbit(r, v, body.gm);
-    let surface = sim.body_fixed(
-        navigation,
-        FrameState {
-            position: selected.position,
-            velocity: selected.velocity,
-        },
-    );
+    let surface = f
+        .frames()
+        .transform(f.vessel_frame(&sim.selected), f.body_frames(navigation).1)
+        .apply_state(void_frames::State {
+            position: f.centre_of_mass_local(&sim.selected),
+            velocity: DVec3::ZERO,
+        });
     let altitude =
         if lab.session.sim().presentation.altitude_agl && sim.terrains.contains_key(&navigation) {
             f.clearance(&lab.session.sim().selected, navigation)
@@ -2575,13 +2634,28 @@ fn draw(
     } else {
         String::new()
     };
+    let stellar_status = sim
+        .world
+        .stellar
+        .as_ref()
+        .map(|stellar| {
+            let system = f.vessel_system(&sim.selected).0;
+            let name = if system == 0 {
+                stellar.home.id.as_str()
+            } else {
+                stellar.neighbors[system - 1].placement.id.as_str()
+            };
+            format!(" · {name} system · stellar distances in light years")
+        })
+        .unwrap_or_default();
     **hud = Text::new(format!(
-        "{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels\nP pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN nearby craft | O orbital craft | R reset | , . warp | K altitude | L speed\nF1 near/orbit/far | Home ship | Alt+F10/F11 exposure\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
+        "{}{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels\nP pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN nearby craft | O orbital craft | R reset | , . warp | K altitude | L speed\nF1 near/orbit/far | Home ship | Ctrl+Home stellar overview | Alt+F10/F11 exposure\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
         if lab.main_game {
             "VOID"
         } else {
             "FLEET FLIGHT INTEGRATION"
         },
+        stellar_status,
         selected.name,
         lab.session.sim().selected,
         selected.mode,
@@ -3581,7 +3655,7 @@ fn setup_scenery(
         bevy::core_pipeline::tonemapping::DebandDither::Disabled,
         Projection::Perspective(PerspectiveProjection {
             fov: 58.0_f32.to_radians(),
-            far: 1e14,
+            far: 1e20,
             ..default()
         }),
         Msaa::Off,

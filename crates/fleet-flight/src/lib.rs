@@ -97,13 +97,21 @@ impl FleetFlight {
     }
     /// Gravitational navigation reference; distinct from launch identity and terrain proximity.
     pub fn navigation_body(&self, vessel: &str) -> usize {
+        let query = self.fleet.vessel_anchor_frame(vessel);
         let bodies = self.fleet.ephemeris.bodies();
-        let mut positions = vec![DVec3::ZERO; bodies.len()];
-        self.fleet
-            .ephemeris
-            .positions_at(self.fleet.time(), &mut positions);
-        void_orbit::DominanceTree::new(bodies)
-            .dominant(&positions, self.fleet.snapshot(vessel).position)
+        let positions = bodies
+            .iter()
+            .map(|body| {
+                self.fleet
+                    .frames()
+                    .transform(self.fleet.body_frames(body.index).0, query)
+                    .apply_point(DVec3::ZERO)
+            })
+            .collect::<Vec<_>>();
+        void_orbit::DominanceTree::new(bodies).dominant(
+            &positions,
+            self.fleet.precise_snapshot(vessel).residual.position,
+        )
     }
     pub fn observation_body(&self) -> usize {
         self.presentation
@@ -127,18 +135,19 @@ impl FleetFlight {
             "flight: invalid fixture"
         );
         let body = self.world.body_index(body_id);
-        let transform = self
-            .fleet
-            .frames()
-            .transform(self.fleet.body_frames(body).1, self.fleet.origin_frame());
+        let transform = self.fleet.frames().transform(
+            self.fleet.body_frames(body).1,
+            self.fleet.system_frames().systems[self.fleet.ephemeris.system_of(body).0],
+        );
         let state = transform.apply_state(void_frames::State {
             position: local.position,
             velocity: local.velocity,
         });
         let up = local.position.normalize();
         let rotation = transform.rotation() * void_landing::upright_at(up);
-        let id = self.fleet.launch(
+        let id = self.fleet.launch_in_system(
             craft,
+            self.fleet.ephemeris.system_of(body),
             FrameState {
                 position: state.position,
                 velocity: state.velocity,
@@ -190,25 +199,27 @@ impl FleetFlight {
     }
     /// Vacuum coast, as the current game's cyan line. No engine or atmosphere in the prediction.
     pub fn predict(&mut self, horizon: f64) -> CoastPrediction {
-        let snap = self.fleet.snapshot(&self.selected);
-        let body = self.nearby_body(&self.selected);
-        let frame = PlanetFrame::new(&self.fleet.ephemeris, body);
-        let state = self.body_fixed(
-            body,
-            FrameState {
-                position: snap.position,
-                velocity: snap.velocity,
-            },
-        );
         let time = self.fleet.time();
+        let body = self.nearby_body(&self.selected);
+        let mass = self.fleet.snapshot(&self.selected).mass_kg;
+        let state = self.fleet.body_fixed_state(&self.selected, body);
+        let mut view = self
+            .fleet
+            .ephemeris
+            .local_view(self.fleet.ephemeris.system_of(body));
+        let source: &mut dyn void_orbit::EphemerisSource = match view.as_mut() {
+            Some(view) => view.as_mut(),
+            None => self.fleet.ephemeris.as_mut(),
+        };
+        let frame = PlanetFrame::new(source, body);
         predict_coast(
-            &mut self.fleet.ephemeris,
+            source,
             &frame,
             &self.terrains[&body],
             self.fleet.options.tolerances,
             time,
             state,
-            snap.mass_kg,
+            mass,
             horizon,
         )
     }
@@ -226,7 +237,7 @@ impl FleetFlight {
         };
         let ground = self.fleet.frames().transform(
             self.fleet.body_frames(body_index).1,
-            self.fleet.origin_frame(),
+            self.fleet.system_frames().systems[self.fleet.ephemeris.system_of(body_index).0],
         );
         let state = ground.apply_state(void_frames::State {
             position: local.position,
@@ -237,7 +248,13 @@ impl FleetFlight {
             velocity: state.velocity,
         };
         let rotation = ground.rotation();
-        let id = self.fleet.launch(craft, state, rotation, DVec3::ZERO);
+        let id = self.fleet.launch_in_system(
+            craft,
+            self.fleet.ephemeris.system_of(body_index),
+            state,
+            rotation,
+            DVec3::ZERO,
+        );
         self.fleet.advance(0.0);
         id
     }
@@ -288,9 +305,24 @@ impl FleetFlight {
         coast_seconds: f64,
     ) -> Result<void_orbit::FlightPlan, String> {
         let engine = self.plan_engine(vessel)?;
-        let snapshot = self.fleet.snapshot(vessel);
+        let precise = self.fleet.precise_snapshot(vessel);
+        let snapshot = precise.residual;
+        let mut view = self
+            .fleet
+            .ephemeris
+            .local_view(self.fleet.vessel_system(vessel));
+        if let Some(view) = &mut view {
+            view.set_physics_offset(precise.anchor);
+        } else {
+            assert_eq!(
+                precise.anchor,
+                void_frames::SplitPosition::ORIGIN,
+                "plan: unsupported split anchor"
+            );
+        }
+        let source = view.as_deref().unwrap_or(self.fleet.ephemeris.as_ref());
         let mut plan = void_orbit::FlightPlan::new(
-            &self.fleet.ephemeris,
+            source,
             self.fleet.options.tolerances,
             engine,
             coast_seconds,

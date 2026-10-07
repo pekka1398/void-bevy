@@ -7,6 +7,14 @@ use void_frames::{FrameId, Motion, Transform};
 use void_vessels::Fleet;
 use void_view::{FocusGeometry, FocusKind, OrbitCamera, PathFrameKind, ViewMode, ViewState};
 
+fn world_view(sim: &FleetFlight, geometry: &FocusGeometry, distance: f64) -> ViewState {
+    let mut view = void_view::view_state(ViewMode::Single, false, geometry, distance);
+    if sim.world.stellar.is_some() {
+        view.max_distance = 30.0 * void_multiscale::LIGHT_YEAR;
+    }
+    view
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Presentation {
@@ -179,18 +187,24 @@ impl Presentation {
     }
     fn geometry(&self, sim: &FleetFlight) -> (FocusGeometry, usize, usize, DVec3) {
         let f = &sim.fleet;
-        let ship = f.snapshot(&sim.selected);
         let mut positions = vec![DVec3::ZERO; f.ephemeris.bodies().len()];
         f.ephemeris.positions_at(f.time(), &mut positions);
         let bodies = f.ephemeris.bodies();
-        let navigation = void_orbit::DominanceTree::new(bodies).dominant(&positions, ship.position);
+        let navigation = sim.navigation_body(&sim.selected);
         let reference = self.focus_body.unwrap_or(navigation);
         let body = bodies.get(reference).expect("view: unknown focus body");
         let anchor = f
             .frames()
             .transform(f.vessel_frame(&sim.selected), f.origin_frame())
             .apply_point(f.root_position_local(&sim.selected));
-        let radial = anchor - positions[reference];
+        let radial_local = f
+            .frames()
+            .transform(f.vessel_frame(&sim.selected), f.body_frames(reference).0)
+            .apply_point(f.root_position_local(&sim.selected));
+        let radial = f
+            .frames()
+            .transform(f.body_frames(reference).0, f.origin_frame())
+            .apply_direction(radial_local);
         (
             FocusGeometry {
                 kind: if self.focus_body.is_some() {
@@ -295,8 +309,7 @@ impl Presentation {
                 assert!(x.is_finite() && y.is_finite(), "view: invalid drag");
                 if self.main_camera {
                     let (geometry, _, _, _) = self.geometry(sim);
-                    let state =
-                        void_view::view_state(ViewMode::Single, false, &geometry, self.distance);
+                    let state = world_view(sim, &geometry, self.distance);
                     let mut camera = self.camera();
                     camera.drag(x, y, state.up);
                     self.direction = camera.direction;
@@ -312,8 +325,7 @@ impl Presentation {
                     self.distance * (-pixels * if self.main_camera { 0.002 } else { 0.003 }).exp();
                 let (min, max) = if self.main_camera {
                     let (geometry, _, _, _) = self.geometry(sim);
-                    let state =
-                        void_view::view_state(ViewMode::Single, false, &geometry, self.distance);
+                    let state = world_view(sim, &geometry, self.distance);
                     (state.min_distance, state.max_distance)
                 } else {
                     (2.0, 2e8)
@@ -342,7 +354,7 @@ impl Presentation {
         );
         assert!(self.rate < 9, "view: invalid rate");
         let (geometry, reference, navigation, _) = self.geometry(sim);
-        let view = void_view::view_state(ViewMode::Single, false, &geometry, self.distance);
+        let view = world_view(sim, &geometry, self.distance);
         let mut camera = self.camera();
         if self.main_camera {
             camera.distance =
@@ -378,7 +390,7 @@ impl Presentation {
     pub fn sample(&self, sim: &FleetFlight) -> CameraSample {
         let f = &sim.fleet;
         let (geometry, _, _, focus) = self.geometry(sim);
-        let view = void_view::view_state(ViewMode::Single, false, &geometry, self.distance);
+        let view = world_view(sim, &geometry, self.distance);
         let (focus_frame, focus_local) = match self.focus_body {
             Some(body) => (f.body_frames(body).0, DVec3::ZERO),
             None => (

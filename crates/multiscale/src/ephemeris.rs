@@ -12,6 +12,7 @@ pub struct FrameEphemeris {
     pub world: SharedWorld,
     pub system_index: usize,
     bodies: Vec<CelestialBody>,
+    offset: SplitPosition,
 }
 impl FrameEphemeris {
     pub fn new(world: SharedWorld, system: &str) -> Self {
@@ -23,6 +24,7 @@ impl FrameEphemeris {
             world,
             system_index,
             bodies,
+            offset: SplitPosition::ORIGIN,
         }
     }
 }
@@ -41,6 +43,15 @@ impl BodyStates for FrameEphemeris {
             p
         } else {
             g.origin.relative(&origin.origin) + p
+        };
+        let position = if self.offset == SplitPosition::ORIGIN {
+            position
+        } else {
+            g.origin
+                .difference(&origin.origin)
+                .translate(p)
+                .difference(&self.offset)
+                .vector()
         };
         (
             position,
@@ -75,6 +86,30 @@ impl EphemerisSource for FrameEphemeris {
     }
     fn origin_system(&self) -> SystemId {
         SystemId(self.system_index)
+    }
+    fn set_origin_system(&mut self, system: SystemId) {
+        assert!(
+            system.0 < self.world.borrow().ids.len(),
+            "frame ephemeris: unknown origin system"
+        );
+        self.system_index = system.0;
+        self.offset = SplitPosition::ORIGIN;
+    }
+    fn physics_offset(&self) -> SplitPosition {
+        self.offset
+    }
+    fn set_physics_offset(&mut self, offset: SplitPosition) {
+        self.offset = offset;
+    }
+    fn local_view(&self, system: SystemId) -> Option<Box<dyn EphemerisSource>> {
+        assert!(
+            system.0 < self.world.borrow().ids.len(),
+            "frame ephemeris: unknown view system"
+        );
+        let mut view = self.clone();
+        view.system_index = system.0;
+        view.offset = SplitPosition::ORIGIN;
+        Some(Box::new(view))
     }
     fn bodies(&self) -> &[CelestialBody] {
         &self.bodies
@@ -128,6 +163,14 @@ impl EphemerisSource for FrameEphemeris {
             } else {
                 g.origin.relative(&origin.origin) + p
             };
+            if self.offset != SplitPosition::ORIGIN {
+                positions[i] = g
+                    .origin
+                    .difference(&origin.origin)
+                    .translate(p)
+                    .difference(&self.offset)
+                    .vector();
+            }
             if let Some(v) = velocities.as_deref_mut() {
                 v[i] = g.velocity - origin.velocity + g.body_velocity(m.local);
             }
