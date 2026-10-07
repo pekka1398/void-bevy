@@ -330,7 +330,17 @@ impl VesselWater {
         dt: f64,
         thrust_acceleration: f64,
     ) -> bool {
-        let frames = self.environment.frames();
+        let mut owned;
+        let (frames, query) = if e.physics_offset() == void_frames::SplitPosition::ORIGIN {
+            let frames = self.environment.frames();
+            (frames, frames.systems[e.origin_system().0])
+        } else {
+            owned = self.environment.frames().clone();
+            let query = owned
+                .tree
+                .add_split_fixed(owned.systems[e.origin_system().0], e.physics_offset());
+            (&owned, query)
+        };
         let at = frames.tree.at(t, e);
         let reach = self
             .parts
@@ -340,7 +350,7 @@ impl VesselWater {
         (0..self.environment.bodies().len()).any(|body| {
             let sample = self
                 .environment
-                .surroundings(&at, frames, frames.origin, state, body);
+                .surroundings(&at, frames, query, state, body);
             let Some(sea) = sample.sea else { return false };
             let b = &self.environment.bodies()[body];
             let a = b.gm / b.radius_meters.powi(2) + thrust_acceleration;
@@ -366,6 +376,13 @@ impl VesselWater {
                 .add_split_fixed(owned.systems[e.origin_system().0], e.physics_offset());
             (&owned, query)
         };
-        self.wrench_in(&frames.tree.at(time, e), query, state, q, w)
+        let mut wrench = self.wrench_in(&frames.tree.at(time, e), query, state, q, w);
+        wrench.frame = if e.physics_offset() == void_frames::SplitPosition::ORIGIN {
+            e.physics_query_frame().unwrap_or(query)
+        } else {
+            e.physics_query_frame()
+                .expect("translated water load requires registered query frame")
+        };
+        wrench
     }
 }
