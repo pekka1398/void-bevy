@@ -10,6 +10,7 @@ render-metrics = ["bevy/detailed_trace"]
 
 [dependencies]
 void-fleet-flight = { path = "../fleet-flight" }
+void-multiscale.workspace = true
 void-assembly.workspace = true
 void-assembly-lab = { path = "../assembly-lab" }
 void-vessels.workspace = true
@@ -34,6 +35,3 @@ void-view.workspace = true
 # The version Bevy already pulls in, for the half-float tables.
 half = "2.7"
 
-[dev-dependencies]
-# The multiscale example's world; the game itself does not use it yet.
-void-multiscale.workspace = true

@@ -17,7 +17,9 @@ use void_assembly_lab::parts::RenderAssets;
 use void_fleet_flight::session::{
     Action, FlightSession, InitialWorld, Outcome, Playback, Recording,
 };
-use void_landing::{FrameState, demo_rocket, landing_lod_options};
+use void_landing::{demo_rocket, landing_lod_options};
+#[cfg(test)]
+use void_landing::FrameState;
 use void_lod::{LodCamera, LodView};
 use void_vessels::nearby_site;
 
