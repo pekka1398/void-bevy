@@ -864,6 +864,15 @@ pub fn run(main_game: bool) {
                 initial.world = void_fleet_flight::world::stellar_neighborhood(&planet.planet);
                 initial.launch_body = "Sol/aurelia".into();
             }
+            if main_game
+                && std::env::args().any(|a| a == "--rover")
+                && planet.planet.body_id == "aurelia"
+            {
+                initial.launch_site = initial
+                    .world
+                    .daylight_terrain_site(&initial.launch_body)
+                    .expect("rover fixture daylight terrain site");
+            }
             FlightSession::new(stellar_fixture_initial(if main_game {
                 initial.with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque)
             } else {
