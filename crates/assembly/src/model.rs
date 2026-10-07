@@ -24,6 +24,9 @@ pub struct AttachNode {
     pub position: DVec3,
     pub direction: DVec3,
     pub size: u32,
+    /// Named capacity slot for arbitrary placement on an authored cuboid surface.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub surface: bool,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
@@ -112,17 +115,32 @@ pub struct PartDefinition {
     pub height: f64,
     pub radius: f64,
     pub shape: Shape,
+    /// Explicit full cuboid dimensions. Absent preserves legacy square-section geometry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_size_meters: Option<DVec3>,
     pub color: String,
     pub crossfeed: bool,
     pub nodes: Vec<AttachNode>,
     pub modules: Vec<Module>,
 }
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Attachment {
     pub parent_id: String,
     pub parent_node_id: String,
     pub node_id: String,
+    /// Twist about the parent socket outward normal after normal alignment.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub twist_radians: f64,
+    /// Explicit parent-relative welded pose at the named surface socket.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pose: Option<PartPose>,
+}
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -230,8 +248,35 @@ pub fn actionable(part: &PartDefinition) -> bool {
         )
     })
 }
+pub fn part_box_size(part: &PartDefinition) -> DVec3 {
+    assert_eq!(
+        part.shape,
+        Shape::Box,
+        "box dimensions requested for non-box"
+    );
+    part.box_size_meters.unwrap_or(DVec3::new(
+        2.0 * part.radius,
+        part.height,
+        2.0 * part.radius,
+    ))
+}
+/// Bounding radius about the authored part origin, shared by contact activation.
+pub fn part_bound_radius(part: &PartDefinition) -> f64 {
+    if part.shape == Shape::Box {
+        part_box_size(part).length() / 2.0
+    } else {
+        (part.height / 2.0).hypot(part.radius)
+    }
+}
 pub fn part_inertia_per_kg(part: &PartDefinition) -> DVec3 {
     if part.shape == Shape::Box {
+        if let Some(size) = part.box_size_meters {
+            return DVec3::new(
+                size.y * size.y + size.z * size.z,
+                size.x * size.x + size.z * size.z,
+                size.x * size.x + size.y * size.y,
+            ) / 12.0;
+        }
         let side = (4.0 * part.radius.powi(2) + part.height.powi(2)) / 12.0;
         return DVec3::new(side, 2.0 * part.radius.powi(2) / 3.0, side);
     }
@@ -268,8 +313,8 @@ fn align(from: DVec3, to: DVec3) -> DQuat {
 }
 /// Validate untrusted craft data and derive every part pose from its paired stack nodes.
 pub fn compile(craft: &Craft) -> ModelResult<CompiledCraft> {
-    if craft.version != 2 || craft.name.trim().is_empty() || craft.parts.is_empty() {
-        return Err("Craft requires version 2, a name and at least one part".into());
+    if !matches!(craft.version, 2 | 3) || craft.name.trim().is_empty() || craft.parts.is_empty() {
+        return Err("Craft requires version 2 or 3, a name and at least one part".into());
     }
     if craft.parts.len() > 100 {
         return Err("This lab supports at most 100 parts".into());
@@ -287,6 +332,14 @@ pub fn compile(craft: &Craft) -> ModelResult<CompiledCraft> {
         }
         let d = definition(&p.definition_id)?;
         validate_definition(d)?;
+        if craft.version == 2
+            && (d.box_size_meters.is_some()
+                || p.attachment
+                    .as_ref()
+                    .is_some_and(|a| a.pose.is_some() || a.twist_radians != 0.0))
+        {
+            return Err("Explicit geometry and attachment poses require craft version 3".into());
+        }
         for (id, stage) in &p.module_stages {
             if !d.modules.iter().any(|m| {
                 m.id() == id
@@ -360,12 +413,66 @@ pub fn compile(craft: &Craft) -> ModelResult<CompiledCraft> {
                 }
                 self.claim(&parent.instance.id, &pn.id)?;
                 self.claim(&p.id, &cn.id)?;
-                let rotation = align(cn.direction, -rotate(parent.pose.rotation, pn.direction));
+                if !a.twist_radians.is_finite() {
+                    return Err("Non-finite attachment twist".into());
+                }
+                if a.pose.is_some() && a.twist_radians != 0.0 {
+                    return Err("Surface pose and node twist are mutually exclusive".into());
+                }
+                let base = align(cn.direction, -rotate(parent.pose.rotation, pn.direction));
+                let rotation = if a.twist_radians == 0.0 {
+                    base
+                } else {
+                    DQuat::from_axis_angle(
+                        rotate(parent.pose.rotation, pn.direction).normalize(),
+                        a.twist_radians,
+                    ) * base
+                };
                 pose = PartPose {
                     rotation,
                     position: parent.pose.position + rotate(parent.pose.rotation, pn.position)
                         - rotate(rotation, cn.position),
                 };
+                if let Some(local) = a.pose {
+                    if !local.position.is_finite()
+                        || !local.rotation.is_finite()
+                        || (local.rotation.length() - 1.0).abs() > 1e-9
+                    {
+                        return Err("Invalid surface attachment pose".into());
+                    }
+                    if !pn.surface || parent.definition.shape != Shape::Box {
+                        return Err(
+                            "Surface pose requires an authored cuboid surface socket".into()
+                        );
+                    }
+                    let point = local.position + local.rotation * cn.position;
+                    let half = part_box_size(parent.definition) / 2.0;
+                    if (point.abs() - half).max_element() > 1e-6 {
+                        return Err("Surface attachment point outside parent collider".into());
+                    }
+                    let distance = (point.abs() - half).abs();
+                    let axis = if distance.x <= distance.y && distance.x <= distance.z {
+                        0
+                    } else if distance.y <= distance.z {
+                        1
+                    } else {
+                        2
+                    };
+                    if distance[axis] > 1e-6 {
+                        return Err(
+                            "Surface attachment point is not on parent collider boundary".into(),
+                        );
+                    }
+                    let mut normal = DVec3::ZERO;
+                    normal[axis] = point[axis].signum();
+                    if (local.rotation * cn.direction).normalize().dot(normal) > -1.0 + 1e-8 {
+                        return Err("Surface attachment normal does not face parent surface".into());
+                    }
+                    pose = PartPose {
+                        position: parent.pose.position + parent.pose.rotation * local.position,
+                        rotation: parent.pose.rotation * local.rotation,
+                    };
+                }
                 self.connections.push(Connection {
                     a: parent.instance.id.clone(),
                     node_a: pn.id.clone(),
@@ -619,10 +726,110 @@ pub fn add_part(
             parent_id: parent_id.into(),
             parent_node_id: parent_node_id.into(),
             node_id: node_id.into(),
+            twist_radians: 0.0,
+            pose: None,
         }),
     });
     compile(&next)?;
     Ok(next)
+}
+/// An authored mount request for a future editor or main-game craft builder.
+#[derive(Clone, Debug)]
+pub struct SurfaceMount {
+    pub definition_id: String,
+    pub parent_socket_id: String,
+    pub node_id: String,
+    pub pose: PartPose,
+}
+/// Add a uniquely identified part on a named surface capacity slot.
+pub fn mount_surface(craft: &Craft, parent_id: &str, mount: &SurfaceMount) -> ModelResult<Craft> {
+    if craft.version != 3 {
+        return Err("Surface mounting requires craft version 3".into());
+    }
+    let added = add_part(
+        craft,
+        &mount.definition_id,
+        parent_id,
+        &mount.parent_socket_id,
+        &mount.node_id,
+    )?;
+    let id = &added.parts.last().expect("added part").id;
+    set_attachment_pose(&added, id, mount.pose)
+}
+/// Add an authored opposite-handed pair atomically. Each part receives a fresh stable ID.
+/// The negative-x counterpart supplies its own mount node and geometry/control definition.
+pub fn mount_mirrored_pair(
+    craft: &Craft,
+    parent_id: &str,
+    positive: &SurfaceMount,
+    negative_definition_id: &str,
+    negative_parent_socket_id: &str,
+    negative_node_id: &str,
+) -> ModelResult<Craft> {
+    let added = mount_surface(craft, parent_id, positive)?;
+    mount_surface(
+        &added,
+        parent_id,
+        &SurfaceMount {
+            definition_id: negative_definition_id.into(),
+            parent_socket_id: negative_parent_socket_id.into(),
+            node_id: negative_node_id.into(),
+            pose: mirror_pose_x(positive.pose)?,
+        },
+    )
+}
+/// Change a welded surface attachment without mutating a live PartGraph or cached poses.
+/// Named sockets retain stable graph connection and supply semantics.
+pub fn set_attachment_pose(craft: &Craft, id: &str, pose: PartPose) -> ModelResult<Craft> {
+    compile(craft)?;
+    let mut next = craft.clone();
+    let part = next
+        .parts
+        .iter_mut()
+        .find(|p| p.id == id)
+        .ok_or("Unknown part")?;
+    let attachment = part
+        .attachment
+        .as_mut()
+        .ok_or("Cannot place command root")?;
+    attachment.pose = Some(pose);
+    attachment.twist_radians = 0.0;
+    compile(&next)?;
+    Ok(next)
+}
+/// Rotate a node attachment about its parent socket's normal; inputs are radians.
+pub fn set_attachment_twist(craft: &Craft, id: &str, radians: f64) -> ModelResult<Craft> {
+    compile(craft)?;
+    let mut next = craft.clone();
+    let part = next
+        .parts
+        .iter_mut()
+        .find(|p| p.id == id)
+        .ok_or("Unknown part")?;
+    let attachment = part
+        .attachment
+        .as_mut()
+        .ok_or("Cannot rotate command root")?;
+    attachment.pose = None;
+    attachment.twist_radians = radians;
+    compile(&next)?;
+    Ok(next)
+}
+/// Bilateral pose about the parent-local yz plane. The geometry must itself be mirror symmetric;
+/// asymmetric aerodynamic/control definitions need their authored opposite-handed counterpart.
+pub fn mirror_pose_x(pose: PartPose) -> ModelResult<PartPose> {
+    if !pose.position.is_finite()
+        || !pose.rotation.is_finite()
+        || (pose.rotation.length() - 1.0).abs() > 1e-9
+    {
+        return Err("Invalid mirror pose".into());
+    }
+    let mirror = glam::DMat3::from_diagonal(DVec3::new(-1.0, 1.0, 1.0));
+    let rotation = DQuat::from_mat3(&(mirror * glam::DMat3::from_quat(pose.rotation) * mirror));
+    Ok(PartPose {
+        position: mirror * pose.position,
+        rotation,
+    })
 }
 pub fn remove_subtree(craft: &Craft, id: &str) -> ModelResult<Craft> {
     let c = compile(craft)?;
@@ -737,6 +944,8 @@ pub fn reentry_capsule() -> Craft {
                     parent_id: "pod".into(),
                     parent_node_id: "bottom".into(),
                     node_id: "top".into(),
+                    twist_radians: 0.0,
+                    pose: None,
                 }),
             },
         ],
@@ -887,6 +1096,11 @@ pub struct LiftingSurfaceDefinition {
     pub pitching_moment: f64,
 }
 pub fn validate_definition(d: &PartDefinition) -> ModelResult<()> {
+    if let Some(size) = d.box_size_meters
+        && (d.shape != Shape::Box || !size.is_finite() || size.min_element() <= 0.0)
+    {
+        return Err("boxSizeMeters requires positive finite Box dimensions".into());
+    }
     if d.modules
         .iter()
         .filter(|m| matches!(m, Module::Thermal { .. }))

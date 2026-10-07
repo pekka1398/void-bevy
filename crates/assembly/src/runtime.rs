@@ -1,6 +1,6 @@
 use crate::{
     CompiledCraft, Craft, G0, ModelResult, Module, PartPose, PlacedPart, Shape, compile, node,
-    part_inertia_per_kg, rotate,
+    part_box_size, part_inertia_per_kg, rotate,
 };
 use glam::{DQuat, DVec3};
 use rapier3d::math::{Pose, Rotation, Vector};
@@ -185,7 +185,8 @@ impl AssemblyFlight {
             let d = p.definition;
             let builder = match d.shape {
                 Shape::Box => {
-                    ColliderBuilder::cuboid(d.radius as f32, d.height as f32 / 2.0, d.radius as f32)
+                    let h = part_box_size(d) / 2.0;
+                    ColliderBuilder::cuboid(h.x as f32, h.y as f32, h.z as f32)
                 }
                 Shape::Cone => ColliderBuilder::cone(d.height as f32 / 2.0, d.radius as f32),
                 Shape::Cylinder => {

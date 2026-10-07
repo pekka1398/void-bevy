@@ -144,6 +144,42 @@ impl RenderAssets {
             );
         }
         for d in void_assembly::catalog() {
+            if d.box_size_meters.is_some() {
+                // Explicit cuboid dimensions are the authored geometry for both drawing and contact.
+                let size = void_assembly::part_box_size(d).as_vec3();
+                let color =
+                    Color::Srgba(Srgba::hex(&d.color).expect("invalid authored part color"));
+                parts.insert(
+                    d.id.clone(),
+                    vec![RenderPiece {
+                        mesh: meshes.add(Cuboid::new(size.x, size.y, size.z)),
+                        material: materials.add(StandardMaterial {
+                            base_color: color,
+                            ..default()
+                        }),
+                        local: Transform::IDENTITY,
+                        flame: false,
+                    }],
+                );
+                let h = size / 2.0;
+                let mut lines = Vec::new();
+                for axis in 0..3 {
+                    let b = (axis + 1) % 3;
+                    let c = (axis + 2) % 3;
+                    for sb in [-1.0, 1.0] {
+                        for sc in [-1.0, 1.0] {
+                            let mut point = h;
+                            point[b] *= sb;
+                            point[c] *= sc;
+                            point[axis] = -h[axis];
+                            lines.push(point);
+                            point[axis] = h[axis];
+                            lines.push(point);
+                        }
+                    }
+                }
+                outlines.insert(d.id.clone(), lines);
+            }
             assert!(
                 parts.contains_key(&d.id),
                 "missing authored render model {}",

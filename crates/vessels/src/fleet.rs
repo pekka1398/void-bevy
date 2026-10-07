@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use void_assembly::{
     Connection, Craft, Module, PartDefinition, PartGraph, PartPose, Shape, compile, node,
-    part_inertia_per_kg,
+    part_bound_radius, part_box_size, part_inertia_per_kg,
 };
 use void_environment::Environment;
 use void_frames::{
@@ -909,14 +909,16 @@ impl Fleet {
             .iter()
             .map(|p| {
                 let ay = (p.pose.rotation * DVec3::Y).y;
-                let radial = if p.definition.shape == Shape::Box {
-                    p.definition.radius
-                        * ((p.pose.rotation * DVec3::X).y.abs()
-                            + (p.pose.rotation * DVec3::Z).y.abs())
+                let extent = if p.definition.shape == Shape::Box {
+                    let h = part_box_size(p.definition) / 2.0;
+                    h.x * (p.pose.rotation * DVec3::X).y.abs()
+                        + h.y * ay.abs()
+                        + h.z * (p.pose.rotation * DVec3::Z).y.abs()
                 } else {
-                    p.definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
+                    ay.abs() * p.definition.height / 2.0
+                        + p.definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
                 };
-                p.pose.position.y - ay.abs() * p.definition.height / 2.0 - radial
+                p.pose.position.y - extent
             })
             .fold(f64::INFINITY, f64::min);
         let g = &self.grounds[self.ground_index(body)];
@@ -1488,7 +1490,7 @@ impl Fleet {
                 Piece {
                     shape: match d.shape {
                         Shape::Box => SimpleShape::Box {
-                            half_extents: DVec3::new(d.radius, d.height / 2.0, d.radius),
+                            half_extents: part_box_size(d) / 2.0,
                         },
                         Shape::Cone => SimpleShape::Cone {
                             radius: d.radius,
@@ -1628,12 +1630,7 @@ impl Fleet {
             .map(|id| {
                 let part = self.parts.part(id);
                 let d = part.definition;
-                (part.pose.position - c).length()
-                    + (d.height / 2.0).hypot(if d.shape == Shape::Box {
-                        d.radius * 2.0_f64.sqrt()
-                    } else {
-                        d.radius
-                    })
+                (part.pose.position - c).length() + part_bound_radius(d)
             })
             .fold(0.0, f64::max);
         let body = ground.spec.body_index;

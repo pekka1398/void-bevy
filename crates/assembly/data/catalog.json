@@ -2419,5 +2419,296 @@
         }
       }
     ]
+  },
+  {
+    "id": "aircraft-cockpit",
+    "name": "Aircraft cockpit",
+    "description": "Cuboid command fuselage with stable surface mount sockets",
+    "category": "command",
+    "dryMassKg": 250,
+    "height": 1.2,
+    "radius": 0.6,
+    "shape": "box",
+    "boxSizeMeters": [
+      1.2,
+      1.2,
+      3
+    ],
+    "color": "#d6dde3",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "tail",
+        "position": [
+          0,
+          0,
+          -1.5
+        ],
+        "direction": [
+          0,
+          0,
+          -1
+        ],
+        "size": 1
+      },
+      {
+        "id": "surface-0",
+        "position": [
+          0.6,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-1",
+        "position": [
+          0.6,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-2",
+        "position": [
+          0.6,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-3",
+        "position": [
+          0.6,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-4",
+        "position": [
+          0.6,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-5",
+        "position": [
+          0.6,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-6",
+        "position": [
+          0.6,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-7",
+        "position": [
+          0.6,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      }
+    ],
+    "modules": [
+      {
+        "kind": "command",
+        "id": "command"
+      }
+    ]
+  },
+  {
+    "id": "aircraft-wing",
+    "name": "Aircraft wing",
+    "description": "Explicit cuboid wing geometry, matched contact and aerodynamic geometry",
+    "category": "structure",
+    "dryMassKg": 70,
+    "height": 0.12,
+    "radius": 2,
+    "shape": "box",
+    "boxSizeMeters": [
+      4,
+      0.12,
+      1.5
+    ],
+    "color": "#d6dde3",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "root",
+        "position": [
+          -2,
+          0,
+          0
+        ],
+        "direction": [
+          -1,
+          0,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "liftingSurface",
+        "id": "lift",
+        "parameters": {
+          "point": [
+            0,
+            0,
+            0
+          ],
+          "chord": [
+            0,
+            0,
+            1
+          ],
+          "normal": [
+            0,
+            1,
+            0
+          ],
+          "areaM2": 6,
+          "aspectRatio": 2.6666666666666665,
+          "chordMeters": 1.5,
+          "sweepRadians": 0,
+          "incidenceRadians": 0.035,
+          "zeroLiftRadians": -0.035,
+          "stallRadians": 0.28,
+          "cd0": 0.02,
+          "efficiency": 0.8,
+          "pitchingMoment": 0
+        }
+      }
+    ]
+  },
+  {
+    "id": "aircraft-wing-left",
+    "name": "Aircraft left wing",
+    "description": "Explicit cuboid wing geometry, matched contact and aerodynamic geometry",
+    "category": "structure",
+    "dryMassKg": 70,
+    "height": 0.12,
+    "radius": 2,
+    "shape": "box",
+    "boxSizeMeters": [
+      4,
+      0.12,
+      1.5
+    ],
+    "color": "#d6dde3",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "root",
+        "position": [
+          2,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "liftingSurface",
+        "id": "lift",
+        "parameters": {
+          "point": [
+            0,
+            0,
+            0
+          ],
+          "chord": [
+            0,
+            0,
+            1
+          ],
+          "normal": [
+            0,
+            1,
+            0
+          ],
+          "areaM2": 6,
+          "aspectRatio": 2.6666666666666665,
+          "chordMeters": 1.5,
+          "sweepRadians": 0,
+          "incidenceRadians": 0.035,
+          "zeroLiftRadians": -0.035,
+          "stallRadians": 0.28,
+          "cd0": 0.02,
+          "efficiency": 0.8,
+          "pitchingMoment": 0
+        }
+      }
+    ]
   }
 ]

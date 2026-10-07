@@ -72,3 +72,26 @@ python3 tools/regenerate-golden.py --reference-root ../void assembly_visuals
 原 assembly lab 的範圍維持不變：堆疊接點與單一推進劑，質心在零件原點，慣量用外接圓柱近似；尚無表面接合、對稱、自由位移、結構彎曲／破壞或完整供油優先序。非預期狀態 panic；使用者的資料與操作錯誤顯示原因。
 
 程式測試與建置通過，Bevy 畫面與操作由使用者在本機驗收。驗收時建議先看範例的分級，再從 New 自己組一艘船、匯出／匯入並試飛；另外比較反向接合、空燃料與 unset 級數。
+
+## Explicit geometry and surface attachment (aircraft branch)
+
+Craft format 3 permits `boxSizeMeters` (full x/y/z cuboid dimensions), attachment
+`twistRadians`, and attachment `pose` (`position`, unit quaternion `rotation`) in the
+parent part's axes. Unchanged format 2 craft remains accepted explicitly; using these
+new capabilities in format 2 is rejected. Existing cylinder/cone and legacy cuboid
+operation ordering is preserved.
+
+`part_box_size`, `part_bound_radius`, and `part_inertia_per_kg` share geometry across
+contact bodies, activation bounds, launch clearance and authored cuboid rendering.
+A surface attachment requires a named parent socket with `surface: true` on a cuboid.
+The pose must put the child socket on the parent's collider boundary, with its normal
+opposing the parent face normal. Interior points, detached points and incompatible
+normals are rejected. Named sockets bound mount capacity and retain stable graph,
+occupancy and supply semantics; they are not anonymous connections. Curved-parent
+surface mounting is not supported in this first interface.
+
+`set_attachment_pose` and `set_attachment_twist` return validated craft copies. Their
+callers explicitly select format 3 before editing. `mirror_pose_x` supplies bilateral
+parent-local pose geometry; asymmetric parts/control signs need authored counterpart
+parts, since a quaternion cannot encode reflection of an asymmetric object. Live
+Fleet state remains owned by PartGraph; these APIs do not mutate its physical caches.
