@@ -10,6 +10,7 @@ use void_rotation::{Mat3, rotation_step};
 
 pub(super) struct RigidFlightSource {
     pub air: Option<Arc<VesselAir>>,
+    pub full_air: bool,
     pub water: Arc<void_modules::water::VesselWater>,
     pub start: f64,
     pub rotation: DQuat,
@@ -48,8 +49,12 @@ impl AirSource for RigidFlightSource {
     ) -> DVec3 {
         let (q, w) = self.attitude(t);
         let force = self.air.as_ref().map_or(DVec3::ZERO, |air| {
-            air.wrench(ephemeris, t, State { position, velocity }, q, w)
-                .force
+            if self.full_air {
+                air.wrench(ephemeris, t, State { position, velocity }, q, w)
+                    .force
+            } else {
+                air.acceleration(ephemeris, t, position, velocity, mass) * mass
+            }
         });
         (force
             + self
@@ -125,6 +130,7 @@ impl void_frames::FrameSource for SceneStepSource<'_> {
 /// This keeps ideal maneuver mode distinct from finite-inertia manual/SAS dynamics.
 pub(super) struct GuidedAirSource {
     pub air: Option<Arc<VesselAir>>,
+    pub full_air: bool,
     pub water: Arc<void_modules::water::VesselWater>,
     pub rotation: DQuat,
     pub thrust_axis: DVec3,
@@ -155,7 +161,11 @@ impl AirSource for GuidedAirSource {
         let state = State { position, velocity };
         let q = self.attitude(e, t, state);
         (self.air.as_ref().map_or(DVec3::ZERO, |air| {
-            air.wrench(e, t, state, q, DVec3::ZERO).force
+            if self.full_air {
+                air.wrench(e, t, state, q, DVec3::ZERO).force
+            } else {
+                air.acceleration(e, t, position, velocity, mass) * mass
+            }
         }) + self.water.wrench(e, t, state, q, DVec3::ZERO).force)
             / mass
     }

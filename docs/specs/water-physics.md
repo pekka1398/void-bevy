@@ -43,3 +43,11 @@ Owner 接縫：ground_for 與 band_safe_seconds 以 min(terrain clearance, sea c
 headless environment/module 全 crate 測試通過，water trial frame/energy/purity 通過；
 fleet-flight water/aircraft/vehicles 受影響場景通過。四 core clippy -D warnings 通過。
 未跑全 workspace，尚未主 agent GUI／人類驗收。
+
+後續 review 修正：Orbit water evaluator 使用近海 trial envelope，取零件 reach、
+相對海水速率及一腿最大 surface-g／thrust 接近距離；遠方乾燥 orbit 不因世界有海
+就切入每步 coupled source。ground sea contact band 仍負責一般海洋的提前 owner 交接。
+ForceOnly coupled/guided air 沿用原 no-spin force evaluator、air torque 為零；water
+自己的 torque 不受 air mode 影響。no-ground Fleet 測試分別核對 dry-near-sea
+ForceOnly 與無海既有旋轉一致、Full 有氣動阻尼，以及 airless submerged 的兩模式
+water 角速度／線速度一致。這些測試及 near/far/incoming envelope 測試通過。

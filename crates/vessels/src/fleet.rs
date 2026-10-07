@@ -2574,7 +2574,21 @@ impl Fleet {
             q,
             w,
         );
+        let full_air = self.options.air_dynamics == AirDynamics::ForceAndTorque;
         let initial = air.as_ref().map(|air| {
+            if !full_air {
+                return void_modules::Wrench {
+                    force: air.acceleration(
+                        &*self.ephemeris,
+                        t,
+                        state.position,
+                        state.velocity,
+                        state.mass_kg,
+                    ) * state.mass_kg,
+                    ..void_modules::Wrench::zero(self.origin_frame(), state.position)
+                };
+            }
+
             air.wrench(
                 &*self.ephemeris,
                 t,
@@ -2613,6 +2627,7 @@ impl Fleet {
         };
         let mid_air = air
             .as_ref()
+            .filter(|_| full_air)
             .map(|air| air.wrench(&*self.ephemeris, t + dt / 2.0, middle, qm, wm));
         let mid_water = water.wrench(&*self.ephemeris, t + dt / 2.0, middle, qm, wm);
         let tau = p.torque
@@ -2621,6 +2636,7 @@ impl Fleet {
             + mid_air.map_or(DVec3::ZERO, |a| qm.conjugate() * a.torque);
         let source = Arc::new(RigidFlightSource {
             air,
+            full_air,
             water,
             start: t,
             rotation: q,
@@ -2761,9 +2777,23 @@ impl Fleet {
                     .is_some_and(|p| p.sea_level_meters.is_some())
             });
             let coupled = !ideal_pointing
-                && (water_world
-                    || (self.options.air_dynamics == AirDynamics::ForceAndTorque
-                        && (aerodynamic || turning)));
+                && (void_modules::water::VesselWater::new(
+                    &self.environment,
+                    &self.parts,
+                    &v.members,
+                    self.centre(&v.members),
+                )
+                .near_surface(
+                    &*self.ephemeris,
+                    t,
+                    State {
+                        position: run.state().position,
+                        velocity: run.state().velocity,
+                    },
+                    leg - t,
+                    p.force.length() / run.state().mass_kg,
+                ) || (self.options.air_dynamics == AirDynamics::ForceAndTorque
+                    && (aerodynamic || turning)));
             if coupled
                 || (burning && turning)
                 || (self.options.air_dynamics == AirDynamics::ForceAndTorque
@@ -2846,6 +2876,7 @@ impl Fleet {
                 .map(|air| air.with_controls(self.controls[&v.id].turn));
                 Some(Arc::new(GuidedAirSource {
                     air: geometry.map(Arc::new),
+                    full_air: self.options.air_dynamics == AirDynamics::ForceAndTorque,
                     water: Arc::new(void_modules::water::VesselWater::new(
                         &self.environment,
                         &self.parts,

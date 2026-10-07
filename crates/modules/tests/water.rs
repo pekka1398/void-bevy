@@ -32,6 +32,18 @@ fn water_trial_frames_purity_and_spin_dissipation() {
     };
     let q = DQuat::from_rotation_z(0.2);
     let spin = DVec3::X * 2.;
+    let to_origin = at.transform(surface, frames.origin);
+    assert!(source.near_surface(&e, 0., to_origin.apply_state(state), 1., 0.));
+    let far = State {
+        position: DVec3::X * (planet.terrain.radius_meters + 100_000.),
+        velocity: DVec3::ZERO,
+    };
+    assert!(!source.near_surface(&e, 0., to_origin.apply_state(far), 1., 0.));
+    let incoming = State {
+        position: DVec3::X * (planet.terrain.radius_meters + 9050.),
+        velocity: -DVec3::X * 100.,
+    };
+    assert!(source.near_surface(&e, 0., to_origin.apply_state(incoming), 1., 0.));
     let load = source.wrench_in(&at, surface, state, q, spin);
     let still = source.wrench_in(
         &at,

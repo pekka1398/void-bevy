@@ -320,6 +320,33 @@ impl VesselWater {
         }
         result
     }
+    /// Conservative entry envelope for one bounded translation leg. Terrain band guards take
+    /// ownership first where configured; this also protects explicit sea worlds without terrain.
+    pub fn near_surface(
+        &self,
+        e: &dyn void_orbit::EphemerisSource,
+        t: f64,
+        state: void_frames::State,
+        dt: f64,
+        thrust_acceleration: f64,
+    ) -> bool {
+        let frames = self.environment.frames();
+        let at = frames.tree.at(t, e);
+        let reach = self
+            .parts
+            .iter()
+            .map(|(part, offset, _)| offset.length() + void_assembly::part_bound_radius(part))
+            .fold(0., f64::max);
+        (0..self.environment.bodies().len()).any(|body| {
+            let sample = self
+                .environment
+                .surroundings(&at, frames, frames.origin, state, body);
+            let Some(sea) = sample.sea else { return false };
+            let b = &self.environment.bodies()[body];
+            let a = b.gm / b.radius_meters.powi(2) + thrust_acceleration;
+            sea.depth >= -(reach + sea.velocity.length() * dt + 0.5 * a * dt * dt)
+        })
+    }
     pub fn wrench(
         &self,
         e: &dyn void_orbit::EphemerisSource,
