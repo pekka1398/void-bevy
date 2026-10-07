@@ -43,7 +43,7 @@ pub fn spawn_map_labels(commands: &mut Commands, bodies: &[CelestialBody]) {
     let mut kinds: Vec<(LabelKind, usize, String, Color)> = bodies
         .iter()
         .map(|b| {
-            let kind = if b.parent_index.is_none() {
+            let kind = if b.parent_index.is_none() && b.index == 0 {
                 LabelKind::Star
             } else {
                 LabelKind::Body(b.index)
