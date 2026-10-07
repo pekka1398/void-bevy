@@ -1143,6 +1143,7 @@ pub fn run(main_game: bool) {
                 draw_map,
                 instruments,
                 update_scenery,
+                capture_frame,
             )
                 .chain(),
         );
@@ -1172,6 +1173,20 @@ pub fn run(main_game: bool) {
             );
     }
     app.run();
+}
+// Capture the GPU window image independently of the desktop/VNC presentation path.
+fn capture_frame(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>) {
+    if keys.just_pressed(KeyCode::PrintScreen) {
+        use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("screenshot clock predates Unix epoch")
+            .as_nanos();
+        let path = format!("lab-log/screenshots/frame-{}-{stamp}.png", std::process::id());
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(path));
+    }
 }
 #[derive(Resource)]
 struct RenderBenchmark {
