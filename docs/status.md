@@ -139,3 +139,27 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 上述封存分支，不混入目前主線。既有驗證錄影／存檔搬至
 `/home/pekka/Archives/VOID/2026-10-05/review-recordings/`，同層 README.txt
 記錄用途與版本限制，SHA-256 摘要核對搬移前後一致。
+
+## 四功能開發中的整合工作區（2026-10-07）
+
+`work/four-feature-integration`／`void-bevy-integration` 尚未合入 master，
+人類驗收尚未進行。範圍見 [共同規格](specs/playable-vehicles-and-multiscale.md)。
+本節記錄開發中證據，不改變上面 master 能力的驗收結論。
+
+- 核心與主遊戲：飛機組裝幾何／表面接合／鏡像、翼面／jet、共用輪子／rover、
+  海水排水與水阻、三星系精確 owner 已接入；EVA 尚待接入和整合審查。
+- Root 檢查：`cfd8ac7` app library 編譯通過；`02aeac3` 後的水 5 項及
+  stellar world／wrench 整合測試通過；`b687cee` 持久 owner 的 escaped-load
+  實際氣動測試通過；`37b9122` 真實 Sol 日照深海場景測試通過。未跑全 workspace。
+- Agent GUI：TigerVNC，RTX 5060 Laptop／Vulkan，`cfd8ac7` draft model 25
+  實際按鍵完成飛機滑行、拉起／輪子離地、下降、三輪接地與 B 煞停。
+  同版錄製 `aircraft-instruments.jsonl` 在 T+42.8 秒的 headless verify 通過。
+  姿態球依 control profile 使用 +Z 前向，水平飛機讀值約 0°。
+- Agent GUI：同一 draft 執行檔切換 Sol／Beryl／Cygnus 船隻，Beryl 普通火箭
+  点火上升至 AGL 19.6 m，Cygnus 軌道船的有限 RCS 操控消耗資源；
+  三船錄製 `stellar-gui.jsonl` 在 T+4.9 秒 verify 通過。
+  這些是明示的遠端起始 fixture，沒有完成光年航程。
+- 證據位於 `/tmp/void-next-feature-evidence/`，包括執行檔來源 commit、SHA256、
+  日誌、截圖及錄影。這些 draft 證據不能代替最終組合版本重查或人類驗收。
+- 尚待：EVA／車輪 owner 接縫收尾、最終模型版本與相容性、受影響回歸／lint、
+  組合版 EVA／rover／海面動態視窗檢查、16 ly 總覽與日側星系 fixture 視窗核對。
