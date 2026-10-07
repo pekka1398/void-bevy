@@ -22,4 +22,7 @@ J／Shift+J 改參考對象，觀察路徑與 Pe／Ap 無舊框架殘留；F6／
 reference_frames 4、view 原檢查 8 與新增固定地表／cache rewind 1 通過。上述
 crates lib/tests Clippy -D warnings、fmt、diff check 通過。TigerVNC 操作四種模式、
 J、縮放、續跑、F6/F7 與錄製，最終 journal `/tmp/void-plot-gui.jsonl` headless
-verify 通過；未跑全 workspace，也尚未進行本輪人類驗收。
+verify 通過；當時未跑全 workspace，人類驗收尚未完成。
+
+2026-10-07：使用者確認包含本項的三項主遊戲整合已完成人類驗收，對應最終
+整合 master `f06c283`（model 20）。此確認不新增測試或擴大既有驗證範圍；尚未 push。

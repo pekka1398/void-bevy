@@ -48,3 +48,6 @@ recipe 表示；沒有日照／行星紅外的幾何積分、燒蝕厚度或化�
 TigerVNC 實際再入、材料耗盡、F6/F7、錄製，561.533333 秒 journal 及直接世界存檔
 headless verify 通過；證據存 `lab-log/thermal-evidence/`。載入後 renderer 呈現仍隨
 下一項 scenery 整合再核對，不宣稱已完成人類驗收。
+
+2026-10-07：使用者確認包含本項的三項主遊戲整合已完成人類驗收，對應最終
+整合 master `f06c283`（model 20）。此確認不新增測試或擴大既有驗證範圍；尚未 push。

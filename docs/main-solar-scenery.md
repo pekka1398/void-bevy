@@ -58,7 +58,7 @@ material 數量不增加。這些 headless 檢查不代替 shader／GUI 或人�
 4. `--reentry` 按 P，觀察熱讀數與材料減少；存讀後續跑。四種 plot frame 切換時
    路徑與標籤更新，不能改變船的物理狀態。
 
-最終使用者驗收仍待完成；本輪未自動跑全 workspace，未 push。
+使用者已於 2026-10-07 確認最終驗收完成（master `f06c283`）；本輪未自動跑全 workspace，未 push。
 
 ## 本輪驗證紀錄
 
@@ -82,4 +82,4 @@ master `a625be9` 加本次 scenery 工作區（本頁隨實作提交），2026-1
 
 可直接執行的 model 20 snapshot：`target/acceptance/void-app`。本機 ignored 證據在
 `lab-log/solar-evidence/`；舊 model 19 熱證據保留 `lab-log/thermal-evidence/`。
-以上是 agent 初步核對，人類最終驗收尚未完成，沒有宣稱其他 GPU 或長期記憶體檢查通過。
+以上是 agent 初步核對的證據；使用者另於 2026-10-07 確認人類驗收完成，沒有宣稱其他 GPU 或長期記憶體檢查通過。
