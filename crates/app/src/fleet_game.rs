@@ -382,6 +382,30 @@ fn plotting_description(sim: &void_fleet_flight::FleetFlight) -> String {
     }
 }
 
+fn vehicle_description(sim: &void_fleet_flight::FleetFlight) -> String {
+    let Some(control) = sim.fleet.vehicle_control(&sim.selected) else {
+        return String::new();
+    };
+    let wheels: Vec<_> = sim
+        .fleet
+        .part_snapshots(&sim.selected)
+        .into_iter()
+        .flat_map(|p| p.modules.into_values())
+        .filter_map(|m| match m {
+            void_assembly::ModuleState::Wheel { state, .. } => Some(state),
+            _ => None,
+        })
+        .collect();
+    format!(
+        "\nDRIVE {:.0}% steer {:.0}% brake {:.0}% | tires {}/{} grounded\nW/S drive | A/D steer | Space brake (latched) | X parking toggle; W/S releases brake\nRaycast suspension/tire model; motor energy unlimited in this first physics milestone",
+        control.drive * 100.0,
+        control.steer * 100.0,
+        control.brake * 100.0,
+        wheels.iter().filter(|s| s.grounded).count(),
+        wheels.len()
+    )
+}
+
 fn thermal_description(lab: &Lab) -> String {
     let parts = lab
         .session
@@ -625,6 +649,7 @@ struct Visual {
     id: String,
     local: Transform,
     flame: bool,
+    wheel: Option<String>,
 }
 fn argument(name: &str) -> Option<String> {
     let args: Vec<_> = std::env::args().collect();
@@ -635,7 +660,7 @@ fn argument(name: &str) -> Option<String> {
 pub fn run(main_game: bool) {
     if std::env::args().any(|a| a == "--help") {
         println!(
-            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--stellar-neighborhood: three fictional systems at real stellar separation\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
+            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--stellar-neighborhood: three fictional systems at real stellar separation\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
         );
         return;
     }
@@ -682,7 +707,9 @@ pub fn run(main_game: bool) {
     let planet = game_planet_by_id(&id, argument("--terrain").as_deref());
     let craft = argument("--craft").map_or_else(
         || {
-            if main_game && std::env::args().any(|a| a == "--reentry") {
+            if main_game && std::env::args().any(|a| a == "--rover") {
+                void_assembly::rover()
+            } else if main_game && std::env::args().any(|a| a == "--reentry") {
                 void_assembly::reentry_capsule()
             } else if main_game {
                 void_assembly::rcs_flight_rocket()
@@ -1480,6 +1507,49 @@ fn controls(
     let warp_was_active = lab.session.sim().maneuver_warp.active();
     let id = lab.session.sim().selected.clone();
     let commanded = lab.session.sim().fleet.has_command(&id);
+    let vehicle = lab.session.sim().fleet.has_wheels(&id)
+        && !lab.session.sim().fleet.parts().parts().any(|p| {
+            lab.session.sim().fleet.vessel_of_part(&p.id) == id
+                && p.definition
+                    .modules
+                    .iter()
+                    .any(|m| matches!(m, Module::LiftingSurface { .. }))
+        });
+    if vehicle {
+        let previous = lab
+            .session
+            .sim()
+            .fleet
+            .vehicle_control(&id)
+            .expect("wheel controls");
+        let drive = if commanded && !lab.paused {
+            axis(&keys, KeyCode::KeyW, KeyCode::KeyS)
+        } else {
+            0.0
+        };
+        let steer = if commanded && !lab.paused {
+            axis(&keys, KeyCode::KeyD, KeyCode::KeyA)
+        } else {
+            0.0
+        };
+        let brake = if keys.pressed(KeyCode::Space) || !commanded {
+            1.0
+        } else if keys.just_pressed(KeyCode::KeyX) {
+            if previous.brake > 0.0 { 0.0 } else { 1.0 }
+        } else if drive != 0.0 {
+            0.0
+        } else {
+            previous.brake
+        };
+        let control = void_assembly::VehicleControl {
+            drive,
+            steer,
+            brake,
+        };
+        if control != previous {
+            lab.session.execute(Action::Vehicle { control });
+        }
+    }
     if keys.just_pressed(KeyCode::KeyT) && commanded {
         let enabled = lab.session.sim().fleet.sas_phase(&id) == void_vessels::SasPhase::Off;
         if enabled && !lab.session.sim().fleet.has_reaction_wheel(&id) {
@@ -1502,7 +1572,7 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyX) {
         c.throttle = 0.0;
     }
-    let turn = if commanded && !lab.paused {
+    let turn = if commanded && !lab.paused && !vehicle {
         DVec3::new(
             axis(&keys, KeyCode::KeyS, KeyCode::KeyW),
             axis(&keys, KeyCode::KeyE, KeyCode::KeyQ),
@@ -1568,7 +1638,7 @@ fn controls(
     if lab.main_game && !keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) {
         docking_controls(lab, &keys);
     }
-    if keys.just_pressed(KeyCode::Space) {
+    if keys.just_pressed(KeyCode::Space) && !vehicle {
         lab.session.execute(Action::Stage);
         lab.own_port = None;
         lab.target_port = None;
@@ -2155,7 +2225,7 @@ fn draw(
     for p in &snapshots {
         if !lab.parts.contains_key(&p.id) {
             let root = part_transform(&mut to_camera, p);
-            let entities = assets.parts[&p.definition.id]
+            let mut entities: Vec<Entity> = assets.parts[&p.definition.id]
                 .iter()
                 .map(|piece| {
                     commands
@@ -2164,6 +2234,7 @@ fn draw(
                                 id: p.id.clone(),
                                 local: piece.local,
                                 flame: piece.flame,
+                                wheel: None,
                             },
                             Mesh3d(piece.mesh.clone()),
                             MeshMaterial3d(piece.material.clone()),
@@ -2177,12 +2248,78 @@ fn draw(
                         .id()
                 })
                 .collect();
+            for module in &p.definition.modules {
+                let Module::Wheel {
+                    id: mid,
+                    parameters: d,
+                } = module
+                else {
+                    continue;
+                };
+                let axle = (-d.suspension_direction).cross(d.forward);
+                let tire = meshes.add(Cylinder::new(d.radius_meters as f32, 0.2));
+                let stripe = meshes.add(Cuboid::new(0.03, 0.21, (d.radius_meters * 1.8) as f32));
+                let local =
+                    Transform::from_rotation(DQuat::from_rotation_arc(DVec3::Y, axle).as_quat());
+                for (mesh, material, shape) in [
+                    (
+                        tire,
+                        assets.parts[&p.definition.id][0].material.clone(),
+                        local,
+                    ),
+                    (stripe, assets.center.clone(), Transform::IDENTITY),
+                ] {
+                    entities.push(
+                        commands
+                            .spawn((
+                                Visual {
+                                    id: p.id.clone(),
+                                    local: shape,
+                                    flame: false,
+                                    wheel: Some(mid.clone()),
+                                },
+                                Mesh3d(mesh),
+                                MeshMaterial3d(material),
+                                root,
+                                Visibility::Inherited,
+                            ))
+                            .id(),
+                    );
+                }
+            }
             lab.parts.insert(p.id.clone(), entities);
         }
     }
     for (visual, mut transform, mut visibility) in &mut parts {
         if let Some(p) = snapshots.iter().find(|p| p.id == visual.id) {
-            *transform = part_transform(&mut to_camera, p).mul_transform(visual.local);
+            let mut root = part_transform(&mut to_camera, p);
+            if let Some(mid) = &visual.wheel {
+                let d = p
+                    .definition
+                    .modules
+                    .iter()
+                    .find_map(|m| match m {
+                        Module::Wheel { id, parameters } if id == mid => Some(parameters),
+                        _ => None,
+                    })
+                    .expect("wheel definition");
+                let void_assembly::ModuleState::Wheel { state, control } = p.modules[mid] else {
+                    panic!("wheel visual state")
+                };
+                let up = -d.suspension_direction;
+                let axle = up.cross(d.forward);
+                let rotation = DQuat::from_axis_angle(up, control.steer * d.max_steer_radians)
+                    * DQuat::from_axis_angle(axle, state.spin_radians);
+                root = root.mul_transform(
+                    Transform::from_translation(
+                        (d.suspension_origin
+                            + d.suspension_direction * state.suspension_length_meters)
+                            .as_vec3(),
+                    )
+                    .with_rotation(rotation.as_quat()),
+                );
+            }
+            *transform = root.mul_transform(visual.local);
             *visibility = if visual.flame && !p.firing {
                 Visibility::Hidden
             } else {
@@ -2398,7 +2535,7 @@ fn draw(
             lab.notice,
             scenery_description(sim),
             plotting_description(sim),
-            thermal_description(lab),
+            format!("{}{}", thermal_description(lab), vehicle_description(sim)),
             if lab.main_game {
                 docking_description(lab)
             } else {

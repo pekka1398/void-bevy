@@ -3293,7 +3293,8 @@
     "modules": [
       {
         "kind": "command",
-        "id": "command1"
+        "id": "command1",
+        "reactionWheel": false
       }
     ]
   },
