@@ -43,3 +43,39 @@ these headless checks do not substitute dynamic GUI or human acceptance.
 
 EVA entry/exit, walking/jumping/jetpack and rover seat transfer are the next milestone on this
 same branch; not claimed complete by the rover checkpoint.
+
+## Local EVA core milestone
+
+Crew resides in a dedicated Seat part with its own isolated typed monopropellant tank; CrewRecord
+stores identity/body+suit dry mass, not a second consumable inventory. Exit transfers that resource
+quantity to a suit PartGraph craft and boarding transfers the remaining amount back. The occupied
+seat also preserves packed suit thermal state; boarding/exiting cannot reset suit heating or failure.
+A separate crewed rover chassis authors requiresCrew=true, while existing/autonomous commands
+retain the explicit false default. Healthy occupied seats grant only the authored crew-required
+capability. Exit switches human selection, clears carrier manual inputs and latches physical brakes.
+
+Hatch clearance queries actual live native geometry. Instant endpoint transfer conserves aggregate
+mass, COM, linear and angular momentum, including spinning carriers; the resulting recoil is part
+of this idealized transfer. Cabin traversal/climbing are outside this milestone. Avatar collision is
+an authored dynamic rectangular suited-body envelope; native normal contacts remain enabled.
+Finite grounded traction/balance uses actual solved normal impulse, not proximity or a prescribed
+position/velocity. The tangential actuator replaces the native suit static-friction constraint using
+an explicit Min coefficient rule. Native clustered contacts and tile support identity are considered.
+Jump is an instantaneous reciprocal support impulse, distinct from interval suspension loading.
+Backpack rotation/translation use the existing finite RCS/resource acceptance semantics.
+
+Vehicle steer and EVA strafe/yaw positive mean player-right. Nose+Z/top+Y is a right-handed frame
+whose +X is up×forward, physically left; physics and tire drawing use the same right-turn sign.
+Physical body-fixed north/east tests, not navball convention, validate the direction.
+
+Known integration work still required after this local-only milestone: use multiscale
+enter_vessel/restore_view scopes around exit/board, explicitly reject different systems, and run
+remote-system transfer tests; packed Orbit wheel spin/motor torque/rails needs acceptance updates.
+Passive support no longer resets native activation, but the existing single-sweep tire solver still
+has about 0.09m/s parked residual on the test terrain and does not settle to sleep in 20s. A failing
+regression is preserved at /tmp/void-eva-suspension-sleep-regression.rs for the next solver step;
+this milestone does not claim parked sleep or full wheel owner completion.
+
+Targeted local evidence: EVA transfer/checkpoint/replay, spinning-carrier conservation, dynamic
+walk/jump, low-gravity ballistic jump and finite orbital backpack resource/checkpoint/replay pass.
+Main EVA controls/avatar rendering and root TigerVNC/human acceptance are subsequent work.

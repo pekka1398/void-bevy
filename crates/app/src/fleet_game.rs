@@ -2496,7 +2496,7 @@ fn draw(
                 };
                 let up = -d.suspension_direction;
                 let axle = up.cross(d.forward);
-                let rotation = DQuat::from_axis_angle(up, control.steer * d.max_steer_radians)
+                let rotation = DQuat::from_axis_angle(up, -control.steer * d.max_steer_radians)
                     * DQuat::from_axis_angle(axle, state.spin_radians);
                 root = root.mul_transform(
                     Transform::from_translation(

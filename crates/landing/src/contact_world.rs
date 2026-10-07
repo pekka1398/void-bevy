@@ -742,12 +742,29 @@ impl<F: ContactFrame> ContactWorld<F> {
         linear: DVec3,
         angular_about_com: DVec3,
     ) {
+        self.apply_contact_wrench_impulse(handle, linear, angular_about_com, true);
+    }
+    /// Actuator/support-motion loads wake; passive suspension/balance does not reset native sleep.
+    /// An already sleeping equilibrium skips passive loads and gravity together.
+    pub fn apply_contact_wrench_impulse(
+        &mut self,
+        handle: RigidBodyHandle,
+        linear: DVec3,
+        angular_about_com: DVec3,
+        active: bool,
+    ) {
         assert!(linear.is_finite() && angular_about_com.is_finite());
         let b = &mut self.world.bodies[handle];
-        assert!(b.is_dynamic(), "contact impulse requires dynamic body");
+        assert!(b.is_dynamic());
+        if b.is_sleeping() && !active {
+            return;
+        }
         let before = v64(b.linvel());
-        b.apply_impulse(v32(linear), linear != DVec3::ZERO);
-        b.apply_torque_impulse(v32(angular_about_com), angular_about_com != DVec3::ZERO);
+        b.apply_impulse(v32(linear), active && linear != DVec3::ZERO);
+        b.apply_torque_impulse(
+            v32(angular_about_com),
+            active && angular_about_com != DVec3::ZERO,
+        );
         let delta = v64(b.linvel()) - before;
         self.record_mut(handle).pending_contact_delta += delta;
     }
@@ -816,6 +833,50 @@ impl<F: ContactFrame> ContactWorld<F> {
         let b = self.body(handle);
         v64(b.velocity_at_point(v32(point - self.origin)))
     }
+    /// Explicit hatch clearance against actual live colliders in this owner.
+    pub fn box_overlaps(
+        &self,
+        centre: DVec3,
+        rotation: DQuat,
+        half_extents: DVec3,
+        excluded: Option<RigidBodyHandle>,
+    ) -> bool {
+        assert!(centre.is_finite() && rotation.is_finite() && half_extents.min_element() > 0.0);
+        let pose = Pose::from_parts(v32(centre - self.origin), q32(rotation));
+        let shape = SharedShape::cuboid(
+            half_extents.x as f32,
+            half_extents.y as f32,
+            half_extents.z as f32,
+        );
+        self.world.colliders.iter().any(|(_, c)| {
+            if c.is_sensor() || (excluded.is_some() && c.parent() == excluded) {
+                return false;
+            }
+            let cp = match c.parent() {
+                Some(parent) => {
+                    self.world.bodies[parent].position()
+                        * c.position_wrt_parent().expect("parented collider pose")
+                }
+                None => *c.position(),
+            };
+            rapier3d::parry::query::intersection_test(&pose, &*shape, &cp, c.shape())
+                .expect("unsupported hatch clearance collider query")
+        })
+    }
+    /// One-off impulse (e.g. jumping), unlike an interval suspension support load.
+    pub fn apply_instantaneous_impulse(
+        &mut self,
+        handle: RigidBodyHandle,
+        linear: DVec3,
+        angular_about_com: DVec3,
+    ) {
+        assert!(linear.is_finite() && angular_about_com.is_finite());
+        let b = &mut self.world.bodies[handle];
+        assert!(b.is_dynamic());
+        b.apply_impulse(v32(linear), true);
+        b.apply_torque_impulse(v32(angular_about_com), true);
+    }
+
     /// Predicted point velocity change from a proposed impulse, without mutating live state.
     pub fn impulse_point_velocity_delta(
         &self,
@@ -849,6 +910,73 @@ impl<F: ContactFrame> ContactWorld<F> {
             (a * props.effective_inv_mass).dot(a)
                 + angular.dot(props.effective_world_inv_inertia * angular),
         )
+    }
+
+    /// True contact support from the last accepted native solve, not mere ray proximity.
+    pub fn body_in_contact_with(
+        &self,
+        handle: RigidBodyHandle,
+        support: ColliderHandle,
+        normal: DVec3,
+    ) -> bool {
+        let support_body = self.world.colliders[support].parent();
+        self.world.bodies[handle].colliders().iter().any(|own| {
+            self.world
+                .narrow_phase
+                .contact_pairs_with(*own)
+                .any(|pair| {
+                    let other = if pair.collider1 == *own {
+                        pair.collider2
+                    } else {
+                        pair.collider1
+                    };
+                    // Streamed terrain is one stationary support split across tile colliders. A foot
+                    // may touch the neighbouring tile while its centre ray hits this tile.
+                    let same_support =
+                        other == support || self.world.colliders[other].parent() == support_body;
+                    same_support
+                        && pair.solver_manifolds().iter().any(|m| {
+                            v64(m.data.normal).dot(normal).abs() > 0.5
+                                && (!m.data.solver_contacts.is_empty()
+                                    || m.points.iter().any(|p| p.dist <= 0.0))
+                        })
+                })
+        })
+    }
+
+    /// Actual accepted normal support impulse divided by dt, shared by grounded actuators.
+    /// Native solver_manifolds selects clustered vs unclustered solved contacts explicitly.
+    pub fn support_normal_load(
+        &self,
+        handle: RigidBodyHandle,
+        support: ColliderHandle,
+        normal: DVec3,
+    ) -> f64 {
+        let support_body = self.world.colliders[support].parent();
+        self.world.bodies[handle]
+            .colliders()
+            .iter()
+            .map(|own| {
+                self.world
+                    .narrow_phase
+                    .contact_pairs_with(*own)
+                    .filter_map(|pair| {
+                        let other = if pair.collider1 == *own {
+                            pair.collider2
+                        } else {
+                            pair.collider1
+                        };
+                        if other != support && self.world.colliders[other].parent() != support_body
+                        {
+                            return None;
+                        }
+                        Some(
+                            v64(pair.total_impulse()).dot(normal).abs() / self.options.step_seconds,
+                        )
+                    })
+                    .sum::<f64>()
+            })
+            .sum()
     }
 
     fn contacts(&self, handle: RigidBodyHandle) -> bool {
@@ -1326,7 +1454,8 @@ impl<F: ContactFrame> ContactWorld<F> {
                 record.position.is_finite()
                     && record.turn_rotation.is_finite()
                     && record.turn_angular_velocity.is_finite()
-                    && record.solver_delta.is_finite(),
+                    && record.solver_delta.is_finite()
+                    && record.pending_contact_delta.is_finite(),
                 "contact checkpoint: invalid body record"
             );
         }

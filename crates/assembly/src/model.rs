@@ -41,6 +41,14 @@ pub enum ControlProfile {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Module {
+    Seat {
+        id: String,
+        parameters: crate::SeatDefinition,
+    },
+    Crew {
+        id: String,
+        parameters: crate::EvaDefinition,
+    },
     Wheel {
         id: String,
         parameters: crate::WheelDefinition,
@@ -77,6 +85,8 @@ pub enum Module {
         id: String,
         #[serde(default, rename = "controlProfile")]
         control_profile: ControlProfile,
+        #[serde(default, rename = "requiresCrew")]
+        requires_crew: bool,
         #[serde(default = "default_true", rename = "reactionWheel")]
         reaction_wheel: bool,
     },
@@ -653,9 +663,10 @@ impl CompiledCraft {
                 f.is_finite() && f >= 0.0 && f <= tank_capacity(p.definition),
                 "invalid fuel state"
             );
-            out.dry_mass_kg += p.definition.dry_mass_kg;
+            out.dry_mass_kg += p.definition.dry_mass_kg + crate::initial_crew_mass_kg(p.definition);
             out.fuel_kg += f;
-            out.center += p.pose.position * (p.definition.dry_mass_kg + f);
+            out.center += p.pose.position
+                * (p.definition.dry_mass_kg + crate::initial_crew_mass_kg(p.definition) + f);
         }
         out.mass_kg = out.dry_mass_kg + out.fuel_kg;
         out.center /= out.mass_kg;
@@ -982,7 +993,9 @@ pub fn reentry_capsule() -> Craft {
 impl Module {
     pub fn id(&self) -> &str {
         match self {
-            Self::Wheel { id, .. }
+            Self::Seat { id, .. }
+            | Self::Crew { id, .. }
+            | Self::Wheel { id, .. }
             | Self::Thermal { id, .. }
             | Self::Rcs { id, .. }
             | Self::DockingPort { id, .. }
@@ -1173,6 +1186,31 @@ pub fn validate_definition(d: &PartDefinition) -> ModelResult<()> {
             return Err("empty/duplicate module ID".into());
         }
         match m {
+            Module::Crew { parameters, .. } => {
+                parameters.validate()?;
+                if d.shape != Shape::Box
+                    || capacity(d, ResourceId::Monopropellant) <= 0.0
+                    || !d.modules.iter().any(|m| {
+                        matches!(
+                            m,
+                            Module::Command {
+                                control_profile: ControlProfile::Eva,
+                                ..
+                            }
+                        )
+                    })
+                {
+                    return Err("EVA crew requires authored Box body, backpack tank and EVA command profile".into());
+                }
+            }
+            Module::Seat { parameters, .. } => {
+                parameters.validate()?;
+                if capacity(d, ResourceId::Monopropellant) <= 0.0 || d.crossfeed {
+                    return Err(
+                        "crew seat requires isolated authored backpack monopropellant tank".into(),
+                    );
+                }
+            }
             Module::Wheel { parameters, .. } => {
                 parameters.validate()?;
             }
@@ -1360,4 +1398,27 @@ pub fn rendezvous_pod() -> Craft {
 /// Configurable four-wheel main-game acceptance craft, using ordinary surface assembly APIs.
 pub fn rover() -> Craft {
     import_craft(include_str!("../data/rover.json")).expect("invalid rover fixture")
+}
+
+/// Rover with a dedicated crew seat and isolated backpack tank, ordinary surface assembly.
+pub fn crew_rover() -> Craft {
+    let mut base = rover();
+    base.parts[0].definition_id = "rover-crewed-chassis".into();
+    mount_surface(
+        &base,
+        "chassis",
+        &SurfaceMount {
+            definition_id: "crew-seat".into(),
+            parent_socket_id: "surface-4".into(),
+            node_id: "mount".into(),
+            pose: PartPose {
+                position: DVec3::new(0.0, 0.675, 0.0),
+                rotation: DQuat::IDENTITY,
+            },
+        },
+    )
+    .expect("invalid crew rover fixture")
+}
+pub fn eva_suit() -> Craft {
+    import_craft(include_str!("../data/eva-suit.json")).expect("invalid EVA suit")
 }

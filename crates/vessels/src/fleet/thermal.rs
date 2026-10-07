@@ -148,11 +148,11 @@ impl Fleet {
             .collect();
         void_modules::thermal::commit(&mut self.parts, updates);
         for id in self.order.clone() {
-            if self.command_failed(&id) {
+            if self.command_control_unavailable(&id) {
                 self.controls.insert(id.clone(), VesselControl::default());
                 self.rcs_controls.insert(id.clone(), RcsControl::default());
                 self.sas.remove(&id);
-                self.cancel_guidance(&id, "command part thermally failed");
+                self.cancel_guidance(&id, "command capability unavailable: thermal failure or required healthy crew missing");
             }
             if !self.vessel(&id).members.iter().any(|p| changed.contains(p)) {
                 continue;

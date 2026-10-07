@@ -78,6 +78,7 @@ pub struct WheelState {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VehicleControl {
     pub drive: f64,
+    /// Positive turns to the player's right (negative rotation about authored up).
     pub steer: f64,
     pub brake: f64,
 }
@@ -188,6 +189,10 @@ pub fn step_wheel(
         let longitudinal = forward_force * scale;
         force = c.normal * normal_force + c.forward * longitudinal + side * side_force * scale;
         omega = braked_omega - longitudinal * d.radius_meters / d.wheel_inertia_kg_m2 * dt;
+        if lock_brake.abs() <= brake_limit && scale == 1.0 {
+            // The solved static brake branch has exactly zero angular velocity.
+            omega = 0.0;
+        }
     }
     next.spin_radians_per_second = omega;
     next.spin_radians = (state.spin_radians + omega * dt).rem_euclid(std::f64::consts::TAU);

@@ -26,9 +26,11 @@ use void_rotation::{Mat3, rotation_step};
 use void_sas::{SAS_TUNING, SasPhase, StabilityAssist};
 use void_terrain::Terrain;
 
+mod eva;
 mod guidance;
 mod thermal;
 mod vehicles;
+pub use eva::CrewSeat;
 mod wrenches;
 pub use guidance::{GuidanceStatus, GuidedBurn};
 use wrenches::{GuidedAirSource, RigidFlightSource, SceneStepSource};
@@ -787,16 +789,60 @@ impl Fleet {
                 .iter()
                 .any(|p| self.parts.part(p).is_command() && self.parts.part(p).thermally_failed())
     }
-    fn commanded(&self, v: &Vessel) -> bool {
-        v.members
+    pub fn requires_crew(&self, id: &str) -> bool {
+        self.parts
+            .part(&self.vessel(id).root)
+            .definition
+            .modules
             .iter()
-            .any(|id| self.parts.part(id).is_command() && !self.parts.part(id).thermally_failed())
+            .any(|m| {
+                matches!(
+                    m,
+                    Module::Command {
+                        requires_crew: true,
+                        ..
+                    }
+                )
+            })
+    }
+    pub fn command_control_unavailable(&self, id: &str) -> bool {
+        self.command_control_unavailable_of(self.vessel(id))
+    }
+    fn command_control_unavailable_of(&self, v: &Vessel) -> bool {
+        !self.commanded(v)
+            && (self.parts.part(&v.root).definition.modules.iter().any(|m| {
+                matches!(
+                    m,
+                    Module::Command {
+                        requires_crew: true,
+                        ..
+                    }
+                )
+            }) || v.members.iter().any(|pid| {
+                self.parts.part(pid).is_command() && self.parts.part(pid).thermally_failed()
+            }))
+    }
+    fn commanded(&self, v: &Vessel) -> bool {
+        let healthy_crew=v.members.iter().any(|pid|{
+            let part=self.parts.part(pid);
+            !part.thermally_failed()&&part.modules.values().any(|m|matches!(m,
+                void_assembly::ModuleState::Seat {occupant:Some(_),packed_suit_thermal:Some(thermal)}
+                if !thermal.failed))
+        });
+        v.members.iter().any(|id| {
+            let part = self.parts.part(id);
+            !part.thermally_failed()
+                && part.definition.modules.iter().any(|m| {
+                    matches!(m,
+                Module::Command {requires_crew,..} if !requires_crew||healthy_crew)
+                })
+        })
     }
     fn propulsion_at(&self, v: &Vessel, conditions: &Conditions, time: f64) -> Propulsion {
         propulsion(
             &self.parts,
             &v.members,
-            self.effective_throttle(&v.id, time),
+            self.effective_throttle(v, time),
             self.centre(&v.members),
             conditions,
         )
@@ -1736,12 +1782,39 @@ impl Fleet {
         let spec = ContactBodySpec {
             shape: BodyShape::Compound(pieces),
             mass_kg: self.mass(&v.members),
-            friction: 0.8,
+            // EVA's explicit grounded actuator supplies finite tangential traction; a second
+            // static-friction constraint would cancel walking. Native normal contact stays dynamic.
+            friction: if v.members.iter().any(|id| {
+                self.parts
+                    .part(id)
+                    .definition
+                    .modules
+                    .iter()
+                    .any(|m| matches!(m, Module::Crew { .. }))
+            }) {
+                0.0
+            } else {
+                0.8
+            },
             restitution: 0.0,
             lock_rotations: false,
         };
         let s = self.scenes.get_mut(&scene).unwrap();
         let body = s.world.add_body(&self.ephemeris, &spec, local, q, push);
+        if v.members.iter().any(|id| {
+            self.parts
+                .part(id)
+                .definition
+                .modules
+                .iter()
+                .any(|m| matches!(m, Module::Crew { .. }))
+        }) {
+            let colliders = s.world.body(body).colliders().to_vec();
+            for collider in colliders {
+                s.world.world.colliders[collider]
+                    .set_friction_combine_rule(rapier3d::prelude::CoefficientCombineRule::Min);
+            }
+        }
         s.world.world.bodies[body].set_angvel(vec32(w), true);
         s.members.push(v.id.clone());
         v.system = s.system;
@@ -3024,7 +3097,8 @@ impl Fleet {
         if let SceneFrame::Bubble(f) = &mut self.scenes.get_mut(&scene).unwrap().world.frame {
             f.advance_origin(&mut self.ephemeris, self.time + dt);
         }
-        let wheel_loads = self.wheel_loads(scene);
+        let mut wheel_loads = self.wheel_loads(scene);
+        self.add_eva_loads(scene, &mut wheel_loads);
         let ids = self.scenes[&scene].members.clone();
         let mut plans = vec![];
         let mut initial_water_acceleration = HashMap::new();
@@ -3180,7 +3254,12 @@ impl Fleet {
         // Tires solve a finite dt impulse coupled to rotor inertia. Apply that same impulse to
         // chassis/support, rather than averaging it with the previous atmospheric/thrust load.
         for (body, (force, torque)) in &wheel_loads.bodies {
-            world.apply_wrench_impulse(*body, *force * dt, *torque * dt);
+            world.apply_contact_wrench_impulse(
+                *body,
+                *force * dt,
+                *torque * dt,
+                wheel_loads.wake.contains(body),
+            );
         }
         world.step_with_passive(
             &mut self.ephemeris,

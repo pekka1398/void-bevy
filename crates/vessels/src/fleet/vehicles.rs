@@ -7,6 +7,7 @@ pub(super) struct WheelLoads {
     /// Contact-frame force and torque about each body's COM.
     pub bodies: HashMap<RigidBodyHandle, (DVec3, DVec3)>,
     pub updates: Vec<(String, String, ModuleState)>,
+    pub wake: HashSet<RigidBodyHandle>,
 }
 impl Fleet {
     /// Root command owns the selected vessel's operator profile, including docked mixed craft.
@@ -49,9 +50,14 @@ impl Fleet {
         control: VehicleControl,
     ) -> Result<(), String> {
         control.validate();
+        if !self.has_command(vessel) {
+            return Err("vehicle command unavailable: required healthy crew missing or command thermally failed".into());
+        }
         if !self.has_wheels(vessel) {
             return Err("selected vessel has no wheels".into());
         }
+        let changed = self.vehicle_control(vessel) != Some(control);
+        let owner = self.vessel(vessel).owner.clone();
         let updates: Vec<_> = self
             .vessel(vessel)
             .members
@@ -76,6 +82,9 @@ impl Fleet {
             .collect();
         for (pid, mid, state) in updates {
             self.parts.set_module_state(&pid, &mid, state);
+        }
+        if changed && let Owner::Scene { scene, body, .. } = owner {
+            self.scenes.get_mut(&scene).unwrap().world.world.bodies[body].wake_up(true);
         }
         Ok(())
     }
@@ -112,7 +121,7 @@ impl Fleet {
                     let down = rotation * d.suspension_direction;
                     let origin = translation
                         + q * (part.pose.position + part.pose.rotation * d.suspension_origin);
-                    let steer = DQuat::from_axis_angle(-down, control.steer * d.max_steer_radians);
+                    let steer = DQuat::from_axis_angle(down, control.steer * d.max_steer_radians);
                     let rolling = steer * (rotation * d.forward);
                     let hit = world.suspension_ray(
                         body,
@@ -185,8 +194,42 @@ impl Fleet {
                             inverse_mass_side: effective(side),
                         })
                     });
+                    let actuator = if part.thermally_failed() {
+                        VehicleControl {
+                            drive: 0.0,
+                            steer: control.steer,
+                            brake: 0.0,
+                        }
+                    } else if !self.has_command(id) {
+                        // A latched mechanical parking brake stays set when the crew leaves.
+                        VehicleControl {
+                            drive: 0.0,
+                            steer: control.steer,
+                            brake: control.brake,
+                        }
+                    } else {
+                        control
+                    };
+                    let moving_support = hit.and_then(|h| h.body).is_some_and(|support| {
+                        let b = world.body(support);
+                        !b.is_sleeping()
+                            && (vec64(b.linvel()) != DVec3::ZERO
+                                || vec64(b.angvel()) != DVec3::ZERO)
+                    });
+                    if actuator.drive != 0.0
+                        || state.spin_radians_per_second != 0.0
+                        || moving_support
+                    {
+                        loads.wake.insert(body);
+                        if let Some(support) = hit
+                            .and_then(|h| h.body)
+                            .filter(|b| world.body(*b).is_dynamic())
+                        {
+                            loads.wake.insert(support);
+                        }
+                    }
                     let (next, force, axle_torque) =
-                        void_assembly::step_wheel(d, state, control, contact, dt);
+                        void_assembly::step_wheel(d, state, actuator, contact, dt);
                     // Positive spin is about normal cross forward. In the air use authored axle.
                     let axle =
                         contact.map_or((-down).cross(rolling), |c| c.normal.cross(c.forward));

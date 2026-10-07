@@ -58,6 +58,18 @@ impl InitialWorld {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum Action {
+    EvaJump,
+    EvaExit {
+        part: String,
+        module: String,
+    },
+    EvaBoard {
+        part: String,
+        module: String,
+    },
+    Eva {
+        control: void_assembly::EvaControl,
+    },
     Vehicle {
         control: void_assembly::VehicleControl,
     },
@@ -210,6 +222,34 @@ impl Action {
     }
     fn apply(&self, sim: &mut FleetFlight) -> Outcome {
         let outcome = match self {
+            Self::EvaJump => match sim.fleet.eva_jump(&sim.selected.clone()) {
+                Ok(()) => Outcome::Applied,
+                Err(reason) => Outcome::Refused(reason),
+            },
+            Self::EvaExit { part, module } => match sim.fleet.eva_exit(part, module) {
+                Ok(vessel) => {
+                    sim.select(&vessel);
+                    sim.view_command(&crate::presentation::ViewCommand::Focus { body: None });
+                    Outcome::Spawned(vessel)
+                }
+                Err(reason) => Outcome::Refused(reason),
+            },
+            Self::EvaBoard { part, module } => {
+                match sim.fleet.board_eva(&sim.selected.clone(), part, module) {
+                    Ok(vessel) => {
+                        sim.select(&vessel);
+                        sim.view_command(&crate::presentation::ViewCommand::Focus { body: None });
+                        Outcome::Spawned(vessel)
+                    }
+                    Err(reason) => Outcome::Refused(reason),
+                }
+            }
+            Self::Eva { control } => {
+                match sim.fleet.set_eva_control(&sim.selected.clone(), *control) {
+                    Ok(()) => Outcome::Applied,
+                    Err(reason) => Outcome::Refused(reason),
+                }
+            }
             Self::Vehicle { control } => match sim
                 .fleet
                 .set_vehicle_control(&sim.selected.clone(), *control)
@@ -322,10 +362,13 @@ impl Action {
                     throttle.is_finite() && (0.0..=1.0).contains(throttle) && turn.is_finite(),
                     "invalid vessel control"
                 );
-                if sim.fleet.command_failed(&sim.selected)
+                if sim.fleet.command_control_unavailable(&sim.selected)
                     && (*throttle > 0.0 || *turn != DVec3::ZERO)
                 {
-                    return Outcome::Refused("command part thermally failed".into());
+                    return Outcome::Refused(
+                        "command unavailable: thermal failure or required healthy crew missing"
+                            .into(),
+                    );
                 }
                 sim.control(VesselControl {
                     throttle: *throttle,

@@ -3473,6 +3473,28 @@
         "id": "command1",
         "reactionWheel": false,
         "controlProfile": "rover"
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal1",
+        "parameters": {
+          "skinCapacityJk": 90000,
+          "coreCapacityJk": 150000,
+          "conductanceWk": 20,
+          "connectionConductanceWk": 5,
+          "radiatingArea": 0.5,
+          "heatingArea": 0.5,
+          "convectionArea": 0.5,
+          "emissivity": 0.8,
+          "noseRadius": 0.7,
+          "heatingFactor": 1,
+          "maxSkinK": 1200,
+          "maxCoreK": 700,
+          "initialTemperatureK": 280,
+          "backgroundK": 2.7,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -3538,6 +3560,28 @@
           "brakeTorqueNm": 500,
           "frictionCoefficient": 1.0,
           "maxSteerRadians": 0.5
+        }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal1",
+        "parameters": {
+          "skinCapacityJk": 4500,
+          "coreCapacityJk": 7500,
+          "conductanceWk": 20,
+          "connectionConductanceWk": 5,
+          "radiatingArea": 0.5,
+          "heatingArea": 0.5,
+          "convectionArea": 0.5,
+          "emissivity": 0.8,
+          "noseRadius": 0.075,
+          "heatingFactor": 1,
+          "maxSkinK": 1200,
+          "maxCoreK": 700,
+          "initialTemperatureK": 280,
+          "backgroundK": 2.7,
+          "normal": null,
+          "ablation": null
         }
       }
     ]
@@ -3605,6 +3649,28 @@
           "frictionCoefficient": 1.0,
           "maxSteerRadians": 0.5
         }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal1",
+        "parameters": {
+          "skinCapacityJk": 4500,
+          "coreCapacityJk": 7500,
+          "conductanceWk": 20,
+          "connectionConductanceWk": 5,
+          "radiatingArea": 0.5,
+          "heatingArea": 0.5,
+          "convectionArea": 0.5,
+          "emissivity": 0.8,
+          "noseRadius": 0.075,
+          "heatingFactor": 1,
+          "maxSkinK": 1200,
+          "maxCoreK": 700,
+          "initialTemperatureK": 280,
+          "backgroundK": 2.7,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -3671,6 +3737,28 @@
           "frictionCoefficient": 1.0,
           "maxSteerRadians": 0
         }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal1",
+        "parameters": {
+          "skinCapacityJk": 4500,
+          "coreCapacityJk": 7500,
+          "conductanceWk": 20,
+          "connectionConductanceWk": 5,
+          "radiatingArea": 0.5,
+          "heatingArea": 0.5,
+          "convectionArea": 0.5,
+          "emissivity": 0.8,
+          "noseRadius": 0.075,
+          "heatingFactor": 1,
+          "maxSkinK": 1200,
+          "maxCoreK": 700,
+          "initialTemperatureK": 280,
+          "backgroundK": 2.7,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -3736,6 +3824,655 @@
           "brakeTorqueNm": 500,
           "frictionCoefficient": 1.0,
           "maxSteerRadians": 0
+        }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal1",
+        "parameters": {
+          "skinCapacityJk": 4500,
+          "coreCapacityJk": 7500,
+          "conductanceWk": 20,
+          "connectionConductanceWk": 5,
+          "radiatingArea": 0.5,
+          "heatingArea": 0.5,
+          "convectionArea": 0.5,
+          "emissivity": 0.8,
+          "noseRadius": 0.075,
+          "heatingFactor": 1,
+          "maxSkinK": 1200,
+          "maxCoreK": 700,
+          "initialTemperatureK": 280,
+          "backgroundK": 2.7,
+          "normal": null,
+          "ablation": null
+        }
+      }
+    ]
+  },
+  {
+    "id": "crew-seat",
+    "name": "Crew seat and backpack cradle",
+    "description": "Enclosed crew seat with authored seated-body envelope and isolated backpack store",
+    "category": "structure",
+    "dryMassKg": 20,
+    "height": 1.0,
+    "radius": 0.3,
+    "shape": "box",
+    "boxSizeMeters": [
+      0.6,
+      1.0,
+      0.7
+    ],
+    "color": "#e7e7df",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "mount",
+        "position": [
+          0,
+          -0.5,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "seat",
+        "id": "seat1",
+        "parameters": {
+          "hatchPosition": [
+            1.25,
+            0,
+            0
+          ],
+          "exitDirection": [
+            1,
+            0,
+            0
+          ],
+          "boardingRadiusMeters": 1.8,
+          "boardingSpeedMetersPerSecond": 2,
+          "initialCrew": true
+        }
+      },
+      {
+        "kind": "tank",
+        "id": "pack",
+        "resource": "monopropellant",
+        "capacityKg": 5
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal1",
+        "parameters": {
+          "skinCapacityJk": 6000,
+          "coreCapacityJk": 100000,
+          "conductanceWk": 20,
+          "connectionConductanceWk": 5,
+          "radiatingArea": 0.5,
+          "heatingArea": 0.5,
+          "convectionArea": 0.5,
+          "emissivity": 0.8,
+          "noseRadius": 0.3,
+          "heatingFactor": 1,
+          "maxSkinK": 1200,
+          "maxCoreK": 400,
+          "initialTemperatureK": 280,
+          "backgroundK": 2.7,
+          "normal": null,
+          "ablation": null
+        }
+      }
+    ]
+  },
+  {
+    "id": "eva-suit",
+    "name": "EVA astronaut",
+    "description": "Dynamic suited crew body with finite backpack RCS",
+    "category": "command",
+    "dryMassKg": 20,
+    "height": 1.8,
+    "radius": 0.225,
+    "shape": "box",
+    "boxSizeMeters": [
+      0.45,
+      1.8,
+      0.35
+    ],
+    "color": "#f4f2df",
+    "crossfeed": true,
+    "nodes": [],
+    "modules": [
+      {
+        "kind": "command",
+        "id": "command1",
+        "reactionWheel": false,
+        "controlProfile": "eva"
+      },
+      {
+        "kind": "crew",
+        "id": "crew1",
+        "parameters": {
+          "walkingSpeedMetersPerSecond": 3,
+          "walkingAccelerationMetersPerSecondSquared": 4,
+          "tractionCoefficient": 0.8,
+          "uprightStiffnessNm": 1600,
+          "uprightDampingNmSeconds": 250,
+          "uprightTorqueLimitNm": 300,
+          "yawRateRadiansPerSecond": 1.4,
+          "jumpSpeedMetersPerSecond": 3,
+          "groundProbeMarginMeters": 0.1
+        }
+      },
+      {
+        "kind": "tank",
+        "id": "pack",
+        "resource": "monopropellant",
+        "capacityKg": 5
+      },
+      {
+        "kind": "rcs",
+        "id": "jet0-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 40,
+        "ispSeconds": 60,
+        "direction": [
+          -1,
+          0,
+          0
+        ],
+        "point": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "jet01",
+        "resource": "monopropellant",
+        "thrustNewtons": 40,
+        "ispSeconds": 60,
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "point": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "jet1-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 40,
+        "ispSeconds": 60,
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "point": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "jet11",
+        "resource": "monopropellant",
+        "thrustNewtons": 40,
+        "ispSeconds": 60,
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "point": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "jet2-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 40,
+        "ispSeconds": 60,
+        "direction": [
+          0,
+          0,
+          -1
+        ],
+        "point": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "jet21",
+        "resource": "monopropellant",
+        "thrustNewtons": 40,
+        "ispSeconds": 60,
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "yaw-0.2-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 20,
+        "ispSeconds": 60,
+        "direction": [
+          0,
+          0,
+          -1
+        ],
+        "point": [
+          -0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "yaw-0.21",
+        "resource": "monopropellant",
+        "thrustNewtons": 20,
+        "ispSeconds": 60,
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          -0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "yaw0.2-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 20,
+        "ispSeconds": 60,
+        "direction": [
+          0,
+          0,
+          -1
+        ],
+        "point": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "yaw0.21",
+        "resource": "monopropellant",
+        "thrustNewtons": 20,
+        "ispSeconds": 60,
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0.2,
+          0,
+          0
+        ]
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal1",
+        "parameters": {
+          "skinCapacityJk": 6000,
+          "coreCapacityJk": 272000,
+          "conductanceWk": 20,
+          "connectionConductanceWk": 5,
+          "radiatingArea": 1.8,
+          "heatingArea": 0.5,
+          "convectionArea": 0.5,
+          "emissivity": 0.8,
+          "noseRadius": 0.225,
+          "heatingFactor": 1,
+          "maxSkinK": 600,
+          "maxCoreK": 400,
+          "initialTemperatureK": 280,
+          "backgroundK": 2.7,
+          "normal": null,
+          "ablation": null
+        }
+      },
+      {
+        "kind": "rcs",
+        "id": "att0-1-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 20,
+        "ispSeconds": 60,
+        "direction": [
+          0,
+          0,
+          -1
+        ],
+        "point": [
+          0,
+          -0.45,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "att0-11",
+        "resource": "monopropellant",
+        "thrustNewtons": 20,
+        "ispSeconds": 60,
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          -0.45,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "att01-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 20,
+        "ispSeconds": 60,
+        "direction": [
+          0,
+          0,
+          -1
+        ],
+        "point": [
+          0,
+          0.45,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "att011",
+        "resource": "monopropellant",
+        "thrustNewtons": 20,
+        "ispSeconds": 60,
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0.45,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "att2-1-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 20,
+        "ispSeconds": 60,
+        "direction": [
+          -1,
+          0,
+          0
+        ],
+        "point": [
+          0,
+          -0.45,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "att2-11",
+        "resource": "monopropellant",
+        "thrustNewtons": 20,
+        "ispSeconds": 60,
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "point": [
+          0,
+          -0.45,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "att21-1",
+        "resource": "monopropellant",
+        "thrustNewtons": 20,
+        "ispSeconds": 60,
+        "direction": [
+          -1,
+          0,
+          0
+        ],
+        "point": [
+          0,
+          0.45,
+          0
+        ]
+      },
+      {
+        "kind": "rcs",
+        "id": "att211",
+        "resource": "monopropellant",
+        "thrustNewtons": 20,
+        "ispSeconds": 60,
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "point": [
+          0,
+          0.45,
+          0
+        ]
+      }
+    ]
+  },
+  {
+    "id": "rover-crewed-chassis",
+    "name": "Crewed rover chassis",
+    "description": "Four-wheel surface vehicle control chassis",
+    "category": "command",
+    "dryMassKg": 300,
+    "height": 0.35,
+    "radius": 0.7,
+    "shape": "box",
+    "boxSizeMeters": [
+      1.4,
+      0.35,
+      2
+    ],
+    "color": "#d9b858",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "surface-0",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-1",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-2",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-3",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-4",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-5",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-6",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-7",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      }
+    ],
+    "modules": [
+      {
+        "kind": "command",
+        "id": "command1",
+        "reactionWheel": false,
+        "controlProfile": "rover",
+        "requiresCrew": true
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal1",
+        "parameters": {
+          "skinCapacityJk": 90000,
+          "coreCapacityJk": 150000,
+          "conductanceWk": 20,
+          "connectionConductanceWk": 5,
+          "radiatingArea": 0.5,
+          "heatingArea": 0.5,
+          "convectionArea": 0.5,
+          "emissivity": 0.8,
+          "noseRadius": 0.7,
+          "heatingFactor": 1,
+          "maxSkinK": 1200,
+          "maxCoreK": 700,
+          "initialTemperatureK": 280,
+          "backgroundK": 2.7,
+          "normal": null,
+          "ablation": null
         }
       }
     ]

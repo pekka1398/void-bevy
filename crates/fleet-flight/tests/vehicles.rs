@@ -106,3 +106,50 @@ fn fixture_uses_same_assembly_graph_mass_and_control_rejection() {
     assert!(sim.fleet.snapshot(&sim.selected).velocity.is_finite());
     let _ = DVec3::ZERO;
 }
+
+fn body_heading(sim: &FleetFlight, id: &str) -> f64 {
+    let state = sim.fleet.body_fixed_state(id, sim.home);
+    let up = state.position.normalize();
+    let north = (DVec3::Z - up * up.z).normalize();
+    let east = DVec3::Z.cross(up).normalize();
+    let forward = sim
+        .fleet
+        .frames()
+        .transform(
+            sim.fleet.vessel_frame(id),
+            sim.fleet.body_frames(sim.home).1,
+        )
+        .apply_direction(DVec3::Z);
+    forward.dot(east).atan2(forward.dot(north))
+}
+#[test]
+fn positive_steering_turns_right_in_body_fixed_north_east_coordinates() {
+    let mut s = make();
+    advance(&mut s, 5.0);
+    let id = s.sim().selected.clone();
+    s.execute(Action::Vehicle {
+        control: VehicleControl {
+            drive: 0.6,
+            steer: 0.0,
+            brake: 0.0,
+        },
+    });
+    advance(&mut s, 3.0);
+    let before = body_heading(s.sim(), &id);
+    s.execute(Action::Vehicle {
+        control: VehicleControl {
+            drive: 0.5,
+            steer: 0.5,
+            brake: 0.0,
+        },
+    });
+    advance(&mut s, 0.6);
+    let after = body_heading(s.sim(), &id);
+    let delta = (after - before + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+        - std::f64::consts::PI;
+    assert!(
+        delta > 0.02,
+        "right steer body-fixed heading change {}°",
+        delta.to_degrees()
+    );
+}

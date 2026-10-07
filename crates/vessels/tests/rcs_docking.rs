@@ -311,6 +311,7 @@ fn asymmetric_and_multi_resource_nozzles_are_actual_consumers() {
     }
     d.modules.push(Module::Engine {
         id: "shared-mono-engine".into(),
+        jet: None,
         resource: ResourceId::Monopropellant,
         thrust_newtons: 80.0,
         isp_seconds: 240.0,

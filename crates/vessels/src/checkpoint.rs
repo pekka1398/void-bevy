@@ -395,6 +395,7 @@ impl Fleet {
                 "fleet checkpoint: orphan SAS"
             );
         }
+        self.validate_crew_identities();
         // Restoring the connections checked their parts and nodes.
         for connection in self.parts.connections() {
             assert!(

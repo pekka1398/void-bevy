@@ -37,7 +37,20 @@ pub struct EngineRating {
 
 impl Part {
     pub fn mass_kg(&self) -> f64 {
-        self.definition.dry_mass_kg + self.resource_mass()
+        self.definition.dry_mass_kg + self.resource_mass() + self.crew_mass_kg()
+    }
+    pub fn crew_mass_kg(&self) -> f64 {
+        self.modules
+            .values()
+            .map(|m| match m {
+                ModuleState::Seat {
+                    occupant: Some(crew),
+                    ..
+                } => crew.carried_dry_mass_kg(),
+                ModuleState::Crew { crew, .. } => crew.body_mass_kg,
+                _ => 0.0,
+            })
+            .sum()
     }
     pub fn is_command(&self) -> bool {
         self.definition
@@ -128,7 +141,22 @@ impl PartGraph {
                     id: id.clone(),
                     definition: p.definition,
                     resources: p.instance.resources.clone(),
-                    modules: initial_modules(p.definition),
+                    modules: initial_modules(p.definition)
+                        .into_iter()
+                        .map(|(mid, mut state)| {
+                            match &mut state {
+                                ModuleState::Seat {
+                                    occupant: Some(crew),
+                                    ..
+                                }
+                                | ModuleState::Crew { crew, .. } => {
+                                    crew.id = format!("{prefix}/{}/{}", p.instance.id, mid);
+                                }
+                                _ => {}
+                            }
+                            (mid, state)
+                        })
+                        .collect(),
                     stage: p.instance.stage,
                     module_stages: p
                         .definition
@@ -230,6 +258,14 @@ impl PartGraph {
         }
     }
 
+    /// Remove an isolated part after its identity/resources have transferred in an owner transaction.
+    pub fn remove_isolated(&mut self, id: &str) -> Part {
+        assert!(
+            self.connections.iter().all(|c| c.a != id && c.b != id),
+            "cannot remove connected part"
+        );
+        self.parts.remove(id).expect("unknown isolated part")
+    }
     pub fn contains(&self, id: &str) -> bool {
         self.parts.contains_key(id)
     }
@@ -302,7 +338,9 @@ impl PartGraph {
                     },
                 }
             }
-            ModuleState::Wheel { .. }
+            ModuleState::Seat { .. }
+            | ModuleState::Crew { .. }
+            | ModuleState::Wheel { .. }
             | ModuleState::Thermal { .. }
             | ModuleState::Rcs { .. }
             | ModuleState::DockingPort { .. }
@@ -490,6 +528,15 @@ impl PartGraph {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ModuleState {
+    Seat {
+        occupant: Option<crate::CrewRecord>,
+        packed_suit_thermal: Option<crate::PartThermalState>,
+    },
+    Crew {
+        crew: crate::CrewRecord,
+        control: crate::EvaControl,
+        grounded: bool,
+    },
     Wheel {
         state: crate::WheelState,
         control: crate::VehicleControl,
@@ -523,6 +570,17 @@ pub fn initial_modules(definition: &PartDefinition) -> BTreeMap<String, ModuleSt
             (
                 m.id().to_string(),
                 match m {
+                    Module::Seat { parameters, .. } => ModuleState::Seat {
+                        occupant: parameters.initial_crew.then(crate::CrewRecord::pilot),
+                        packed_suit_thermal: parameters
+                            .initial_crew
+                            .then(|| crate::eva_suit_thermal_definition().initial()),
+                    },
+                    Module::Crew { .. } => ModuleState::Crew {
+                        crew: crate::CrewRecord::pilot(),
+                        control: crate::EvaControl::default(),
+                        grounded: false,
+                    },
                     Module::Wheel { parameters, .. } => ModuleState::Wheel {
                         state: parameters.initial(),
                         control: crate::VehicleControl::default(),
@@ -564,6 +622,30 @@ fn check_modules(part: &Part) {
             .expect("part graph: missing module state");
         assert!(
             match (m, state) {
+                (
+                    Module::Seat { .. },
+                    ModuleState::Seat {
+                        occupant,
+                        packed_suit_thermal,
+                    },
+                ) => {
+                    let d = crate::eva_suit_thermal_definition();
+                    occupant.is_some() == packed_suit_thermal.is_some()
+                        && occupant.as_ref().is_none_or(|c| c.validate())
+                        && packed_suit_thermal.is_none_or(|s| {
+                            s.skin_k.is_finite()
+                                && s.skin_k > 0.0
+                                && s.core_k.is_finite()
+                                && s.core_k > 0.0
+                                && (s.failed
+                                    || (s.skin_k <= d.max_skin_k && s.core_k <= d.max_core_k))
+                        })
+                }
+                (Module::Crew { .. }, ModuleState::Crew { crew, control, .. }) =>
+                    crew.validate()
+                        && [control.forward, control.strafe, control.yaw]
+                            .iter()
+                            .all(|v| v.is_finite() && v.abs() <= 1.0),
                 (Module::Wheel { parameters, .. }, ModuleState::Wheel { state, control }) => {
                     state.spin_radians.is_finite()
                         && state.spin_radians_per_second.is_finite()
@@ -655,7 +737,21 @@ fn check_transition(old: &ModuleState, new: &ModuleState) {
         (ModuleState::Thermal { state: a }, ModuleState::Thermal { state: b }) => {
             !a.failed || b.failed
         }
-        (ModuleState::Wheel { .. }, ModuleState::Wheel { .. })
+        (
+            ModuleState::Seat {
+                occupant: a,
+                packed_suit_thermal: ta,
+            },
+            ModuleState::Seat {
+                occupant: b,
+                packed_suit_thermal: tb,
+            },
+        ) => match (a, b, ta, tb) {
+            (Some(a), Some(b), Some(ta), Some(tb)) => a.id == b.id && (!ta.failed || tb.failed),
+            _ => a.is_none() || b.is_none(),
+        },
+        (ModuleState::Crew { .. }, ModuleState::Crew { .. })
+        | (ModuleState::Wheel { .. }, ModuleState::Wheel { .. })
         | (ModuleState::Rcs { .. }, ModuleState::Rcs { .. })
         | (ModuleState::DockingPort { .. }, ModuleState::DockingPort { .. })
         | (ModuleState::Passive, ModuleState::Passive) => true,
@@ -688,7 +784,9 @@ impl Part {
                 *activated
             }
             ModuleState::Parachute { state } => state.phase != crate::ParachutePhase::Stowed,
-            ModuleState::Wheel { .. }
+            ModuleState::Seat { .. }
+            | ModuleState::Crew { .. }
+            | ModuleState::Wheel { .. }
             | ModuleState::Thermal { .. }
             | ModuleState::Rcs { .. }
             | ModuleState::DockingPort { .. }

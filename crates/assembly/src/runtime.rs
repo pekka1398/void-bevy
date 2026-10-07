@@ -47,7 +47,7 @@ fn q64(q: Rotation) -> DQuat {
     DQuat::from_xyzw(q.x as f64, q.y as f64, q.z as f64, q.w as f64)
 }
 fn mass_properties(p: &PlacedPart, fuel: f64) -> MassProperties {
-    let mass = p.definition.dry_mass_kg + fuel;
+    let mass = p.definition.dry_mass_kg + crate::initial_crew_mass_kg(p.definition) + fuel;
     MassProperties::with_principal_inertia_frame(
         Vector::ZERO,
         mass as f32,

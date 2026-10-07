@@ -21,7 +21,11 @@ pub struct GuidedBurn {
     pub(super) flow: f64,
 }
 impl Fleet {
-    pub(super) fn effective_throttle(&self, id: &str, time: f64) -> f64 {
+    pub(super) fn effective_throttle(&self, v: &Vessel, time: f64) -> f64 {
+        if self.command_control_unavailable_of(v) {
+            return 0.0;
+        }
+        let id = &v.id;
         if let Some(g) = self.guidance.get(id)
             && g.status == GuidanceStatus::Armed
         {

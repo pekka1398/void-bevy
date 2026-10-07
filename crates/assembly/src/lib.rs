@@ -15,3 +15,5 @@ pub use wheel::*;
 
 mod aircraft;
 pub use aircraft::*;
+mod crew;
+pub use crew::*;

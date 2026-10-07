@@ -1,0 +1,15 @@
+{
+  "version": 3,
+  "name": "EVA astronaut",
+  "parts": [
+    {
+      "id": "suit",
+      "definitionId": "eva-suit",
+      "resources": {
+        "monopropellant": 5
+      },
+      "stage": null,
+      "attachment": null
+    }
+  ]
+}
