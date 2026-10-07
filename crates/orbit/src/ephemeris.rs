@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use glam::DVec3;
-use void_frames::{BodyId, BodyStates, FrameSource, SplitPosition, SystemId};
+use void_frames::{BodyId, BodyStates, FrameId, FrameSource, SplitPosition, SystemId};
 
 use crate::hermite::HermiteBasis;
 use crate::system::{BuiltSystem, CelestialBody};
@@ -402,6 +402,17 @@ pub trait EphemerisSource: BodyStates + FrameSource {
             "ephemeris: unsupported local view"
         );
     }
+    /// Registered owner-tree frame for the current integration coordinates. Translated
+    /// force/torque evaluators must use this ID rather than invent a frame in a different tree.
+    fn physics_query_frame(&self) -> Option<FrameId> {
+        None
+    }
+    fn set_physics_query_frame(&mut self, frame: Option<FrameId>) {
+        assert!(
+            frame.is_none(),
+            "ephemeris: unsupported registered physics frame"
+        );
+    }
     /// Independent view over the same world; no celestial state copy or model replacement.
     /// Constant split offset from the origin-system barycentre for this local integration view.
     fn physics_offset(&self) -> SplitPosition {
@@ -513,6 +524,12 @@ impl EphemerisSource for Box<dyn EphemerisSource> {
     }
     fn set_physics_offset(&mut self, offset: SplitPosition) {
         (**self).set_physics_offset(offset)
+    }
+    fn physics_query_frame(&self) -> Option<FrameId> {
+        (**self).physics_query_frame()
+    }
+    fn set_physics_query_frame(&mut self, frame: Option<FrameId>) {
+        (**self).set_physics_query_frame(frame)
     }
     fn local_view(&self, system: SystemId) -> Option<Box<dyn EphemerisSource>> {
         (**self).local_view(system)

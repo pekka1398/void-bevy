@@ -27,6 +27,10 @@ impl Fleet {
         self.ephemeris.set_origin_system(system);
         self.ephemeris.set_physics_offset(SplitPosition::ORIGIN);
         self.frames.origin = self.frames.systems[system.0];
+        if self.ephemeris.system_count() > 1 {
+            self.ephemeris
+                .set_physics_query_frame(Some(self.frames.origin));
+        }
         previous
     }
     pub(super) fn set_view_offset(&mut self, offset: SplitPosition) {
@@ -34,6 +38,9 @@ impl Fleet {
         let parent = self.frames.systems[self.ephemeris.origin_system().0];
         if offset == SplitPosition::ORIGIN {
             self.frames.origin = parent;
+            if self.ephemeris.system_count() > 1 {
+                self.ephemeris.set_physics_query_frame(Some(parent));
+            }
             return;
         }
         let frame = match self.physics_view_frame {
@@ -53,6 +60,7 @@ impl Fleet {
             }
         };
         self.frames.origin = frame;
+        self.ephemeris.set_physics_query_frame(Some(frame));
     }
     pub(super) fn restore_view(&mut self, previous: PhysicsView) {
         self.ephemeris.set_origin_system(previous.system);

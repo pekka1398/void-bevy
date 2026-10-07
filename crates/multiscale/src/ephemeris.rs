@@ -2,7 +2,7 @@
 use crate::CoupledWorld;
 use glam::DVec3;
 use std::{cell::RefCell, rc::Rc};
-use void_frames::{BodyId, BodyStates, FrameSource, SplitPosition, SystemId};
+use void_frames::{BodyId, BodyStates, FrameId, FrameSource, SplitPosition, SystemId};
 use void_orbit::{CelestialBody, EphemerisSource};
 
 pub type SharedWorld = Rc<RefCell<CoupledWorld>>;
@@ -13,6 +13,7 @@ pub struct FrameEphemeris {
     pub system_index: usize,
     bodies: Vec<CelestialBody>,
     offset: SplitPosition,
+    query_frame: Option<FrameId>,
 }
 impl FrameEphemeris {
     pub fn new(world: SharedWorld, system: &str) -> Self {
@@ -25,6 +26,7 @@ impl FrameEphemeris {
             system_index,
             bodies,
             offset: SplitPosition::ORIGIN,
+            query_frame: None,
         }
     }
 }
@@ -94,12 +96,20 @@ impl EphemerisSource for FrameEphemeris {
         );
         self.system_index = system.0;
         self.offset = SplitPosition::ORIGIN;
+        self.query_frame = None;
     }
     fn physics_offset(&self) -> SplitPosition {
         self.offset
     }
     fn set_physics_offset(&mut self, offset: SplitPosition) {
         self.offset = offset;
+        self.query_frame = None;
+    }
+    fn physics_query_frame(&self) -> Option<FrameId> {
+        self.query_frame
+    }
+    fn set_physics_query_frame(&mut self, frame: Option<FrameId>) {
+        self.query_frame = frame;
     }
     fn local_view(&self, system: SystemId) -> Option<Box<dyn EphemerisSource>> {
         assert!(
@@ -109,6 +119,7 @@ impl EphemerisSource for FrameEphemeris {
         let mut view = self.clone();
         view.system_index = system.0;
         view.offset = SplitPosition::ORIGIN;
+        view.query_frame = None;
         Some(Box::new(view))
     }
     fn bodies(&self) -> &[CelestialBody] {

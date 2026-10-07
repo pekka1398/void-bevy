@@ -365,13 +365,21 @@ impl VesselAir {
                 .add_split_fixed(parent, ephemeris.physics_offset());
             (&owned, query)
         };
-        self.wrench_in(
+        let mut wrench = self.wrench_in(
             &frames.tree.at(t, ephemeris),
             query,
             state,
             rotation,
             angular_velocity,
-        )
+        );
+        if ephemeris.physics_offset() != void_frames::SplitPosition::ORIGIN {
+            wrench.frame = ephemeris
+                .physics_query_frame()
+                .expect("translated aerodynamic wrench needs a registered owner physics frame");
+        } else if let Some(frame) = ephemeris.physics_query_frame() {
+            wrench.frame = frame;
+        }
+        wrench
     }
     /// The parts' bodies, in `members` order.
     pub fn elements(&self) -> &[AeroElement] {
