@@ -28,6 +28,7 @@ use void_terrain::Terrain;
 
 mod guidance;
 mod thermal;
+mod vehicles;
 mod wrenches;
 pub use guidance::{GuidanceStatus, GuidedBurn};
 use wrenches::{GuidedAirSource, RigidFlightSource, SceneStepSource};
@@ -920,7 +921,18 @@ impl Fleet {
                     ay.abs() * p.definition.height / 2.0
                         + p.definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
                 };
-                p.pose.position.y - extent
+                let hull = p.pose.position.y - extent;
+                p.definition.modules.iter().fold(hull, |lowest, m| match m {
+                    Module::Wheel { parameters: d, .. } => {
+                        let hub = p.pose.position + p.pose.rotation * d.suspension_origin;
+                        let end = hub
+                            + p.pose.rotation
+                                * d.suspension_direction
+                                * (d.rest_length_meters + d.travel_meters);
+                        lowest.min(end.y - d.radius_meters)
+                    }
+                    _ => lowest,
+                })
             })
             .fold(f64::INFINITY, f64::min);
         let g = &self.grounds[self.ground_index(body)];
@@ -2638,6 +2650,7 @@ impl Fleet {
         if let SceneFrame::Bubble(f) = &mut self.scenes.get_mut(&scene).unwrap().world.frame {
             f.advance_origin(&mut self.ephemeris, self.time + dt);
         }
+        let wheel_loads = self.wheel_loads(scene);
         let ids = self.scenes[&scene].members.clone();
         let mut plans = vec![];
         for id in ids {
@@ -2758,6 +2771,11 @@ impl Fleet {
         if let SceneFrame::Bubble(f) = &mut world.frame {
             f.advance_origin(&mut self.ephemeris, self.time + dt);
         }
+        // Tires solve a finite dt impulse coupled to rotor inertia. Apply that same impulse to
+        // chassis/support, rather than averaging it with the previous atmospheric/thrust load.
+        for (body, (force, torque)) in &wheel_loads.bodies {
+            world.apply_wrench_impulse(*body, *force * dt, *torque * dt);
+        }
         world.step_with_passive(
             &mut self.ephemeris,
             Some(&mut |body, _| {
@@ -2777,6 +2795,9 @@ impl Fleet {
                 (p.2 + p.3) / 2.0 - p.5
             }),
         );
+        for (pid, mid, state) in wheel_loads.updates {
+            self.parts.set_module_state(&pid, &mid, state);
+        }
         for (id, body, _, now, p, _) in plans {
             if let Owner::Scene { push, .. } = &mut self.vessels.get_mut(&id).unwrap().owner {
                 *push = now;

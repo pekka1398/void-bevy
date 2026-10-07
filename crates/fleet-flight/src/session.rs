@@ -58,6 +58,9 @@ impl InitialWorld {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum Action {
+    Vehicle {
+        control: void_assembly::VehicleControl,
+    },
     RcsNozzle {
         part: String,
         module: String,
@@ -197,6 +200,13 @@ impl Action {
     }
     fn apply(&self, sim: &mut FleetFlight) -> Outcome {
         let outcome = match self {
+            Self::Vehicle { control } => match sim
+                .fleet
+                .set_vehicle_control(&sim.selected.clone(), *control)
+            {
+                Ok(()) => Outcome::Applied,
+                Err(reason) => Outcome::Refused(reason),
+            },
             Self::SetModuleStage {
                 part,
                 module,

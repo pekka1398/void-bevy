@@ -688,6 +688,21 @@ impl<F: ContactFrame> ContactWorld<F> {
         }
     }
 
+    /// Contact-model impulse in contact-frame axes, torque about this body's COM.
+    /// This shares the native body; it is not an extra owner or force-trial state mutation.
+    pub fn apply_wrench_impulse(
+        &mut self,
+        handle: RigidBodyHandle,
+        linear: DVec3,
+        angular_about_com: DVec3,
+    ) {
+        assert!(linear.is_finite() && angular_about_com.is_finite());
+        let b = &mut self.world.bodies[handle];
+        assert!(b.is_dynamic(), "contact impulse requires dynamic body");
+        b.apply_impulse(v32(linear), linear != DVec3::ZERO);
+        b.apply_torque_impulse(v32(angular_about_com), angular_about_com != DVec3::ZERO);
+    }
+
     /// Query actual collider geometry, including freshly streamed tiles before broad-phase rebuild.
     /// The ray origin is f64 contact-frame position; conversion occurs only after origin subtraction.
     /// Own-body colliders are excluded. Sensors never provide mechanical support.
@@ -752,6 +767,24 @@ impl<F: ContactFrame> ContactWorld<F> {
         let b = self.body(handle);
         v64(b.velocity_at_point(v32(point - self.origin)))
     }
+    /// Predicted point velocity change from a proposed impulse, without mutating live state.
+    pub fn impulse_point_velocity_delta(
+        &self,
+        handle: RigidBodyHandle,
+        linear: DVec3,
+        angular_about_com: DVec3,
+        point: DVec3,
+    ) -> DVec3 {
+        let b = self.body(handle);
+        if !b.is_dynamic() {
+            return DVec3::ZERO;
+        }
+        let props = b.mass_properties();
+        let dv = v64(v32(linear) * props.effective_inv_mass);
+        let dw = v64(props.effective_world_inv_inertia * v32(angular_about_com));
+        dv + dw.cross(point - self.origin - v64(b.center_of_mass()))
+    }
+
     /// Inverse effective mass for a point impulse, including angular response. Fixed supports
     /// contribute zero. Both participants are added by the tire solve.
     pub fn inverse_point_mass(&self, handle: RigidBodyHandle, point: DVec3, axis: DVec3) -> f64 {

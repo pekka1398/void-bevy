@@ -1,0 +1,109 @@
+{
+  "version": 3,
+  "name": "Four-wheel rover",
+  "parts": [
+    {
+      "id": "chassis",
+      "definitionId": "rover-chassis",
+      "resources": {},
+      "stage": null,
+      "attachment": null
+    },
+    {
+      "id": "wheel0",
+      "definitionId": "rover-wheel-left",
+      "resources": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "chassis",
+        "parentNodeId": "surface-0",
+        "nodeId": "mount",
+        "pose": {
+          "position": [
+            -0.775,
+            0,
+            0.7
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "wheel1",
+      "definitionId": "rover-wheel-right",
+      "resources": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "chassis",
+        "parentNodeId": "surface-1",
+        "nodeId": "mount",
+        "pose": {
+          "position": [
+            0.775,
+            0,
+            0.7
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "wheel2",
+      "definitionId": "rover-rear-wheel-left",
+      "resources": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "chassis",
+        "parentNodeId": "surface-2",
+        "nodeId": "mount",
+        "pose": {
+          "position": [
+            -0.775,
+            0,
+            -0.7
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "wheel3",
+      "definitionId": "rover-rear-wheel-right",
+      "resources": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "chassis",
+        "parentNodeId": "surface-3",
+        "nodeId": "mount",
+        "pose": {
+          "position": [
+            0.775,
+            0,
+            -0.7
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    }
+  ]
+}

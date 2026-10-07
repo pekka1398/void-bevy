@@ -302,7 +302,8 @@ impl PartGraph {
                     },
                 }
             }
-            ModuleState::Thermal { .. }
+            ModuleState::Wheel { .. }
+            | ModuleState::Thermal { .. }
             | ModuleState::Rcs { .. }
             | ModuleState::DockingPort { .. }
             | ModuleState::Passive => {
@@ -489,13 +490,30 @@ impl PartGraph {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ModuleState {
-    Thermal { state: crate::PartThermalState },
-    Parachute { state: crate::ParachuteState },
-    Rcs { enabled: bool },
-    DockingPort { armed: bool },
+    Wheel {
+        state: crate::WheelState,
+        control: crate::VehicleControl,
+    },
+    Thermal {
+        state: crate::PartThermalState,
+    },
+    Parachute {
+        state: crate::ParachuteState,
+    },
+    Rcs {
+        enabled: bool,
+    },
+    DockingPort {
+        armed: bool,
+    },
     Passive,
-    Engine { activated: bool, enabled: bool },
-    Decoupler { activated: bool },
+    Engine {
+        activated: bool,
+        enabled: bool,
+    },
+    Decoupler {
+        activated: bool,
+    },
 }
 pub fn initial_modules(definition: &PartDefinition) -> BTreeMap<String, ModuleState> {
     definition
@@ -505,6 +523,10 @@ pub fn initial_modules(definition: &PartDefinition) -> BTreeMap<String, ModuleSt
             (
                 m.id().to_string(),
                 match m {
+                    Module::Wheel { parameters, .. } => ModuleState::Wheel {
+                        state: parameters.initial(),
+                        control: crate::VehicleControl::default(),
+                    },
                     Module::Thermal { parameters, .. } => ModuleState::Thermal {
                         state: parameters.initial(),
                     },
@@ -542,6 +564,20 @@ fn check_modules(part: &Part) {
             .expect("part graph: missing module state");
         assert!(
             match (m, state) {
+                (Module::Wheel { parameters, .. }, ModuleState::Wheel { state, control }) => {
+                    state.spin_radians.is_finite()
+                        && state.spin_radians_per_second.is_finite()
+                        && state.suspension_length_meters.is_finite()
+                        && state.suspension_length_meters >= 0.0
+                        && state.suspension_length_meters
+                            <= parameters.rest_length_meters + parameters.travel_meters
+                        && control.drive.is_finite()
+                        && control.drive.abs() <= 1.0
+                        && control.steer.is_finite()
+                        && control.steer.abs() <= 1.0
+                        && control.brake.is_finite()
+                        && (0.0..=1.0).contains(&control.brake)
+                }
                 (Module::Thermal { parameters, .. }, ModuleState::Thermal { state }) =>
                     state.skin_k.is_finite()
                         && state.skin_k > 0.0
@@ -619,7 +655,8 @@ fn check_transition(old: &ModuleState, new: &ModuleState) {
         (ModuleState::Thermal { state: a }, ModuleState::Thermal { state: b }) => {
             !a.failed || b.failed
         }
-        (ModuleState::Rcs { .. }, ModuleState::Rcs { .. })
+        (ModuleState::Wheel { .. }, ModuleState::Wheel { .. })
+        | (ModuleState::Rcs { .. }, ModuleState::Rcs { .. })
         | (ModuleState::DockingPort { .. }, ModuleState::DockingPort { .. })
         | (ModuleState::Passive, ModuleState::Passive) => true,
         (ModuleState::Parachute { state: a }, ModuleState::Parachute { state: b }) => {
@@ -651,7 +688,8 @@ impl Part {
                 *activated
             }
             ModuleState::Parachute { state } => state.phase != crate::ParachutePhase::Stowed,
-            ModuleState::Thermal { .. }
+            ModuleState::Wheel { .. }
+            | ModuleState::Thermal { .. }
             | ModuleState::Rcs { .. }
             | ModuleState::DockingPort { .. }
             | ModuleState::Passive => false,

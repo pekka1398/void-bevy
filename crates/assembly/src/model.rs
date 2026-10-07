@@ -31,6 +31,10 @@ pub struct AttachNode {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Module {
+    Wheel {
+        id: String,
+        parameters: crate::WheelDefinition,
+    },
     Thermal {
         id: String,
         parameters: crate::ThermalDefinition,
@@ -964,7 +968,8 @@ pub fn reentry_capsule() -> Craft {
 impl Module {
     pub fn id(&self) -> &str {
         match self {
-            Self::Thermal { id, .. }
+            Self::Wheel { id, .. }
+            | Self::Thermal { id, .. }
             | Self::Rcs { id, .. }
             | Self::DockingPort { id, .. }
             | Self::Command { id, .. }
@@ -1154,6 +1159,9 @@ pub fn validate_definition(d: &PartDefinition) -> ModelResult<()> {
             return Err("empty/duplicate module ID".into());
         }
         match m {
+            Module::Wheel { parameters, .. } => {
+                parameters.validate()?;
+            }
             Module::Thermal { parameters, .. } => {
                 parameters.validate()?;
             }
@@ -1333,4 +1341,9 @@ pub fn rendezvous_pod() -> Craft {
     craft.parts[0].definition_id = "rcs-pod".into();
     craft.parts[0].resources = full_resources(definition("rcs-pod").expect("authored pod"));
     craft
+}
+
+/// Configurable four-wheel main-game acceptance craft, using ordinary surface assembly APIs.
+pub fn rover() -> Craft {
+    import_craft(include_str!("../data/rover.json")).expect("invalid rover fixture")
 }

@@ -3151,5 +3151,414 @@
         }
       }
     ]
+  },
+  {
+    "id": "rover-chassis",
+    "name": "Rover chassis",
+    "description": "Four-wheel surface vehicle control chassis",
+    "category": "command",
+    "dryMassKg": 300,
+    "height": 0.35,
+    "radius": 0.7,
+    "shape": "box",
+    "boxSizeMeters": [
+      1.4,
+      0.35,
+      2
+    ],
+    "color": "#d9b858",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "surface-0",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-1",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-2",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-3",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-4",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-5",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-6",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-7",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "direction": [
+          0,
+          1,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      }
+    ],
+    "modules": [
+      {
+        "kind": "command",
+        "id": "command1"
+      }
+    ]
+  },
+  {
+    "id": "rover-wheel-left",
+    "name": "Rover wheel left",
+    "description": "Raycast tire and damped suspension; motor energy unlimited in this first physics milestone",
+    "category": "structure",
+    "dryMassKg": 15,
+    "height": 0.15,
+    "radius": 0.075,
+    "shape": "box",
+    "boxSizeMeters": [
+      0.15,
+      0.15,
+      0.15
+    ],
+    "color": "#343940",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "mount",
+        "position": [
+          0.075,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "wheel",
+        "id": "wheel1",
+        "parameters": {
+          "suspensionOrigin": [
+            0,
+            0,
+            0
+          ],
+          "suspensionDirection": [
+            0,
+            -1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ],
+          "radiusMeters": 0.35,
+          "restLengthMeters": 0.35,
+          "travelMeters": 0.2,
+          "springNewtonsPerMeter": 14000,
+          "dampingNewtonSecondsPerMeter": 1500,
+          "wheelInertiaKgM2": 0.9,
+          "driveTorqueNm": 100,
+          "brakeTorqueNm": 500,
+          "frictionCoefficient": 1.0,
+          "maxSteerRadians": 0.5
+        }
+      }
+    ]
+  },
+  {
+    "id": "rover-wheel-right",
+    "name": "Rover wheel right",
+    "description": "Raycast tire and damped suspension; motor energy unlimited in this first physics milestone",
+    "category": "structure",
+    "dryMassKg": 15,
+    "height": 0.15,
+    "radius": 0.075,
+    "shape": "box",
+    "boxSizeMeters": [
+      0.15,
+      0.15,
+      0.15
+    ],
+    "color": "#343940",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "mount",
+        "position": [
+          -0.075,
+          0,
+          0
+        ],
+        "direction": [
+          -1,
+          0,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "wheel",
+        "id": "wheel1",
+        "parameters": {
+          "suspensionOrigin": [
+            0,
+            0,
+            0
+          ],
+          "suspensionDirection": [
+            0,
+            -1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ],
+          "radiusMeters": 0.35,
+          "restLengthMeters": 0.35,
+          "travelMeters": 0.2,
+          "springNewtonsPerMeter": 14000,
+          "dampingNewtonSecondsPerMeter": 1500,
+          "wheelInertiaKgM2": 0.9,
+          "driveTorqueNm": 100,
+          "brakeTorqueNm": 500,
+          "frictionCoefficient": 1.0,
+          "maxSteerRadians": 0.5
+        }
+      }
+    ]
+  },
+  {
+    "id": "rover-rear-wheel-left",
+    "name": "Rover wheel left",
+    "description": "Raycast tire and damped suspension; motor energy unlimited in this first physics milestone",
+    "category": "structure",
+    "dryMassKg": 15,
+    "height": 0.15,
+    "radius": 0.075,
+    "shape": "box",
+    "boxSizeMeters": [
+      0.15,
+      0.15,
+      0.15
+    ],
+    "color": "#343940",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "mount",
+        "position": [
+          0.075,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "wheel",
+        "id": "wheel1",
+        "parameters": {
+          "suspensionOrigin": [
+            0,
+            0,
+            0
+          ],
+          "suspensionDirection": [
+            0,
+            -1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ],
+          "radiusMeters": 0.35,
+          "restLengthMeters": 0.35,
+          "travelMeters": 0.2,
+          "springNewtonsPerMeter": 14000,
+          "dampingNewtonSecondsPerMeter": 1500,
+          "wheelInertiaKgM2": 0.9,
+          "driveTorqueNm": 100,
+          "brakeTorqueNm": 500,
+          "frictionCoefficient": 1.0,
+          "maxSteerRadians": 0
+        }
+      }
+    ]
+  },
+  {
+    "id": "rover-rear-wheel-right",
+    "name": "Rover wheel right",
+    "description": "Raycast tire and damped suspension; motor energy unlimited in this first physics milestone",
+    "category": "structure",
+    "dryMassKg": 15,
+    "height": 0.15,
+    "radius": 0.075,
+    "shape": "box",
+    "boxSizeMeters": [
+      0.15,
+      0.15,
+      0.15
+    ],
+    "color": "#343940",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "mount",
+        "position": [
+          -0.075,
+          0,
+          0
+        ],
+        "direction": [
+          -1,
+          0,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "wheel",
+        "id": "wheel1",
+        "parameters": {
+          "suspensionOrigin": [
+            0,
+            0,
+            0
+          ],
+          "suspensionDirection": [
+            0,
+            -1,
+            0
+          ],
+          "forward": [
+            0,
+            0,
+            1
+          ],
+          "radiusMeters": 0.35,
+          "restLengthMeters": 0.35,
+          "travelMeters": 0.2,
+          "springNewtonsPerMeter": 14000,
+          "dampingNewtonSecondsPerMeter": 1500,
+          "wheelInertiaKgM2": 0.9,
+          "driveTorqueNm": 100,
+          "brakeTorqueNm": 500,
+          "frictionCoefficient": 1.0,
+          "maxSteerRadians": 0
+        }
+      }
+    ]
   }
 ]
