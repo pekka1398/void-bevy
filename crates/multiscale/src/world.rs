@@ -1,5 +1,6 @@
 //! Several star systems in one Newtonian N-body world, as the lab's `CoupledWorld.ts`.
 
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
 use glam::DVec3;
@@ -20,7 +21,8 @@ pub struct SystemSeed {
 
 /// One system at one time: its barycentre's split position, velocity and acceleration, and its
 /// bodies relative to it (flat x, y, z per body).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SystemState {
     pub origin: SplitPosition,
     pub velocity: DVec3,
@@ -48,6 +50,8 @@ struct LiveSystem {
     position_correction: Vec<f64>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Sample {
     time: f64,
     systems: Vec<SystemState>,
@@ -72,6 +76,7 @@ pub struct CoupledWorld {
     pub membership: Vec<Membership>,
     pub step_seconds: f64,
     pub sample_limit: usize,
+    seed_signature: serde_json::Value,
     live: Vec<LiveSystem>,
     samples: VecDeque<Sample>,
     latest: f64,
@@ -94,6 +99,17 @@ impl CoupledWorld {
             ids.len() == seeds.len() && seeds.iter().all(|s| !s.id.is_empty()),
             "CoupledWorld: duplicate/empty system id"
         );
+        let seed_signature = serde_json::Value::Array(
+            seeds
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "id": s.id, "origin": s.origin, "velocity": s.velocity,
+                        "positions": s.system.positions, "velocities": s.system.velocities,
+                    })
+                })
+                .collect(),
+        );
         let ids = seeds.iter().map(|s| s.id.clone()).collect();
         let mut bodies: Vec<CelestialBody> = vec![];
         let mut membership = vec![];
@@ -111,8 +127,8 @@ impl CoupledWorld {
                 let mut mass = 0.0;
                 for body in &seed.system.bodies {
                     assert!(
-                        body.mass_kg > 0.0 && body.mass_kg.is_finite() && body.j2 == 0.0,
-                        "CoupledWorld: this fixture requires finite point masses (J2=0)"
+                        body.mass_kg > 0.0 && body.mass_kg.is_finite(),
+                        "CoupledWorld: requires finite positive masses"
                     );
                     bodies.push(CelestialBody {
                         id: format!("{}/{}", seed.id, body.id),
@@ -157,6 +173,7 @@ impl CoupledWorld {
             step_seconds,
             sample_limit,
             live,
+            seed_signature,
             samples: VecDeque::new(),
             latest: 0.0,
             steps: 0,
@@ -469,6 +486,12 @@ impl CoupledWorld {
             out.x += d.x * f;
             out.y += d.y * f;
             out.z += d.z * f;
+            let c = void_orbit::gravity::oblateness(body);
+            if c != 0.0 {
+                // Preserve the existing point-mass arithmetic (bit-exact golden fixtures),
+                // while applying the same zonal field that ordinary orbit vessels feel.
+                out += void_orbit::gravity::pull(0.0, c, body.rotation.axis(), -d);
+            }
         }
         out
     }
@@ -503,5 +526,168 @@ impl CoupledWorld {
             |i| SystemId(self.membership[i].system),
             SystemId(self.system_index(origin)),
         )
+    }
+}
+
+/// Exact continuation state, including drift compensation and retained interpolation samples.
+/// Body definitions come from the explicitly supplied seeds and must match the stored signature.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CoupledCheckpoint {
+    version: u32,
+    ids: Vec<String>,
+    bodies: serde_json::Value,
+    seeds: serde_json::Value,
+    step_seconds: f64,
+    sample_limit: usize,
+    latest: f64,
+    steps: u64,
+    live: Vec<SavedSystem>,
+    samples: VecDeque<Sample>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SavedSystem {
+    state: SystemState,
+    origin_correction: DVec3,
+    position_correction: Vec<f64>,
+}
+impl CoupledWorld {
+    fn body_signature(&self) -> serde_json::Value {
+        serde_json::Value::Array(
+            self.bodies
+                .iter()
+                .map(|b| {
+                    serde_json::json!({
+                        "id": b.id, "index": b.index, "parent": b.parent_index,
+                        "mass": b.mass_kg, "gm": b.gm, "radius": b.radius_meters,
+                        "j2": b.j2, "j2_radius": b.j2_reference_radius_meters,
+                        "rotation": [b.rotation.period_seconds, b.rotation.obliquity_radians,
+                            b.rotation.pole_longitude_radians, b.rotation.angle_at_epoch_radians],
+                    })
+                })
+                .collect(),
+        )
+    }
+    pub fn checkpoint(&self) -> CoupledCheckpoint {
+        CoupledCheckpoint {
+            version: 1,
+            ids: self.ids.clone(),
+            bodies: self.body_signature(),
+            seeds: self.seed_signature.clone(),
+            step_seconds: self.step_seconds,
+            sample_limit: self.sample_limit,
+            latest: self.latest,
+            steps: self.steps,
+            live: self
+                .live
+                .iter()
+                .map(|g| SavedSystem {
+                    state: g.state.clone(),
+                    origin_correction: g.origin_correction,
+                    position_correction: g.position_correction.clone(),
+                })
+                .collect(),
+            samples: self.samples.clone(),
+        }
+    }
+    /// Reconstruct definitions only; never reintegrate centuries from the initial epoch.
+    pub fn from_checkpoint(seeds: Vec<SystemSeed>, saved: CoupledCheckpoint) -> Self {
+        assert_eq!(saved.version, 1, "coupled checkpoint: unsupported version");
+        let mut world = Self::new(seeds, saved.step_seconds, saved.sample_limit);
+        assert_eq!(saved.ids, world.ids, "coupled checkpoint: systems changed");
+        assert_eq!(
+            saved.seeds, world.seed_signature,
+            "coupled checkpoint: initial placement changed"
+        );
+        assert_eq!(
+            saved.bodies,
+            world.body_signature(),
+            "coupled checkpoint: bodies changed"
+        );
+        assert!(
+            saved.latest.is_finite() && saved.latest >= 0.0,
+            "coupled checkpoint: invalid time"
+        );
+        assert_eq!(
+            saved.live.len(),
+            world.live.len(),
+            "coupled checkpoint: wrong live systems"
+        );
+        assert!(
+            !saved.samples.is_empty() && saved.samples.len() <= saved.sample_limit,
+            "coupled checkpoint: invalid retained history"
+        );
+        let validate = |state: &SystemState, n: usize| {
+            assert_eq!(
+                state.origin,
+                state.origin.translate(DVec3::ZERO),
+                "coupled checkpoint: noncanonical origin"
+            );
+            assert!(
+                state.velocity.is_finite() && state.acceleration.is_finite(),
+                "coupled checkpoint: nonfinite barycentre"
+            );
+            for values in [&state.positions, &state.velocities, &state.accelerations] {
+                assert!(
+                    values.len() == 3 * n && values.iter().all(|v| v.is_finite()),
+                    "coupled checkpoint: invalid body state"
+                );
+            }
+        };
+        let mut previous = None;
+        for sample in &saved.samples {
+            assert!(
+                sample.time.is_finite() && sample.time >= 0.0 && sample.time <= saved.latest,
+                "coupled checkpoint: invalid sample clock"
+            );
+            if let Some(t) = previous {
+                assert!(sample.time > t, "coupled checkpoint: unordered samples");
+                assert!(
+                    ((sample.time - t) - saved.step_seconds).abs()
+                        <= 8.0 * f64::EPSILON * saved.latest.max(saved.step_seconds),
+                    "coupled checkpoint: inconsistent sample spacing"
+                );
+            }
+            previous = Some(sample.time);
+            assert_eq!(
+                sample.systems.len(),
+                world.live.len(),
+                "coupled checkpoint: sample systems"
+            );
+            for (state, definition) in sample.systems.iter().zip(&world.live) {
+                validate(state, definition.bodies.len());
+            }
+        }
+        assert_eq!(
+            saved.samples.back().unwrap().time,
+            saved.latest,
+            "coupled checkpoint: latest history missing"
+        );
+        for ((live, saved_live), newest) in world
+            .live
+            .iter_mut()
+            .zip(saved.live)
+            .zip(&saved.samples.back().unwrap().systems)
+        {
+            validate(&saved_live.state, live.bodies.len());
+            assert_eq!(
+                saved_live.state, *newest,
+                "coupled checkpoint: live state differs from history"
+            );
+            assert!(
+                saved_live.origin_correction.is_finite()
+                    && saved_live.position_correction.len() == 3 * live.bodies.len()
+                    && saved_live.position_correction.iter().all(|v| v.is_finite()),
+                "coupled checkpoint: invalid compensation"
+            );
+            live.state = saved_live.state;
+            live.origin_correction = saved_live.origin_correction;
+            live.position_correction = saved_live.position_correction;
+        }
+        world.latest = saved.latest;
+        world.steps = saved.steps;
+        world.samples = saved.samples;
+        world
     }
 }

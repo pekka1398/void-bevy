@@ -165,3 +165,47 @@ impl SplitPosition {
 fn add_cells(a: i128, b: i128) -> i128 {
     a.checked_add(b).expect("split position: cell overflow")
 }
+
+// Keep cell integers as decimal strings in every durable artifact; JSON numbers cannot
+// represent galaxy cells exactly. Deserialize rejects unknown fields and noncanonical state.
+impl serde::Serialize for SplitPosition {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(serde::Serialize)]
+        struct Wire {
+            cell: [String; 3],
+            offset: [f64; 3],
+        }
+        Wire {
+            cell: self.cell.map(|v| v.to_string()),
+            offset: self.offset.to_array(),
+        }
+        .serialize(serializer)
+    }
+}
+impl<'de> serde::Deserialize<'de> for SplitPosition {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            cell: [String; 3],
+            offset: [f64; 3],
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        let mut cell = [0; 3];
+        for (i, digits) in wire.cell.iter().enumerate() {
+            cell[i] = digits.parse().map_err(serde::de::Error::custom)?;
+            if cell[i].to_string() != *digits {
+                return Err(serde::de::Error::custom(
+                    "split position: noncanonical cell",
+                ));
+            }
+        }
+        let offset = DVec3::from_array(wire.offset);
+        if !offset.is_finite() || offset.to_array().iter().any(|x| *x < -HALF || *x >= HALF) {
+            return Err(serde::de::Error::custom(
+                "split position: invalid canonical offset",
+            ));
+        }
+        Ok(Self { cell, offset })
+    }
+}

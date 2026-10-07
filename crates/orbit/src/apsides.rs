@@ -113,7 +113,7 @@ fn sign(x: f64) -> f64 {
 pub struct DominanceTree {
     soi: Vec<Option<f64>>,
     children: Vec<Vec<usize>>,
-    root: usize,
+    roots: Vec<usize>,
 }
 
 impl DominanceTree {
@@ -124,9 +124,8 @@ impl DominanceTree {
             .map(|b| b.index)
             .collect();
         assert!(
-            roots.len() == 1,
-            "dominance tree: expected one root, found {}",
-            roots.len()
+            !roots.is_empty(),
+            "dominance tree: expected at least one root"
         );
         let mut children = vec![Vec::new(); bodies.len()];
         for b in bodies {
@@ -140,13 +139,34 @@ impl DominanceTree {
                 .map(|b| b.sphere_of_influence_meters)
                 .collect(),
             children,
-            root: roots[0],
+            roots,
         }
     }
 
     /// `positions`: barycentric body positions at the same instant as `point`.
     pub fn dominant(&self, positions: &[DVec3], point: DVec3) -> usize {
-        let mut current = self.root;
+        assert_eq!(
+            positions.len(),
+            self.children.len(),
+            "dominance tree: body positions mismatch"
+        );
+        assert!(
+            point.is_finite() && positions.iter().all(|p| p.is_finite()),
+            "dominance tree: nonfinite positions"
+        );
+        // Separate star systems form a forest. Choose the nearest stellar root for display,
+        // then apply the unchanged nested SOI selection within that system. This never switches
+        // gravitational sources or replaces physical N-body forces.
+        let mut current = *self
+            .roots
+            .iter()
+            .min_by(|&&a, &&b| {
+                (point - positions[a])
+                    .length_squared()
+                    .total_cmp(&(point - positions[b]).length_squared())
+                    .then(a.cmp(&b))
+            })
+            .unwrap();
         loop {
             let mut best = None;
             let mut best_ratio = 1.0;

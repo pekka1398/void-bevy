@@ -5571,6 +5571,7 @@ dependencies = [
  "void-frames",
  "void-landing",
  "void-modules",
+ "void-multiscale",
  "void-orbit",
  "void-scenery",
  "void-terrain",
@@ -5596,6 +5597,7 @@ name = "void-frames"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
+ "serde",
  "serde_json",
 ]
 
@@ -5654,6 +5656,7 @@ name = "void-multiscale"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
+ "serde",
  "serde_json",
  "void-frames",
  "void-math",

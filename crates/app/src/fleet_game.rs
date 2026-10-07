@@ -147,7 +147,7 @@ fn scenery_preset(lab: &mut Lab, body: usize, view: &str) {
     let ratio = match view {
         "near" => 1.025,
         "orbit" => {
-            if fleet.ephemeris.bodies()[body].id == "halo" {
+            if fleet.ephemeris.bodies()[body].id.rsplit('/').next() == Some("halo") {
                 6.0
             } else {
                 3.5
@@ -635,7 +635,7 @@ fn argument(name: &str) -> Option<String> {
 pub fn run(main_game: bool) {
     if std::env::args().any(|a| a == "--help") {
         println!(
-            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
+            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--stellar-neighborhood: three fictional systems at real stellar separation\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
         );
         return;
     }
@@ -736,6 +736,18 @@ pub fn run(main_game: bool) {
                         body.visual.cloud_profile = None;
                     }
                 }
+            }
+            if std::env::args().any(|a| a == "--stellar-neighborhood") {
+                assert!(
+                    main_game && planet.planet.body_id == "aurelia",
+                    "--stellar-neighborhood requires the main Aurelia game"
+                );
+                assert!(
+                    air,
+                    "stellar neighborhood currently uses explicit authored air profiles"
+                );
+                initial.world = void_fleet_flight::world::stellar_neighborhood(&planet.planet);
+                initial.launch_body = "Sol/aurelia".into();
             }
             FlightSession::new(if main_game {
                 initial.with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque)
@@ -1645,7 +1657,11 @@ fn plot_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
         if keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
             let candidates: Vec<_> = bodies
                 .iter()
-                .filter(|b| b.index != primary)
+                .filter(|b| {
+                    b.index != primary
+                        && sim.fleet.ephemeris.system_of(b.index)
+                            == sim.fleet.ephemeris.system_of(primary)
+                })
                 .map(|b| b.index)
                 .collect();
             if candidates.is_empty() {
@@ -1659,7 +1675,10 @@ fn plot_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
             mode = 3;
         } else {
             primary = (primary + 1) % bodies.len();
-            if secondary == Some(primary) {
+            if secondary.is_some_and(|s| {
+                s == primary
+                    || sim.fleet.ephemeris.system_of(s) != sim.fleet.ephemeris.system_of(primary)
+            }) {
                 secondary = None;
             }
         }
@@ -1681,7 +1700,16 @@ fn plot_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
                         .map(|b| b.index)
                 })
                 .or(bodies[primary].parent_index)
-                .or_else(|| bodies.iter().find(|b| b.index != primary).map(|b| b.index));
+                .or_else(|| {
+                    bodies
+                        .iter()
+                        .find(|b| {
+                            b.index != primary
+                                && sim.fleet.ephemeris.system_of(b.index)
+                                    == sim.fleet.ephemeris.system_of(primary)
+                        })
+                        .map(|b| b.index)
+                });
             let Some(secondary) = secondary else {
                 lab.notice = "Two-body plot requires two bodies".into();
                 return;

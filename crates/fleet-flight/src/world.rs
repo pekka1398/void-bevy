@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
 use void_environment::{Atmosphere, BodyEnvironment, EarthAtmosphere, Environment};
 use void_landing::{ContactWorldOptions, LandingPlanet, level_for_tile_size};
-use void_orbit::{Ephemeris, EphemerisOptions, SystemSpec, build_system, suggested_step_seconds};
+use void_orbit::{
+    Ephemeris, EphemerisOptions, EphemerisSource, SystemSpec, build_system, suggested_step_seconds,
+};
 use void_terrain::{Terrain, TerrainConfig};
 use void_vessels::GroundSpec;
 
@@ -35,16 +37,61 @@ pub struct BodyDescription {
     pub sea_level_meters: Option<f64>,
     pub visual: VisualSettings,
 }
+/// Explicit, nonrotating stellar placement. Positions stay split even in save files.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SystemPlacement {
+    pub id: String,
+    pub origin: void_frames::SplitPosition,
+    pub velocity: DVec3,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NeighborSystem {
+    pub placement: SystemPlacement,
+    pub system: SystemSpec,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StellarConfiguration {
+    pub home: SystemPlacement,
+    pub neighbors: Vec<NeighborSystem>,
+}
+impl StellarConfiguration {
+    fn seeds(&self, home: &SystemSpec) -> Vec<void_multiscale::SystemSeed> {
+        assert!(
+            (1..=2).contains(&self.neighbors.len()),
+            "world: neighborhood needs two or three systems"
+        );
+        let seed = |placement: &SystemPlacement, spec: &SystemSpec| {
+            assert!(
+                !placement.id.is_empty() && !placement.id.contains('/'),
+                "world: invalid system ID"
+            );
+            void_multiscale::SystemSeed {
+                id: placement.id.clone(),
+                system: build_system(spec),
+                origin: placement.origin,
+                velocity: placement.velocity,
+            }
+        };
+        std::iter::once(seed(&self.home, home))
+            .chain(self.neighbors.iter().map(|n| seed(&n.placement, &n.system)))
+            .collect()
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldDescription {
     pub schema: u32,
     pub system: SystemSpec,
+    pub stellar: Option<StellarConfiguration>,
     #[serde(deserialize_with = "unique_bodies")]
     pub bodies: BTreeMap<String, BodyDescription>,
 }
 pub struct BuiltWorld {
-    pub ephemeris: Ephemeris,
+    pub ephemeris: Box<dyn EphemerisSource>,
+    pub coupled_world: Option<void_multiscale::SharedWorld>,
     pub environment: Arc<Environment>,
     pub grounds: Vec<GroundSpec>,
     pub terrains: BTreeMap<usize, Arc<Terrain>>,
@@ -65,8 +112,9 @@ impl WorldDescription {
         };
         let max = planet.terrain.max_height_meters;
         Self {
-            schema: 3,
+            schema: 4,
             system: planet.system.clone(),
+            stellar: None,
             bodies: BTreeMap::from([(
                 planet.body_id.clone(),
                 BodyDescription {
@@ -115,21 +163,52 @@ impl WorldDescription {
         }
     }
     pub fn build(&self) -> BuiltWorld {
-        assert_eq!(self.schema, 3, "world: unsupported schema");
-        let system = build_system(&self.system);
-        let step_seconds = if system.bodies.len() > 1 {
-            suggested_step_seconds(&system.bodies, 256.0)
-        } else {
-            60.0
-        };
-        let mut ephemeris = Ephemeris::new(
-            &system,
-            EphemerisOptions {
-                step_seconds,
-                chunk_steps: 1024,
-            },
-        );
-        ephemeris.extend_to(step_seconds);
+        self.build_with_coupled_checkpoint(None)
+    }
+    pub fn build_with_coupled_checkpoint(
+        &self,
+        saved: Option<void_multiscale::CoupledCheckpoint>,
+    ) -> BuiltWorld {
+        assert_eq!(self.schema, 4, "world: unsupported schema");
+        let restoring_coupled = saved.is_some();
+        let (mut ephemeris, coupled_world): (Box<dyn EphemerisSource>, _) =
+            if let Some(stellar) = &self.stellar {
+                let seeds = stellar.seeds(&self.system);
+                let step = seeds
+                    .iter()
+                    .filter(|s| s.system.bodies.len() > 1)
+                    .map(|s| suggested_step_seconds(&s.system.bodies, 256.0))
+                    .fold(f64::INFINITY, f64::min);
+                let step = if step.is_finite() { step } else { 60.0 };
+                let world = match saved {
+                    Some(saved) => void_multiscale::CoupledWorld::from_checkpoint(seeds, saved),
+                    None => void_multiscale::CoupledWorld::new(seeds, step, 8192),
+                };
+                let shared = std::rc::Rc::new(std::cell::RefCell::new(world));
+                let source = void_multiscale::FrameEphemeris::new(shared.clone(), &stellar.home.id);
+                (Box::new(source), Some(shared))
+            } else {
+                assert!(saved.is_none(), "world: single system has coupled state");
+                let system = build_system(&self.system);
+                let step_seconds = if system.bodies.len() > 1 {
+                    suggested_step_seconds(&system.bodies, 256.0)
+                } else {
+                    60.0
+                };
+                (
+                    Box::new(Ephemeris::new(
+                        &system,
+                        EphemerisOptions {
+                            step_seconds,
+                            chunk_steps: 1024,
+                        },
+                    )),
+                    None,
+                )
+            };
+        if !restoring_coupled {
+            ephemeris.extend_to(ephemeris.start_time() + ephemeris.step_seconds());
+        }
         let mut environment = Environment::new(&ephemeris);
         let mut grounds = vec![];
         let mut terrains = BTreeMap::new();
@@ -268,16 +347,34 @@ impl WorldDescription {
         }
         BuiltWorld {
             ephemeris,
+            coupled_world,
             environment: Arc::new(environment),
             grounds,
             terrains,
         }
     }
     pub fn body_index(&self, id: &str) -> usize {
-        build_system(&self.system)
-            .bodies
+        let bodies = if let Some(stellar) = &self.stellar {
+            let seeds = stellar.seeds(&self.system);
+            seeds
+                .into_iter()
+                .flat_map(|seed| {
+                    seed.system
+                        .bodies
+                        .into_iter()
+                        .map(move |body| format!("{}/{}", seed.id, body.id))
+                })
+                .collect::<Vec<_>>()
+        } else {
+            build_system(&self.system)
+                .bodies
+                .into_iter()
+                .map(|body| body.id)
+                .collect()
+        };
+        bodies
             .iter()
-            .position(|b| b.id == id)
+            .position(|body| body == id)
             .unwrap_or_else(|| panic!("world: unknown body {id}"))
     }
     pub fn landing_planet(&self, id: &str) -> LandingPlanet {
@@ -291,7 +388,7 @@ impl WorldDescription {
             .expect("world: launch body needs terrain");
         LandingPlanet {
             label: d.label.clone(),
-            system: self.system.clone(),
+            system: self.system_for_body(id),
             body_id: id.into(),
             terrain_config: config.clone(),
             terrain: Arc::new(Terrain::from_config(config)),
@@ -299,6 +396,33 @@ impl WorldDescription {
             air_datum: d.air_datum_meters,
             sea_level: d.sea_level_meters,
         }
+    }
+    fn system_for_body(&self, body: &str) -> SystemSpec {
+        let Some(stellar) = &self.stellar else {
+            return self.system.clone();
+        };
+        let (system_id, _) = body
+            .split_once('/')
+            .expect("stellar body needs system qualifier");
+        let mut spec = if system_id == stellar.home.id {
+            self.system.clone()
+        } else {
+            stellar
+                .neighbors
+                .iter()
+                .find(|s| s.placement.id == system_id)
+                .expect("world: unknown system")
+                .system
+                .clone()
+        };
+        fn qualify(node: &mut void_orbit::BodySpec, system: &str) {
+            node.id = format!("{system}/{}", node.id);
+            for child in &mut node.children {
+                qualify(child, system);
+            }
+        }
+        qualify(&mut spec.root, system_id);
+        spec
     }
     pub fn validate_launch(&self, id: &str, site: DVec3) {
         self.body_index(id);
@@ -526,5 +650,56 @@ pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
             },
         );
     }
+    world
+}
+
+/// Authored fictional neighborhood at real stellar separations. This is not a transfer
+/// fixture: the ordinary launch craft starts landed with its ordinary resources and speed.
+pub fn stellar_neighborhood(planet: &LandingPlanet) -> WorldDescription {
+    let mut world = solar_scenery(planet);
+    let home = SystemPlacement {
+        id: "Sol".into(),
+        origin: void_multiscale::default_galaxy(),
+        velocity: DVec3::new(220_000.0, 0.0, 0.0),
+    };
+    let mut neighbor_spec = world.system.clone();
+    neighbor_spec.root.children.retain(|b| b.id == "aurelia");
+    let neighbors = [
+        ("Beryl", DVec3::new(4.24, 0.0, 0.0), 0.8),
+        ("Cygnus", DVec3::new(-3.0, 5.0, 1.0), 1.1),
+    ]
+    .into_iter()
+    .map(|(id, light_years, mass)| {
+        let mut system = neighbor_spec.clone();
+        system.name = format!("{id} fictional stellar system");
+        system.root.name = format!("{id} Star");
+        system.root.mass_kg *= mass;
+        NeighborSystem {
+            placement: SystemPlacement {
+                id: id.into(),
+                origin: home
+                    .origin
+                    .translate(light_years * void_multiscale::LIGHT_YEAR),
+                velocity: home.velocity + DVec3::new(0.0, 100.0 * mass, 0.0),
+            },
+            system,
+        }
+    })
+    .collect::<Vec<_>>();
+    let original = world.bodies.clone();
+    world.bodies = original
+        .iter()
+        .map(|(id, d)| (format!("Sol/{id}"), d.clone()))
+        .collect();
+    for neighbor in &neighbors {
+        for id in ["sol", "aurelia", "selene"] {
+            let mut description = original[id].clone();
+            description.label = format!("{} · {id}", neighbor.placement.id);
+            world
+                .bodies
+                .insert(format!("{}/{id}", neighbor.placement.id), description);
+        }
+    }
+    world.stellar = Some(StellarConfiguration { home, neighbors });
     world
 }

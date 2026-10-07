@@ -24,6 +24,7 @@ pub struct FlightCheckpoint {
     maneuver_warp: crate::warp::ManeuverWarp,
     plans: std::collections::BTreeMap<String, crate::plans::SavedVesselPlan>,
     ephemeris_end: f64,
+    coupled_world: Option<void_multiscale::CoupledCheckpoint>,
     mark: serde_json::Value,
 }
 impl FlightCheckpoint {
@@ -56,6 +57,7 @@ impl FlightCheckpoint {
             maneuver_warp: sim.maneuver_warp.clone(),
             plans: sim.plan_checkpoints(),
             ephemeris_end: sim.fleet.ephemeris.end_time(),
+            coupled_world: sim.coupled_world.as_ref().map(|w| w.borrow().checkpoint()),
             mark: world_mark(sim),
         }
     }
@@ -77,10 +79,26 @@ impl FlightCheckpoint {
     }
     pub fn restore(&self) -> FleetFlight {
         self.validate_header();
+        assert_eq!(
+            self.initial.world.stellar.is_some(),
+            self.coupled_world.is_some(),
+            "world checkpoint: missing or unexpected coupled state"
+        );
         let planet = self.initial.planet();
         let home = self.initial.world.body_index(&self.initial.launch_body);
-        let mut built = self.initial.world.build();
-        built.ephemeris.extend_to(self.ephemeris_end);
+        let mut built = self
+            .initial
+            .world
+            .build_with_coupled_checkpoint(self.coupled_world.clone());
+        if self.coupled_world.is_some() {
+            assert_eq!(
+                built.ephemeris.end_time(),
+                self.ephemeris_end,
+                "world checkpoint: coupled ephemeris bound differs"
+            );
+        } else {
+            built.ephemeris.extend_to(self.ephemeris_end);
+        }
         let (ephemeris, environment) = (built.ephemeris, built.environment);
         let fleet = Fleet::from_checkpoint(ephemeris, environment, self.fleet.clone());
         assert_eq!(
@@ -90,6 +108,7 @@ impl FlightCheckpoint {
         let mut sim = FleetFlight {
             fleet,
             world: self.initial.world.clone(),
+            coupled_world: built.coupled_world,
             terrains: built.terrains,
             planet,
             home,
