@@ -9,3 +9,6 @@ pub use runtime::*;
 
 mod thermal;
 pub use thermal::*;
+
+mod wheel;
+pub use wheel::*;

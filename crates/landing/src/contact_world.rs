@@ -273,6 +273,17 @@ pub struct ContactWorld<F: ContactFrame> {
     tiles: OrderedMap<TileCollider>,
 }
 
+/// A suspension ray hit on the actual live collider, expressed in contact-frame axes.
+#[derive(Clone, Copy, Debug)]
+pub struct ContactRayHit {
+    pub collider: ColliderHandle,
+    pub body: Option<RigidBodyHandle>,
+    pub distance_meters: f64,
+    pub point: DVec3,
+    pub normal: DVec3,
+    pub point_velocity: DVec3,
+}
+
 /// Extra acceleration (thrust) for a body, called once per step with its state. Leapfrog kicks
 /// cover the half steps on both sides of a step, so this must return the average over the step
 /// just ended and the step starting; a jump (engine on or off) then lands on the step boundary.
@@ -675,6 +686,87 @@ impl<F: ContactFrame> ContactWorld<F> {
         if self.world.bodies[handle].is_sleeping() {
             self.world.bodies[handle].wake_up(true);
         }
+    }
+
+    /// Query actual collider geometry, including freshly streamed tiles before broad-phase rebuild.
+    /// The ray origin is f64 contact-frame position; conversion occurs only after origin subtraction.
+    /// Own-body colliders are excluded. Sensors never provide mechanical support.
+    pub fn suspension_ray(
+        &self,
+        excluded: RigidBodyHandle,
+        origin: DVec3,
+        direction: DVec3,
+        reach: f64,
+    ) -> Option<ContactRayHit> {
+        assert!(
+            origin.is_finite()
+                && direction.is_finite()
+                && (direction.length_squared() - 1.0).abs() < 1e-9
+                && reach.is_finite()
+                && reach > 0.0
+        );
+        let ray = Ray::new(v32(origin - self.origin), v32(direction));
+        let mut closest: Option<ContactRayHit> = None;
+        for (handle, collider) in self.world.colliders.iter() {
+            if collider.is_sensor() || collider.parent() == Some(excluded) {
+                continue;
+            }
+            let max = closest.map_or(reach, |h| h.distance_meters);
+            let pose = match collider.parent() {
+                Some(parent) => {
+                    self.world.bodies[parent].position()
+                        * collider
+                            .position_wrt_parent()
+                            .expect("parented collider has local pose")
+                }
+                None => *collider.position(),
+            };
+            if let Some(hit) = collider
+                .shape()
+                .cast_ray_and_get_normal(&pose, &ray, max as f32, true)
+            {
+                let distance = f64::from(hit.time_of_impact);
+                let point = origin + direction * distance;
+                let normal = v64(hit.normal).normalize();
+                // Back-facing geometry and walls are not a road for this suspension axis.
+                if normal.dot(-direction) <= 0.1 {
+                    continue;
+                }
+                let body = collider.parent();
+                let point_velocity = body.map_or(DVec3::ZERO, |b| self.point_velocity(b, point));
+                closest = Some(ContactRayHit {
+                    collider: handle,
+                    body,
+                    distance_meters: distance,
+                    point,
+                    normal,
+                    point_velocity,
+                });
+            }
+        }
+        closest
+    }
+    /// Native half-step point velocity relative to this frame, including angular motion.
+    /// Callers add the same translational half-kick used by state() for accepted-boundary loads.
+    pub fn point_velocity(&self, handle: RigidBodyHandle, point: DVec3) -> DVec3 {
+        let b = self.body(handle);
+        v64(b.velocity_at_point(v32(point - self.origin)))
+    }
+    /// Inverse effective mass for a point impulse, including angular response. Fixed supports
+    /// contribute zero. Both participants are added by the tire solve.
+    pub fn inverse_point_mass(&self, handle: RigidBodyHandle, point: DVec3, axis: DVec3) -> f64 {
+        let b = self.body(handle);
+        if !b.is_dynamic() {
+            return 0.0;
+        }
+        let r = point - self.origin - v64(b.center_of_mass());
+        let props = b.mass_properties();
+        let a = v32(axis);
+        let angular = v32(r.cross(axis));
+        f64::from(
+            (a * props.effective_inv_mass).dot(a)
+                + angular.dot(props.effective_world_inv_inertia * angular),
+        )
     }
 
     fn contacts(&self, handle: RigidBodyHandle) -> bool {

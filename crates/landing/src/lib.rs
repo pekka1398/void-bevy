@@ -16,9 +16,9 @@ pub use coast::{
     CoastPrediction, EncounterPairState, EncounterPhysicsGate, EncounterRanges, predict_coast,
 };
 pub use contact_world::{
-    BodyColliderMesh, BodyShape, ContactBodySpec, ContactWorld, ContactWorldCheckpoint,
-    ContactWorldOptions, ExtraAcceleration, Piece, PieceMass, SimpleShape, TileCollider,
-    surface_indices,
+    BodyColliderMesh, BodyShape, ContactBodySpec, ContactRayHit, ContactWorld,
+    ContactWorldCheckpoint, ContactWorldOptions, ExtraAcceleration, Piece, PieceMass, SimpleShape,
+    TileCollider, surface_indices,
 };
 pub use demo_rocket::{DemoRocket, booster_pieces, demo_rocket, upper_pieces};
 pub use lander::{

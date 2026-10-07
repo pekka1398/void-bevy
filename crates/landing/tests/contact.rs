@@ -471,3 +471,63 @@ fn body_overlay_reads_live_collider_shape_and_local_transform() {
         meshes[0].vertices
     );
 }
+
+#[test]
+fn suspension_query_excludes_chassis_and_tracks_actual_dynamic_support() {
+    let Env {
+        mut ephemeris,
+        frame,
+        ..
+    } = plain_pebble();
+    let at = DVec3::new(100_000.0, 200.0, -50.0);
+    let mut world = ContactWorld::new(frame, None, options(), 0.0, at, &mut ephemeris);
+    let body_spec = spec(
+        SimpleShape::Box {
+            half_extents: DVec3::new(2.0, 0.2, 2.0),
+        },
+        500.0,
+        0.6,
+        0.0,
+    );
+    let support = world.add_body(
+        &ephemeris,
+        &body_spec,
+        FrameState {
+            position: at,
+            velocity: DVec3::ZERO,
+        },
+        DQuat::IDENTITY,
+        DVec3::ZERO,
+    );
+    let chassis = world.add_body(
+        &ephemeris,
+        &body_spec,
+        FrameState {
+            position: at + DVec3::Y * 2.0,
+            velocity: DVec3::ZERO,
+        },
+        DQuat::IDENTITY,
+        DVec3::ZERO,
+    );
+    world.world.bodies[support].set_linvel(rapier3d::math::Vector::new(1.0, 0.0, 0.0), false);
+    world.world.bodies[support].set_angvel(rapier3d::math::Vector::new(0.0, 1.0, 0.0), false);
+    let origin = at + DVec3::new(1.0, 2.0, 0.0);
+    let hit = world
+        .suspension_ray(chassis, origin, -DVec3::Y, 4.0)
+        .unwrap();
+    assert_eq!(hit.body, Some(support));
+    assert!((hit.distance_meters - 1.8).abs() < 1e-6);
+    assert!((hit.normal - DVec3::Y).length() < 1e-9);
+    assert!((hit.point_velocity - DVec3::new(1.0, 0.0, -1.0)).length() < 1e-6);
+    let before = hit.point;
+    world.recenter(at + DVec3::new(123.0, -44.0, 55.0));
+    let after = world
+        .suspension_ray(chassis, origin, -DVec3::Y, 4.0)
+        .unwrap();
+    assert!((before - after.point).length() < 1e-5);
+    assert!(
+        world
+            .suspension_ray(chassis, origin, DVec3::Y, 4.0)
+            .is_none()
+    );
+}
