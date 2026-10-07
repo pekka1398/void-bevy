@@ -13,6 +13,7 @@ pub struct PreciseVesselSnapshot {
 pub(super) struct PhysicsView {
     system: SystemId,
     offset: SplitPosition,
+    query_frame: Option<FrameId>,
 }
 impl Fleet {
     pub(super) fn enter_system(&mut self, system: SystemId) -> PhysicsView {
@@ -23,6 +24,7 @@ impl Fleet {
         let previous = PhysicsView {
             system: self.ephemeris.origin_system(),
             offset: self.ephemeris.physics_offset(),
+            query_frame: self.ephemeris.physics_query_frame(),
         };
         self.ephemeris.set_origin_system(system);
         self.ephemeris.set_physics_offset(SplitPosition::ORIGIN);
@@ -60,11 +62,14 @@ impl Fleet {
             }
         };
         self.frames.origin = frame;
-        self.ephemeris.set_physics_query_frame(Some(frame));
+        // This reusable node is only an internal coordinate view. Loads escaping this scope
+        // must be registered against their persistent owner anchor by enter_vessel/enter_scene.
+        self.ephemeris.set_physics_query_frame(None);
     }
     pub(super) fn restore_view(&mut self, previous: PhysicsView) {
         self.ephemeris.set_origin_system(previous.system);
         self.set_view_offset(previous.offset);
+        self.ephemeris.set_physics_query_frame(previous.query_frame);
     }
     pub(super) fn enter_vessel(&mut self, id: &str) -> PhysicsView {
         let vessel = self.vessel(id);
@@ -74,13 +79,20 @@ impl Fleet {
         let (system, offset) = (vessel.system, vessel.anchor);
         let previous = self.enter_system(system);
         self.set_view_offset(offset);
+        if self.ephemeris.system_count() > 1 {
+            self.ephemeris
+                .set_physics_query_frame(Some(self.anchor_frames[id]));
+        }
         previous
     }
     pub(super) fn enter_scene(&mut self, scene: u64) -> PhysicsView {
         let scene = &self.scenes[&scene];
-        let (system, offset) = (scene.system, scene.anchor);
+        let (system, offset, query) = (scene.system, scene.anchor, scene.anchor_frame);
         let previous = self.enter_system(system);
         self.set_view_offset(offset);
+        if self.ephemeris.system_count() > 1 {
+            self.ephemeris.set_physics_query_frame(Some(query));
+        }
         previous
     }
     pub(super) fn query_frame(&self, vessel: &Vessel) -> FrameId {
@@ -232,5 +244,126 @@ impl Fleet {
         }
         **run = run.restarted();
         self.put(vessel);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn fleet() -> Fleet {
+        let world = std::rc::Rc::new(std::cell::RefCell::new(void_multiscale::wide_world(
+            void_multiscale::default_galaxy(),
+        )));
+        let ephemeris = void_multiscale::FrameEphemeris::new(world, "Aster");
+        let environment = Arc::new(Environment::new(&ephemeris).with(
+            3,
+            void_environment::BodyEnvironment {
+                atmosphere: Some(void_environment::Atmosphere::Earth(
+                    void_environment::EarthAtmosphere::new(1.0),
+                )),
+                air_datum_meters: 0.0,
+                terrain: None,
+                sea_level_meters: None,
+            },
+        ));
+        Fleet::new(ephemeris, environment, 0.0, vec![], FleetOptions::default())
+    }
+    fn scoped_load(fleet: &mut Fleet, id: &str) -> void_modules::Wrench {
+        let previous = fleet.enter_vessel(id);
+        let v = fleet.vessel(id);
+        let state = fleet.snapshot(id);
+        let air = vessel_air_at(
+            &fleet.environment,
+            &fleet.parts,
+            &v.members,
+            fleet.centre(&v.members),
+            state.rotation,
+            fleet.time,
+        )
+        .unwrap();
+        let load = air.wrench(
+            fleet.ephemeris.as_ref(),
+            fleet.time,
+            State {
+                position: state.position,
+                velocity: state.velocity,
+            },
+            state.rotation,
+            state.angular_velocity,
+        );
+        assert_eq!(load.frame, fleet.query_frame(v));
+        fleet.restore_view(previous);
+        load
+    }
+    #[test]
+    fn escaped_trial_load_keeps_its_owner_frame_across_scopes_at_the_same_time() {
+        let mut fleet = fleet();
+        let mut craft = void_assembly::fresh_craft();
+        craft.parts[0].definition_id = "aero-stabilizer-pod".into();
+        let (p, v) = fleet.ephemeris.body_in_system(BodyId(3), 0.0);
+        let state = FrameState {
+            position: p + DVec3::X * (fleet.ephemeris.bodies()[3].radius_meters + 5000.0),
+            velocity: v + DVec3::Y * 80.0,
+        };
+        let a = fleet.launch_in_system(&craft, SystemId(1), state, DQuat::IDENTITY, DVec3::ZERO);
+        let other = fleet.launch_in_system(
+            &craft,
+            SystemId(2),
+            FrameState {
+                position: DVec3::X * 1e10,
+                velocity: DVec3::ZERO,
+            },
+            DQuat::IDENTITY,
+            DVec3::ZERO,
+        );
+        let captured = scoped_load(&mut fleet, &a);
+        assert_eq!(captured.frame, fleet.vessel_anchor_frame(&a));
+        let reference = fleet
+            .frames()
+            .to_galaxy(captured.frame, captured.reference_point);
+        let previous = fleet.enter_vessel(&a);
+        let nested = fleet.enter_vessel(&other);
+        assert_eq!(
+            fleet.ephemeris.physics_query_frame(),
+            Some(fleet.vessel_anchor_frame(&other))
+        );
+        fleet.restore_view(nested);
+        assert_eq!(fleet.ephemeris.physics_query_frame(), Some(captured.frame));
+        fleet.restore_view(previous);
+        assert_eq!(
+            fleet
+                .frames()
+                .to_galaxy(captured.frame, captured.reference_point),
+            reference
+        );
+        assert_eq!(captured, scoped_load(&mut fleet, &a));
+        assert_eq!(fleet.time(), 0.0);
+
+        // Exercise the same escaping-load contract under a persistent bubble scene anchor.
+        fleet.launch_in_system(
+            &craft,
+            SystemId(1),
+            FrameState {
+                position: state.position + DVec3::Y * 10.0,
+                velocity: state.velocity,
+            },
+            DQuat::IDENTITY,
+            DVec3::ZERO,
+        );
+        fleet.advance(0.0);
+        assert_eq!(fleet.snapshot(&a).mode, VesselMode::Bubble);
+        let scene_load = scoped_load(&mut fleet, &a);
+        let scene_reference = fleet
+            .frames()
+            .to_galaxy(scene_load.frame, scene_load.reference_point);
+        let previous = fleet.enter_vessel(&other);
+        fleet.restore_view(previous);
+        assert_eq!(
+            fleet
+                .frames()
+                .to_galaxy(scene_load.frame, scene_load.reference_point),
+            scene_reference
+        );
+        assert_eq!(scene_load, scoped_load(&mut fleet, &a));
     }
 }

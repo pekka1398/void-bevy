@@ -5810,6 +5810,7 @@ dependencies = [
  "void-frames",
  "void-landing",
  "void-modules",
+ "void-multiscale",
  "void-orbit",
  "void-rotation",
  "void-sas",
