@@ -3,7 +3,7 @@
 直接接主遊戲與 Fleet；`void-app --splashdown` 在當前天體真實海洋位置放置
 防熱盾指令艙：COM 海面上 8 m、向下 2 m/s。fixture 透過一般 LaunchState /
 Select journal action，沒有另一套水 runtime。HUD 顯示同一 evaluator 的 water N。
-不能搭配 load/replay 或沒有海的天體。按 P 暫停，F5/F9 存讀沿用現有操作。
+不能搭配 load/replay 或沒有海的天體。按 P 暫停，F6/F7 存讀沿用現有操作。
 
 `Environment::SeaSample` 保留海平面 datum 深度，即使位於陸地；新增 water_present
 及相對旋轉海水的速度。terrain height >= sea level 或 query point 在固體內不施水力。
