@@ -55,3 +55,22 @@ water 角速度／線速度一致。這些測試及 near/far/incoming envelope �
 Scene 後續修正：water torque 中點和 water boundary push 更新不再依赖 AirDynamics。
 ForceOnly 原 air force/start推力語義保留，仅从原 now 移除 start water 並加入 end
 water；airless Ground 中傾斜濺落 10s 兩模式 position／velocity／spin 一致（零差）。
+
+J2 與 stiff drag review：浮力重力改呼叫 void_orbit::gravity::pull／oblateness，以
+query pole 投影 inward radial 再扣離心項；仍是球面海，沒有外部天體潮汐液面。
+
+二次阻力剛性不能靠固定 60 Hz 顯式 kick 承受所有有效速度。Fleet 一個設定步
+可細分為同一 runtime 的 accepted substeps；所有 Scene／Orbit 與耗用／thermal
+一起推進到相同時間。以可能入水的 full hull 排水上界、實際相對點速度、正定
+角阻及逆慣量 operator norm 算 relaxation rate，h <= 0.2/rate；沒有 force clamp。
+
+ContactWorld::set_step_seconds 先讀舊 boundary velocity，消耗已入 boundary 的
+solver_delta 一次，再用新 h 的 I+hC+h²C²（C 為 Coriolis operator）反解新的 native
+half velocity；Rapier dt 和 options dt 一致。恢復配置步長也做同一 rebase，checkpoint
+保存配置步及已轉換 cache，不把上次 substep 的 half velocity 當成 60 Hz。
+
+有效 fully submerged fixture 同時以 100 m/s 橫向、100 m/s 向下（合速141 m/s）
+入水：逐 60 Hz boundary kinetic speed² 遞減、有限，0.25s 小於100 (m/s)²；沒有
+反向能量爆增。checkpoint 恢復後跨不同 substep 數量精確續跑一致。ContactWorld
+重設 h 測試允許 native f32 一次重發布 rounding 3e-5 m/s，沒有物理 impulse。
+J2 共用 gravity 數值測試、既有水5／飛機3／車輛2及 core clippy 通過。

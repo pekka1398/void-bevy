@@ -76,3 +76,51 @@ fn water_trial_frames_purity_and_spin_dissipation() {
             .collect::<Vec<_>>()
     );
 }
+#[test]
+fn hydrostatic_projection_uses_shared_j2_body_gravity() {
+    let mut planet = void_landing::earth_size();
+    planet.sea_level = Some(9000.);
+    planet.system.root.gravity_field = Some(void_orbit::GravityField {
+        j2: 0.03,
+        reference_radius_meters: planet.terrain.radius_meters,
+    });
+    let (e, home) = void_landing::planet_ephemeris(&planet);
+    let env = void_landing::planet_environment(&planet, &e, home, false);
+    let mut graph = void_assembly::PartGraph::new();
+    let ids = graph.add(
+        &void_assembly::compile(&void_assembly::fresh_craft()).unwrap(),
+        "j2",
+    );
+    let source = void_modules::water::VesselWater::new(&env, &graph, &ids, DVec3::ZERO);
+    let frames = env.frames();
+    let at = frames.tree.at(0., &e);
+    let state = State {
+        position: DVec3::X * (planet.terrain.radius_meters + 8995.),
+        velocity: DVec3::ZERO,
+    };
+    let load = source.wrench_in(
+        &at,
+        frames.surface[home],
+        state,
+        DQuat::IDENTITY,
+        DVec3::ZERO,
+    );
+    let body = &e.bodies()[home];
+    let g = -void_orbit::gravity::pull(
+        body.gm,
+        void_orbit::gravity::oblateness(body),
+        DVec3::Z,
+        state.position,
+    )
+    .dot(DVec3::X)
+        - body.rotation.rate().powi(2) * state.position.length();
+    let definition = graph.part(&ids[0]).definition;
+    let volume = void_modules::water::displacement(definition, DVec3::X, 5.).volume;
+    assert!((load.force.x - 1000. * volume * g).abs() < 1e-8);
+    assert!(
+        (g - (body.gm / state.position.length_squared()
+            - body.rotation.rate().powi(2) * state.position.length()))
+        .abs()
+            > 0.1
+    );
+}

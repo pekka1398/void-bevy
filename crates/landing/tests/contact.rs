@@ -531,3 +531,36 @@ fn suspension_query_excludes_chassis_and_tracks_actual_dynamic_support() {
             .is_none()
     );
 }
+
+#[test]
+fn retiming_rebases_half_velocity_without_an_impulse() {
+    let Env {
+        mut ephemeris,
+        frame,
+        terrain: _,
+    } = harsh_pebble();
+    let start = hop_start(&frame);
+    let mut world = ContactWorld::new(frame, None, options(), 0., start.position, &mut ephemeris);
+    let force = DVec3::new(200., -50., 70.);
+    let body = world.add_body(
+        &ephemeris,
+        &spec(SimpleShape::Ball { radius: 1. }, 1000., 0.5, 0.),
+        start,
+        DQuat::IDENTITY,
+        force,
+    );
+    let before = world.state(&ephemeris, body, force);
+    for dt in [1. / 6000., 1. / 60., 1. / 10000., 1. / 60.] {
+        world.set_step_seconds(&ephemeris, dt, &|_| force);
+        let after = world.state(&ephemeris, body, force);
+        assert_eq!(after.position, before.position);
+        assert!(
+            (after.velocity - before.velocity).length() < 3e-5,
+            "{:?} -> {:?}",
+            before.velocity,
+            after.velocity
+        );
+        assert_eq!(world.options.step_seconds, dt);
+        assert_eq!(world.world.integration_parameters.dt, dt as f32);
+    }
+}

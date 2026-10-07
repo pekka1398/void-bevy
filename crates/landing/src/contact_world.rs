@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc::channel;
 
-use glam::{DQuat, DVec3};
+use glam::{DMat3, DQuat, DVec3};
 use rapier3d::math::{Rotation, Vector};
 use rapier3d::prelude::*;
 use void_lod::{OrderedMap, TileMeshOptions, build_tile_indices, build_tile_mesh, tiles_around};
@@ -606,6 +606,49 @@ impl<F: ContactFrame> ContactWorld<F> {
         }
     }
 
+    /// Change the accepted step without reinterpreting stored half-step velocities. A physical
+    /// boundary velocity is rebased onto the new stagger; no impulse or force limit is applied.
+    pub fn set_step_seconds(
+        &mut self,
+        ephemeris: &dyn EphemerisSource,
+        seconds: f64,
+        extra: &dyn Fn(RigidBodyHandle) -> DVec3,
+    ) {
+        assert!(
+            seconds.is_finite() && seconds > 0.,
+            "contact world: invalid step"
+        );
+        if seconds == self.options.step_seconds {
+            return;
+        }
+        let states: Vec<_> = self
+            .body_handles()
+            .map(|h| (h, self.state(ephemeris, h, extra(h))))
+            .collect();
+        self.options.step_seconds = seconds;
+        self.world.integration_parameters.dt = seconds as f32;
+        for (handle, state) in states {
+            let a0 = self
+                .frame
+                .acceleration(ephemeris, self.time, state.position, DVec3::ZERO)
+                + extra(handle);
+            let h = seconds / 2.;
+            let spin = self.frame.spin();
+            let coriolis = DMat3::from_cols(
+                -2. * spin.cross(DVec3::X),
+                -2. * spin.cross(DVec3::Y),
+                -2. * spin.cross(DVec3::Z),
+            );
+            // Invert the same one-pass Coriolis reconstruction used by state().
+            let matrix = DMat3::IDENTITY + coriolis * h + coriolis * coriolis * (h * h);
+            let half = matrix.inverse() * (state.velocity - a0 * h - coriolis * a0 * (h * h));
+            let body = &mut self.world.bodies[handle];
+            if !body.is_sleeping() {
+                body.set_linvel(v32(half), false);
+            }
+            self.record_mut(handle).solver_delta = DVec3::ZERO;
+        }
+    }
     pub fn remove_body(&mut self, handle: RigidBodyHandle) {
         let index = self
             .bodies

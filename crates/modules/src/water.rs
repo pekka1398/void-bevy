@@ -212,6 +212,12 @@ mod tests {
 }
 
 /// Immutable geometry assembled once per accepted leg; every trial queries the shared environment.
+pub struct StepParameters {
+    pub mass_kg: f64,
+    /// Conservative operator norm of inverse body inertia, 1/(kg m²).
+    pub inverse_inertia_norm: f64,
+    pub maximum_seconds: f64,
+}
 pub struct VesselWater {
     environment: std::sync::Arc<void_environment::Environment>,
     parts: Vec<(PartDefinition, DVec3, DQuat)>,
@@ -276,7 +282,13 @@ impl VesselWater {
                 let radial_centrifugal = celestial.rotation.rate().powi(2)
                     * surroundings.radius
                     * (1. - pole.dot(surroundings.up).powi(2));
-                let g = celestial.gm / surroundings.radius.powi(2) - radial_centrifugal;
+                let body_gravity = void_orbit::gravity::pull(
+                    celestial.gm,
+                    void_orbit::gravity::oblateness(celestial),
+                    pole,
+                    surroundings.up * surroundings.radius,
+                );
+                let g = -body_gravity.dot(surroundings.up) - radial_centrifugal;
                 assert!(g > 0., "water sea requires positive effective gravity");
                 let centre_arm = q * d.centre;
                 let sample = self.environment.surroundings(
@@ -319,6 +331,82 @@ impl VesselWater {
             }
         }
         result
+    }
+    /// Accepted-step relaxation bound for distributed quadratic point drag and angular drag.
+    /// Uses full hull volume whenever the trial can cross the surface, never reduces a force.
+    pub fn stable_step_in<S: void_frames::FrameSource + ?Sized>(
+        &self,
+        at: &void_frames::Snapshot<'_, S>,
+        query: void_frames::FrameId,
+        state: void_frames::State,
+        q: DQuat,
+        w: DVec3,
+        step: StepParameters,
+    ) -> f64 {
+        let StepParameters {
+            mass_kg: mass,
+            inverse_inertia_norm,
+            maximum_seconds: maximum_dt,
+        } = step;
+        assert!(
+            mass.is_finite()
+                && mass > 0.
+                && inverse_inertia_norm.is_finite()
+                && inverse_inertia_norm > 0.
+                && maximum_dt.is_finite()
+                && maximum_dt > 0.
+        );
+        let mut rate = 0.;
+        for (part, offset, pose) in &self.parts {
+            let arm = q * *offset;
+            let rotation = q * *pose;
+            let reach = void_assembly::part_bound_radius(part);
+            for body in 0..self.environment.bodies().len() {
+                let sample = self.environment.surroundings(
+                    at,
+                    self.environment.frames(),
+                    query,
+                    void_frames::State {
+                        position: state.position + arm,
+                        velocity: state.velocity + w.cross(arm),
+                    },
+                    body,
+                );
+                let Some(sea) = sample.sea else { continue };
+                let celestial = &self.environment.bodies()[body];
+                let surface = at.transform(self.environment.frames().surface[body], query);
+                let spin = w - surface.to_motion().angular_velocity;
+                let surface_gravity_bound = celestial.gm / celestial.radius_meters.powi(2)
+                    * (1.
+                        + 3. * celestial.j2.abs()
+                            * (celestial.j2_reference_radius_meters / celestial.radius_meters)
+                                .powi(2));
+                let speed = sea.velocity.length()
+                    + spin.length() * reach
+                    + maximum_dt * surface_gravity_bound;
+                if sea.depth < -(reach + speed * maximum_dt) {
+                    continue;
+                }
+                let volume =
+                    displacement(part, rotation.conjugate() * sample.up, reach * 2.).volume;
+                let size = if part.shape == Shape::Box {
+                    void_assembly::part_box_size(part)
+                } else {
+                    DVec3::new(2. * part.radius, part.height, 2. * part.radius)
+                };
+                let lever = offset.length() + reach;
+                let linear = 2. * 1.2 * 1000. * volume * speed;
+                let angular = 1000. * volume * size.length_squared() / 12.;
+                rate += linear * (mass.recip() + lever * lever * inverse_inertia_norm)
+                    + angular * inverse_inertia_norm;
+                break;
+            }
+        }
+        if rate == 0. {
+            maximum_dt
+        } else {
+            maximum_dt.min(0.2 / rate)
+        }
     }
     /// Conservative entry envelope for one bounded translation leg. Terrain band guards take
     /// ownership first where configured; this also protects explicit sea worlds without terrain.

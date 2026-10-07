@@ -193,3 +193,75 @@ fn airless_ground_water_sampling_is_same_in_both_air_modes() {
             < 1e-8
     );
 }
+#[test]
+fn fully_submerged_fast_motion_dissipates_and_checkpoint_retimes_exactly() {
+    let mut planet = void_landing::earth_size();
+    planet.sea_level = Some(1800.);
+    let initial = InitialWorld::new(&planet, &void_assembly::reentry_capsule(), DVec3::X, true)
+        .with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque);
+    let mut session = FlightSession::new(initial.clone());
+    let above = void_fleet_flight::water::splashdown(&mut session);
+    let sim = session.sim();
+    let body = sim.home;
+    let direction = sim
+        .fleet
+        .body_fixed_state(&above, body)
+        .position
+        .normalize();
+    let tangent = direction.any_orthonormal_vector();
+    let transform = sim
+        .fleet
+        .frames()
+        .transform(sim.fleet.body_frames(body).1, sim.fleet.origin_frame());
+    let state = transform.apply_state(void_frames::State {
+        position: direction * (planet.terrain.radius_meters + 1800. - 20.),
+        velocity: tangent * 100. - direction * 100.,
+    });
+    let q = transform.rotation() * glam::DQuat::from_rotation_arc(DVec3::Y, direction);
+    let Outcome::Spawned(id) = session.execute(Action::LaunchState {
+        craft: void_assembly::reentry_capsule(),
+        position: state.position,
+        velocity: state.velocity,
+        rotation: q,
+        angular_velocity: DVec3::ZERO,
+    }) else {
+        panic!("submerged launch")
+    };
+    session.execute(Action::Select { vessel: id.clone() });
+    let mut previous = 20000.;
+    for _ in 0..15 {
+        session.execute(Action::Advance {
+            seconds: 1. / 60.,
+            rails: false,
+        });
+        let sim = session.sim();
+        let speed = sim
+            .fleet
+            .body_fixed_state(&id, sim.home)
+            .velocity
+            .length_squared();
+        assert!(
+            speed.is_finite() && speed <= previous + 1.,
+            "energy growth {previous} -> {speed}"
+        );
+        previous = speed;
+    }
+    assert!(previous < 100., "stiff drag failed to dissipate {previous}");
+    let base = void_fleet_flight::checkpoint::FlightCheckpoint::capture(
+        session.sim(),
+        session.recording_initial().clone(),
+    );
+    let mut restored = FlightSession::from_checkpoint(base);
+    for seconds in [1. / 60., 0.2, 0.5] {
+        let action = Action::Advance {
+            seconds,
+            rails: false,
+        };
+        session.execute(action.clone());
+        restored.execute(action);
+        assert_eq!(
+            void_fleet_flight::session::world_mark(session.sim()),
+            void_fleet_flight::session::world_mark(restored.sim())
+        );
+    }
+}

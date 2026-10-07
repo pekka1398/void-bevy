@@ -3283,7 +3283,75 @@ impl Fleet {
             }
         }
     }
+    fn water_step_seconds(&self, maximum: f64) -> f64 {
+        self.order.iter().fold(maximum, |dt, id| {
+            let v = self.vessel(id);
+            let Owner::Scene { scene, body, .. } = v.owner else {
+                return dt;
+            };
+            let b = self.scenes[&scene].world.body(body);
+            let inertia = self.inertia_of(&v.members, self.centre(&v.members));
+            let inverse_norm = inertia
+                .inverse()
+                .to_cols_array()
+                .iter()
+                .map(|x| x.abs())
+                .sum();
+            let water = void_modules::water::VesselWater::new(
+                &self.environment,
+                &self.parts,
+                &v.members,
+                self.centre(&v.members),
+            );
+            water.stable_step_in(
+                &self.frames(),
+                self.scenes[&scene].contact,
+                state_of(self.scene_centre(v)),
+                quat64(*b.rotation()),
+                vec64(b.angvel()),
+                void_modules::water::StepParameters {
+                    mass_kg: self.mass(&v.members),
+                    inverse_inertia_norm: inverse_norm,
+                    maximum_seconds: dt,
+                },
+            )
+        })
+    }
+    fn set_physics_step(&mut self, seconds: f64) {
+        self.options.step_seconds = seconds;
+        for scene in self.scenes.keys().copied().collect::<Vec<_>>() {
+            let extras: HashMap<_, _> = self.scenes[&scene]
+                .members
+                .iter()
+                .map(|id| {
+                    let Owner::Scene { body, push, .. } = self.vessel(id).owner else {
+                        unreachable!()
+                    };
+                    (body, push)
+                })
+                .collect();
+            self.scenes.get_mut(&scene).unwrap().world.set_step_seconds(
+                &*self.ephemeris,
+                seconds,
+                &|body| extras[&body],
+            );
+        }
+    }
     fn step_all(&mut self) {
+        let configured = self.options.step_seconds;
+        let end = self.time + configured;
+        while self.time < end {
+            let dt = self.water_step_seconds((end - self.time).min(configured));
+            assert!(
+                dt > 0. && self.time + dt > self.time,
+                "water stiffness exceeds clock resolution"
+            );
+            self.set_physics_step(dt);
+            self.step_all_accepted();
+        }
+        self.set_physics_step(configured);
+    }
+    fn step_all_accepted(&mut self) {
         self.prepare_parachutes();
         let end = self.time + self.options.step_seconds;
         for scene in self.scenes.keys().copied().collect::<Vec<_>>() {
