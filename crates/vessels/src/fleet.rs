@@ -3420,6 +3420,12 @@ impl Fleet {
     }
     fn step_all(&mut self) {
         let configured = self.options.step_seconds;
+        // A nominal dry step needs no rebase. Computing end - time first can change dt
+        // by an ULP and repeatedly discard contact solver history at unchanged physical cadence.
+        if self.water_step_seconds(configured) == configured {
+            self.step_all_accepted();
+            return;
+        }
         let end = self.time + configured;
         while self.time < end {
             let dt = self.water_step_seconds((end - self.time).min(configured));
