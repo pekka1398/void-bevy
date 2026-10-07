@@ -969,16 +969,28 @@ impl Fleet {
             .iter()
             .map(|p| {
                 let ay = (p.pose.rotation * DVec3::Y).y;
-                let extent = if p.definition.shape == Shape::Box {
-                    let h = part_box_size(p.definition) / 2.0;
-                    h.x * (p.pose.rotation * DVec3::X).y.abs()
-                        + h.y * ay.abs()
-                        + h.z * (p.pose.rotation * DVec3::Z).y.abs()
+                let hull = if p.definition.box_size_meters.is_none() {
+                    // Keep unchanged Craft2 launch arithmetic, including its subtraction order.
+                    let radial = if p.definition.shape == Shape::Box {
+                        p.definition.radius
+                            * ((p.pose.rotation * DVec3::X).y.abs()
+                                + (p.pose.rotation * DVec3::Z).y.abs())
+                    } else {
+                        p.definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
+                    };
+                    p.pose.position.y - ay.abs() * p.definition.height / 2.0 - radial
                 } else {
-                    ay.abs() * p.definition.height / 2.0
-                        + p.definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
+                    let extent = if p.definition.shape == Shape::Box {
+                        let h = part_box_size(p.definition) / 2.0;
+                        h.x * (p.pose.rotation * DVec3::X).y.abs()
+                            + h.y * ay.abs()
+                            + h.z * (p.pose.rotation * DVec3::Z).y.abs()
+                    } else {
+                        ay.abs() * p.definition.height / 2.0
+                            + p.definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
+                    };
+                    p.pose.position.y - extent
                 };
-                let hull = p.pose.position.y - extent;
                 p.definition.modules.iter().fold(hull, |lowest, m| match m {
                     Module::Wheel { parameters: d, .. } => {
                         let hub = p.pose.position + p.pose.rotation * d.suspension_origin;

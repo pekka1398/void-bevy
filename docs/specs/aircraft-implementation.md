@@ -65,3 +65,30 @@ on a cuboid face; the child mating point/normal must actually meet that face.
 New geometry/poses require Craft3. Unchanged Craft2 is explicitly supported; old model
 recordings/saves are refused. Aircraft model22 is reserved; root assigns final combined
 checkpoint/model versions. Human acceptance has not yet occurred.
+
+Coordinated root build/run:
+
+```sh
+cargo build -j 2 -p void-app --bin void-app
+./target/debug/void-app --aircraft
+```
+
+The process opens paused. P starts simulation; Space activates the jet; hold Shift
+until full throttle. Near 45–50 m/s airspeed, use brief W commands, aim for roughly
+8–12 degrees nose-up and release before a steep climb. Holding W continuously is a
+strong elevator command and can induce a stall. Reduce throttle and steer back toward
+the surface for approach; use brief W for flare, then hold B and X after wheel contact.
+Navball and AIR diagnostics are the pilot observations, not an automatic pilot.
+The automated physical test uses 20 Hz sampled pilot commands for repeatability only.
+
+At ae4928f the controlled acceptance sequence rose ~64 m at ~48 m/s, touched down at
+~2.8 m/s vertical speed and stopped with brakes. Follow-up 41beb0a imports the shared
+contact support-boundary correction 80091df; all three aircraft integration tests still
+pass. This is headless evidence. Main GUI and human acceptance remain pending.
+
+Final follow-up headless sequence after the contact correction reports ~64 m climb,
+~48 m/s cruise, first wheel contact at ~5.3 m/s downward speed and ~35.6 m/s forward
+speed, then ~0.061 m/s after braking. The previous ~2.8 m/s touchdown observation used
+the older boundary velocity bookkeeping; it must not be quoted as the corrected
+impact speed. The current approach fixture exercises a firm touchdown, and GUI pilot
+handling/flare remains review work. No crash/structural failure claim follows from it.

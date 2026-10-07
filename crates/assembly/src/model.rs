@@ -285,8 +285,10 @@ pub fn part_box_size(part: &PartDefinition) -> DVec3 {
 }
 /// Bounding radius about the authored part origin, shared by contact activation.
 pub fn part_bound_radius(part: &PartDefinition) -> f64 {
-    if part.shape == Shape::Box {
-        part_box_size(part).length() / 2.0
+    if let Some(size) = part.box_size_meters {
+        size.length() / 2.0
+    } else if part.shape == Shape::Box {
+        (part.height / 2.0).hypot(part.radius * 2.0_f64.sqrt())
     } else {
         (part.height / 2.0).hypot(part.radius)
     }
