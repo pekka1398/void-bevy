@@ -3,7 +3,8 @@ use crate::body;
 use glam::{DQuat, DVec3};
 use std::sync::Arc;
 use void_aero::{
-    AeroElement, AeroShape, AeroState, ControlSurface, NEUTRAL, WingAero, aerodynamic_forces,
+    AeroElement, AeroShape, AeroState, ControlSurface, Controls, NEUTRAL, WingAero,
+    aerodynamic_forces,
 };
 use void_assembly::PartGraph;
 use void_environment::{AirSample, Environment};
@@ -79,9 +80,23 @@ pub struct VesselAir {
         void_assembly::ParachuteState,
     )>,
     start_time: f64,
+    controls: Controls,
 }
 
 impl VesselAir {
+    /// Accepted body-axis pitch/yaw/roll pilot inputs frozen for pure trial evaluation.
+    pub fn with_controls(mut self, turn: DVec3) -> Self {
+        assert!(
+            turn.is_finite() && turn.abs().max_element() <= 1.0,
+            "invalid aero controls"
+        );
+        self.controls = Controls {
+            elevator: turn.x,
+            rudder: turn.y,
+            aileron: turn.z,
+        };
+        self
+    }
     /// Pure trial load about the COM. Rotation maps parts axes into `query`; angular velocity
     /// is relative to `query` in its axes. Each location gets its own environment sample, so
     /// the frame/environment supplies the local wind exactly once.
@@ -125,7 +140,7 @@ impl VesselAir {
                     },
                     &air.air,
                     DVec3::ZERO,
-                    &NEUTRAL,
+                    &self.controls,
                 );
                 result.add(crate::Wrench {
                     frame: query,
@@ -207,7 +222,7 @@ impl VesselAir {
                 },
                 &air.air,
                 DVec3::ZERO,
-                &NEUTRAL,
+                &self.controls,
             )
             .force
         });
@@ -297,6 +312,7 @@ pub fn vessel_air_at(
         bodies,
         rotation,
         start_time,
+        controls: NEUTRAL,
         parachutes: members
             .iter()
             .flat_map(|id| {
@@ -322,7 +338,7 @@ pub fn vessel_air_at(
             .iter()
             .flat_map(|id| {
                 let part = graph.part(id);
-                let mut elements = vec![body::element(graph, members, id, centre)];
+                let mut elements = body::elements(graph, members, id, centre);
                 for module in &part.definition.modules {
                     if let void_assembly::Module::LiftingSurface { id, parameters: p } = module {
                         elements.push(AeroElement {
@@ -341,9 +357,16 @@ pub fn vessel_air_at(
                                 cd0: p.cd0,
                                 efficiency: p.efficiency,
                                 pitching_moment: p.pitching_moment,
-                                control: ControlSurface::None,
-                                control_sign: 1.0,
-                                max_deflection_radians: 0.0,
+                                control: match p.control {
+                                    void_assembly::SurfaceControl::Fixed => ControlSurface::None,
+                                    void_assembly::SurfaceControl::Pitch => {
+                                        ControlSurface::Elevator
+                                    }
+                                    void_assembly::SurfaceControl::Roll => ControlSurface::Aileron,
+                                    void_assembly::SurfaceControl::Yaw => ControlSurface::Rudder,
+                                },
+                                control_sign: p.control_sign,
+                                max_deflection_radians: p.max_deflection_radians,
                             }),
                         });
                     }

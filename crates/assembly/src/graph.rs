@@ -32,6 +32,7 @@ pub struct EngineRating {
     /// Thrust direction in the part's axes.
     pub direction: DVec3,
     pub resource: ResourceId,
+    pub jet: Option<crate::JetDefinition>,
 }
 
 impl Part {
@@ -53,6 +54,7 @@ impl Part {
                 nozzle_exit_area_m2,
                 direction,
                 resource,
+                jet,
             } => Some((
                 id.as_str(),
                 EngineRating {
@@ -61,6 +63,7 @@ impl Part {
                     nozzle_exit_area_m2: *nozzle_exit_area_m2,
                     direction: *direction,
                     resource: *resource,
+                    jet: *jet,
                 },
             )),
             _ => None,

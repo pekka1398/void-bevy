@@ -47,3 +47,40 @@ pub fn element(graph: &PartGraph, members: &[String], part: &str, centre: DVec3)
         }),
     }
 }
+
+/// Cuboid pressure drag resolves each face pair with its actual area and part-local axes.
+/// Legacy authored shapes retain their existing numeric body model.
+pub fn elements(
+    graph: &PartGraph,
+    members: &[String],
+    part: &str,
+    centre: DVec3,
+) -> Vec<AeroElement> {
+    let p = graph.part(part);
+    if p.definition.box_size_meters.is_none() {
+        return vec![element(graph, members, part, centre)];
+    }
+    let size = void_assembly::part_box_size(p.definition);
+    [DVec3::X, DVec3::Y, DVec3::Z]
+        .into_iter()
+        .enumerate()
+        .map(|(axis, direction)| {
+            let area = size[(axis + 1) % 3] * size[(axis + 2) % 3];
+            AeroElement {
+                id: format!("{part}/face-{axis}"),
+                point: p.pose.position - centre,
+                shape: AeroShape::Body(BodyAero {
+                    axis: p.pose.rotation * direction,
+                    front_area: area,
+                    rear_area: area,
+                    side_area: 0.0,
+                    wet_area: 0.0,
+                    length_meters: size[axis],
+                    front_cd: 1.1,
+                    rear_cd: 1.1,
+                    side_cd: 0.0,
+                }),
+            }
+        })
+        .collect()
+}

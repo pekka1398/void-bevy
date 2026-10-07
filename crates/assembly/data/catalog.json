@@ -2575,7 +2575,8 @@
     "modules": [
       {
         "kind": "command",
-        "id": "command"
+        "id": "command",
+        "reactionWheel": false
       }
     ]
   },
@@ -2640,7 +2641,10 @@
           "stallRadians": 0.28,
           "cd0": 0.02,
           "efficiency": 0.8,
-          "pitchingMoment": 0
+          "pitchingMoment": 0,
+          "control": "roll",
+          "controlSign": 1,
+          "maxDeflectionRadians": 0.2
         }
       }
     ]
@@ -2706,7 +2710,444 @@
           "stallRadians": 0.28,
           "cd0": 0.02,
           "efficiency": 0.8,
-          "pitchingMoment": 0
+          "pitchingMoment": 0,
+          "control": "roll",
+          "controlSign": -1,
+          "maxDeflectionRadians": 0.2
+        }
+      }
+    ]
+  },
+  {
+    "id": "aircraft-fuselage",
+    "name": "Aircraft fuel fuselage",
+    "description": "Aircraft fuel fuselage; explicit collision and mass geometry",
+    "category": "structure",
+    "dryMassKg": 110,
+    "height": 1,
+    "radius": 1.5,
+    "shape": "box",
+    "boxSizeMeters": [
+      1,
+      1,
+      3
+    ],
+    "color": "#bfcbd5",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "front",
+        "position": [
+          0,
+          0,
+          1.5
+        ],
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "size": 1
+      },
+      {
+        "id": "rear",
+        "position": [
+          0,
+          0,
+          -1.5
+        ],
+        "direction": [
+          0,
+          0,
+          -1
+        ],
+        "size": 1
+      },
+      {
+        "id": "surface-0",
+        "position": [
+          0.5,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-1",
+        "position": [
+          0.5,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-2",
+        "position": [
+          0.5,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-3",
+        "position": [
+          0.5,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-4",
+        "position": [
+          0.5,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-5",
+        "position": [
+          0.5,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-6",
+        "position": [
+          0.5,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      },
+      {
+        "id": "surface-7",
+        "position": [
+          0.5,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1,
+        "surface": true
+      }
+    ],
+    "modules": [
+      {
+        "kind": "tank",
+        "id": "fuel",
+        "resource": "liquidPropellant",
+        "capacityKg": 200
+      }
+    ]
+  },
+  {
+    "id": "aircraft-jet",
+    "name": "Atmosphere-fed jet",
+    "description": "Atmosphere-fed jet; explicit collision and mass geometry",
+    "category": "structure",
+    "dryMassKg": 80,
+    "height": 0.5,
+    "radius": 0.5,
+    "shape": "box",
+    "boxSizeMeters": [
+      0.5,
+      0.5,
+      1
+    ],
+    "color": "#bfcbd5",
+    "crossfeed": true,
+    "nodes": [
+      {
+        "id": "front",
+        "position": [
+          0,
+          0,
+          0.5
+        ],
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "engine",
+        "id": "jet",
+        "resource": "liquidPropellant",
+        "thrustNewtons": 5000,
+        "ispSeconds": 2500,
+        "nozzleExitAreaM2": 0,
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "jet": {
+          "referenceDensityKgM3": 1.225,
+          "minimumDensityKgM3": 0.03
+        }
+      }
+    ]
+  },
+  {
+    "id": "aircraft-elevator-right",
+    "name": "Aircraft right elevator",
+    "description": "Explicit cuboid wing geometry, matched contact and aerodynamic geometry",
+    "category": "structure",
+    "dryMassKg": 25,
+    "height": 0.1,
+    "radius": 0.75,
+    "shape": "box",
+    "boxSizeMeters": [
+      1.5,
+      0.1,
+      1
+    ],
+    "color": "#d6dde3",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "root",
+        "position": [
+          -0.75,
+          0,
+          0
+        ],
+        "direction": [
+          -1,
+          0,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "liftingSurface",
+        "id": "lift",
+        "parameters": {
+          "point": [
+            0,
+            0,
+            0
+          ],
+          "chord": [
+            0,
+            0,
+            1
+          ],
+          "normal": [
+            0,
+            1,
+            0
+          ],
+          "areaM2": 1.5,
+          "aspectRatio": 1.5,
+          "chordMeters": 1,
+          "sweepRadians": 0,
+          "incidenceRadians": 0,
+          "zeroLiftRadians": 0,
+          "stallRadians": 0.28,
+          "cd0": 0.02,
+          "efficiency": 0.8,
+          "pitchingMoment": 0,
+          "control": "pitch",
+          "controlSign": -1,
+          "maxDeflectionRadians": 0.35
+        }
+      }
+    ]
+  },
+  {
+    "id": "aircraft-elevator-left",
+    "name": "Aircraft left elevator",
+    "description": "Explicit cuboid wing geometry, matched contact and aerodynamic geometry",
+    "category": "structure",
+    "dryMassKg": 25,
+    "height": 0.1,
+    "radius": 0.75,
+    "shape": "box",
+    "boxSizeMeters": [
+      1.5,
+      0.1,
+      1
+    ],
+    "color": "#d6dde3",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "root",
+        "position": [
+          0.75,
+          0,
+          0
+        ],
+        "direction": [
+          1,
+          0,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "liftingSurface",
+        "id": "lift",
+        "parameters": {
+          "point": [
+            0,
+            0,
+            0
+          ],
+          "chord": [
+            0,
+            0,
+            1
+          ],
+          "normal": [
+            0,
+            1,
+            0
+          ],
+          "areaM2": 1.5,
+          "aspectRatio": 1.5,
+          "chordMeters": 1,
+          "sweepRadians": 0,
+          "incidenceRadians": 0,
+          "zeroLiftRadians": 0,
+          "stallRadians": 0.28,
+          "cd0": 0.02,
+          "efficiency": 0.8,
+          "pitchingMoment": 0,
+          "control": "pitch",
+          "controlSign": -1,
+          "maxDeflectionRadians": 0.35
+        }
+      }
+    ]
+  },
+  {
+    "id": "aircraft-rudder",
+    "name": "Aircraft vertical rudder",
+    "description": "Aircraft vertical rudder; explicit collision and mass geometry",
+    "category": "structure",
+    "dryMassKg": 25,
+    "height": 1.5,
+    "radius": 0.5,
+    "shape": "box",
+    "boxSizeMeters": [
+      0.12,
+      1.5,
+      1
+    ],
+    "color": "#bfcbd5",
+    "crossfeed": false,
+    "nodes": [
+      {
+        "id": "root",
+        "position": [
+          0,
+          -0.75,
+          0
+        ],
+        "direction": [
+          0,
+          -1,
+          0
+        ],
+        "size": 1
+      }
+    ],
+    "modules": [
+      {
+        "kind": "liftingSurface",
+        "id": "lift",
+        "parameters": {
+          "point": [
+            0,
+            0,
+            0
+          ],
+          "chord": [
+            0,
+            0,
+            1
+          ],
+          "normal": [
+            1,
+            0,
+            0
+          ],
+          "areaM2": 1.5,
+          "aspectRatio": 1.5,
+          "chordMeters": 1,
+          "sweepRadians": 0,
+          "incidenceRadians": 0,
+          "zeroLiftRadians": 0,
+          "stallRadians": 0.28,
+          "cd0": 0.02,
+          "efficiency": 0.8,
+          "pitchingMoment": 0,
+          "control": "yaw",
+          "controlSign": -1,
+          "maxDeflectionRadians": 0.3
         }
       }
     ]

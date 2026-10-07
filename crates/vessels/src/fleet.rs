@@ -474,6 +474,7 @@ impl Fleet {
                 _ => self.time,
             },
         )
+        .map(|air| air.with_controls(self.controls[&v.id].turn))
         .map(|air| Arc::new(air) as Arc<dyn AirSource>)
     }
     /// Current passive aerodynamic load in the origin frame, about the live COM. No state is
@@ -489,6 +490,7 @@ impl Fleet {
             snap.rotation,
             self.time,
         )
+        .map(|air| air.with_controls(self.controls[&v.id].turn))
         .map_or(
             void_modules::Wrench::zero(self.origin_frame(), snap.position),
             |air| {
@@ -1540,6 +1542,7 @@ impl Fleet {
                     snap.rotation,
                     self.time,
                 )
+                .map(|air| air.with_controls(self.controls[&v.id].turn))
                 .map_or(DVec3::ZERO, |source| {
                     if self.options.air_dynamics == AirDynamics::ForceOnly {
                         return source.acceleration(
@@ -2167,6 +2170,19 @@ impl Fleet {
         }
     }
     fn steering(&mut self, v: &Vessel, q: DQuat, w: DVec3, dt: f64) -> DVec3 {
+        if !v.members.iter().any(|id| {
+            self.parts.part(id).definition.modules.iter().any(|module| {
+                matches!(
+                    module,
+                    Module::Command {
+                        reaction_wheel: true,
+                        ..
+                    }
+                )
+            })
+        }) {
+            return DVec3::ZERO;
+        }
         let pilot = self.controls[&v.id].turn;
         let ground = self.attitude_ground(v);
         let inertia = rows(self.inertia_of(&v.members, self.centre(&v.members)));
@@ -2234,6 +2250,7 @@ impl Fleet {
             q,
             t,
         )
+        .map(|air| air.with_controls(self.controls[&v.id].turn))
         .map(Arc::new);
         let initial = air.as_ref().map(|air| {
             air.wrench(
@@ -2482,6 +2499,7 @@ impl Fleet {
                     *rotation,
                     t,
                 )
+                .map(|air| air.with_controls(self.controls[&v.id].turn))
                 .unwrap();
                 Some(Arc::new(GuidedAirSource {
                     air: Arc::new(geometry),
@@ -2642,6 +2660,7 @@ impl Fleet {
                 snapshot.rotation,
                 self.time,
             )
+            .map(|air| air.with_controls(self.controls[&v.id].turn))
             .map(|source| {
                 let local = if full_air {
                     self.scene_centre(&v)
@@ -2718,6 +2737,7 @@ impl Fleet {
                         q,
                         self.time,
                     )
+                    .map(|air| air.with_controls(self.controls[&v.id].turn))
                     .map_or(DVec3::ZERO, |air| {
                         qm.conjugate()
                             * air
@@ -2817,6 +2837,7 @@ impl Fleet {
                 q,
                 self.time,
             )
+            .map(|air| air.with_controls(self.controls[&v.id].turn))
             .map_or(DVec3::ZERO, |air| {
                 air.wrench_in(&at, contact, state_of(local), q, w).force
             });

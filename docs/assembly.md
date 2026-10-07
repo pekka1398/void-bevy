@@ -95,3 +95,18 @@ callers explicitly select format 3 before editing. `mirror_pose_x` supplies bila
 parent-local pose geometry; asymmetric parts/control signs need authored counterpart
 parts, since a quaternion cannot encode reflection of an asymmetric object. Live
 Fleet state remains owned by PartGraph; these APIs do not mutate its physical caches.
+
+Aircraft command modules author `reactionWheel: false`; manual turn inputs then act
+through pitch/roll/yaw aerodynamic control channels without Fleet's artificial
+command torque. Legacy command definitions explicitly retain their previous
+reaction-wheel behavior. Each surface authors its control sign and maximum deflection;
+left/right wings have opposite aileron signs. `VesselAir::with_controls` freezes the
+accepted pilot input for every trial, without mutating modules or resources.
+
+New cuboids use three face-pair pressure elements with actual face areas. Rocket and
+legacy square-section body drag retain their original evaluation order. Jet engine
+ratings use existing engine activation/crossfeed and accepted fuel consumption; thrust
+and fuel flow scale with density, vanish below the authored minimum density, and cannot
+operate in vacuum. This is a simple atmospheric jet model, not a compressor map.
+Aircraft branch simulation model is 22; final combined model is assigned during root
+integration. No prior recordings are silently repaired.

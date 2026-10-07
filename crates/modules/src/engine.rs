@@ -44,7 +44,23 @@ pub fn thrust_rating(
         "engine: {} ambient pressure {pressure}",
         part.id
     );
-    let thrust = engine.thrust_newtons * throttle;
+    let density_scale = if let Some(jet) = engine.jet {
+        conditions.air.map_or(0.0, |sample| {
+            let density = sample.air.density;
+            assert!(
+                density.is_finite() && density >= 0.0,
+                "invalid jet air density"
+            );
+            if density <= jet.minimum_density_kg_m3 {
+                0.0
+            } else {
+                (density / jet.reference_density_kg_m3).min(1.0)
+            }
+        })
+    } else {
+        1.0
+    };
+    let thrust = engine.thrust_newtons * throttle * density_scale;
     let scale = (1.0 - area * pressure / engine.thrust_newtons).max(0.0);
     assert!(
         scale.is_finite() && (0.0..=1.0).contains(&scale),

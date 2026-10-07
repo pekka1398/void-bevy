@@ -61,6 +61,8 @@ pub enum Module {
     },
     Command {
         id: String,
+        #[serde(default = "default_true", rename = "reactionWheel")]
+        reaction_wheel: bool,
     },
     Tank {
         id: String,
@@ -79,6 +81,8 @@ pub enum Module {
         #[serde(rename = "nozzleExitAreaM2")]
         nozzle_exit_area_m2: f64,
         direction: DVec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        jet: Option<JetDefinition>,
     },
     Decoupler {
         id: String,
@@ -135,6 +139,9 @@ pub struct Attachment {
     /// Explicit parent-relative welded pose at the named surface socket.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pose: Option<PartPose>,
+}
+fn default_true() -> bool {
+    true
 }
 fn is_false(value: &bool) -> bool {
     !*value
@@ -960,7 +967,7 @@ impl Module {
             Self::Thermal { id, .. }
             | Self::Rcs { id, .. }
             | Self::DockingPort { id, .. }
-            | Self::Command { id }
+            | Self::Command { id, .. }
             | Self::Tank { id, .. }
             | Self::Engine { id, .. }
             | Self::Decoupler { id, .. }
@@ -1077,6 +1084,25 @@ impl ParachuteState {
         elapsed_seconds: 0.0,
     };
 }
+/// Atmosphere-fed engine rating; thrust and fuel flow track density, no vacuum operation.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct JetDefinition {
+    pub reference_density_kg_m3: f64,
+    pub minimum_density_kg_m3: f64,
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SurfaceControl {
+    #[default]
+    Fixed,
+    Pitch,
+    Roll,
+    Yaw,
+}
+fn default_control_sign() -> f64 {
+    1.0
+}
 /// Fixed aerodynamic section in part axes; offset is its centre of pressure from part origin.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1094,6 +1120,12 @@ pub struct LiftingSurfaceDefinition {
     pub cd0: f64,
     pub efficiency: f64,
     pub pitching_moment: f64,
+    #[serde(default)]
+    pub control: SurfaceControl,
+    #[serde(default = "default_control_sign")]
+    pub control_sign: f64,
+    #[serde(default)]
+    pub max_deflection_radians: f64,
 }
 pub fn validate_definition(d: &PartDefinition) -> ModelResult<()> {
     if let Some(size) = d.box_size_meters
@@ -1162,8 +1194,23 @@ pub fn validate_definition(d: &PartDefinition) -> ModelResult<()> {
                     return Err("invalid docking parameters".into());
                 }
             }
+            Module::Engine { jet: Some(jet), .. }
+                if !jet.reference_density_kg_m3.is_finite()
+                    || jet.reference_density_kg_m3 <= 0.0
+                    || !jet.minimum_density_kg_m3.is_finite()
+                    || jet.minimum_density_kg_m3 < 0.0
+                    || jet.minimum_density_kg_m3 >= jet.reference_density_kg_m3 =>
+            {
+                return Err("Invalid jet density range".into());
+            }
             Module::LiftingSurface { parameters: p, .. }
-                if !p.point.is_finite()
+                if !p.control_sign.is_finite()
+                    || p.control_sign.abs() != 1.0
+                    || !p.max_deflection_radians.is_finite()
+                    || !(0.0..=std::f64::consts::FRAC_PI_2).contains(&p.max_deflection_radians)
+                    || (p.control == SurfaceControl::Fixed && p.max_deflection_radians != 0.0)
+                    || (p.control != SurfaceControl::Fixed && p.max_deflection_radians == 0.0)
+                    || !p.point.is_finite()
                     || !p.chord.is_finite()
                     || !p.normal.is_finite()
                     || (p.chord.length() - 1.0).abs() > 1e-8

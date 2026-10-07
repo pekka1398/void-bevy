@@ -57,6 +57,9 @@ pub fn propulsion(
                     continue;
                 }
                 let thrust = engine::thrust_rating(p, rating, throttle, conditions);
+                if thrust.flow_kg_per_second == 0.0 {
+                    continue;
+                }
                 let e = EngineForce {
                     part_id: id.clone(),
                     module_id: module_id.to_string(),
