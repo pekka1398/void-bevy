@@ -68,6 +68,8 @@ pub fn displacement(part: &PartDefinition, normal: DVec3, depth: f64) -> Displac
     }
     let mut clipped = vec![];
     let mut cap: Vec<DVec3> = vec![];
+    let mut has_inside = false;
+    let mut has_outside = false;
     for face in faces {
         let mut result = vec![];
         for i in 0..face.len() {
@@ -75,6 +77,11 @@ pub fn displacement(part: &PartDefinition, normal: DVec3, depth: f64) -> Displac
             let b = face[(i + 1) % face.len()];
             let da = normal.dot(a) - depth;
             let db = normal.dot(b) - depth;
+            has_inside |= da < 0.;
+            has_outside |= da > 0.;
+            if da.abs() < 1e-12 && !cap.iter().any(|v| (*v - a).length_squared() < 1e-20) {
+                cap.push(a);
+            }
             if da <= 0. {
                 result.push(a);
             }
@@ -90,7 +97,7 @@ pub fn displacement(part: &PartDefinition, normal: DVec3, depth: f64) -> Displac
             clipped.push(result);
         }
     }
-    if cap.len() >= 3 {
+    if cap.len() >= 3 && has_inside && has_outside {
         let centre = cap.iter().copied().sum::<DVec3>() / cap.len() as f64;
         let u = normal.any_orthonormal_vector();
         let v = normal.cross(u);
@@ -183,6 +190,14 @@ mod tests {
         let part = void_assembly::definition("flight-booster-engine").unwrap();
         let wet = displacement(part, DVec3::Y, part.height);
         assert!(1000. * wet.volume < part.dry_mass_kg);
+    }
+    #[test]
+    fn clipping_plane_through_vertices_closes_cap_once() {
+        let p = part(Shape::Box);
+        let normal = DVec3::ONE.normalize();
+        let volume = displacement(&p, normal, 1. / 3.0_f64.sqrt()).volume;
+        assert!((volume - 20. / 3.).abs() < 1e-10, "{volume}");
+        assert!((displacement(&p, DVec3::Y, 1.).volume - 8.).abs() < 1e-10);
     }
     #[test]
     fn cylinder_and_cone_volumes() {
