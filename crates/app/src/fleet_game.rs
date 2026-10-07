@@ -1178,11 +1178,15 @@ pub fn run(main_game: bool) {
 fn capture_frame(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>) {
     if keys.just_pressed(KeyCode::PrintScreen) {
         use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+        std::fs::create_dir_all("lab-log/screenshots").expect("create screenshot directory");
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("screenshot clock predates Unix epoch")
             .as_nanos();
-        let path = format!("lab-log/screenshots/frame-{}-{stamp}.png", std::process::id());
+        let path = format!(
+            "lab-log/screenshots/frame-{}-{stamp}.png",
+            std::process::id()
+        );
         commands
             .spawn(Screenshot::primary_window())
             .observe(save_to_disk(path));
@@ -1860,14 +1864,15 @@ fn controls(
     {
         DVec3::new(
             axis(&keys, KeyCode::KeyS, KeyCode::KeyW),
-            axis(&keys, KeyCode::KeyE, KeyCode::KeyQ),
             if lab.session.sim().fleet.control_profile(&id)
                 == Some(void_assembly::ControlProfile::Aircraft)
             {
-                axis(&keys, KeyCode::KeyA, KeyCode::KeyD)
+                // +Z nose / +Y top: player right is -X, hence negative yaw about +Y.
+                axis(&keys, KeyCode::KeyQ, KeyCode::KeyE)
             } else {
-                axis(&keys, KeyCode::KeyD, KeyCode::KeyA)
+                axis(&keys, KeyCode::KeyE, KeyCode::KeyQ)
             },
+            axis(&keys, KeyCode::KeyD, KeyCode::KeyA),
         )
     } else {
         DVec3::ZERO
@@ -3329,6 +3334,133 @@ mod tests {
         assert_eq!(
             lab.session.sim().fleet.rcs_control(&selected).force,
             DVec3::ZERO
+        );
+    }
+    fn aircraft_input_app(airborne: bool) -> App {
+        let planet = void_fleet_flight::aircraft_acceptance_planet(void_landing::earth_size());
+        let craft = void_assembly::aircraft();
+        let site = DVec3::X;
+        let initial = InitialWorld::new(&planet, &craft, site, true)
+            .with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque);
+        let mut lab = new_lab(FlightSession::new(initial), craft.clone());
+        lab.main_game = true;
+        lab.paused = false;
+        if airborne {
+            let f = &lab.session.sim().fleet;
+            let body = lab.session.sim().home;
+            let transform = f
+                .frames()
+                .transform(f.body_frames(body).1, f.origin_frame());
+            let upright = void_landing::upright_at(site);
+            let state = transform.apply_state(void_frames::State {
+                position: site * (planet.terrain.radius_meters + 1000.0),
+                velocity: upright * DVec3::Z * 100.0,
+            });
+            let Outcome::Spawned(id) = lab.session.execute(Action::LaunchState {
+                craft,
+                position: state.position,
+                velocity: state.velocity,
+                rotation: transform.rotation() * upright,
+                angular_velocity: DVec3::ZERO,
+            }) else {
+                panic!("aircraft flight fixture")
+            };
+            select_pilot(&mut lab, &id);
+        }
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_non_send(lab)
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(AccumulatedMouseMotion::default())
+            .insert_resource(AccumulatedMouseScroll::default())
+            .add_systems(Update, controls);
+        app.world_mut().spawn(Window::default());
+        app
+    }
+    fn aircraft_world_torque(app: &App) -> DVec3 {
+        let sim = app.world().non_send::<Lab>().session.sim();
+        let load = sim.fleet.aerodynamic_wrench(&sim.selected);
+        sim.fleet
+            .frames()
+            .transform(load.frame, sim.fleet.origin_frame())
+            .apply_direction(load.torque)
+    }
+    #[test]
+    fn aircraft_keyboard_produces_pitch_up_and_player_right_bank_and_yaw() {
+        // Prove geometric directions from actual aerodynamic loads, independently of catalog
+        // part names and the mirrored navball. Player right is nose cross top.
+        for key in [KeyCode::KeyW, KeyCode::KeyD, KeyCode::KeyE] {
+            let mut app = aircraft_input_app(true);
+            let q = {
+                let sim = app.world().non_send::<Lab>().session.sim();
+                sim.fleet.snapshot(&sim.selected).rotation
+            };
+            let nose = q * DVec3::Z;
+            let top = q * DVec3::Y;
+            let right = nose.cross(top);
+            let neutral = aircraft_world_torque(&app);
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+            app.update();
+            let change = aircraft_world_torque(&app) - neutral;
+            let response = match key {
+                KeyCode::KeyW => change.cross(nose).dot(top),
+                KeyCode::KeyD => change.cross(top).dot(right),
+                KeyCode::KeyE => change.cross(nose).dot(right),
+                _ => unreachable!(),
+            };
+            assert!(
+                response > 100.0,
+                "{key:?}: world torque {change:?}, response {response}"
+            );
+        }
+    }
+    #[test]
+    fn aircraft_keyboard_taxi_turns_toward_player_right() {
+        let mut app = aircraft_input_app(false);
+        let (id, start, up) = {
+            let mut lab = app.world_mut().non_send_mut::<Lab>();
+            lab.session.execute(Action::Advance {
+                seconds: 5.0,
+                rails: false,
+            });
+            lab.session.execute(Action::Stage);
+            lab.session.execute(Action::Vehicle {
+                control: void_assembly::VehicleControl::default(),
+            });
+            lab.session.execute(Action::Control {
+                throttle: 0.3,
+                turn: DVec3::ZERO,
+            });
+            lab.session.execute(Action::Advance {
+                seconds: 5.0,
+                rails: false,
+            });
+            let sim = lab.session.sim();
+            let q = sim.fleet.snapshot(&sim.selected).rotation;
+            (sim.selected.clone(), q * DVec3::Z, q * DVec3::Y)
+        };
+        let right = start.cross(up);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyE);
+        for _ in 0..40 {
+            app.update();
+            app.world_mut()
+                .non_send_mut::<Lab>()
+                .session
+                .execute(Action::Advance {
+                    seconds: 0.05,
+                    rails: false,
+                });
+        }
+        let lab = app.world().non_send::<Lab>();
+        let end = lab.session.sim().fleet.snapshot(&id).rotation * DVec3::Z;
+        assert!(
+            end.dot(right) > 0.02,
+            "E taxi nose {start:?} -> {end:?}, right {right:?}"
         );
     }
     fn initialized_scene(main_game: bool) -> App {
