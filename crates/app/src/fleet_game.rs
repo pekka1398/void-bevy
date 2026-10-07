@@ -703,6 +703,21 @@ pub fn run(main_game: bool) {
         );
         return;
     }
+    if main_game && std::env::args().any(|a| a == "--rover") {
+        assert!(
+            !std::env::args().any(|a| matches!(
+                a.as_str(),
+                "--reentry"
+                    | "--rendezvous"
+                    | "--aircraft"
+                    | "--load"
+                    | "--replay"
+                    | "--world"
+                    | "--craft"
+            )),
+            "--rover is a new craft fixture and cannot replace explicit craft/world/load/replay or another fixture"
+        );
+    }
     let id = argument("--planet").unwrap_or("aurelia".into());
     let planet = game_planet_by_id(&id, argument("--terrain").as_deref());
     let craft = argument("--craft").map_or_else(
@@ -1507,14 +1522,8 @@ fn controls(
     let warp_was_active = lab.session.sim().maneuver_warp.active();
     let id = lab.session.sim().selected.clone();
     let commanded = lab.session.sim().fleet.has_command(&id);
-    let vehicle = lab.session.sim().fleet.has_wheels(&id)
-        && !lab.session.sim().fleet.parts().parts().any(|p| {
-            lab.session.sim().fleet.vessel_of_part(&p.id) == id
-                && p.definition
-                    .modules
-                    .iter()
-                    .any(|m| matches!(m, Module::LiftingSurface { .. }))
-        });
+    let vehicle =
+        lab.session.sim().fleet.control_profile(&id) == Some(void_assembly::ControlProfile::Rover);
     if vehicle {
         let previous = lab
             .session

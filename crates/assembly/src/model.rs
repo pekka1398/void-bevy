@@ -28,6 +28,16 @@ pub struct AttachNode {
     #[serde(default, skip_serializing_if = "is_false")]
     pub surface: bool,
 }
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ControlProfile {
+    #[default]
+    Flight,
+    Aircraft,
+    Rover,
+    Eva,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Module {
@@ -65,6 +75,8 @@ pub enum Module {
     },
     Command {
         id: String,
+        #[serde(default)]
+        control_profile: ControlProfile,
         #[serde(default = "default_true", rename = "reactionWheel")]
         reaction_wheel: bool,
     },

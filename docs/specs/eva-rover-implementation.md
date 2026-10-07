@@ -28,7 +28,7 @@ silently by planet. Main craft command has no ideal reaction wheel.
 
 ## Main game acceptance
 
-Run void-app --rover --planet earth-size (or the appropriate planet ID listed by --help), or
+Run void-app --rover --planet terra (or another configured planet ID), or
 --craft crates/assembly/data/rover.json. W/S drive/reverse, A/D front steering; Space latches
 brakes, X toggles parking brake, and W/S releases brakes. P pause; F6/F7 direct save/load;
 F4 shows actual chassis and terrain colliders. Tire meshes visibly steer, spin and move with

@@ -3294,7 +3294,8 @@
       {
         "kind": "command",
         "id": "command1",
-        "reactionWheel": false
+        "reactionWheel": false,
+        "controlProfile": "rover"
       }
     ]
   },

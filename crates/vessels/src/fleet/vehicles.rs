@@ -9,6 +9,24 @@ pub(super) struct WheelLoads {
     pub updates: Vec<(String, String, ModuleState)>,
 }
 impl Fleet {
+    /// Root command owns the selected vessel's operator profile, including docked mixed craft.
+    pub fn control_profile(&self, vessel: &str) -> Option<void_assembly::ControlProfile> {
+        let v = self.vessel(vessel);
+        let command = self
+            .parts
+            .part(&v.root)
+            .definition
+            .modules
+            .iter()
+            .find_map(|m| match m {
+                Module::Command {
+                    control_profile, ..
+                } => Some(*control_profile),
+                _ => None,
+            });
+        command
+    }
+
     pub fn has_wheels(&self, vessel: &str) -> bool {
         self.vessel(vessel).members.iter().any(|id| {
             self.parts
