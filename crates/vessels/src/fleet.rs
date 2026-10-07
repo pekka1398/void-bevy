@@ -478,6 +478,31 @@ impl Fleet {
         .map(|air| air.with_controls(self.controls[&v.id].turn))
         .map(|air| Arc::new(air) as Arc<dyn AirSource>)
     }
+    pub fn air_data(&self, id: &str) -> void_modules::AirData {
+        let v = self.vessel(id);
+        let snap = self.snapshot_of(v);
+        vessel_air_at(
+            &self.environment,
+            &self.parts,
+            &v.members,
+            self.centre(&v.members),
+            snap.rotation,
+            self.time,
+        )
+        .map(|air| air.with_controls(self.controls[&v.id].turn))
+        .map_or(void_modules::AirData::default(), |air| {
+            air.air_data(
+                &*self.ephemeris,
+                self.time,
+                State {
+                    position: snap.position,
+                    velocity: snap.velocity,
+                },
+                snap.rotation,
+                snap.angular_velocity,
+            )
+        })
+    }
     /// Current passive aerodynamic load in the origin frame, about the live COM. No state is
     /// prepared/committed and no force is applied; useful to HUDs and acceptance diagnostics.
     pub fn aerodynamic_wrench(&self, id: &str) -> void_modules::Wrench {

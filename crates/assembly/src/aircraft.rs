@@ -75,7 +75,7 @@ pub fn aircraft() -> Craft {
             parent_socket_id: "surface-5".into(),
             node_id: "root".into(),
             pose: PartPose {
-                position: DVec3::new(0.5, -0.4, 0.0),
+                position: DVec3::new(0.5, -0.4, 0.5),
                 rotation: DQuat::IDENTITY,
             },
         },

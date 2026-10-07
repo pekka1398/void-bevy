@@ -1670,7 +1670,8 @@ fn controls(
         c.turn = turn;
     }
     if lab.session.sim().fleet.control_profile(&id) == Some(void_assembly::ControlProfile::Aircraft)
-        && lab.session.sim().fleet.has_wheels(&id) {
+        && lab.session.sim().fleet.has_wheels(&id)
+    {
         let wheel_control = void_assembly::VehicleControl {
             drive: 0.0,
             steer: if lab.paused { 0.0 } else { turn.y },
@@ -2542,6 +2543,24 @@ fn draw(
         .iter()
         .map(|p| p.fuel_kg)
         .sum();
+    let aircraft_data = if f.control_profile(&sim.selected)
+        == Some(void_assembly::ControlProfile::Aircraft)
+    {
+        let data = f.air_data(&sim.selected);
+        let control = f.control(&sim.selected).turn;
+        format!(
+            "\nAIR: {:.1}m/s q {:.1}kPa max section AoA {:.1}° stall {:.0}% | pitch {:.0}% yaw {:.0}% roll {:.0}%\nB hold brakes | Q/E nose steering | aerodynamic control, no reaction wheel",
+            data.airspeed_mps,
+            data.dynamic_pressure_pa / 1000.0,
+            data.maximum_angle_radians.to_degrees(),
+            data.maximum_stall * 100.0,
+            control.x * 100.0,
+            control.y * 100.0,
+            control.z * 100.0
+        )
+    } else {
+        String::new()
+    };
     **hud = Text::new(format!(
         "{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels\nP pause | Space stage | Shift/Ctrl throttle | X cut | WASD QE turn | T SAS\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN nearby craft | O orbital craft | R reset | , . warp | K altitude | L speed\nF1 near/orbit/far | Home ship | Alt+F10/F11 exposure\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
         if lab.main_game {
@@ -2589,8 +2608,9 @@ fn draw(
         (orbital.apoapsis_radius_meters - body.radius_meters) / 1000.0,
         f.vessel_ids().len(),
         format_args!(
-            "{}\n{}\n{}\n{}\n{}\n{}",
+            "{}{}\n{}\n{}\n{}\n{}\n{}",
             lab.notice,
+            aircraft_data,
             scenery_description(sim),
             plotting_description(sim),
             format!("{}{}", thermal_description(lab), vehicle_description(sim)),

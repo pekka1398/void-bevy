@@ -8,7 +8,7 @@ pub use wrench::Wrench;
 pub mod body;
 pub mod engine;
 pub mod parachute;
-pub use air::{Conditions, VesselAir, has_atmosphere, vessel_air, vessel_air_at};
+pub use air::{AirData, Conditions, VesselAir, has_atmosphere, vessel_air, vessel_air_at};
 
 pub mod rcs;
 

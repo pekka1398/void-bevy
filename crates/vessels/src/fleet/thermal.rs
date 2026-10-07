@@ -50,6 +50,14 @@ impl Fleet {
                     let normal = parameters.normal.map(|n| transform.apply_direction(n));
                     let exposure = match (normal, flow) {
                         (Some(n), Some(d)) => n.dot(d).max(0.0),
+                        (None, Some(d)) if part.definition.box_size_meters.is_some() => {
+                            let size = void_assembly::part_box_size(part.definition);
+                            let local = (transform.rotation().conjugate() * d).abs();
+                            let projected = size.y * size.z * local.x
+                                + size.x * size.z * local.y
+                                + size.x * size.y * local.z;
+                            (projected / parameters.heating_area).min(1.0)
+                        }
                         (None, Some(d)) => {
                             // Use the same exposed end areas as the aerodynamic body module.
                             // Buried stack faces do not all receive stagnation heating; failed
@@ -100,7 +108,9 @@ impl Fleet {
                                 let along = offset.dot(n) / facing;
                                 along > 0.0
                                     && (direction * along - offset).length()
-                                        + part.definition.radius
+                                        + if part.definition.box_size_meters.is_some() {
+                                            void_assembly::part_bound_radius(part.definition)
+                                        } else { part.definition.radius }
                                         <= shield.definition.radius
                             })
                         })

@@ -68,6 +68,14 @@ impl Conditions {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct AirData {
+    pub airspeed_mps: f64,
+    pub dynamic_pressure_pa: f64,
+    pub maximum_angle_radians: f64,
+    pub maximum_stall: f64,
+    pub controlled_surfaces: usize,
+}
 /// Immutable part geometry and accepted parachute state for pure trial wrench evaluation.
 pub struct VesselAir {
     environment: Arc<Environment>,
@@ -96,6 +104,62 @@ impl VesselAir {
             aileron: turn.z,
         };
         self
+    }
+    /// Pure HUD/acceptance observation from the same point wind and polar as applied forces.
+    pub fn air_data(
+        &self,
+        ephemeris: &dyn EphemerisSource,
+        time: f64,
+        state: State,
+        rotation: DQuat,
+        angular_velocity: DVec3,
+    ) -> AirData {
+        let frames = self.environment.frames();
+        let at = frames.tree.at(time, ephemeris);
+        let sample = |state| {
+            self.bodies.iter().find_map(|&body| {
+                self.environment
+                    .surroundings(&at, frames, frames.origin, state, body)
+                    .air
+            })
+        };
+        let mut data = AirData::default();
+        if let Some(air) = sample(state) {
+            data.airspeed_mps = air.airspeed.length();
+            data.dynamic_pressure_pa = 0.5 * air.air.density * air.airspeed.length_squared();
+        }
+        for element in &self.elements {
+            let AeroShape::Wing(wing) = &element.shape else {
+                continue;
+            };
+            if wing.control != ControlSurface::None {
+                data.controlled_surfaces += 1;
+            }
+            let arm = rotation * element.point;
+            let point = state.position + arm;
+            if let Some(air) = sample(State {
+                position: point,
+                velocity: state.velocity + angular_velocity.cross(arm),
+            }) {
+                let load = aerodynamic_forces(
+                    std::slice::from_ref(element),
+                    &AeroState {
+                        center: state.position,
+                        velocity: air.airspeed,
+                        rotation,
+                        angular_velocity: DVec3::ZERO,
+                    },
+                    &air.air,
+                    DVec3::ZERO,
+                    &self.controls,
+                );
+                let section = &load.elements[0];
+                data.maximum_angle_radians =
+                    data.maximum_angle_radians.max(section.alpha_radians.abs());
+                data.maximum_stall = data.maximum_stall.max(section.stall);
+            }
+        }
+        data
     }
     /// Pure trial load about the COM. Rotation maps parts axes into `query`; angular velocity
     /// is relative to `query` in its axes. Each location gets its own environment sample, so

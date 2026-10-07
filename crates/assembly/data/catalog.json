@@ -2576,7 +2576,30 @@
       {
         "kind": "command",
         "id": "command",
-        "reactionWheel": false
+        "reactionWheel": false,
+        "controlProfile": "aircraft"
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 18750.0,
+          "coreCapacityJk": 106250.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 17.279999999999998,
+          "heatingArea": 3.5999999999999996,
+          "convectionArea": 17.279999999999998,
+          "emissivity": 0.8,
+          "noseRadius": 0.6,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -2646,6 +2669,28 @@
           "controlSign": 1,
           "maxDeflectionRadians": 0.2
         }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 5250.0,
+          "coreCapacityJk": 29750.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 13.32,
+          "heatingArea": 6.0,
+          "convectionArea": 13.32,
+          "emissivity": 0.8,
+          "noseRadius": 0.06,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -2714,6 +2759,28 @@
           "control": "roll",
           "controlSign": -1,
           "maxDeflectionRadians": 0.2
+        }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 5250.0,
+          "coreCapacityJk": 29750.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 13.32,
+          "heatingArea": 6.0,
+          "convectionArea": 13.32,
+          "emissivity": 0.8,
+          "noseRadius": 0.06,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
         }
       }
     ]
@@ -2890,6 +2957,28 @@
         "id": "fuel",
         "resource": "liquidPropellant",
         "capacityKg": 200
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 8250.0,
+          "coreCapacityJk": 46750.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 14,
+          "heatingArea": 3,
+          "convectionArea": 14,
+          "emissivity": 0.8,
+          "noseRadius": 0.5,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -2941,6 +3030,28 @@
         "jet": {
           "referenceDensityKgM3": 1.225,
           "minimumDensityKgM3": 0.03
+        }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 6000.0,
+          "coreCapacityJk": 34000.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 2.5,
+          "heatingArea": 0.5,
+          "convectionArea": 2.5,
+          "emissivity": 0.8,
+          "noseRadius": 0.25,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
         }
       }
     ]
@@ -3011,6 +3122,28 @@
           "controlSign": 1,
           "maxDeflectionRadians": 0.35
         }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 1875.0,
+          "coreCapacityJk": 10625.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 3.5,
+          "heatingArea": 1.5,
+          "convectionArea": 3.5,
+          "emissivity": 0.8,
+          "noseRadius": 0.05,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -3080,6 +3213,28 @@
           "controlSign": 1,
           "maxDeflectionRadians": 0.35
         }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 1875.0,
+          "coreCapacityJk": 10625.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 3.5,
+          "heatingArea": 1.5,
+          "convectionArea": 3.5,
+          "emissivity": 0.8,
+          "noseRadius": 0.05,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -3148,6 +3303,28 @@
           "control": "yaw",
           "controlSign": -1,
           "maxDeflectionRadians": 0.3
+        }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 1875.0,
+          "coreCapacityJk": 10625.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 3.5999999999999996,
+          "heatingArea": 1.5,
+          "convectionArea": 3.5999999999999996,
+          "emissivity": 0.8,
+          "noseRadius": 0.06,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
         }
       }
     ]
@@ -3570,10 +3747,10 @@
     "category": "structure",
     "dryMassKg": 20,
     "height": 0.2,
-    "radius": 0.15,
+    "radius": 0.8,
     "shape": "box",
     "boxSizeMeters": [
-      0.12,
+      1.6,
       0.2,
       0.3
     ],
@@ -3601,7 +3778,7 @@
         "id": "wheel",
         "parameters": {
           "suspensionOrigin": [
-            0,
+            0.8,
             -0.1,
             0
           ],
@@ -3626,6 +3803,28 @@
           "frictionCoefficient": 0.8,
           "maxSteerRadians": 0
         }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 1500.0,
+          "coreCapacityJk": 8500.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 1.7200000000000002,
+          "heatingArea": 0.48,
+          "convectionArea": 1.7200000000000002,
+          "emissivity": 0.8,
+          "noseRadius": 0.1,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
+        }
       }
     ]
   },
@@ -3636,10 +3835,10 @@
     "category": "structure",
     "dryMassKg": 20,
     "height": 0.2,
-    "radius": 0.15,
+    "radius": 0.8,
     "shape": "box",
     "boxSizeMeters": [
-      0.12,
+      1.6,
       0.2,
       0.3
     ],
@@ -3667,7 +3866,7 @@
         "id": "wheel",
         "parameters": {
           "suspensionOrigin": [
-            0,
+            -0.8,
             -0.1,
             0
           ],
@@ -3691,6 +3890,28 @@
           "brakeTorqueNm": 1000,
           "frictionCoefficient": 0.8,
           "maxSteerRadians": 0
+        }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 1500.0,
+          "coreCapacityJk": 8500.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 1.7200000000000002,
+          "heatingArea": 0.48,
+          "convectionArea": 1.7200000000000002,
+          "emissivity": 0.8,
+          "noseRadius": 0.1,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
         }
       }
     ]
@@ -3757,6 +3978,28 @@
           "brakeTorqueNm": 1000,
           "frictionCoefficient": 0.8,
           "maxSteerRadians": 0.4
+        }
+      },
+      {
+        "kind": "thermal",
+        "id": "thermal",
+        "parameters": {
+          "skinCapacityJk": 1500.0,
+          "coreCapacityJk": 8500.0,
+          "conductanceWk": 8.0,
+          "connectionConductanceWk": 4.0,
+          "radiatingArea": 0.24,
+          "heatingArea": 0.06,
+          "convectionArea": 0.24,
+          "emissivity": 0.8,
+          "noseRadius": 0.06,
+          "heatingFactor": 1.0,
+          "maxSkinK": 1800.0,
+          "maxCoreK": 1100.0,
+          "initialTemperatureK": 270.0,
+          "backgroundK": 270.0,
+          "normal": null,
+          "ablation": null
         }
       }
     ]

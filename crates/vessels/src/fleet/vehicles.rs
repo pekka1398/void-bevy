@@ -12,8 +12,7 @@ impl Fleet {
     /// Root command owns the selected vessel's operator profile, including docked mixed craft.
     pub fn control_profile(&self, vessel: &str) -> Option<void_assembly::ControlProfile> {
         let v = self.vessel(vessel);
-        let command = self
-            .parts
+        self.parts
             .part(&v.root)
             .definition
             .modules
@@ -23,8 +22,7 @@ impl Fleet {
                     control_profile, ..
                 } => Some(*control_profile),
                 _ => None,
-            });
-        command
+            })
     }
 
     pub fn has_wheels(&self, vessel: &str) -> bool {
