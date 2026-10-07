@@ -16,7 +16,7 @@ TS→Rust 搬遷與主要架構重構已完成。主遊戲具備 assembly／Flee
 | 熱系統 | PartGraph 熱模組、連接傳熱、有限 ablator、防熱盾、失效能力停用；`--reentry`、HUD、存讀／journal | 初版參數、270 K 輻射背景；無碎裂／撞擊毀損，見 [main-thermal.md](main-thermal.md) |
 | Solar scenery | 預設十天體；固體共用 LOD／碰撞取樣；氣態雲帶、環、Sol；F1 視角、曝光、O 指定天體軌道 fixture | 三顆光學大氣，只有 Earth 物理大氣；非最終外觀，見 [main-solar-scenery.md](main-solar-scenery.md) |
 
-格式為 model 20／world schema 3／FleetCheckpoint 8／Craft 2，舊模型明確拒絕，沒有自動遷移。本輪採針對性檢查，沒有全 workspace；root TigerVNC／真實 journal 與 checkpoint 核對已通過；使用者於 2026-10-07 確認三項人類驗收完成，對應 master `f06c283`。scenery 最後核對為 26 app／77 Fleet／9 scenery 核心測試、相關 lint／fmt 通過，範圍見整合文件，尚未 push。
+格式為 model 20／world schema 3／FleetCheckpoint 8／Craft 2，舊模型明確拒絕，沒有自動遷移。本輪採針對性檢查，沒有全 workspace；root TigerVNC／真實 journal 與 checkpoint 核對已通過；使用者於 2026-10-07 確認三項人類驗收完成，對應 master `f06c283`。scenery 最後核對為 26 app／77 Fleet／9 scenery 核心測試、相關 lint／fmt 通過，範圍見整合文件；已於 2026-10-07 推送至 origin。
 
 ## 已驗收 RCS／氣動整合
 
@@ -85,7 +85,7 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 ## 待續工作
 
 - **RCS／氣動主遊戲接線**：本輪已合入；對接埠外觀、操作手感及有限 RCS 驅動 SAS 可另開後續工作，不混入這輪。
-- **Scenery**：第一輪基礎已採入主遊戲，原 worktree 保留；逐顆細緻美術仍待安排。
+- **Scenery**：第一輪基礎已採入主遊戲；原始 model 14 lab 已封存至 `archive/solar-scenery-model14`（`e1f13f3`）並推送，原 worktree 已移除；逐顆細緻美術仍待安排。
 - 後續新功能按現行 branch／worktree 主遊戲流程開發。其他需求不因列在 NOTE 就自動啟動。
 
 ## 對照 NOTE.md 的願望清單
@@ -131,3 +131,11 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 合併核對（2026-10-05）：受影響核心／場景 **245 passed、0 failed**；主遊戲原有 offscreen GPU 重建／存檔測試另跑 **1 passed**。唯一仍跳過的行為測試是已結案的 Pebble 傾角；沒有重跑全 workspace。所屬 crates all-targets Clippy `-D warnings`、fmt、主遊戲與兩 lab 編譯通過。新增第二天體降落傘 checkpoint／續跑／錄放，以及分支舊模型拒絕回歸。
 
 合併 commit 後再次以 TigerVNC 核對：降落傘 deploy／全開／F6-F7 續跑，雙大氣切船／月球軌道／存讀；兩份實際操作錄影的 merged-model headless verify 與多天體 checkpoint verify 通過，未見 panic／shader validation 錯誤。
+
+## Git 與歷史資料整理（2026-10-07）
+
+主工作區只保留 `void-bevy`／master；已合併的開發分支與 worktree 已清理。
+組合飛行測試已在 master，舊 flight-checks 工作區已移除。Scenery 原始成果保留於
+上述封存分支，不混入目前主線。既有驗證錄影／存檔搬至
+`/home/pekka/Archives/VOID/2026-10-05/review-recordings/`，同層 README.txt
+記錄用途與版本限制，SHA-256 摘要核對搬移前後一致。
