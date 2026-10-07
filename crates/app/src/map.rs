@@ -198,7 +198,12 @@ pub fn place_map_labels(
             *visibility = Visibility::Hidden;
             continue;
         };
-        *visibility = Visibility::Inherited;
+        // A suppressed label must not leave an invisible button above the visible star.
+        *visibility = if *crowded {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
         node.left = px(at.x - 3.0);
         node.top = px(at.y - 7.0);
         if let Ok((mut t, mut v)) = texts.get_mut(marker.text) {
