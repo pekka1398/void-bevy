@@ -21,12 +21,42 @@ pub fn splashdown_with(
         .and_then(|p| p.sea_level_meters)
         .expect("splashdown requires sea");
     let radius = fleet.environment().bodies()[body].radius_meters;
+    let star = fleet
+        .ephemeris
+        .bodies()
+        .iter()
+        .find(|star| {
+            star.parent_index.is_none()
+                && fleet.ephemeris.system_of(star.index) == fleet.ephemeris.system_of(body)
+        })
+        .expect("splashdown home system has no root light source");
+    // Exactly the renderer's home-system light geometry, computed entirely in f64 body axes.
+    // Single-body worlds explicitly author distant +X sunlight; stellar worlds use their star.
+    let at = fleet.frames();
+    let surface = fleet.body_frames(body).1;
+    let star_position = (star.index != body).then(|| {
+        at.transform(fleet.body_frames(star.index).0, surface)
+            .apply_point(DVec3::ZERO)
+    });
+    let distant_sun = at
+        .transform(fleet.origin_frame(), surface)
+        .apply_direction(DVec3::X);
     let direction = (0..4096)
         .find_map(|i| {
             let z = 1. - 2. * (i as f64 + 0.5) / 4096.;
             let t = i as f64 * 2.399963229728653;
             let r = (1. - z * z).sqrt();
             let d = DVec3::new(r * t.cos(), r * t.sin(), z);
+            let sun = star_position.map_or(distant_sun, |position| {
+                (position - d * (radius + level + 8.)).normalize()
+            });
+            assert!(
+                sun.is_finite() && (sun.length_squared() - 1.).abs() < 1e-9,
+                "splashdown invalid sun geometry"
+            );
+            if d.dot(sun) <= 0.2 {
+                return None;
+            }
             let s = fleet.environment().surroundings_local(
                 body,
                 void_frames::State {
@@ -36,7 +66,7 @@ pub fn splashdown_with(
             );
             s.ground.filter(|g| g.height < level - 50.).map(|_| d)
         })
-        .expect("splashdown requires a deep ocean site");
+        .expect("splashdown requires a daylight deep ocean site (sun cosine > 0.2)");
     let transform = fleet
         .frames()
         .transform(fleet.body_frames(body).1, fleet.origin_frame());

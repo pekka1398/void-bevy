@@ -10,6 +10,18 @@ fn capsule_splashdown_floats_and_replays() {
     )
     .with_recording();
     let id = void_fleet_flight::water::splashdown(&mut session);
+    let sim = session.sim();
+    let direction = sim
+        .fleet
+        .body_fixed_state(&id, sim.home)
+        .position
+        .normalize();
+    let sun = sim
+        .fleet
+        .frames()
+        .transform(sim.fleet.origin_frame(), sim.fleet.body_frames(sim.home).1)
+        .apply_direction(DVec3::X);
+    assert!(direction.dot(sun) > 0.2);
     for _ in 0..120 {
         assert_eq!(
             session.execute(Action::Advance {
@@ -264,4 +276,45 @@ fn fully_submerged_fast_motion_dissipates_and_checkpoint_retimes_exactly() {
             void_fleet_flight::session::world_mark(restored.sim())
         );
     }
+}
+#[test]
+fn stellar_home_splashdown_uses_actual_daylight_star_geometry() {
+    let mut planet = void_landing::aurelia();
+    planet.sea_level = Some(1800.);
+    let mut session = FlightSession::new(
+        InitialWorld::new(&planet, &void_assembly::reentry_capsule(), DVec3::X, true)
+            .with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque),
+    );
+    let id = void_fleet_flight::water::splashdown(&mut session);
+    let sim = session.sim();
+    let fleet = &sim.fleet;
+    let point = fleet.body_fixed_state(&id, sim.home).position;
+    let star = fleet
+        .ephemeris
+        .bodies()
+        .iter()
+        .find(|b| {
+            b.parent_index.is_none()
+                && fleet.ephemeris.system_of(b.index) == fleet.ephemeris.system_of(sim.home)
+        })
+        .unwrap();
+    assert_ne!(star.index, sim.home);
+    let sun = (fleet
+        .frames()
+        .transform(
+            fleet.body_frames(star.index).0,
+            fleet.body_frames(sim.home).1,
+        )
+        .apply_point(DVec3::ZERO)
+        - point)
+        .normalize();
+    assert!(point.normalize().dot(sun) > 0.2);
+    let water = fleet.environment().surroundings_local(
+        sim.home,
+        void_frames::State {
+            position: point,
+            velocity: DVec3::ZERO,
+        },
+    );
+    assert!(water.ground.unwrap().height < 1800. - 50.);
 }

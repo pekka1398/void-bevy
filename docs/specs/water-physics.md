@@ -74,3 +74,9 @@ half velocity；Rapier dt 和 options dt 一致。恢復配置步長也做同一
 反向能量爆增。checkpoint 恢復後跨不同 substep 數量精確續跑一致。ContactWorld
 重設 h 測試允許 native f32 一次重發布 rounding 3e-5 m/s，沒有物理 impulse。
 J2 共用 gravity 數值測試、既有水5／飛機3／車輛2及 core clippy 通過。
+
+濺落視窗 fixture 選點追加 daylight 條件：與 renderer 同樣的 home-system root star
+→home body-fixed f64 frame tree geometry，候選點 sun cosine >0.2 且地形低於海面50m。
+單天體配置沿用既有 renderer 明寫的遠方 +X 光源，不新加光源或亮度 fallback。
+找不到 daylight 深海點明確 panic。核對真正 Aurelia／Sol 光源和單天體方向兩種
+選點測試；使用相同 terrain sampler，未改海面或地形。
