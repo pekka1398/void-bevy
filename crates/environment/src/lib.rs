@@ -62,6 +62,10 @@ pub struct GroundSample {
 pub struct SeaSample {
     /// Below the sea surface; negative above it.
     pub depth: f64,
+    /// Velocity relative to water rotating with the body, in query axes.
+    pub velocity: DVec3,
+    /// Sea exists above local solid terrain, and query point is outside solid terrain.
+    pub water_present: bool,
 }
 
 /// One body's conditions at a point.
@@ -281,8 +285,13 @@ impl Environment {
             })
         });
         let sea = described.and_then(|p| {
+            let level = p.sea_level_meters?;
+            let ground = self.ground_under(body, place);
+            let water_present = !ground.is_some_and(|g| g.height >= level || g.clearance < 0.0);
             Some(SeaSample {
-                depth: b.radius_meters + p.sea_level_meters? - radius,
+                depth: b.radius_meters + level - radius,
+                velocity: place.back * local.velocity,
+                water_present,
             })
         });
         Surroundings {

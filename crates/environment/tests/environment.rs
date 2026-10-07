@@ -321,3 +321,38 @@ fn compatibility_checks_physics_even_when_body_ids_match() {
         assert!(panics(|| environment.assert_compatible(&other)));
     }
 }
+
+#[test]
+fn water_mask_excludes_coastal_land_and_solid_interior() {
+    let e = sol();
+    let (env, body, terrain) = aurelia(&e);
+    let radius = e.bodies()[body].radius_meters;
+    let mut wet = false;
+    let mut dry = false;
+    for i in 0..256 {
+        let z = 1. - 2. * (i as f64 + 0.5) / 256.;
+        let theta = i as f64 * 2.399963229728653;
+        let direction = DVec3::new(
+            (1. - z * z).sqrt() * theta.cos(),
+            (1. - z * z).sqrt() * theta.sin(),
+            z,
+        );
+        let height = terrain.height(direction);
+        let sample = |altitude| {
+            env.surroundings_local(
+                body,
+                State {
+                    position: direction * (radius + altitude),
+                    velocity: DVec3::new(1., 2., 3.),
+                },
+            )
+        };
+        let sea = sample(SEA_LEVEL + 10.).sea.unwrap();
+        assert_eq!(sea.water_present, height < SEA_LEVEL);
+        assert_eq!(sea.velocity, DVec3::new(1., 2., 3.));
+        assert!(!sample(height - 1.).sea.unwrap().water_present);
+        wet |= sea.water_present;
+        dry |= !sea.water_present;
+    }
+    assert!(wet && dry);
+}

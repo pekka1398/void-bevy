@@ -13,3 +13,5 @@ pub use air::{AirData, Conditions, VesselAir, has_atmosphere, vessel_air, vessel
 pub mod rcs;
 
 pub mod thermal;
+
+pub mod water;

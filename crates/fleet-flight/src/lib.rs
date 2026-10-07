@@ -359,3 +359,5 @@ pub fn aircraft_acceptance_planet(mut planet: LandingPlanet) -> LandingPlanet {
     planet.label.push_str(" | AIRCRAFT RUNWAY ACCEPTANCE");
     planet
 }
+
+pub mod water;

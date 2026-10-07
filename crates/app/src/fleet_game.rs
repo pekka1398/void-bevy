@@ -730,6 +730,20 @@ pub fn run(main_game: bool) {
             "--rover is a new craft fixture and cannot replace explicit craft/world/load/replay or another fixture"
         );
     }
+    if main_game && std::env::args().any(|a| a == "--splashdown") {
+        assert!(
+            !std::env::args().any(|a| [
+                "--rover",
+                "--aircraft",
+                "--reentry",
+                "--rendezvous",
+                "--load",
+                "--replay"
+            ]
+            .contains(&a.as_str())),
+            "--splashdown is an explicit ocean fixture incompatible with other fixtures/load/replay"
+        );
+    }
     let aircraft_mode = main_game && std::env::args().any(|a| a == "--aircraft");
     if aircraft_mode {
         assert!(
@@ -923,6 +937,15 @@ pub fn run(main_game: bool) {
             paused: true,
             rate: lab.rate,
         });
+    }
+    if main_game && std::env::args().any(|a| a == "--splashdown") {
+        assert!(
+            argument("--load").is_none() && lab.playback.is_none(),
+            "splashdown cannot replace load/replay"
+        );
+        let id = void_fleet_flight::water::splashdown(&mut lab.session);
+        select_pilot(&mut lab, &id);
+        lab.notice="Splashdown fixture: capsule 8 m above the real ocean, 2 m/s descent. P pause; water load uses displacement and mass.".into();
     }
     if let Some(body) = argument("--body") {
         assert!(
@@ -2701,7 +2724,12 @@ fn draw(
             aircraft_data,
             scenery_description(sim),
             plotting_description(sim),
-            format!("{}{}", thermal_description(lab), vehicle_description(sim)),
+            format!(
+                "{}{} | Water {:.0} N",
+                thermal_description(lab),
+                vehicle_description(sim),
+                sim.fleet.water_wrench(&sim.selected).force.length()
+            ),
             if lab.main_game {
                 docking_description(lab)
             } else {

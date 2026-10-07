@@ -1850,7 +1850,35 @@ impl Fleet {
         self.put(v);
     }
     fn ground_for(&self, v: &Vessel) -> Option<usize> {
-        self.grounds.iter().enumerate().find(|(i,g)| { let inside=matches!(v.owner,Owner::Scene { scene,.. } if self.scenes[&scene].ground==Some(*i)); self.clearance_over(v,*i)<=if inside { g.spec.band_exit_meters } else { g.spec.band_enter_meters+0.1 } }).map(|(i,_)|i)
+        self.grounds.iter().enumerate().find(|(i,g)| { let inside=matches!(v.owner,Owner::Scene { scene,.. } if self.scenes[&scene].ground==Some(*i)); self.contact_clearance(v,*i)<=if inside { g.spec.band_exit_meters } else { g.spec.band_enter_meters+0.1 } }).map(|(i,_)|i)
+    }
+    /// Sea loads use the body's surface owner even when solid seabed is far below.
+    /// Public terrain clearance retains its original meaning.
+    fn contact_clearance(&self, v: &Vessel, g: usize) -> f64 {
+        let terrain = self.clearance_over(v, g);
+        let body = self.grounds[g].spec.body_index;
+        let p = self.body_fixed_state(&v.id, body).position;
+        let sample = self.environment.surroundings_local(
+            body,
+            State {
+                position: p,
+                velocity: DVec3::ZERO,
+            },
+        );
+        if let Some(sea) = sample.sea.filter(|s| s.water_present) {
+            let c = self.centre(&v.members);
+            let reach = v
+                .members
+                .iter()
+                .map(|id| {
+                    let p = self.parts.part(id);
+                    (p.pose.position - c).length() + part_bound_radius(p.definition)
+                })
+                .fold(0., f64::max);
+            terrain.min(-sea.depth - reach)
+        } else {
+            terrain
+        }
     }
     fn clearance_over(&self, v: &Vessel, g: usize) -> f64 {
         let ground = &self.grounds[g];
@@ -1914,7 +1942,7 @@ impl Fleet {
             }
             for (i, g) in self.grounds.iter().enumerate() {
                 let s = self.body_fixed_state(id, g.spec.body_index);
-                let gap = (self.clearance_over(v, i) - g.spec.band_enter_meters).max(0.0);
+                let gap = (self.contact_clearance(v, i) - g.spec.band_enter_meters).max(0.0);
                 let speed = s.velocity.length();
                 let a = 1.2 * g.frame.body.gm / s.position.length_squared()
                     + self.propulsion_of(v).force.length() / self.mass(&v.members);
@@ -2530,6 +2558,22 @@ impl Fleet {
         )
         .map(|air| air.with_controls(self.controls[&v.id].turn))
         .map(Arc::new);
+        let water = Arc::new(void_modules::water::VesselWater::new(
+            &self.environment,
+            &self.parts,
+            &v.members,
+            self.centre(&v.members),
+        ));
+        let initial_water = water.wrench(
+            &*self.ephemeris,
+            t,
+            State {
+                position: state.position,
+                velocity: state.velocity,
+            },
+            q,
+            w,
+        );
         let initial = air.as_ref().map(|air| {
             air.wrench(
                 &*self.ephemeris,
@@ -2547,7 +2591,10 @@ impl Fleet {
         } else {
             self.steering(v, q, w, dt)
         };
-        let tau0 = p.torque + steering + initial.map_or(DVec3::ZERO, |a| q.conjugate() * a.torque);
+        let tau0 = p.torque
+            + steering
+            + q.conjugate() * initial_water.torque
+            + initial.map_or(DVec3::ZERO, |a| q.conjugate() * a.torque);
         let (qm, wm) = if dt == 0.0 {
             (q, w)
         } else {
@@ -2556,8 +2603,9 @@ impl Fleet {
         let gravity = self
             .propagator
             .gravity_at(&*self.ephemeris, t, state.position);
-        let acceleration =
-            gravity + (q * p.force + initial.map_or(DVec3::ZERO, |a| a.force)) / state.mass_kg;
+        let acceleration = gravity
+            + (q * p.force + initial_water.force + initial.map_or(DVec3::ZERO, |a| a.force))
+                / state.mass_kg;
         self.ephemeris.extend_to(t + dt / 2.0);
         let middle = State {
             position: state.position + state.velocity * (dt / 2.0) + acceleration * (dt * dt / 8.0),
@@ -2566,9 +2614,14 @@ impl Fleet {
         let mid_air = air
             .as_ref()
             .map(|air| air.wrench(&*self.ephemeris, t + dt / 2.0, middle, qm, wm));
-        let tau = p.torque + steering + mid_air.map_or(DVec3::ZERO, |a| qm.conjugate() * a.torque);
+        let mid_water = water.wrench(&*self.ephemeris, t + dt / 2.0, middle, qm, wm);
+        let tau = p.torque
+            + steering
+            + qm.conjugate() * mid_water.torque
+            + mid_air.map_or(DVec3::ZERO, |a| qm.conjugate() * a.torque);
         let source = Arc::new(RigidFlightSource {
             air,
+            water,
             start: t,
             rotation: q,
             angular_velocity: w,
@@ -2702,9 +2755,15 @@ impl Fleet {
                 });
             }
             let ideal_pointing = burning && guide.is_some() && p.force.length() > 0.0;
-            let coupled = self.options.air_dynamics == AirDynamics::ForceAndTorque
-                && !ideal_pointing
-                && (aerodynamic || turning);
+            let water_world = self.environment.bodies().iter().enumerate().any(|(b, _)| {
+                self.environment
+                    .body(b)
+                    .is_some_and(|p| p.sea_level_meters.is_some())
+            });
+            let coupled = !ideal_pointing
+                && (water_world
+                    || (self.options.air_dynamics == AirDynamics::ForceAndTorque
+                        && (aerodynamic || turning)));
             if coupled
                 || (burning && turning)
                 || (self.options.air_dynamics == AirDynamics::ForceAndTorque
@@ -2766,10 +2825,11 @@ impl Fleet {
             } else {
                 None
             };
-            let guided_air = if self.options.air_dynamics == AirDynamics::ForceAndTorque
+            let guided_air = if (self.options.air_dynamics == AirDynamics::ForceAndTorque
+                || water_world)
                 && burning
                 && p.force.length() > 0.0
-                && air.is_some()
+                && (air.is_some() || water_world)
                 && let Some(g) = &guide
             {
                 let Owner::Orbit { rotation, .. } = &v.owner else {
@@ -2783,10 +2843,15 @@ impl Fleet {
                     *rotation,
                     t,
                 )
-                .map(|air| air.with_controls(self.controls[&v.id].turn))
-                .unwrap();
+                .map(|air| air.with_controls(self.controls[&v.id].turn));
                 Some(Arc::new(GuidedAirSource {
-                    air: Arc::new(geometry),
+                    air: geometry.map(Arc::new),
+                    water: Arc::new(void_modules::water::VesselWater::new(
+                        &self.environment,
+                        &self.parts,
+                        &v.members,
+                        self.centre(&v.members),
+                    )),
                     rotation: *rotation,
                     thrust_axis: p.force.normalize(),
                     law: g.attitude,
@@ -2987,11 +3052,30 @@ impl Fleet {
                 local.position,
                 local.velocity,
             );
-            let air_acceleration = air_wrench.map_or(DVec3::ZERO, |w| w.force / snapshot.mass_kg);
-            let air_torque = air_wrench.map_or(DVec3::ZERO, |w| q.conjugate() * w.torque);
+            let water = void_modules::water::VesselWater::new(
+                &self.environment,
+                &self.parts,
+                &v.members,
+                self.centre(&v.members),
+            );
+            let water_wrench = water.wrench_in(
+                &self.frames(),
+                self.scenes[&scene].contact,
+                state_of(local),
+                q,
+                w,
+            );
+            let air_acceleration = (air_wrench.map_or(DVec3::ZERO, |w| w.force)
+                + water_wrench.force)
+                / snapshot.mass_kg;
+            let air_torque = q.conjugate()
+                * (air_wrench.map_or(DVec3::ZERO, |w| w.torque) + water_wrench.torque);
             let (force, tau, burned) = step_thrust(&p, dt, c);
-            let resting =
-                b.is_sleeping() && self.controls[&id].turn == DVec3::ZERO && p.groups.is_empty();
+            let resting = b.is_sleeping()
+                && self.controls[&id].turn == DVec3::ZERO
+                && p.groups.is_empty()
+                && water_wrench.force == DVec3::ZERO
+                && water_wrench.torque == DVec3::ZERO;
             let active =
                 q * force / (self.mass(&v.members) - if full_air { 0.0 } else { burned / 2.0 });
             let now = active + air_acceleration;
@@ -3000,7 +3084,7 @@ impl Fleet {
             } else {
                 let steering = self.steering(&v, q, w, dt);
                 if !full_air {
-                    tau + steering
+                    tau + steering + q.conjugate() * water_wrench.torque
                 } else {
                     let initial = tau + air_torque + steering;
                     let inertia = rows(self.inertia_of(&v.members, self.centre(&v.members)));
@@ -3034,7 +3118,12 @@ impl Fleet {
                                 .wrench_in(&at, self.scenes[&scene].contact, middle, qm, wm)
                                 .torque
                     });
-                    tau + steering + mid_torque
+                    tau + steering
+                        + mid_torque
+                        + qm.conjugate()
+                            * water
+                                .wrench_in(&at, self.scenes[&scene].contact, middle, qm, wm)
+                                .torque
                 }
             };
             self.scenes
@@ -3042,7 +3131,14 @@ impl Fleet {
                 .unwrap()
                 .world
                 .apply_local_torque(body, torque);
-            plans.push((id, body, push, now, p, active));
+            plans.push((
+                id,
+                body,
+                push,
+                now,
+                p,
+                active + water_wrench.force / snapshot.mass_kg,
+            ));
         }
         let world = &mut self.scenes.get_mut(&scene).unwrap().world;
         if let SceneFrame::Bubble(f) = &mut world.frame {
@@ -3068,7 +3164,7 @@ impl Fleet {
                     .find(|p| p.1 == body)
                     .expect("scene body has no vessel");
                 // Preserve the previous total kick for half-step state reconstruction. Only the
-                // current active thrust wakes a body; the remaining trapezoidal kick is passive.
+                // current active thrust or buoyancy wakes a body; the remaining trapezoidal kick is passive.
                 (p.2 + p.3) / 2.0 - p.5
             }),
         );
@@ -3139,7 +3235,15 @@ impl Fleet {
             .map_or(DVec3::ZERO, |air| {
                 air.wrench_in(&at, contact, state_of(local), q, w).force
             });
-            let next = (q * rating.force + next_air) / self.mass(&v.members);
+            let next_water = void_modules::water::VesselWater::new(
+                &self.environment,
+                &self.parts,
+                &v.members,
+                self.centre(&v.members),
+            )
+            .wrench_in(&at, contact, state_of(local), q, w)
+            .force;
+            let next = (q * rating.force + next_air + next_water) / self.mass(&v.members);
             if let Owner::Scene { push, .. } = &mut self.vessels.get_mut(&id).unwrap().owner {
                 *push = next;
             }
@@ -3218,6 +3322,42 @@ impl Fleet {
             }
         }
     }
+    /// Pure water load in the current owner's bounded query frame.
+    pub fn water_wrench(&self, id: &str) -> void_modules::Wrench {
+        let v = self.vessel(id);
+        let water = void_modules::water::VesselWater::new(
+            &self.environment,
+            &self.parts,
+            &v.members,
+            self.centre(&v.members),
+        );
+        match &v.owner {
+            Owner::Scene { scene, body, .. } => {
+                let b = self.scenes[scene].world.body(*body);
+                water.wrench_in(
+                    &self.frames(),
+                    self.scenes[scene].contact,
+                    state_of(self.scene_centre(v)),
+                    quat64(*b.rotation()),
+                    vec64(b.angvel()),
+                )
+            }
+            Owner::Orbit {
+                run,
+                rotation,
+                angular_velocity,
+            } => water.wrench_in(
+                &self.frames(),
+                self.origin_frame(),
+                State {
+                    position: run.state().position,
+                    velocity: run.state().velocity,
+                },
+                *rotation,
+                *angular_velocity,
+            ),
+        }
+    }
     pub fn rails_blocker(&self) -> Option<String> {
         if let Some(reason) = self.thermal_rails_blocker() {
             return Some(reason);
@@ -3230,6 +3370,10 @@ impl Fleet {
             return Some("scheduled maneuver: use physics time".into());
         }
         for id in &self.order {
+            let load = self.water_wrench(id);
+            if load.force != DVec3::ZERO || load.torque != DVec3::ZERO {
+                return Some(format!("water load requires physics on {id}"));
+            }
             let v = self.vessel(id);
             let active=v.members.iter().any(|pid|self.parts.part(pid).modules.values().any(|m|matches!(m,void_assembly::ModuleState::Parachute{state} if void_modules::parachute::active(*state))));
             if active && has_atmosphere(&self.environment) {
