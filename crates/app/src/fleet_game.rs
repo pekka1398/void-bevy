@@ -396,8 +396,17 @@ fn vehicle_description(sim: &void_fleet_flight::FleetFlight) -> String {
             _ => None,
         })
         .collect();
+    if sim.fleet.control_profile(&sim.selected) == Some(void_assembly::ControlProfile::Aircraft) {
+        return format!(
+            "\nLanding gear: {}/{} supported | brake {:.0}% | steer {:.0}%",
+            wheels.iter().filter(|s| s.grounded).count(),
+            wheels.len(),
+            control.brake * 100.0,
+            control.steer * 100.0
+        );
+    }
     format!(
-        "\nDRIVE {:.0}% steer {:.0}% brake {:.0}% | tires {}/{} grounded\nW/S drive | A/D steer | Space brake (latched) | X parking toggle; W/S releases brake\nRaycast suspension/tire model; motor energy unlimited in this first physics milestone",
+        "\nDRIVE {:.0}% steer {:.0}% brake {:.0}% | tires {}/{} grounded\nW/S drive | A/D steer | Space brake (latched) | X parking toggle; W/S releases brake",
         control.drive * 100.0,
         control.steer * 100.0,
         control.brake * 100.0,
@@ -745,7 +754,12 @@ pub fn run(main_game: bool) {
         planet.sea_level = 0.0;
         planet.rock_height = 10.0;
         planet.snow_height = 100.0;
-        planet.launch_site = Some(DVec3::new(0.8, 0.55, 0.25).normalize());
+        // This explicit acceptance fixture starts on the day side of the authored light.
+        planet.launch_site = Some(DVec3::new(0.8, -0.55, 0.25).normalize());
+    }
+    if main_game && std::env::args().any(|a| a == "--rover") && id == "terra" {
+        // Keep the actual Hills terrain; select a sunlit starting site for visual acceptance.
+        planet.launch_site = Some(DVec3::new(0.8, -0.55, 0.25).normalize());
     }
     let craft = argument("--craft").map_or_else(
         || {
