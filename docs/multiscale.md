@@ -80,7 +80,7 @@
 `--stellar-neighborhood --stellar-fixture` 是明確的驗收初始場景：Sol 地面主船、
 Beryl 地面船與 Cygnus 軌道船；預設暫停。這些遠方船是初始配置，不代表火箭已完成
 星際航程。Tab 切船、普通引擎／姿態／分級操作仍有效；F6/F7 存讀、record/replay
-沿用同一套 command journal。Ctrl+Home 看 12 光年鄰近星系，點恆星標籤切焦點，
+沿用同一套 command journal。Ctrl+Home 看 16 光年鄰近星系，點恆星標籤切焦點，
 滾輪可縮放到 30 光年，Home 回船。HUD 顯示所選船的系統；視角改變不移動船。
 
 ### 精確狀態與 owner 接縫
@@ -91,7 +91,8 @@ Beryl 地面船與 Cygnus 軌道船；預設暫停。這些遠方船是初始配
   接受的邊界才把殘量納入 split 錨點並重啟導數；燃料、零件圖、姿態、慣量不因此重造。
 - `FrameTree` 的 split anchor 節點掛在恆星系之下。近船在星際空間也先精確相減
   split 錨點，再處理局部 f64／渲染 f32；不把數光年的絕對 f64 當接觸座標。
-- 系統選擇使用 5% 遲滯。實際滑行越過界線才換框架；split 絕對位置、速度及
+- Orbit 系統選擇使用 5% 遲滯。實際滑行越過界線才換框架；Bubble 保留原
+  system chart 並持續重定位 split anchor，回到 Orbit 後才重選最近星系。split 絕對位置、速度及
   慣量／零件 ID 保留。換框架不替換引力来源，所有天體仍在同一 `CoupledWorld`。
 - 舊 `Fleet::snapshot` 的位置是主來源座標下的觀察值，远方可能损失小量精度，不能
   再用于物理。物理／驗證使用 `precise_snapshot` 的 split `position`、`anchor`、
@@ -110,8 +111,8 @@ Beryl 地面船與 Cygnus 軌道船；預設暫停。這些遠方船是初始配
 
 ### 存檔與相容性
 
-此分支的世界描述 schema 是 4，Flight model 是 21，Fleet checkpoint 是 9；整合
-分支可以再指定組合版本，不自動讀舊規則或修補舊存檔。多星系 checkpoint 必須
+最終整合世界描述 schema 是 4，Flight model 是 26，Fleet checkpoint 是 12。
+原功能分支曾使用 21／9；組合版明確拒絕那些存檔，不自動修補舊格式。多星系 checkpoint 必須
 保存 `CoupledCheckpoint`，包含 live 狀態、Kahan 補償量、保留的 Hermite 樣本、
 步長及初始 seed／天體摘要。恢復直接接續，不從起始年代重新積分數百年。缺少
 耦合狀態、界線不符、seed 位置／速度／軌道、天體 J2／SOI 改變，都明確拒絕。
@@ -128,3 +129,7 @@ Beryl 地面船與 Cygnus 軌道船；預設暫停。這些遠方船是初始配
 數分鐘內完成數光年航程。時間推進仍受原 rails 條件、天體／軌道步長及積分預算
 限制；不得以跳時、換船或省略引力來源掩蓋效能不足。兩個鄰近星系目前使用明確
 配置的星球／衛星與既有外觀資產，沒有新增逐顆專屬美術。
+
+最終整合檢查與主遊戲操作見 [四功能驗收](next-features-acceptance.md)。主遊戲
+連續邊界測試跨越約 250 m，不代表已驗證 Sol 起飛到 Beryl 著陸的完整航程。
+N 明確是 home-site 地面初始船；O 在目前觀察天體生成軌道初始船。兩者都不是傳送。

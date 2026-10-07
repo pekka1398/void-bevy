@@ -41,8 +41,7 @@ friction circle, brake hold, rotor reaction, actual moving-support ray and float
 recenter. Main-game source entry is delivered separately and requires root compile/GUI checks;
 these headless checks do not substitute dynamic GUI or human acceptance.
 
-EVA entry/exit, walking/jumping/jetpack and rover seat transfer are the next milestone on this
-same branch; not claimed complete by the rover checkpoint.
+This first rover checkpoint preceded the EVA milestones below; it alone does not prove EVA.
 
 ## Local EVA core milestone
 
@@ -68,10 +67,8 @@ Vehicle steer and EVA strafe/yaw positive mean player-right. Nose+Z/top+Y is a r
 whose +X is up×forward, physically left; physics and tire drawing use the same right-turn sign.
 Physical body-fixed north/east tests, not navball convention, validate the direction.
 
-Known integration work still required after this local-only milestone: use multiscale
-enter_vessel/restore_view scopes around exit/board, explicitly reject different systems, and run
-remote-system transfer tests. Root owns these multiscale transaction wrappers and their remote
-Ground/Orbit validation.
+The local-only milestone initially needed multiscale scopes and remote transfer tests. These
+were completed by root as described under Precise stellar crew transactions below.
 The original local single-sweep milestone had about 0.09m/s parked residual. The subsequent
 coupled contact milestone replaces that sweep with 32 deterministic projected Gauss-Seidel passes
 on frozen live-collider geometry, including same-tire cross-axis effective mass and all upcoming
@@ -107,8 +104,8 @@ The original conservation thresholds remain unchanged. Root evidence:
 
 A combined dry-contact regression exposed ULP retiming by the water stepping wrapper, which
 cleared native solver history on nominal dry steps. The accepted dry cadence is now preserved;
-EVA 6, vehicles 3, water 6 and aircraft 3 targeted tests pass together after that fix. Main source
-has compiled, but root EVA dynamic GUI and human acceptance are still pending.
+EVA 6, vehicles 3, water 6 and aircraft 3 targeted tests pass together after that fix. Root model26 TigerVNC has since checked walking, jump, boarding, orbital finite-pack movement
+and save/load; see ../next-features-acceptance.md. Human acceptance remains pending.
 
 ## Crewed rocket acceptance craft
 
@@ -146,3 +143,7 @@ axis-change transfer and precession with total-H error below 1e-9. Assembly test
 rate and rejection of missing saved angle. Existing runway taxi/takeoff, aerodynamic-wrench owner
 and Fleet owner/ground-sleep regressions pass. This does not replace combined root GUI/human
 acceptance or assert a separate rigid-body tire/cabin/resource model.
+
+Final combined rules are model26 / FleetCheckpoint12 / world4 / Craft3. Root source/version,
+headless and GUI evidence is recorded in ../next-features-acceptance.md and ../status.md; historical
+branch model23 and local-only milestone notes above do not describe the final merge candidate.

@@ -140,26 +140,55 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 `/home/pekka/Archives/VOID/2026-10-05/review-recordings/`，同層 README.txt
 記錄用途與版本限制，SHA-256 摘要核對搬移前後一致。
 
-## 四功能開發中的整合工作區（2026-10-07）
+## 四功能的待驗收整合版（2026-10-08）
 
-`work/four-feature-integration`／`void-bevy-integration` 尚未合入 master，
-人類驗收尚未進行。範圍見 [共同規格](specs/playable-vehicles-and-multiscale.md)。
-本節記錄開發中證據，不改變上面 master 能力的驗收結論。
+`work/four-feature-integration`／`void-bevy-integration`，實際程式來源 `c7c638b`。
+四功能分支的實作已完成，root 審查後接入同一主遊戲。尚未合入／push master，
+人類最終驗收待進行；上面的 master 能力表維持主線歷史結論。
+啟動入口、操作、重新編譯及限制見 [四功能驗收](next-features-acceptance.md)。
 
-- 核心與主遊戲：飛機組裝幾何／表面接合／鏡像、翼面／jet、共用輪子／rover、
-  海水排水與水阻、三星系精確 owner 已接入；EVA 尚待接入和整合審查。
-- Root 檢查：`cfd8ac7` app library 編譯通過；`02aeac3` 後的水 5 項及
-  stellar world／wrench 整合測試通過；`b687cee` 持久 owner 的 escaped-load
-  實際氣動測試通過；`37b9122` 真實 Sol 日照深海場景測試通過。未跑全 workspace。
-- Agent GUI：TigerVNC，RTX 5060 Laptop／Vulkan，`cfd8ac7` draft model 25
-  實際按鍵完成飛機滑行、拉起／輪子離地、下降、三輪接地與 B 煞停。
-  同版錄製 `aircraft-instruments.jsonl` 在 T+42.8 秒的 headless verify 通過。
-  姿態球依 control profile 使用 +Z 前向，水平飛機讀值約 0°。
-- Agent GUI：同一 draft 執行檔切換 Sol／Beryl／Cygnus 船隻，Beryl 普通火箭
-  点火上升至 AGL 19.6 m，Cygnus 軌道船的有限 RCS 操控消耗資源；
-  三船錄製 `stellar-gui.jsonl` 在 T+4.9 秒 verify 通過。
-  這些是明示的遠端起始 fixture，沒有完成光年航程。
-- 證據位於 `/tmp/void-next-feature-evidence/`，包括執行檔來源 commit、SHA256、
-  日誌、截圖及錄影。這些 draft 證據不能代替最終組合版本重查或人類驗收。
-- 尚待：EVA／車輪 owner 接縫收尾、最終模型版本與相容性、受影響回歸／lint、
-  組合版 EVA／rover／海面動態視窗檢查、16 ly 總覽與日側星系 fixture 視窗核對。
+| 範圍 | 核心與主遊戲 | root 審查的主要接縫 |
+| --- | --- | --- |
+| EVA／rover | 有乘員座位、出入座、步行／跳躍、有限背包、輪子／懸吊／驅動／煞車 | 隔離燃料與乘員質量、COM/P/L、遠端 Ground/Orbit 出入座、dry accepted cadence、sleep/wake、輪胎 reciprocal impulse、accepted steering、Orbit rotor momentum／rails |
+| 飛機／assembly | 共用 PartGraph、cuboid 幾何／慣量／外觀、surface mount／mirror、翼面／jet、共享起落架 | native 接觸 bookkeeping、低速 AIR 資訊、profile navball、世界向量的真實按鍵方向與滑行轉向 |
+| 水 | 真實海柱部分浸水、排水浮力、偏心力矩／水阻、濺落 | sea presence 與岸上拒算、Scene/Orbit force frame、accepted water substeps、ForceOnly air 語義、dry cadence |
+| 三星系 | 共用世界 Sol/Beryl/Cygnus、精確 split state、普通火箭、地圖／切船、存讀／錄放 | 持久 query frame／escaped Wrench、遠方小量、owner 交接與 reanchor、coupled checkpoint、地圖 root label/hitbox、日照真實地形 fixture |
+
+相容性：model26／FleetCheckpoint12／world4／Craft3；明示保留未用新增幾何的
+既有 Craft2。新狀態必要欄位與舊模型明確拒絕，不自動修補。native Rapier 為
+`rapier3d-0.35.1/f32/v1`；公共物理與座標使用 f64／局部浮動原點，沒有宣稱 native f64。
+
+Root headless：受影響九個核心 crates 的 lib/tests **345 passed、0 failed、1 ignored**；
+ignored 是既有已結案 Pebble 傾角，沒有放寬門檻。app 最終 **28 passed**，其中兩項
+直接檢查真實氣動力矩和 native 起落架的玩家方向。所屬核心與 app all-targets
+Clippy `-D warnings`、fmt 通過；沒有跑全 workspace。
+
+Root TigerVNC 初步檢查（RTX 5060 Laptop／Vulkan）：
+
+- model26／`0be322f` 地面 EVA：F 出座，人物與實際 collider，W/D 移動、跳躍與
+  接地，F6/F7 存讀、F 回座。太空有乘員火箭 F 出座，有限背包從 5 kg 減至約
+  4.82 kg，相對運動，存讀與 F 回座。最後 `c7c638b` verifier 核對兩份真實錄影
+  T+10.55 s／2.10 s 通過；回座的額外 GUI 觀察與錄影涵蓋範圍分開記錄。
+- model26／`0be322f` 水：日侧真实海洋濺落，艙體持續部分浸水，T+35.45 s
+  顯示約 0.2 m/s，F6/F7 存讀。最後執行檔 verifier 通過；AGL 是海底地形距離。
+- model26／`e0b659a` 星系：16 ly 三星標籤，切 Sol/Beryl/Cygnus，Beryl 普通火箭
+  升至 AGL 73 m、Cygnus RCS 耗用至 19.911 kg。錄影只涵蓋初段 T+1.60 s；
+  後續升空／RCS 是額外 GUI 觀察，不冒稱都在该錄影內。最終執行檔 verify 通過。
+- model26／`c7c638b` rover：低速1.7m/s、D右轉heading000→013、四輪支撐，
+  Space煞停至0.0m/s、F6/F7，錄影T+6.70s verify通過。另一段約13m/s全幅急轉
+  抬輪／翻覆，chassis碰撞正常、無自動扶正；T+97.50s錄影也保留並verify，
+  不把高速翻覆樣本說成四輪穩定煞停。
+- model26／`c7c638b` 飛機：50.4 m/s 滑行、W 抬頭約8°、0/3支撐並升至
+  AGL4.7m；切油門下降、拉平、輪子接地、B煞停至0.0m/s及3/3支撐，F6/F7。
+  同執行檔錄影 T+70.15 s verify 通過。沒有結構破壞／任意組装適航認證。
+
+EVA／車輪／水／星系的 production 內容在上述 GUI 版本後未再修改；water test module
+後移以通過 all-targets lint，非 test token 相同。最後兩次
+app 修正是飛機方向映射與純觀察 GPU 截圖，最終二進位另核對真實錄影。
+Root GUI 截圖不代替人類最終驗收。TigerVNC 曾有間歇遮擋矩形，重繪後消失；
+GPU 截圖診斷加入後的配對樣本正常，未取得異常同幀的 GPU 證據，未宣稱根因已修復。
+
+驗證檔保存於 `/home/pekka/Archives/VOID/2026-10-08/four-features-review/`；
+原開發暫存位於 `/tmp/void-next-feature-evidence/`。驗收二進位及 SHA256/source manifest
+位於整合工作區 `target/acceptance/`，各功能 worktree 的同目錄有明確指向組合版的入口，
+不偽裝成各自分支已驗證的二進位。詳細需求核對見 [root review](next-features-review.md)。

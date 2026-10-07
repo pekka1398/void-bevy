@@ -73,7 +73,7 @@ cargo build -j 2 -p void-app --bin void-app
 ./target/debug/void-app --aircraft
 ```
 
-The process opens paused. P starts simulation; Space activates the jet; hold Shift
+The ordinary main-game process starts running. P toggles pause; Space activates the jet; hold Shift
 until full throttle. Near 45–50 m/s airspeed, use brief W commands, aim for roughly
 8–12 degrees nose-up and release before a steep climb. Holding W continuously is a
 strong elevator command and can induce a stall. Reduce throttle and steer back toward
@@ -92,3 +92,9 @@ speed, then ~0.061 m/s after braking. The previous ~2.8 m/s touchdown observatio
 the older boundary velocity bookkeeping; it must not be quoted as the corrected
 impact speed. The current approach fixture exercises a firm touchdown, and GUI pilot
 handling/flare remains review work. No crash/structural failure claim follows from it.
+
+Final integration: model26 / FleetCheckpoint12 / world4 / Craft3. Aircraft yaw input follows
+player-right = nose cross top (-X), roll-right tilts top in that direction; shared steering uses
+the same physical right. Two main input regressions test real world-space aerodynamic torque
+and a native-gear taxi turn, independently of historical wing-side names. Root GUI and final
+source artifacts are recorded in ../next-features-acceptance.md and ../status.md.

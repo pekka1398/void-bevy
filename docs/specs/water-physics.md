@@ -80,3 +80,8 @@ J2 共用 gravity 數值測試、既有水5／飛機3／車輛2及 core clippy �
 單天體配置沿用既有 renderer 明寫的遠方 +X 光源，不新加光源或亮度 fallback。
 找不到 daylight 深海點明確 panic。核對真正 Aurelia／Sol 光源和單天體方向兩種
 選點測試；使用相同 terrain sampler，未改海面或地形。
+
+Final integration is model26 / FleetCheckpoint12 / world4 / Craft3. Root model26 TigerVNC
+checks actual daylight splashdown, partial immersion through T+35.45s and save/load; its journal
+and final-binary verifier are recorded in ../next-features-acceptance.md and ../status.md.
+Human final acceptance remains pending. Historical per-branch versions are not final compatibility.
