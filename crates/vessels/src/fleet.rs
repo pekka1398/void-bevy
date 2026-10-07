@@ -3381,7 +3381,7 @@ impl Fleet {
                 angular_velocity,
             } => water.wrench_in(
                 &self.frames(),
-                self.origin_frame(),
+                self.query_frame(v),
                 State {
                     position: run.state().position,
                     velocity: run.state().velocity,
