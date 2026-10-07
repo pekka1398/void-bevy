@@ -327,8 +327,10 @@ impl Action {
                 if *enabled && !sim.fleet.has_command(&sim.selected) {
                     return Outcome::Refused("SAS requires a functioning command part".into());
                 }
-                sim.sas(*enabled);
-                Outcome::Applied
+                match sim.fleet.request_sas(&sim.selected, *enabled) {
+                    Ok(()) => Outcome::Applied,
+                    Err(reason) => Outcome::Refused(reason),
+                }
             }
             Self::AddManeuver { spec } => match sim.add_maneuver(&sim.selected.clone(), *spec) {
                 Ok(()) => Outcome::Applied,

@@ -12,3 +12,6 @@ pub use thermal::*;
 
 mod wheel;
 pub use wheel::*;
+
+mod aircraft;
+pub use aircraft::*;

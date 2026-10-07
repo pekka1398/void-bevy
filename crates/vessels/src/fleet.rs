@@ -814,10 +814,42 @@ impl Fleet {
             self.rcs_controls[id],
         )
     }
+    pub fn has_reaction_wheel(&self, id: &str) -> bool {
+        self.vessel(id).members.iter().any(|part| {
+            self.parts
+                .part(part)
+                .definition
+                .modules
+                .iter()
+                .any(|module| {
+                    matches!(
+                        module,
+                        Module::Command {
+                            reaction_wheel: true,
+                            ..
+                        }
+                    )
+                })
+        })
+    }
+    /// Capability-aware user request; unsupported hardware is an explicit rejection.
+    pub fn request_sas(&mut self, id: &str, on: bool) -> Result<(), String> {
+        if on && !self.has_reaction_wheel(id) {
+            return Err(
+                "SAS reaction wheel unavailable: vessel has no reaction-wheel command module"
+                    .into(),
+            );
+        }
+        self.set_sas(id, on);
+        Ok(())
+    }
     pub fn set_sas(&mut self, id: &str, on: bool) {
         let v = self.vessel(id);
         if on {
-            assert!(self.commanded(v), "fleet: no command part");
+            assert!(
+                self.commanded(v) && self.has_reaction_wheel(id),
+                "fleet: SAS requires reaction-wheel command module"
+            );
         }
         let ground = self.attitude_ground(v);
         if !on {

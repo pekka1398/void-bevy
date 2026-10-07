@@ -144,3 +144,31 @@ fn public_mirror_pair_builder_has_distinct_identity_and_atomic_rejection() {
     );
     assert_eq!(craft.parts.len(), 1);
 }
+
+#[test]
+fn authored_airframe_uses_the_same_public_connections_and_supply() {
+    let craft = aircraft_airframe();
+    let compiled = compile(&craft).unwrap();
+    assert_eq!(compiled.parts.len(), 8);
+    let mut graph = PartGraph::new();
+    let ids = graph.add(&compiled, "aircraft");
+    assert_eq!(graph.components(&ids).len(), 1);
+    assert_eq!(
+        graph.resource_tanks(&ids, &ids[7], ResourceId::LiquidPropellant),
+        vec![ids[1].clone()]
+    );
+    assert!(
+        !graph
+            .part(&ids[0])
+            .definition
+            .modules
+            .iter()
+            .any(|m| matches!(
+                m,
+                Module::Command {
+                    reaction_wheel: true,
+                    ..
+                }
+            ))
+    );
+}

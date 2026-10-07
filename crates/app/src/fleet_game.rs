@@ -1482,7 +1482,12 @@ fn controls(
     let commanded = lab.session.sim().fleet.has_command(&id);
     if keys.just_pressed(KeyCode::KeyT) && commanded {
         let enabled = lab.session.sim().fleet.sas_phase(&id) == void_vessels::SasPhase::Off;
-        lab.session.execute(Action::Sas { enabled });
+        if enabled && !lab.session.sim().fleet.has_reaction_wheel(&id) {
+            lab.notice =
+                "SAS unavailable: aircraft has aerodynamic controls, no reaction wheel".into();
+        } else {
+            lab.session.execute(Action::Sas { enabled });
+        }
     }
     let mut c = lab.session.sim().fleet.control(&id);
     let dt = time.delta_secs_f64().min(0.05);
