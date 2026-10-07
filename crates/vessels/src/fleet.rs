@@ -3320,6 +3320,7 @@ impl Fleet {
     fn set_physics_step(&mut self, seconds: f64) {
         self.options.step_seconds = seconds;
         for scene in self.scenes.keys().copied().collect::<Vec<_>>() {
+            let previous = self.enter_scene(scene);
             let extras: HashMap<_, _> = self.scenes[&scene]
                 .members
                 .iter()
@@ -3335,6 +3336,7 @@ impl Fleet {
                 seconds,
                 &|body| extras[&body],
             );
+            self.restore_view(previous);
         }
     }
     fn step_all(&mut self) {
