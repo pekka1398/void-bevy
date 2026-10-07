@@ -1805,15 +1805,15 @@ fn controls(
         } else {
             void_assembly::EvaControl::default()
         };
-        if lab.session.sim().fleet.eva_control(&id) != Some(control) {
-            if let Outcome::Refused(reason) = lab.session.execute(Action::Eva { control }) {
-                lab.notice = reason;
-            }
+        if lab.session.sim().fleet.eva_control(&id) != Some(control)
+            && let Outcome::Refused(reason) = lab.session.execute(Action::Eva { control })
+        {
+            lab.notice = reason;
         }
-        if keys.just_pressed(KeyCode::Space) {
-            if let Outcome::Refused(reason) = lab.session.execute(Action::EvaJump) {
-                lab.notice = reason;
-            }
+        if keys.just_pressed(KeyCode::Space)
+            && let Outcome::Refused(reason) = lab.session.execute(Action::EvaJump)
+        {
+            lab.notice = reason;
         }
     }
     if keys.just_pressed(KeyCode::KeyT) && commanded && !eva {
@@ -1846,7 +1846,13 @@ fn controls(
         DVec3::new(
             axis(&keys, KeyCode::KeyS, KeyCode::KeyW),
             axis(&keys, KeyCode::KeyE, KeyCode::KeyQ),
-            axis(&keys, KeyCode::KeyD, KeyCode::KeyA),
+            if lab.session.sim().fleet.control_profile(&id)
+                == Some(void_assembly::ControlProfile::Aircraft)
+            {
+                axis(&keys, KeyCode::KeyA, KeyCode::KeyD)
+            } else {
+                axis(&keys, KeyCode::KeyD, KeyCode::KeyA)
+            },
         )
     } else {
         DVec3::ZERO
@@ -1911,7 +1917,7 @@ fn controls(
     {
         let wheel_control = void_assembly::VehicleControl {
             drive: 0.0,
-            steer: if lab.paused { 0.0 } else { turn.y },
+            steer: if lab.paused { 0.0 } else { -turn.y },
             brake: if lab.paused || keys.pressed(KeyCode::KeyB) {
                 1.0
             } else {
@@ -2264,6 +2270,9 @@ fn plan_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
 }
 fn plan_description(lab: &Lab) -> String {
     let sim = lab.session.sim();
+    if sim.fleet.control_profile(&sim.selected) != Some(void_assembly::ControlProfile::Flight) {
+        return String::new();
+    }
     let Some(p) = sim.plans.get(&sim.selected) else {
         return "M add maneuver | Z warp before burn | B execute first | Esc abort".into();
     };
@@ -2846,7 +2855,7 @@ fn draw(
         })
         .unwrap_or_default();
     **hud = Text::new(format!(
-        "{}{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels\n{}\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN nearby craft | O orbital craft | R reset | , . warp | K altitude | L speed\nF1 near/orbit/far | Home ship | Ctrl+Home stellar overview | Alt+F10/F11 exposure\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
+        "{}{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels\n{}\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN home-site craft | O orbital craft | R reset | , . warp | K altitude | L speed\nF1 near/orbit/far | Home ship | Ctrl+Home stellar overview | Alt+F10/F11 exposure\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}",
         if lab.main_game {
             "VOID"
         } else {
