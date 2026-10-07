@@ -104,6 +104,19 @@ fn select_pilot(lab: &mut Lab, id: &str) {
     lab.target_port = None;
     refresh_ports(lab);
 }
+fn stellar_fixture_initial(mut initial: InitialWorld) -> InitialWorld {
+    if std::env::args().any(|a| a == "--stellar-fixture") {
+        assert!(
+            initial.world.stellar.is_some() && initial.launch_body == "Sol/aurelia",
+            "stellar fixture requires the authored Sol launch world"
+        );
+        initial.launch_site = initial
+            .world
+            .daylight_terrain_site(&initial.launch_body)
+            .expect("stellar fixture Sol daylight terrain site");
+    }
+    initial
+}
 fn scenery_preset(lab: &mut Lab, body: usize, view: &str) {
     let sim = lab.session.sim();
     let fleet = &sim.fleet;
@@ -824,7 +837,7 @@ pub fn run(main_game: bool) {
                 let initial: InitialWorld =
                     serde_json::from_str(&std::fs::read_to_string(path).expect("read world"))
                         .expect("invalid initial world");
-                return FlightSession::new(initial);
+                return FlightSession::new(stellar_fixture_initial(initial));
             }
             let mut initial = InitialWorld::new(&planet.planet, &craft, site, air);
             if main_game && !aircraft_mode && planet.planet.body_id == "aurelia" {
@@ -851,11 +864,11 @@ pub fn run(main_game: bool) {
                 initial.world = void_fleet_flight::world::stellar_neighborhood(&planet.planet);
                 initial.launch_body = "Sol/aurelia".into();
             }
-            FlightSession::new(if main_game {
+            FlightSession::new(stellar_fixture_initial(if main_game {
                 initial.with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque)
             } else {
                 initial
-            })
+            }))
         },
         FlightSession::load_checkpoint,
     );
@@ -920,7 +933,12 @@ pub fn run(main_game: bool) {
             argument("--load").is_none() && lab.playback.is_none(),
             "stellar fixture cannot override load/replay"
         );
-        let site = lab.session.sim().launch_site;
+        let site = lab
+            .session
+            .sim()
+            .world
+            .daylight_terrain_site("Beryl/aurelia")
+            .expect("stellar fixture Beryl daylight terrain site");
         lab.session.execute(Action::LaunchGroundAt {
             body: "Beryl/aurelia".into(),
             craft: lab.craft.clone(),
@@ -932,7 +950,7 @@ pub fn run(main_game: bool) {
             offset: DVec3::ZERO,
         });
         lab.paused = true;
-        lab.notice = "STELLAR ACCEPTANCE FIXTURE: local ships in three systems; these are declared starting states, not completed interstellar trips. Tab selects ship.".into();
+        lab.notice = "STELLAR ACCEPTANCE FIXTURE: Sol/Beryl ground ships on real daylight terrain; Cygnus orbit is a declared starting state, not a completed interstellar trip. Tab selects ship.".into();
         lab.session.execute(Action::EndFrame {
             paused: true,
             rate: lab.rate,

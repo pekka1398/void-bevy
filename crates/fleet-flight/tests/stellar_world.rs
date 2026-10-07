@@ -544,3 +544,61 @@ fn moving_interstellar_bubble_keeps_its_free_fall_origin_bounded() {
     assert!(after.residual.position.length() < 20.0);
     assert!((sim.fleet.relative(&b, &a).position - DVec3::Y * 10.0).length() < 1e-4);
 }
+
+#[test]
+fn stellar_fixture_ground_ships_are_on_dry_actual_terrain_in_their_own_daylight() {
+    use glam::DVec3;
+    use void_fleet_flight::session::{Action, Outcome};
+    let mut initial = neighborhood_initial();
+    initial.launch_site = initial.world.daylight_terrain_site("Sol/aurelia").unwrap();
+    let mut session = FlightSession::new(initial);
+    let sol = session.sim().selected.clone();
+    let beryl_site = session
+        .sim()
+        .world
+        .daylight_terrain_site("Beryl/aurelia")
+        .unwrap();
+    let Outcome::Spawned(beryl) = session.execute(Action::LaunchGroundAt {
+        body: "Beryl/aurelia".into(),
+        craft: void_assembly::demo_craft(),
+        site: beryl_site,
+    }) else {
+        panic!("daylight fixture rejected");
+    };
+    for (ship, name) in [(sol, "Sol/aurelia"), (beryl, "Beryl/aurelia")] {
+        let sim = session.sim();
+        let fleet = &sim.fleet;
+        let body = sim.world.body_index(name);
+        let position = fleet.body_fixed_state(&ship, body).position;
+        let terrain = fleet
+            .environment()
+            .body(body)
+            .unwrap()
+            .terrain
+            .as_ref()
+            .unwrap();
+        let terrain_height = terrain.height(position.normalize());
+        if let Some(sea) = sim.world.bodies[name].sea_level_meters {
+            assert!(terrain_height > sea + 20.0);
+        }
+        assert!(position.length() > terrain.radius_meters + terrain_height);
+        let star = fleet
+            .ephemeris
+            .bodies()
+            .iter()
+            .find(|b| {
+                b.parent_index.is_none()
+                    && fleet.ephemeris.system_of(b.index) == fleet.ephemeris.system_of(body)
+            })
+            .unwrap();
+        let star_local = fleet
+            .frames()
+            .transform(fleet.body_frames(star.index).0, fleet.body_frames(body).1)
+            .apply_point(DVec3::ZERO);
+        let sun_mu = position
+            .normalize()
+            .dot((star_local - position).normalize());
+        assert!(sun_mu > 0.2, "{name}: sun_mu={sun_mu}");
+        assert_eq!(fleet.snapshot(&ship).mode, void_vessels::VesselMode::Ground);
+    }
+}

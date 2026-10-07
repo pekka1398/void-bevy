@@ -437,6 +437,78 @@ impl WorldDescription {
         qualify(&mut spec.root, system_id);
         spec
     }
+    /// Deterministic acceptance-fixture site on real dry terrain in this body's own daylight.
+    /// Does not change terrain or illumination, and does not modify ordinary launch defaults.
+    pub fn daylight_terrain_site(&self, id: &str) -> Result<DVec3, String> {
+        let body = self.body_index(id);
+        let built = self.build();
+        let terrain = built
+            .terrains
+            .get(&body)
+            .ok_or("daylight fixture needs authored solid terrain")?;
+        let source = built.ephemeris.as_ref();
+        let star = source
+            .bodies()
+            .iter()
+            .find(|b| {
+                b.parent_index.is_none() && source.system_of(b.index) == source.system_of(body)
+            })
+            .ok_or("daylight fixture needs its own stellar root")?;
+        if star.index == body {
+            return Err("daylight terrain fixture cannot launch on a stellar root".into());
+        }
+        let frames = void_orbit::SystemFrames::new(source);
+        let star_local = frames
+            .tree
+            .at(0.0, source)
+            .transform(frames.inertial[star.index], frames.surface[body])
+            .apply_point(DVec3::ZERO);
+        assert!(
+            star_local.is_finite() && star_local.length_squared() > 0.0,
+            "fixture: invalid stellar direction"
+        );
+        let sun = star_local.normalize();
+        let axis = if sun.z.abs() < 0.9 {
+            DVec3::Z
+        } else {
+            DVec3::X
+        };
+        let east = axis.cross(sun).normalize();
+        let north = sun.cross(east);
+        let sea = self.bodies[id].sea_level_meters;
+        let angle_step = std::f64::consts::PI * (3.0 - 5.0_f64.sqrt());
+        let reach = 12.0;
+        let mut best: Option<(f64, DVec3)> = None;
+        for i in 0..512 {
+            let mu = 0.35 + 0.65 * (i as f64 + 0.5) / 512.0;
+            let angle = i as f64 * angle_step;
+            let direction = (sun * mu
+                + (east * angle.cos() + north * angle.sin()) * (1.0 - mu * mu).sqrt())
+            .normalize();
+            let height = terrain.height(direction);
+            if sea.is_some_and(|sea| height <= sea + 20.0) {
+                continue;
+            }
+            let tangent = axis.cross(direction).normalize();
+            let other = direction.cross(tangent);
+            let radius = terrain.radius_meters + height;
+            let slope = [tangent, -tangent, other, -other]
+                .into_iter()
+                .map(|side| {
+                    (terrain.height((direction * radius + side * reach).normalize()) - height).abs()
+                        / reach
+                })
+                .fold(0.0_f64, f64::max);
+            if slope > 0.025 {
+                continue;
+            }
+            if best.is_none_or(|(score, _)| slope < score) {
+                best = Some((slope, direction));
+            }
+        }
+        best.map(|(_, direction)| direction)
+            .ok_or_else(|| format!("no dry, sufficiently level daylight terrain site on {id}"))
+    }
     pub fn validate_launch(&self, id: &str, site: DVec3) {
         self.body_index(id);
         self.landing_planet(id);
