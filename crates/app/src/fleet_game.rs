@@ -1831,7 +1831,7 @@ fn controls(
                     command: ViewCommand::BodyPreset {
                         body: 0,
                         direction: DVec3::new(0.1, 0.2, 1.0).normalize(),
-                        distance: 12.0 * void_multiscale::LIGHT_YEAR,
+                        distance: 16.0 * void_multiscale::LIGHT_YEAR,
                     },
                 });
                 lab.notice =
