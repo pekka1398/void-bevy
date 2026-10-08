@@ -63,3 +63,5 @@ cargo run -p void-terrain --example volcanic_profile -j 2 -- 0.44514744410845786
 輸出三欄為向東距離m、全細節高度m、100m-cell高度m（皆above reference sphere）。剖面高度約3.18–6.10km、fixture約5.93km；雲層在48–70km，上方正常稠密氣體與雲仍會遮住遠距地貌。剖面僅補充真幾何證據，不代替主遊戲或人類驗收。
 
 root對補修工作區另行獨立重驗volcanic3及scenery lib7通過；此證據只覆蓋該兩個針對性範圍，不代表全量驗證或人類驗收。
+
+root其後已看補修review-upland／shield-high，接受文件如實描述濃霾可見限制；並以同SHA `6c9994f78fcd0dc3fd4d3b0d116c7435a3b6f78bbc156e7cc4fd1fa3a28e6475`獨立verify最新review-shield-v2 journal及review-shield-save，兩者皆通過T+1.016667s。這是root驗證，不是人類驗收。
