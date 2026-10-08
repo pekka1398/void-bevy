@@ -243,11 +243,25 @@ impl WorldDescription {
                 "world: invalid visual heights"
             );
             description.visual.surface.validate();
+            if matches!(
+                description.visual.surface,
+                void_scenery::solar::SurfaceRecipe::Regolith
+            ) {
+                assert!(
+                    !description.visual.atmosphere
+                        && !description.visual.clouds
+                        && !description.visual.ocean
+                        && description.air_density_scale.is_none()
+                        && description.sea_level_meters.is_none(),
+                    "regolith recipe requires an airless dry body"
+                );
+            }
             if let Some(rings) = &description.visual.rings {
                 rings.validate();
             }
             match description.visual.surface {
-                void_scenery::solar::SurfaceRecipe::SolidSurface => {
+                void_scenery::solar::SurfaceRecipe::SolidSurface
+                | void_scenery::solar::SurfaceRecipe::Regolith => {
                     assert!(description.terrain.is_some(), "solid recipe needs terrain")
                 }
                 _ => assert!(
@@ -321,7 +335,7 @@ impl WorldDescription {
                             && h.wavelength_meters.is_finite(),
                         "world: non-finite terrain"
                     ),
-                    TerrainConfig::Cratered(_) => {} // constructor validates every parameter
+                    TerrainConfig::Cratered(_) | TerrainConfig::Impact(_) => {} // constructor validates every parameter
                     TerrainConfig::Layered(l) => {
                         assert!(l.radius_meters.is_finite(), "world: non-finite terrain")
                     }
@@ -607,17 +621,14 @@ pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
             snow_height_meters: 1.0e9,
         };
         let terrain = match id {
-            "cinder" | "selene" | "ares" | "vesper" => {
+            "cinder" => {
+                visual.surface = SurfaceRecipe::Regolith;
+                Some(TerrainConfig::Impact(void_terrain::ImpactOptions::cinder(
+                    body.radius_meters,
+                )))
+            }
+            "selene" | "ares" | "vesper" => {
                 let (height, count, size, roughness, seed, low, high) = match id {
-                    "cinder" => (
-                        7000.0,
-                        180,
-                        0.11,
-                        0.7,
-                        31,
-                        [0.09, 0.07, 0.055],
-                        [0.52, 0.43, 0.34],
-                    ),
                     "selene" => (
                         8500.0,
                         120,

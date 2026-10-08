@@ -5570,6 +5570,7 @@ dependencies = [
  "void-environment",
  "void-frames",
  "void-landing",
+ "void-lod",
  "void-modules",
  "void-multiscale",
  "void-orbit",

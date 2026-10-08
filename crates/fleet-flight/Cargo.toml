@@ -26,3 +26,6 @@ void-view.workspace = true
 void-environment.workspace = true
 
 void-scenery.workspace = true
+
+[dev-dependencies]
+void-lod.workspace = true

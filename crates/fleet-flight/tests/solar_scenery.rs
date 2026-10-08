@@ -102,10 +102,16 @@ fn cratered_collision_vertices_match_renderer_sampler() {
             .frames()
             .transform(tile.frame, sim.fleet.body_frames(body).1);
         let terrain = &sim.terrains[&body];
+        // Collision and renderer use the same cell-limited surface. A full-detail point query
+        // includes relief finer than this mesh and is not the mesh's authoritative height.
+        let level = void_landing::level_for_tile_size(terrain.radius_meters, 300.0);
+        let cell = void_lod::cell_meters(terrain.radius_meters, level, 33);
         for v in vertices.iter().step_by(64) {
             let p = into.apply_point(tile.local_position + DVec3::from_array(v.map(f64::from)));
             assert!(
-                (p.length() - terrain.radius_meters - terrain.height(p.normalize())).abs() < 1e-3
+                (p.length() - terrain.radius_meters - terrain.sample(p.normalize(), Some(cell)).0)
+                    .abs()
+                    < 1e-3
             );
         }
     }
@@ -161,4 +167,29 @@ fn authored_luts_and_vacuum_extreme_optics_are_finite() {
             assert!(trans.as_chunks::<4>().0.iter().all(|v| v[..3] == [1.0; 3]));
         }
     }
+}
+
+#[test]
+fn cinder_has_explicit_impact_recipe_and_rejects_previous_model() {
+    use void_scenery::solar::SurfaceRecipe;
+    use void_terrain::TerrainConfig;
+    let initial = initial();
+    let body = &initial.world.bodies["cinder"];
+    assert!(matches!(body.terrain, Some(TerrainConfig::Impact(_))));
+    assert_eq!(body.visual.surface, SurfaceRecipe::Regolith);
+    assert!(!body.visual.atmosphere && !body.visual.ocean && !body.visual.clouds);
+    assert!(body.air_density_scale.is_none() && body.sea_level_meters.is_none());
+    let sim = initial.build();
+    let checkpoint =
+        void_fleet_flight::checkpoint::FlightCheckpoint::capture(&sim, initial.clone());
+    let mut encoded = serde_json::to_value(&checkpoint).unwrap();
+    encoded["model_version"] = serde_json::json!(27);
+    let checkpoint: void_fleet_flight::checkpoint::FlightCheckpoint =
+        serde_json::from_value(encoded).unwrap();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| checkpoint.restore())).is_err()
+    );
+    let mut invalid = initial.world;
+    invalid.bodies.get_mut("cinder").unwrap().air_density_scale = Some(1.0);
+    assert!(std::panic::catch_unwind(|| invalid.build()).is_err());
 }

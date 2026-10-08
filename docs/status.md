@@ -8,7 +8,7 @@ fast-forward至ad21813，包含此前整合版的EVA／rover、飛機零件與�
 整合證據，不把水的人類驗收擴寫為其他功能已完成獨立人類驗收。
 
 原agent實作透過cherry-pick及接縫修正整合，不重複merge原分支；worktree保留。
-水星work/mercury-scenery另外未合入。未push。model27／FleetCheckpoint12／world4／Craft3。
+水星其後已依使用者驗收授權合入，見下節。未push。model27／FleetCheckpoint12／world4／Craft3。
 驗收入口已可從主線scripts執行；詳見[water-review.md](water-review.md)。
 
 更新日期：2026-10-08。現行開發規則見 [AGENTS.md](../AGENTS.md)，需求與方向見 [NOTE.md](../NOTE.md)。本頁區分核心能力、主遊戲接線、驗證及合併；歷史測試结果只適用於記錄版本。
@@ -16,6 +16,10 @@ fast-forward至ad21813，包含此前整合版的EVA／rover、飛機零件與�
 合併後核對（master/ad21813）：fleet-flight的aircraft、eva、eva_stellar、stellar_world、
 stellar_wrench_frames、vehicles及water七組整合測試，37 passed／0 failed。
 未跑全workspace；主線程式碼與已驗收候選逐檔相同，主線驗收入口的binary摘要也已核對。
+
+## Cinder 已驗收並合入（2026-10-08）
+
+使用者已確認水星外觀沒有問題並授權合併。`work/mercury-scenery` 的 `4294b0f` 採入主線；root 審查地形／材質／取樣接口，保留既有四功能入口，拒絕 Cinder fixture 與其他 fixture 混用。整合為 model28／FleetCheckpoint12／world4／Craft3，舊 model27 與分支 model21 明確拒絕，沒有自動遷移。分支人類驗收與 agent GUI 證據見 [main-mercury-scenery.md](main-mercury-scenery.md)。未 push。
 
 ## 一句話
 
