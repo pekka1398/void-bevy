@@ -3395,6 +3395,10 @@ impl Fleet {
             }
         }
     }
+    /// Read-only bound for the splashdown performance diagnostic.
+    pub fn diagnostic_water_step_seconds(&self) -> f64 {
+        self.water_step_seconds(self.options.step_seconds)
+    }
     fn water_step_seconds(&self, maximum: f64) -> f64 {
         self.order.iter().fold(maximum, |dt, id| {
             let v = self.vessel(id);
