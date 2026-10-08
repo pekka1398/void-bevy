@@ -400,6 +400,22 @@ fn cinder_fixture(initial: &mut InitialWorld, site: &str) {
     initial.launch_site = direction;
 }
 
+fn vesper_fixture(initial: &mut InitialWorld, site: &str) {
+    assert_eq!(site, "plains", "--vesper-site must be plains");
+    assert!(
+        matches!(
+            initial.world.bodies["vesper"].terrain,
+            Some(void_terrain::TerrainConfig::Volcanic(_))
+        ),
+        "Vesper fixture requires volcanic terrain"
+    );
+    initial.launch_body = "vesper".into();
+    initial.launch_site = initial
+        .world
+        .daylight_terrain_site("vesper")
+        .expect("Vesper daylight terrain site");
+}
+
 fn scenery_description(sim: &void_fleet_flight::FleetFlight) -> String {
     let id = &sim.fleet.ephemeris.bodies()[sim.observation_body()].id;
     match sim.world.bodies.get(id) {
@@ -737,7 +753,7 @@ fn argument(name: &str) -> Option<String> {
 pub fn run(main_game: bool) {
     if std::env::args().any(|a| a == "--help") {
         println!(
-            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--cinder-site basin|rim|ejecta: paused main-game surface fixture\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--stellar-fixture: declared remote ground/orbit starting ships for acceptance\n--splashdown: paused ocean capsule; --water-speed m/s --water-tilt degrees --water-entry-angle degrees; R repeat, Shift+R next\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
+            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--cinder-site basin|rim|ejecta: paused main-game surface fixture\n--vesper-site plains: paused Vesper volcanic ground fixture\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--stellar-fixture: declared remote ground/orbit starting ships for acceptance\n--splashdown: paused ocean capsule; --water-speed m/s --water-tilt degrees --water-entry-angle degrees; R repeat, Shift+R next\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
         );
         return;
     }
@@ -868,7 +884,11 @@ pub fn run(main_game: bool) {
     let air =
         planet.planet.air_density_scale.is_some() && !std::env::args().any(|a| a == "--vacuum");
     let replay_path = argument("--replay");
-    if argument("--cinder-site").is_some() {
+    if argument("--cinder-site").is_some() || argument("--vesper-site").is_some() {
+        assert!(
+            argument("--cinder-site").is_none() || argument("--vesper-site").is_none(),
+            "surface fixtures cannot be combined"
+        );
         assert!(
             argument("--world").is_none()
                 && argument("--load").is_none()
@@ -885,7 +905,7 @@ pub fn run(main_game: bool) {
                         | "--stellar-fixture"
                         | "--splashdown"
                 )),
-            "--cinder-site cannot override world/load/replay/planet/terrain or other fixtures"
+            "surface fixture cannot override world/load/replay/planet/terrain or other fixtures"
         );
     }
     assert!(
@@ -949,6 +969,10 @@ pub fn run(main_game: bool) {
                 assert!(main_game, "Cinder fixture is a main-game entry");
                 cinder_fixture(&mut initial, &site);
             }
+            if let Some(site) = argument("--vesper-site") {
+                assert!(main_game, "Vesper fixture is a main-game entry");
+                vesper_fixture(&mut initial, &site);
+            }
             FlightSession::new(stellar_fixture_initial(if main_game {
                 initial.with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque)
             } else {
@@ -977,7 +1001,10 @@ pub fn run(main_game: bool) {
         !lab.rendezvous || (argument("--load").is_none() && replay_path.is_none()),
         "--rendezvous cannot be combined with --load or --replay"
     );
-    lab.paused = !main_game || argument("--load").is_some() || argument("--cinder-site").is_some();
+    lab.paused = !main_game
+        || argument("--load").is_some()
+        || argument("--cinder-site").is_some()
+        || argument("--vesper-site").is_some();
     if argument("--load").is_none() && replay_path.is_none() {
         lab.session.execute(Action::View {
             command: ViewCommand::Configure {
@@ -4452,6 +4479,24 @@ fn draw_map(
 #[cfg(test)]
 mod mercury_fixture_tests {
     use super::*;
+    #[test]
+    fn vesper_ground_fixture_uses_real_world_and_terrain() {
+        let planet = void_landing::aurelia();
+        let craft = void_vessels::pod_tank("Vesper fixture witness");
+        let mut initial = InitialWorld::new(&planet, &craft, DVec3::X, true);
+        initial.world = void_fleet_flight::world::solar_scenery(&planet);
+        vesper_fixture(&mut initial, "plains");
+        let sim = initial.build();
+        assert_eq!(sim.fleet.ephemeris.bodies()[sim.home].id, "vesper");
+        assert!(matches!(
+            sim.planet.terrain.config(),
+            void_terrain::TerrainConfig::Volcanic(_)
+        ));
+        assert_eq!(
+            sim.planet.terrain.config(),
+            sim.terrains[&sim.home].config()
+        );
+    }
     #[test]
     fn surface_entries_are_real_initial_worlds_with_shared_terrain() {
         let planet = void_landing::aurelia();

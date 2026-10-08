@@ -1,7 +1,7 @@
 {
   "air_dynamics": "forceAndTorque",
   "world": {
-    "schema": 4,
+    "schema": 5,
     "system": {
       "name": "Sol analogue",
       "root": {
@@ -529,6 +529,8 @@
             "bottom_meters": 1500.0,
             "top_meters": 8000.0,
             "extinction_per_meter": 0.0011,
+            "morphology": "EarthWeather",
+            "single_scattering_albedo": [0.99, 0.99, 0.99],
             "coverage": 0.62
           },
           "ocean": true,
@@ -826,6 +828,8 @@
             "bottom_meters": 45000.0,
             "top_meters": 70000.0,
             "extinction_per_meter": 0.0008,
+            "morphology": "EarthWeather",
+            "single_scattering_albedo": [0.99, 0.99, 0.99],
             "coverage": 0.96
           },
           "ocean": false,

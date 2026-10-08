@@ -45,6 +45,7 @@ struct Ground {
     impact_fresh: vec4<f32>,
     impact_rays: array<vec4<f32>,32>,
     impact_ray_params: array<vec4<f32>,32>,
+    continuous_cloud: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> ground: Ground;
@@ -135,12 +136,18 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let sun = ground.sun_direction;
     let sun_mu = dot(up, sun);
     let enabled = ground.atmosphere_enabled;
-    let sunlight = mix(vec3(1.0), sun_transmittance(transmittance_table, transmittance_sampler, shape, r, sun_mu), enabled)
+    var sunlight = mix(vec3(1.0), sun_transmittance(transmittance_table, transmittance_sampler, shape, r, sun_mu), enabled)
         * ground.sun_illuminance;
     // Sky irradiance on level ground from the table (multiple scattering included), plus a night floor
     // for starlight and airglow, exaggerated about a hundredfold so the night side is dim, not black.
-    let sky_light = sky_irradiance(irradiance_table, irradiance_sampler, shape, r, sun_mu) * enabled * ground.sun_illuminance
+    var sky_light = sky_irradiance(irradiance_table, irradiance_sampler, shape, r, sun_mu) * enabled * ground.sun_illuminance
         + NIGHT_LIGHT;
+
+    if ground.continuous_cloud.w > 0.0 {
+        sunlight *= exp(-ground.continuous_cloud.w / max(sun_mu, 0.03));
+        sky_light = ground.continuous_cloud.xyz * ground.sun_illuminance
+            * smoothstep(-0.12, 0.35, sun_mu) + vec3(NIGHT_LIGHT);
+    }
 
     // Land.
     let normal = normalize(in.world_normal);

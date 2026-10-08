@@ -96,6 +96,8 @@ pub struct AirSettings {
     pub cloud_bottom: f32,
     pub cloud_top: f32,
     pub cloud_extinction: f32,
+    pub cloud_morphology: f32,
+    pub cloud_albedo: Vec3,
 }
 
 /// three.js's tone mappings the lab offers, done at the end of the air pass. The camera's own
@@ -186,6 +188,8 @@ impl AirSettings {
             cloud_bottom: 1500.0,
             cloud_top: 8000.0,
             cloud_extinction: 0.0011,
+            cloud_morphology: 0.0,
+            cloud_albedo: Vec3::splat(0.99),
         }
     }
 

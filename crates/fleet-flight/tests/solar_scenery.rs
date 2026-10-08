@@ -193,3 +193,28 @@ fn cinder_has_explicit_impact_recipe_and_rejects_previous_model() {
     invalid.bodies.get_mut("cinder").unwrap().air_density_scale = Some(1.0);
     assert!(std::panic::catch_unwind(|| invalid.build()).is_err());
 }
+
+#[test]
+fn vesper_is_cloud_shrouded_volcanic_without_physical_atmosphere() {
+    use void_scenery::atmosphere_scene::CloudMorphology;
+    let initial = initial();
+    let d = &initial.world.bodies["vesper"];
+    assert!(matches!(
+        d.terrain,
+        Some(void_terrain::TerrainConfig::Volcanic(_))
+    ));
+    assert!(d.air_density_scale.is_none());
+    assert!(d.visual.atmosphere && d.visual.clouds && !d.visual.ocean);
+    let cloud = d.visual.cloud_profile.as_ref().unwrap();
+    assert_eq!(cloud.morphology, CloudMorphology::ContinuousDeck);
+    assert!(cloud.vertical_optical_depth() > 40.0);
+    let sim = initial.build();
+    let checkpoint = void_fleet_flight::checkpoint::FlightCheckpoint::capture(&sim, initial);
+    let mut encoded = serde_json::to_value(checkpoint).unwrap();
+    encoded["model_version"] = serde_json::json!(28);
+    let checkpoint: void_fleet_flight::checkpoint::FlightCheckpoint =
+        serde_json::from_value(encoded).unwrap();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| checkpoint.restore())).is_err()
+    );
+}

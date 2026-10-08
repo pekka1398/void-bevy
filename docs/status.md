@@ -1,5 +1,9 @@
 # 目前狀態
 
+## Vesper景觀候選（未合併）
+
+2026-10-08，work/venus-scenery：主遊戲連續厚雲與自訂火山地形、雲下暖色漫射及普通地面fixture已接線；model29/world5。針對性headless及agent TigerVNC驗證完成，待root審查與人類驗收，不代表已合入master。仍只有光學大氣，沒有新增Vesper物理氣動／熱模型。見[main-venus-scenery](main-venus-scenery.md)。
+
 ## 四功能與水修正已合入 master（2026-10-08）
 
 使用者驗收水的減速、斜入水及漂浮後，明確授權合併；master由183b9ba

@@ -58,6 +58,8 @@ struct Air {
     cloud_bottom: f32,
     cloud_top: f32,
     cloud_extinction: f32,
+    cloud_morphology: f32,
+    cloud_albedo: vec3<f32>,
 }
 
 @group(0) @binding(0) var scene_texture: texture_2d<f32>;
@@ -108,6 +110,19 @@ fn cloud_density(position: vec3<f32>, footprint: f32) -> f32 {
         return 0.0;
     }
     let up = normalize(position - air.planet_center);
+    if air.cloud_morphology > 0.5 {
+        // Unbroken deck. Density never opens Earth-style holes into the volcanic surface.
+        let h = (height-air.cloud_bottom)/(air.cloud_top-air.cloud_bottom);
+        let latitude = asin(clamp(up.z, -1.0, 1.0));
+        let longitude = atan2(up.y, up.x);
+        let broad = sin(latitude*11.0 + sin(longitude*2.0)*cos(latitude)*0.55);
+        let bands = 0.90 + 0.055*broad;
+        let q = (position + air.macro_origin)/(SHAPE_PERIOD*16.0);
+        let small = textureSampleLevel(shape_texture, noise_sampler, q,
+            log2(max(footprint/(SHAPE_PERIOD*16.0/SHAPE_SIZE), 1.0))).b;
+        return smoothstep(0.0, 0.08, h)*(1.0-smoothstep(0.80, 1.0, h))
+            * bands*(0.75+small*0.15);
+    }
     let uv = vec2(
         atan2(up.y, up.x) / (2.0 * PI) + (0.5 + 0.5 / WEATHER_WIDTH),
         (asin(clamp(up.z, -1.0, 1.0)) / PI + 0.5) * ((WEATHER_HEIGHT - 1.0) / WEATHER_HEIGHT) + 0.5 / WEATHER_HEIGHT,
@@ -189,7 +204,23 @@ fn cloud_source(position: vec3<f32>, rd: vec3<f32>, footprint: f32) -> vec3<f32>
         // phase lobe points away from the camera.
         + exp(optical * -0.3) * 0.02;
     let sky = sky_irradiance(irradiance_table, table_sampler, shape(), r, sun_mu) * air.enabled / PI;
-    return (to_sun * sunlight + sky * 0.5 * exp(optical * -0.35) + vec3(2e-5)) * air.sun_illuminance * 0.99;
+    if air.cloud_morphology > 0.5 {
+        // Diffuse tail for a nearly conservative, optically thick deck. Finite-order Earth
+        // cumulus approximation alone loses most reflected energy in a 40+ optical-depth slab.
+        let absorption = sqrt(vec3(1.0)-air.cloud_albedo);
+        let reflectance = (vec3(1.0)-absorption)/(vec3(1.0)+absorption);
+        let latitude = asin(clamp(up.z, -1.0, 1.0));
+        let longitude = atan2(up.y, up.x);
+        let warp = sin(longitude*2.0)*cos(latitude)*0.55;
+        let q = vec3(up.xy*2.0, up.z*7.0 + warp*0.12);
+        let wisps = textureSampleLevel(shape_texture, noise_sampler, q, 0.0).r;
+        let markings = 0.96 + 0.04*sin(latitude*11.0+warp+wisps*0.8);
+        // Weak visible absorber contrast. This intentionally does not reproduce the dark UV bands.
+        let tint = mix(vec3(0.94,0.88,0.76), vec3(1.0), smoothstep(0.1,0.8,wisps));
+        let diffuse = reflectance * (0.6/PI) * max(sun_mu, 0.0) * exp(-optical*0.12) * markings * tint;
+        return (to_sun*(sunlight*air.cloud_albedo+diffuse) + sky*0.5*exp(-optical*0.35)) * air.sun_illuminance;
+    }
+    return (to_sun * sunlight + sky * 0.5 * exp(optical * -0.35) + vec3(2e-5)) * air.sun_illuminance * air.cloud_albedo;
 }
 
 // ---------------------------------------------------------------- the pass
@@ -329,6 +360,13 @@ fn transport(ray: Ray) -> Medium {
             var source = (scattering * sun_transmittance(transmittance_table, table_sampler, shape(), r, sun_mu)
                 + all_scattering * multiple_scattering(multiple_table, table_sampler, shape(), r, sun_mu) * air.multiple_enabled)
                 * air.sun_illuminance * air.enabled;
+            if air.cloud_morphology > 0.5 && height < air.cloud_bottom+air.sea_level {
+                // The same overcast diffusion approximation as ground illumination. LUTs
+                // contain gas only; their unshadowed sunlight cannot illuminate subcloud air.
+                let tau = (air.cloud_top-air.cloud_bottom)*air.cloud_extinction*0.65;
+                let transmission = exp(-sqrt((vec3(1.0)-air.cloud_albedo)*0.3)*tau)/(1.0+0.05*tau);
+                source *= transmission;
+            }
             if in_cloud {
                 let footprint = max(dt, t / air.focal_pixels) * 2.0;
                 let sigma = cloud_density(position, footprint) * air.cloud_extinction;

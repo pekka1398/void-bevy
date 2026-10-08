@@ -139,6 +139,11 @@ pub fn build_scenes(
             air.cloud_top = clouds.top_meters as f32;
             air.cloud_extinction = clouds.extinction_per_meter as f32;
             air.coverage = clouds.coverage as f32;
+            air.cloud_morphology = match clouds.morphology {
+                void_scenery::atmosphere_scene::CloudMorphology::EarthWeather => 0.0,
+                void_scenery::atmosphere_scene::CloudMorphology::ContinuousDeck => 1.0,
+            };
+            air.cloud_albedo = Vec3::from_array(clouds.single_scattering_albedo.map(|v| v as f32));
         }
         air.exposure = 1.0;
         air.tone_mapping = crate::air::ToneMapping::None as u8 as f32;
@@ -164,6 +169,21 @@ pub fn build_scenes(
             d.visual.rock_height_meters,
             d.visual.snow_height_meters,
         );
+        if let Some(clouds) = &d.visual.cloud_profile
+            && clouds.morphology == void_scenery::atmosphere_scene::CloudMorphology::ContinuousDeck
+        {
+            let tau = clouds.vertical_optical_depth();
+            let transmission = clouds.single_scattering_albedo.map(|a| {
+                // Diffusion approximation to absorbing, optically thick overcast illumination.
+                ((-((0.3 * (1.0 - a)).sqrt()) * tau).exp() / (1.0 + 0.05 * tau)) as f32
+            });
+            uniforms.continuous_cloud = Vec4::new(
+                transmission[0],
+                transmission[1],
+                transmission[2],
+                tau as f32,
+            );
+        }
         uniforms.regolith = f32::from(u8::from(matches!(
             d.visual.surface,
             void_scenery::solar::SurfaceRecipe::Regolith

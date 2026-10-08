@@ -117,7 +117,7 @@ impl WorldDescription {
         };
         let max = planet.terrain.max_height_meters;
         Self {
-            schema: 4,
+            schema: 5,
             system: planet.system.clone(),
             stellar: None,
             bodies: BTreeMap::from([(
@@ -174,7 +174,7 @@ impl WorldDescription {
         &self,
         saved: Option<void_multiscale::CoupledCheckpoint>,
     ) -> BuiltWorld {
-        assert_eq!(self.schema, 4, "world: unsupported schema");
+        assert_eq!(self.schema, 5, "world: unsupported schema");
         let restoring_coupled = saved.is_some();
         let (mut ephemeris, coupled_world): (Box<dyn EphemerisSource>, _) =
             if let Some(stellar) = &self.stellar {
@@ -335,7 +335,9 @@ impl WorldDescription {
                             && h.wavelength_meters.is_finite(),
                         "world: non-finite terrain"
                     ),
-                    TerrainConfig::Cratered(_) | TerrainConfig::Impact(_) => {} // constructor validates every parameter
+                    TerrainConfig::Cratered(_)
+                    | TerrainConfig::Impact(_)
+                    | TerrainConfig::Volcanic(_) => {} // constructor validates every parameter
                     TerrainConfig::Layered(l) => {
                         assert!(l.radius_meters.is_finite(), "world: non-finite terrain")
                     }
@@ -627,7 +629,10 @@ pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
                     body.radius_meters,
                 )))
             }
-            "selene" | "ares" | "vesper" => {
+            "vesper" => Some(TerrainConfig::Volcanic(
+                void_terrain::VolcanicOptions::vesper(body.radius_meters),
+            )),
+            "selene" | "ares" => {
                 let (height, count, size, roughness, seed, low, high) = match id {
                     "selene" => (
                         8500.0,
@@ -646,15 +651,6 @@ pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
                         47,
                         [0.13, 0.035, 0.014],
                         [0.65, 0.25, 0.09],
-                    ),
-                    "vesper" => (
-                        9000.0,
-                        22,
-                        0.12,
-                        1.0,
-                        73,
-                        [0.10, 0.07, 0.02],
-                        [0.48, 0.34, 0.12],
                     ),
                     _ => unreachable!(),
                 };
@@ -711,13 +707,13 @@ pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
             visual.scattering = Some(AtmosphereProfile::Custom {
                 height_meters: if venus { 120000.0 } else { 80000.0 },
                 rayleigh_scattering: if venus {
-                    [18e-6, 15e-6, 8e-6]
+                    [85e-6, 150e-6, 280e-6]
                 } else {
                     [0.5e-6, 0.3e-6, 0.15e-6]
                 },
-                rayleigh_scale_height: if venus { 16000.0 } else { 11000.0 },
-                mie_scattering: if venus { 12e-6 } else { 0.4e-6 },
-                mie_extinction: if venus { 15e-6 } else { 0.5e-6 },
+                rayleigh_scale_height: if venus { 15000.0 } else { 11000.0 },
+                mie_scattering: if venus { 5e-6 } else { 0.4e-6 },
+                mie_extinction: if venus { 6e-6 } else { 0.5e-6 },
                 mie_scale_height: if venus { 18000.0 } else { 8000.0 },
                 mie_anisotropy: 0.7,
                 ozone_absorption: [0.0; 3],
@@ -726,12 +722,7 @@ pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
             });
             if venus {
                 visual.clouds = true;
-                visual.cloud_profile = Some(CloudProfile {
-                    bottom_meters: 45000.0,
-                    top_meters: 70000.0,
-                    extinction_per_meter: 0.0008,
-                    coverage: 0.96,
-                });
+                visual.cloud_profile = Some(CloudProfile::vesper());
             }
         }
         world.bodies.insert(

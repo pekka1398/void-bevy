@@ -110,6 +110,7 @@ pub struct GroundUniforms {
     pub impact_fresh: Vec4,
     pub impact_rays: [Vec4; 32],
     pub impact_ray_params: [Vec4; 32],
+    pub continuous_cloud: Vec4,
 }
 
 impl GroundUniforms {
@@ -132,6 +133,7 @@ impl GroundUniforms {
             impact_fresh: Vec4::ZERO,
             impact_rays: [Vec4::ZERO; 32],
             impact_ray_params: [Vec4::ZERO; 32],
+            continuous_cloud: Vec4::ZERO,
             planet_center: Vec3::ZERO,
             sun_illuminance: 1.0,
             sun_direction: Vec3::X,

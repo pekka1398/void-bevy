@@ -98,6 +98,13 @@ impl AtmosphereProfile {
     }
 }
 
+/// A weather field or an unbroken aerosol deck; never infer morphology from the body name.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CloudMorphology {
+    EarthWeather,
+    ContinuousDeck,
+}
+
 /// Height above the body's cloud datum. Noise recipe is currently shared, not Earth heights.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -106,6 +113,8 @@ pub struct CloudProfile {
     pub top_meters: f64,
     pub extinction_per_meter: f64,
     pub coverage: f64,
+    pub morphology: CloudMorphology,
+    pub single_scattering_albedo: [f64; 3],
 }
 impl CloudProfile {
     pub fn earth() -> Self {
@@ -114,9 +123,36 @@ impl CloudProfile {
             top_meters: 8000.0,
             extinction_per_meter: 0.0011,
             coverage: 0.62,
+            morphology: CloudMorphology::EarthWeather,
+            single_scattering_albedo: [0.99; 3],
         }
     }
+    pub fn vesper() -> Self {
+        Self {
+            bottom_meters: 48000.0,
+            top_meters: 70000.0,
+            extinction_per_meter: 0.003,
+            coverage: 1.0,
+            morphology: CloudMorphology::ContinuousDeck,
+            single_scattering_albedo: [0.999, 0.998, 0.995],
+        }
+    }
+    /// The deck's integrated density moment (smooth tapers and mean structure).
+    pub fn vertical_optical_depth(&self) -> f64 {
+        assert_eq!(self.morphology, CloudMorphology::ContinuousDeck);
+        (self.top_meters - self.bottom_meters) * self.extinction_per_meter * 0.65
+    }
     pub fn validate(&self) {
+        assert!(
+            self.single_scattering_albedo
+                .iter()
+                .all(|v| v.is_finite() && *v > 0.0 && *v <= 1.0),
+            "invalid cloud albedo"
+        );
+        assert!(
+            self.morphology != CloudMorphology::ContinuousDeck || self.coverage == 1.0,
+            "continuous cloud deck requires full coverage"
+        );
         assert!(
             self.bottom_meters.is_finite()
                 && self.bottom_meters >= 0.0
@@ -253,6 +289,19 @@ mod tests {
             },
         ];
         assert_eq!(ordered_volumes(&volumes), [0, 1]);
+    }
+    #[test]
+    fn continuous_deck_is_explicit_and_optically_thick() {
+        let p = CloudProfile::vesper();
+        p.validate();
+        assert!(p.vertical_optical_depth() > 40.0);
+        assert_eq!(
+            serde_json::from_str::<CloudProfile>(&serde_json::to_string(&p).unwrap()).unwrap(),
+            p
+        );
+        let mut invalid = p;
+        invalid.coverage = 0.99;
+        assert!(std::panic::catch_unwind(|| invalid.validate()).is_err());
     }
     #[test]
     fn custom_profile_round_trip_and_non_earth_parameters() {
