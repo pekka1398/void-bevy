@@ -272,10 +272,21 @@ impl Environment {
         self.read(body, &self.local(body, local, DQuat::IDENTITY))
     }
 
-    fn read(&self, body: usize, place: &InBody) -> Surroundings {
+    /// Atmosphere-only query: same frame/state validation and air as `surroundings`,
+    /// without evaluating terrain or the sea mask.
+    pub fn air<S: FrameSource + ?Sized>(
+        &self,
+        at: &Snapshot<S>,
+        frames: &SystemFrames,
+        from: FrameId,
+        state: State,
+        body: usize,
+    ) -> Option<AirSample> {
+        self.read_air(body, &self.in_body(at, frames, from, state, body))
+    }
+    fn read_air(&self, body: usize, place: &InBody) -> Option<AirSample> {
         let (b, local, radius) = (&self.bodies[body], place.local, place.radius);
-        let described = self.places[body].as_ref();
-        let air = described.and_then(|p| {
+        self.places[body].as_ref().and_then(|p| {
             let atmosphere = p.atmosphere.as_ref()?;
             let altitude = radius - b.radius_meters - p.air_datum_meters;
             (altitude < atmosphere.ceiling_meters()).then(|| AirSample {
@@ -283,10 +294,16 @@ impl Environment {
                 air: atmosphere.sample(altitude),
                 airspeed: place.back * local.velocity,
             })
-        });
+        })
+    }
+
+    fn read(&self, body: usize, place: &InBody) -> Surroundings {
+        let (b, local, radius) = (&self.bodies[body], place.local, place.radius);
+        let described = self.places[body].as_ref();
+        let air = self.read_air(body, place);
+        let ground = self.ground_under(body, place);
         let sea = described.and_then(|p| {
             let level = p.sea_level_meters?;
-            let ground = self.ground_under(body, place);
             let water_present = !ground.is_some_and(|g| g.height >= level || g.clearance < 0.0);
             Some(SeaSample {
                 depth: b.radius_meters + level - radius,
@@ -299,7 +316,7 @@ impl Environment {
             up: place.back * place.direction,
             radius,
             air,
-            ground: self.ground_under(body, place),
+            ground,
             sea,
         }
     }

@@ -45,11 +45,9 @@ fn air_at(
         (&owned, query)
     };
     let at = frames.tree.at(t, ephemeris);
-    bodies.iter().find_map(|&body| {
-        environment
-            .surroundings(&at, frames, query, state, body)
-            .air
-    })
+    bodies
+        .iter()
+        .find_map(|&body| environment.air(&at, frames, query, state, body))
 }
 
 /// What a vessel's parts act in for one leg or step, read once at its centre of mass.
@@ -156,11 +154,9 @@ impl VesselAir {
     ) -> AirData {
         let frames = self.environment.frames();
         let sample = |state| {
-            self.bodies.iter().find_map(|&body| {
-                self.environment
-                    .surroundings(at, frames, query, state, body)
-                    .air
-            })
+            self.bodies
+                .iter()
+                .find_map(|&body| self.environment.air(at, frames, query, state, body))
         };
         let mut data = AirData::default();
         if let Some(air) = sample(state) {
@@ -218,11 +214,9 @@ impl VesselAir {
         assert!(angular_velocity.is_finite(), "invalid air angular velocity");
         let frames = self.environment.frames();
         let sample = |state| {
-            self.bodies.iter().find_map(|&body| {
-                self.environment
-                    .surroundings(at, frames, query, state, body)
-                    .air
-            })
+            self.bodies
+                .iter()
+                .find_map(|&body| self.environment.air(at, frames, query, state, body))
         };
         let mut result = crate::Wrench::zero(query, state.position);
         for element in &self.elements {
@@ -308,11 +302,9 @@ impl VesselAir {
         );
         let frames = self.environment.frames();
         let sample = |state| {
-            self.bodies.iter().find_map(|&body| {
-                self.environment
-                    .surroundings(at, frames, query, state, body)
-                    .air
-            })
+            self.bodies
+                .iter()
+                .find_map(|&body| self.environment.air(at, frames, query, state, body))
         };
         let mut force = sample(state).map_or(DVec3::ZERO, |air| {
             aerodynamic_forces(

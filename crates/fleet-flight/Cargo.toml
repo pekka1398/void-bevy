@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+step-timing = ["void-vessels/step-timing"]
+
 [dependencies]
 glam.workspace = true
 void-assembly.workspace = true

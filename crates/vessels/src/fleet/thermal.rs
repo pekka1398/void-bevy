@@ -30,11 +30,8 @@ impl Fleet {
                     position: DVec3::ZERO,
                     velocity: DVec3::ZERO,
                 });
-                let air = (0..self.environment.bodies().len()).find_map(|body| {
-                    self.environment
-                        .surroundings(&at, frames, query, state, body)
-                        .air
-                });
+                let air = (0..self.environment.bodies().len())
+                    .find_map(|body| self.environment.air(&at, frames, query, state, body));
                 for module in &part.definition.modules {
                     let Module::Thermal {
                         id: module,

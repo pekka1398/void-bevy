@@ -2,6 +2,15 @@ use glam::DVec3;
 use void_landing::FrameState;
 use void_vessels::{AirDynamics, Fleet, FleetOptions};
 fn make(mode: AirDynamics, sea: bool, air: bool, height: f64) -> (Fleet, String) {
+    make_with_ground(mode, sea, air, height, false)
+}
+fn make_with_ground(
+    mode: AirDynamics,
+    sea: bool,
+    air: bool,
+    height: f64,
+    ground: bool,
+) -> (Fleet, String) {
     let mut planet = void_landing::earth_size();
     planet.sea_level = sea.then_some(9000.);
     let (e, home) = void_landing::planet_ephemeris(&planet);
@@ -21,7 +30,11 @@ fn make(mode: AirDynamics, sea: bool, air: bool, height: f64) -> (Fleet, String)
         e,
         env,
         0.,
-        vec![],
+        if ground {
+            vec![ground_spec(home)]
+        } else {
+            vec![]
+        },
         FleetOptions {
             air_dynamics: mode,
             ..FleetOptions::default()
@@ -75,4 +88,86 @@ fn submerged_water_rotation_is_independent_of_air_mode() {
     let b = full.snapshot(&b);
     assert!((a.angular_velocity - b.angular_velocity).length() < 1e-10);
     assert!((a.velocity - b.velocity).length() < 1e-10);
+}
+
+#[test]
+fn wet_scene_does_not_change_remote_dry_scene_cadence_and_restores_at_boundary() {
+    let (mut mixed, wet) = make_with_ground(AirDynamics::ForceAndTorque, true, false, -2., true);
+    let (dry, dry_only) = make(AirDynamics::ForceAndTorque, true, false, 5.);
+    // The antipodal craft requires another Ground scene, outside contact/encounter range.
+    let source = dry.snapshot(&dry_only);
+    let mut craft = void_assembly::fresh_craft();
+    craft.parts[0].definition_id = "aero-stabilizer-pod".into();
+    let remote = mixed.launch(
+        &craft,
+        FrameState {
+            position: -source.position,
+            velocity: -source.velocity,
+        },
+        source.rotation,
+        source.angular_velocity,
+    );
+    let (reference, _) = make_with_ground(AirDynamics::ForceAndTorque, true, false, 5., true);
+    // Replace the reference launch with the exact antipodal initial conditions.
+    let mut reference = Fleet::new(
+        void_landing::planet_ephemeris(&void_landing::earth_size()).0,
+        reference.environment().clone(),
+        0.,
+        vec![ground_spec(0)],
+        reference.options,
+    );
+    let reference_id = reference.launch(
+        &craft,
+        FrameState {
+            position: -source.position,
+            velocity: -source.velocity,
+        },
+        source.rotation,
+        source.angular_velocity,
+    );
+    mixed.advance(0.1);
+    reference.advance(0.1);
+    assert!(mixed.water_wrench(&wet).force.length() > 0.);
+    assert_eq!(mixed.scene_snapshots().len(), 2);
+    let a = mixed.snapshot(&remote);
+    let b = reference.snapshot(&reference_id);
+    assert!((a.position - b.position).length() < 1e-7);
+    assert!((a.velocity - b.velocity).length() < 1e-7);
+    assert!((a.angular_velocity - b.angular_velocity).length() < 1e-10);
+    let checkpoint = mixed.checkpoint();
+    let mut restored = Fleet::from_checkpoint(
+        void_landing::planet_ephemeris(&void_landing::earth_size()).0,
+        mixed.environment().clone(),
+        checkpoint,
+    );
+    assert_eq!(restored.time(), mixed.time());
+    for id in mixed.vessel_ids() {
+        assert_eq!(
+            restored.snapshot(&id).position,
+            mixed.snapshot(&id).position
+        );
+    }
+    mixed.advance(0.05);
+    restored.advance(0.05);
+    for id in mixed.vessel_ids() {
+        assert!((restored.snapshot(&id).position - mixed.snapshot(&id).position).length() < 1e-7);
+        assert!((restored.snapshot(&id).velocity - mixed.snapshot(&id).velocity).length() < 1e-7);
+    }
+}
+
+fn ground_spec(body_index: usize) -> void_vessels::GroundSpec {
+    void_vessels::GroundSpec {
+        body_index,
+        band_enter_meters: 10000.,
+        band_exit_meters: 11000.,
+        tiles: void_landing::ContactWorldOptions {
+            step_seconds: 1. / 60.,
+            tile_level: void_landing::level_for_tile_size(6371000., 300.),
+            tile_resolution: 9,
+            tile_reach_meters: 300.,
+            tile_keep_meters: 600.,
+            recenter_meters: 5000.,
+            sleeping: true,
+        },
+    }
 }

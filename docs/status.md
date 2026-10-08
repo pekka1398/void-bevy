@@ -1,5 +1,13 @@
 # 目前狀態
 
+## 水卡頓修正候選（2026-10-08，未人類驗收）
+
+`work/splashdown-performance`／`void-bevy-water-perf` 的model27改用平滑水阻力衝量，
+保留排水浮力、原船runtime及normal Scene cadence。主agent自行實作與核對；
+尚未合入master，未替換原model26 integration候選。遊戲內P開始、R重跑、
+Shift+R換六組速度／角度；入口與證據見[water-review.md](water-review.md)。
+
+
 更新日期：2026-10-07。現行開發規則見 [AGENTS.md](../AGENTS.md)，需求與方向見 [NOTE.md](../NOTE.md)。本頁區分核心能力、主遊戲接線、驗證及合併；各項完成條件和限制見對應文件。歷史測試結果只適用於記錄的版本。
 
 ## 一句話

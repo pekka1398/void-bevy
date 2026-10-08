@@ -551,6 +551,7 @@ struct Lab {
     main_game: bool,
     rendezvous: bool,
     reentry: bool,
+    water_review: Option<[f64; 3]>,
     own_port: Option<PortAddress>,
     target_port: Option<PortAddress>,
     pointer_over_label: bool,
@@ -700,7 +701,7 @@ fn argument(name: &str) -> Option<String> {
 pub fn run(main_game: bool) {
     if std::env::args().any(|a| a == "--help") {
         println!(
-            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--stellar-fixture: declared remote ground/orbit starting ships for acceptance\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
+            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--stellar-fixture: declared remote ground/orbit starting ships for acceptance\n--splashdown: paused ocean capsule; --water-speed m/s --water-tilt degrees --water-entry-angle degrees; R repeat, Shift+R next\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
         );
         return;
     }
@@ -985,9 +986,26 @@ pub fn run(main_game: bool) {
             argument("--load").is_none() && lab.playback.is_none(),
             "splashdown cannot replace load/replay"
         );
-        let id = void_fleet_flight::water::splashdown(&mut lab.session);
-        select_pilot(&mut lab, &id);
-        lab.notice="Splashdown fixture: capsule 8 m above the real ocean, 2 m/s descent. P pause; water load uses displacement and mass.".into();
+        let number = |name: &str, default: f64| {
+            argument(name).map_or(default, |s| {
+                s.parse::<f64>()
+                    .unwrap_or_else(|_| panic!("invalid {name}: {s}"))
+            })
+        };
+        let speed = number("--water-speed", 2.);
+        let tilt = number("--water-tilt", 0.);
+        let entry = number("--water-entry-angle", 0.);
+        assert!(
+            speed.is_finite()
+                && speed >= 0.
+                && tilt.is_finite()
+                && tilt.abs() <= 180.
+                && entry.is_finite()
+                && (0. ..=90.).contains(&entry),
+            "invalid splashdown parameters"
+        );
+        lab.water_review = Some([speed, tilt, entry]);
+        water_fixture(&mut lab);
     }
     if let Some(body) = argument("--body") {
         assert!(
@@ -1317,6 +1335,36 @@ fn benchmark_tick(
         }
     }
 }
+const WATER_REVIEW_CASES: [[f64; 3]; 6] = [
+    [2., 0., 0.],
+    [20., 45., 0.],
+    [80., 90., 0.],
+    [200., 0., 0.],
+    [80., 45., 45.],
+    [200., 90., 60.],
+];
+fn water_fixture(lab: &mut Lab) {
+    let [speed, tilt, entry] = lab.water_review.expect("water review parameters");
+    let id = void_fleet_flight::water::splashdown_at(
+        &mut lab.session,
+        &void_assembly::reentry_capsule(),
+        speed,
+        tilt.to_radians(),
+        entry.to_radians(),
+    );
+    select_pilot(lab, &id);
+    lab.paused = true;
+    lab.session.execute(Action::View {
+        command: ViewCommand::Zoom { pixels: 320. },
+    });
+    lab.session.execute(Action::EndFrame {
+        paused: true,
+        rate: lab.rate,
+    });
+    lab.notice = format!(
+        "Splashdown: {speed} m/s, body tilt {tilt}°, entry from vertical {entry}°. P start/pause; R repeat; Shift+R next case."
+    );
+}
 fn new_lab(session: FlightSession, craft: Craft) -> Lab {
     let f = &session.sim().fleet;
     let orbits = void_view::MapOrbits::new(f.ephemeris.bodies());
@@ -1324,6 +1372,7 @@ fn new_lab(session: FlightSession, craft: Craft) -> Lab {
         main_game: false,
         rendezvous: false,
         reentry: false,
+        water_review: None,
         own_port: None,
         target_port: None,
         pointer_over_label: false,
@@ -1682,6 +1731,15 @@ fn controls(
         }
     }
     if keys.just_pressed(KeyCode::KeyR) {
+        if keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
+            && let Some(current) = lab.water_review
+        {
+            let next = WATER_REVIEW_CASES
+                .iter()
+                .position(|c| *c == current)
+                .map_or(0, |i| (i + 1) % WATER_REVIEW_CASES.len());
+            lab.water_review = Some(WATER_REVIEW_CASES[next]);
+        }
         let initial = lab.session.recording_initial().clone();
         lab.session.execute(Action::ResetWorld {
             initial: Box::new(initial),
@@ -1699,6 +1757,9 @@ fn controls(
         }
         if lab.reentry {
             reentry_fixture(lab);
+        }
+        if lab.water_review.is_some() {
+            water_fixture(lab);
         }
     }
     if keys.just_pressed(KeyCode::Tab)
@@ -1849,6 +1910,7 @@ fn controls(
     let throttle_axis = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) as i32
         - keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]) as i32;
     if !lab.session.sim().fleet.command_failed(&id)
+        && !(lab.water_review.is_some() && lab.paused)
         && !keys.just_pressed(KeyCode::Tab)
         && !keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
     {
@@ -3013,6 +3075,56 @@ mod tests {
     }
     use super::*;
     use void_assembly::demo_craft;
+    #[test]
+    fn water_review_repeat_and_next_reset_without_accumulating_vessels() {
+        let mut planet = void_landing::earth_size();
+        planet.sea_level = Some(1800.);
+        let craft = void_assembly::reentry_capsule();
+        let initial = InitialWorld::new(&planet, &craft, DVec3::X, true);
+        let mut lab = new_lab(FlightSession::new(initial).with_recording(), craft);
+        lab.main_game = true;
+        lab.water_review = Some(WATER_REVIEW_CASES[0]);
+        water_fixture(&mut lab);
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_non_send(lab)
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(AccumulatedMouseMotion::default())
+            .insert_resource(AccumulatedMouseScroll::default())
+            .add_systems(Update, controls);
+        app.world_mut().spawn(Window::default());
+        for next in [false, true, false] {
+            {
+                let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+                keys.reset_all();
+                keys.press(KeyCode::KeyR);
+                if next {
+                    keys.press(KeyCode::ShiftLeft);
+                }
+            }
+            app.update();
+            let lab = app.world().non_send::<Lab>();
+            let sim = lab.session.sim();
+            assert!(lab.paused);
+            assert_eq!(sim.fleet.time(), 0.);
+            assert_eq!(sim.fleet.vessel_ids().len(), 2);
+            assert_eq!(sim.fleet.control(&sim.selected).throttle, 0.);
+            let speed = sim
+                .fleet
+                .body_fixed_state(&sim.selected, sim.home)
+                .velocity
+                .length();
+            assert!((speed - lab.water_review.unwrap()[0]).abs() < 1e-6);
+        }
+        let mut lab = app.world_mut().non_send_mut::<Lab>();
+        assert_eq!(lab.water_review, Some(WATER_REVIEW_CASES[1]));
+        let replayed = FlightSession::from_recording(lab.session.recording());
+        assert_eq!(
+            void_fleet_flight::session::world_mark(replayed.sim()),
+            void_fleet_flight::session::world_mark(lab.session.sim())
+        );
+    }
     fn rendezvous_lab() -> Lab {
         let planet = game_planet_by_id("aurelia", None);
         let craft = void_assembly::rcs_flight_rocket();

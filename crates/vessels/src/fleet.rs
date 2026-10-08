@@ -279,6 +279,8 @@ pub struct Fleet {
     primary_system: SystemId,
     /// The world's gravity, air, terrain and sea.
     environment: Arc<Environment>,
+    /// Derived immutable hull geometry, released with this fleet; never checkpoint state.
+    water_hulls: void_modules::water::HullCache,
     grounds: Vec<Ground>,
     /// Every part's state and pose, and the connections between parts.
     parts: PartGraph,
@@ -304,6 +306,8 @@ pub struct Fleet {
     pending: f64,
     next_vessel: u64,
     next_scene: u64,
+    #[cfg(feature = "step-timing")]
+    step_times: [f64; 6],
 }
 /// The fleet's tree reads systems and bodies from the ephemeris and scenes and vessels from the
 /// fleet's own state, which exists at the fleet's time only.
@@ -438,6 +442,7 @@ impl Fleet {
             propagator,
             primary_system,
             environment,
+            water_hulls: void_modules::water::HullCache::default(),
             grounds,
             parts: PartGraph::new(),
             vessels: BTreeMap::new(),
@@ -460,6 +465,8 @@ impl Fleet {
             pending: 0.0,
             next_vessel: 1,
             next_scene: 1,
+            #[cfg(feature = "step-timing")]
+            step_times: [0.0; 6],
         }
     }
     pub fn environment(&self) -> &Arc<Environment> {
@@ -484,18 +491,16 @@ impl Fleet {
         let at = self.frames.tree.at(time, self);
         Conditions {
             air: (0..self.environment.bodies().len()).find_map(|body| {
-                self.environment
-                    .surroundings(
-                        &at,
-                        self.environment.frames(),
-                        query,
-                        State {
-                            position: snapshot.position,
-                            velocity: snapshot.velocity,
-                        },
-                        body,
-                    )
-                    .air
+                self.environment.air(
+                    &at,
+                    self.environment.frames(),
+                    query,
+                    State {
+                        position: snapshot.position,
+                        velocity: snapshot.velocity,
+                    },
+                    body,
+                )
             }),
         }
     }
@@ -2632,11 +2637,12 @@ impl Fleet {
         )
         .map(|air| air.with_controls(self.controls[&v.id].turn))
         .map(Arc::new);
-        let water = Arc::new(void_modules::water::VesselWater::new(
+        let water = Arc::new(void_modules::water::VesselWater::new_cached(
             &self.environment,
             &self.parts,
             &v.members,
             self.centre(&v.members),
+            &self.water_hulls,
         ));
         let initial_water = water.wrench(
             &*self.ephemeris,
@@ -2872,11 +2878,12 @@ impl Fleet {
             }
             let coupled = self.wheels_need_physics(&v)
                 || !ideal_pointing
-                    && (void_modules::water::VesselWater::new(
+                    && (void_modules::water::VesselWater::new_cached(
                         &self.environment,
                         &self.parts,
                         &v.members,
                         self.centre(&v.members),
+                        &self.water_hulls,
                     )
                     .near_surface(
                         &*self.ephemeris,
@@ -2979,11 +2986,12 @@ impl Fleet {
                 Some(Arc::new(GuidedAirSource {
                     air: geometry.map(Arc::new),
                     full_air: self.options.air_dynamics == AirDynamics::ForceAndTorque,
-                    water: Arc::new(void_modules::water::VesselWater::new(
+                    water: Arc::new(void_modules::water::VesselWater::new_cached(
                         &self.environment,
                         &self.parts,
                         &v.members,
                         self.centre(&v.members),
+                        &self.water_hulls,
                     )),
                     rotation: *rotation,
                     thrust_axis: p.force.normalize(),
@@ -3129,6 +3137,7 @@ impl Fleet {
         let ids = self.scenes[&scene].members.clone();
         let mut plans = vec![];
         let mut initial_water_acceleration = HashMap::new();
+        let mut water_impulses = Vec::new();
         for id in ids {
             let v = self.vessel(&id).clone();
             let Owner::Scene { body, push, .. } = v.owner else {
@@ -3186,13 +3195,14 @@ impl Fleet {
                 local.position,
                 local.velocity,
             );
-            let water = void_modules::water::VesselWater::new(
+            let water = void_modules::water::VesselWater::new_cached(
                 &self.environment,
                 &self.parts,
                 &v.members,
                 self.centre(&v.members),
+                &self.water_hulls,
             );
-            let water_wrench = water.wrench_in(
+            let water_wrench = water.buoyancy_in(
                 &self.frames(),
                 self.scenes[&scene].contact,
                 state_of(local),
@@ -3256,10 +3266,33 @@ impl Fleet {
                         + mid_torque
                         + qm.conjugate()
                             * water
-                                .wrench_in(&at, self.scenes[&scene].contact, middle, qm, wm)
+                                .buoyancy_in(&at, self.scenes[&scene].contact, middle, qm, wm)
                                 .torque
                 }
             };
+            // Integrate resistance against the velocity predicted after continuous
+            // loads, so buoyancy/gravity do not kick again after the damping solve.
+            let inverse = self
+                .inertia_of(&v.members, self.centre(&v.members))
+                .inverse();
+            let predicted = State {
+                position: local.position,
+                velocity: local.velocity + (frame_acceleration + now) * dt,
+            };
+            let predicted_spin = w + q * (inverse * torque) * dt;
+            let drag = water.drag_impulse_in(
+                &self.frames(),
+                self.scenes[&scene].contact,
+                predicted,
+                q,
+                predicted_spin,
+                void_modules::water::DragStep {
+                    mass_kg: snapshot.mass_kg,
+                    inverse_inertia: inverse,
+                    seconds: dt,
+                },
+            );
+            water_impulses.push((body, drag));
             self.scenes
                 .get_mut(&scene)
                 .unwrap()
@@ -3273,6 +3306,13 @@ impl Fleet {
                 p,
                 active + water_wrench.force / snapshot.mass_kg,
             ));
+        }
+        for (body, drag) in water_impulses {
+            self.scenes
+                .get_mut(&scene)
+                .unwrap()
+                .world
+                .apply_resistance_impulse(body, drag.linear, drag.angular);
         }
         let external_acceleration: HashMap<_, _> = plans
             .iter()
@@ -3353,15 +3393,13 @@ impl Fleet {
             let contact = self.scenes[&scene].contact;
             let conditions = Conditions {
                 air: (0..self.environment.bodies().len()).find_map(|body| {
-                    self.environment
-                        .surroundings(
-                            &at,
-                            self.environment.frames(),
-                            contact,
-                            state_of(local),
-                            body,
-                        )
-                        .air
+                    self.environment.air(
+                        &at,
+                        self.environment.frames(),
+                        contact,
+                        state_of(local),
+                        body,
+                    )
                 }),
             };
             let rating = self.propulsion_at(v, &conditions, self.time + dt);
@@ -3377,13 +3415,14 @@ impl Fleet {
             .map_or(DVec3::ZERO, |air| {
                 air.wrench_in(&at, contact, state_of(local), q, w).force
             });
-            let next_water = void_modules::water::VesselWater::new(
+            let next_water = void_modules::water::VesselWater::new_cached(
                 &self.environment,
                 &self.parts,
                 &v.members,
                 self.centre(&v.members),
+                &self.water_hulls,
             )
-            .wrench_in(&at, contact, state_of(local), q, w)
+            .buoyancy_in(&at, contact, state_of(local), q, w)
             .force;
             let next = if full_air {
                 (q * rating.force + next_air + next_water) / self.mass(&v.members)
@@ -3395,118 +3434,79 @@ impl Fleet {
             }
         }
     }
-    /// Read-only bound for the splashdown performance diagnostic.
-    pub fn diagnostic_water_step_seconds(&self) -> f64 {
-        self.water_step_seconds(self.options.step_seconds)
-    }
-    fn water_step_seconds(&self, maximum: f64) -> f64 {
-        self.order.iter().fold(maximum, |dt, id| {
-            let v = self.vessel(id);
-            let Owner::Scene { scene, body, .. } = v.owner else {
-                return dt;
-            };
-            let b = self.scenes[&scene].world.body(body);
-            let inertia = self.inertia_of(&v.members, self.centre(&v.members));
-            let inverse_norm = inertia
-                .inverse()
-                .to_cols_array()
-                .iter()
-                .map(|x| x.abs())
-                .sum();
-            let water = void_modules::water::VesselWater::new(
-                &self.environment,
-                &self.parts,
-                &v.members,
-                self.centre(&v.members),
-            );
-            water.stable_step_in(
-                &self.frames(),
-                self.scenes[&scene].contact,
-                state_of(self.scene_centre(v)),
-                quat64(*b.rotation()),
-                vec64(b.angvel()),
-                void_modules::water::StepParameters {
-                    mass_kg: self.mass(&v.members),
-                    inverse_inertia_norm: inverse_norm,
-                    maximum_seconds: dt,
-                },
-            )
-        })
-    }
-    fn set_physics_step(&mut self, seconds: f64) {
-        self.options.step_seconds = seconds;
-        for scene in self.scenes.keys().copied().collect::<Vec<_>>() {
-            let previous = self.enter_scene(scene);
-            let extras: HashMap<_, _> = self.scenes[&scene]
-                .members
-                .iter()
-                .map(|id| {
-                    let Owner::Scene { body, push, .. } = self.vessel(id).owner else {
-                        unreachable!()
-                    };
-                    (body, push)
-                })
-                .collect();
-            self.scenes.get_mut(&scene).unwrap().world.set_step_seconds(
-                &*self.ephemeris,
-                seconds,
-                &|body| extras[&body],
-            );
-            self.restore_view(previous);
-        }
+    #[cfg(feature = "step-timing")]
+    pub fn step_timings(&self) -> [f64; 6] {
+        self.step_times
     }
     fn step_all(&mut self) {
-        let configured = self.options.step_seconds;
-        // A nominal dry step needs no rebase. Computing end - time first can change dt
-        // by an ULP and repeatedly discard contact solver history at unchanged physical cadence.
-        if self.water_step_seconds(configured) == configured {
-            self.step_all_accepted();
-            return;
+        self.step_all_accepted();
+    }
+    fn recenter_scene(&mut self, scene: u64) {
+        let s = &self.scenes[&scene];
+        let mut mass = 0.;
+        let mut p = DVec3::ZERO;
+        for id in &s.members {
+            let v = self.vessel(id);
+            let Owner::Scene { body, .. } = v.owner else {
+                unreachable!()
+            };
+            let m = self.mass(&v.members);
+            mass += m;
+            p += vec64(s.world.body(body).translation()) * m;
         }
-        let end = self.time + configured;
-        while self.time < end {
-            let dt = self.water_step_seconds((end - self.time).min(configured));
-            assert!(
-                dt > 0. && self.time + dt > self.time,
-                "water stiffness exceeds clock resolution"
-            );
-            self.set_physics_step(dt);
-            self.step_all_accepted();
+        let c = p / mass;
+        if c.length() > self.options.follow_meters {
+            let origin = s.world.origin + c;
+            self.scenes.get_mut(&scene).unwrap().world.recenter(origin);
         }
-        self.set_physics_step(configured);
     }
     fn step_all_accepted(&mut self) {
+        #[cfg(feature = "step-timing")]
+        let mut stamp = std::time::Instant::now();
         self.prepare_parachutes();
+        #[cfg(feature = "step-timing")]
+        {
+            self.step_times[0] += stamp.elapsed().as_secs_f64() * 1000.;
+            stamp = std::time::Instant::now();
+        }
         let end = self.time + self.options.step_seconds;
         for scene in self.scenes.keys().copied().collect::<Vec<_>>() {
             self.step_scene(scene);
+        }
+        #[cfg(feature = "step-timing")]
+        {
+            self.step_times[1] += stamp.elapsed().as_secs_f64() * 1000.;
+            stamp = std::time::Instant::now();
         }
         for id in self.order.clone() {
             if matches!(self.vessel(&id).owner, Owner::Orbit { .. }) {
                 self.advance_orbit(&id, end);
             }
         }
+        #[cfg(feature = "step-timing")]
+        {
+            self.step_times[2] += stamp.elapsed().as_secs_f64() * 1000.;
+            stamp = std::time::Instant::now();
+        }
         self.commit_parachutes(self.options.step_seconds);
         self.time = end;
+        #[cfg(feature = "step-timing")]
+        {
+            self.step_times[3] += stamp.elapsed().as_secs_f64() * 1000.;
+            stamp = std::time::Instant::now();
+        }
         self.commit_thermal(self.options.step_seconds);
+        #[cfg(feature = "step-timing")]
+        {
+            self.step_times[4] += stamp.elapsed().as_secs_f64() * 1000.;
+            stamp = std::time::Instant::now();
+        }
         for scene in self.scenes.keys().copied().collect::<Vec<_>>() {
-            let s = &self.scenes[&scene];
-            let mut mass = 0.0;
-            let mut p = DVec3::ZERO;
-            for id in &s.members {
-                let v = self.vessel(id);
-                let Owner::Scene { body, .. } = v.owner else {
-                    unreachable!()
-                };
-                let m = self.mass(&v.members);
-                mass += m;
-                p += vec64(s.world.body(body).translation()) * m;
-            }
-            let c = p / mass;
-            if c.length() > self.options.follow_meters {
-                let origin = s.world.origin + c;
-                self.scenes.get_mut(&scene).unwrap().world.recenter(origin);
-            }
+            self.recenter_scene(scene);
+        }
+        #[cfg(feature = "step-timing")]
+        {
+            self.step_times[5] += stamp.elapsed().as_secs_f64() * 1000.;
         }
     }
     pub fn advance(&mut self, dt: f64) {
@@ -3551,11 +3551,12 @@ impl Fleet {
     /// Pure water load in the current owner's bounded query frame.
     pub fn water_wrench(&self, id: &str) -> void_modules::Wrench {
         let v = self.vessel(id);
-        let water = void_modules::water::VesselWater::new(
+        let water = void_modules::water::VesselWater::new_cached(
             &self.environment,
             &self.parts,
             &v.members,
             self.centre(&v.members),
+            &self.water_hulls,
         );
         match &v.owner {
             Owner::Scene { scene, body, .. } => {

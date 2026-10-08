@@ -1,0 +1,1021 @@
+{
+  "air_dynamics": "forceAndTorque",
+  "world": {
+    "schema": 4,
+    "system": {
+      "name": "Sol analogue",
+      "root": {
+        "id": "sol",
+        "name": "Sol",
+        "massKg": 1.98847e+30,
+        "radiusMeters": 695700000.0,
+        "color": "#ffd27a",
+        "rotation": {
+          "periodSeconds": 2192832.0,
+          "obliquityRadians": 0.12656650926193705,
+          "poleLongitudeRadians": -0.2484333172783543,
+          "angleAtEpochRadians": 0.0
+        },
+        "orbit": null,
+        "orbitPlane": null,
+        "gravityField": {
+          "j2": 2.2e-07,
+          "referenceRadiusMeters": 695700000.0
+        },
+        "children": [
+          {
+            "id": "cinder",
+            "name": "Cinder",
+            "massKg": 3.3011e+23,
+            "radiusMeters": 2439700.0,
+            "color": "#a39485",
+            "rotation": {
+              "periodSeconds": 5067014.4,
+              "obliquityRadians": 0.12281754338387718,
+              "poleLongitudeRadians": -0.7289315203118193,
+              "angleAtEpochRadians": 0.0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 57909036552.2286,
+              "eccentricity": 0.20563,
+              "inclinationRadians": 0.12226031410220278,
+              "longitudeOfAscendingNodeRadians": 0.8435350807813795,
+              "argumentOfPeriapsisRadians": 0.5083096913508285,
+              "meanAnomalyRadians": 3.0507657193160083
+            },
+            "orbitPlane": "ecliptic",
+            "gravityField": {
+              "j2": 5.03e-05,
+              "referenceRadiusMeters": 2440000.0
+            },
+            "children": []
+          },
+          {
+            "id": "vesper",
+            "name": "Vesper",
+            "massKg": 4.8675e+24,
+            "radiusMeters": 6051800.0,
+            "color": "#e8d3a0",
+            "rotation": {
+              "periodSeconds": 20997152.64,
+              "obliquityRadians": 3.1199678721601547,
+              "poleLongitudeRadians": -2.614734683588967,
+              "angleAtEpochRadians": 0.0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 108209474537.37917,
+              "eccentricity": 0.00677672,
+              "inclinationRadians": 0.05924827411109566,
+              "longitudeOfAscendingNodeRadians": 1.3383157224083446,
+              "argumentOfPeriapsisRadians": 0.9585806336304324,
+              "meanAnomalyRadians": 0.8792381000505897
+            },
+            "orbitPlane": "ecliptic",
+            "gravityField": {
+              "j2": 4.458e-06,
+              "referenceRadiusMeters": 6051800.0
+            },
+            "children": []
+          },
+          {
+            "id": "aurelia",
+            "name": "Aurelia",
+            "massKg": 5.9722e+24,
+            "radiusMeters": 6371000.0,
+            "color": "#3f7fd6",
+            "rotation": {
+              "periodSeconds": 86164.2,
+              "obliquityRadians": 0.40910517666747087,
+              "poleLongitudeRadians": 1.5707963267948966,
+              "angleAtEpochRadians": 0.0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 149598261150.4425,
+              "eccentricity": 0.01671,
+              "inclinationRadians": 8.726646259971648e-07,
+              "longitudeOfAscendingNodeRadians": 6.086661233405025,
+              "argumentOfPeriapsisRadians": 1.9933405387027237,
+              "meanAnomalyRadians": 6.259047403624505
+            },
+            "orbitPlane": "ecliptic",
+            "gravityField": {
+              "j2": 0.00108262668,
+              "referenceRadiusMeters": 6378137.0
+            },
+            "children": [
+              {
+                "id": "selene",
+                "name": "Selene",
+                "massKg": 7.342e+22,
+                "radiusMeters": 1737400.0,
+                "color": "#b8b8b0",
+                "rotation": {
+                  "kind": "locked",
+                  "periodSeconds": 2360591.5104,
+                  "obliquityToOrbitRadians": 0.1165879940332212
+                },
+                "orbit": {
+                  "semiMajorAxisMeters": 381486900.0,
+                  "eccentricity": 0.0549,
+                  "inclinationRadians": 0.08979719001510825,
+                  "longitudeOfAscendingNodeRadians": 2.1830578283945075,
+                  "argumentOfPeriapsisRadians": 5.5527650152199595,
+                  "meanAnomalyRadians": 2.3609068791727297
+                },
+                "orbitPlane": "ecliptic",
+                "gravityField": {
+                  "j2": 0.0002033,
+                  "referenceRadiusMeters": 1738000.0
+                },
+                "children": []
+              }
+            ]
+          },
+          {
+            "id": "ares",
+            "name": "Ares",
+            "massKg": 6.4171e+23,
+            "radiusMeters": 3389500.0,
+            "color": "#c1583a",
+            "rotation": {
+              "periodSeconds": 88642.44,
+              "obliquityRadians": 0.44338045023493733,
+              "poleLongitudeRadians": -0.08999616274981276,
+              "angleAtEpochRadians": 0.0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 227939134030.3053,
+              "eccentricity": 0.0934,
+              "inclinationRadians": 0.0322885911618951,
+              "longitudeOfAscendingNodeRadians": 0.8649502707033498,
+              "argumentOfPeriapsisRadians": 5.000403213548794,
+              "meanAnomalyRadians": 0.33880331439713923
+            },
+            "orbitPlane": "ecliptic",
+            "gravityField": {
+              "j2": 0.00196045,
+              "referenceRadiusMeters": 3396200.0
+            },
+            "children": []
+          },
+          {
+            "id": "velvet",
+            "name": "Velvet",
+            "massKg": 1.89813e+27,
+            "radiusMeters": 69911000.0,
+            "color": "#c9a27a",
+            "rotation": {
+              "periodSeconds": 35730.0,
+              "obliquityRadians": 0.03868522514254324,
+              "poleLongitudeRadians": -1.9579501751867592,
+              "angleAtEpochRadians": 0.0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 778567158271.08,
+              "eccentricity": 0.0489,
+              "inclinationRadians": 0.022741640153486113,
+              "longitudeOfAscendingNodeRadians": 1.7534275797235832,
+              "argumentOfPeriapsisRadians": 4.7798808625593106,
+              "meanAnomalyRadians": 0.3494149162492648
+            },
+            "orbitPlane": "ecliptic",
+            "gravityField": {
+              "j2": 0.014736,
+              "referenceRadiusMeters": 71492000.0
+            },
+            "children": [
+              {
+                "id": "ember",
+                "name": "Ember",
+                "massKg": 8.9319e+22,
+                "radiusMeters": 1821600.0,
+                "color": "#e8c35a",
+                "rotation": {
+                  "kind": "locked",
+                  "periodSeconds": 152853.5232,
+                  "obliquityToOrbitRadians": 0.0
+                },
+                "orbit": {
+                  "semiMajorAxisMeters": 421700000.0,
+                  "eccentricity": 0.0041,
+                  "inclinationRadians": 0.0008726646259971648,
+                  "longitudeOfAscendingNodeRadians": 0.7661995416255106,
+                  "argumentOfPeriapsisRadians": 1.467821900927231,
+                  "meanAnomalyRadians": 5.969026041820607
+                },
+                "orbitPlane": "parent-equator",
+                "gravityField": {
+                  "j2": 0.0018459,
+                  "referenceRadiusMeters": 1821600.0
+                },
+                "children": []
+              },
+              {
+                "id": "rime",
+                "name": "Rime",
+                "massKg": 4.7998e+22,
+                "radiusMeters": 1560800.0,
+                "color": "#cfc6b4",
+                "rotation": {
+                  "kind": "locked",
+                  "periodSeconds": 306822.0384,
+                  "obliquityToOrbitRadians": 0.0
+                },
+                "orbit": {
+                  "semiMajorAxisMeters": 670900000.0,
+                  "eccentricity": 0.009,
+                  "inclinationRadians": 0.008203047484373348,
+                  "longitudeOfAscendingNodeRadians": 3.824016391119576,
+                  "argumentOfPeriapsisRadians": 1.552819435499355,
+                  "meanAnomalyRadians": 2.9845130209103035
+                },
+                "orbitPlane": "parent-equator",
+                "gravityField": {
+                  "j2": 0.0004355,
+                  "referenceRadiusMeters": 1560800.0
+                },
+                "children": []
+              },
+              {
+                "id": "hollow",
+                "name": "Hollow",
+                "massKg": 1.4819e+23,
+                "radiusMeters": 2634100.0,
+                "color": "#9c8f80",
+                "rotation": {
+                  "kind": "locked",
+                  "periodSeconds": 618153.3792,
+                  "obliquityToOrbitRadians": 0.0
+                },
+                "orbit": {
+                  "semiMajorAxisMeters": 1070400000.0,
+                  "eccentricity": 0.0013,
+                  "inclinationRadians": 0.003490658503988659,
+                  "longitudeOfAscendingNodeRadians": 1.1091567396423965,
+                  "argumentOfPeriapsisRadians": 3.3580134808370903,
+                  "meanAnomalyRadians": 5.541420375081996
+                },
+                "orbitPlane": "parent-equator",
+                "gravityField": {
+                  "j2": 0.00012733,
+                  "referenceRadiusMeters": 2634100.0
+                },
+                "children": []
+              },
+              {
+                "id": "umber",
+                "name": "Umber",
+                "massKg": 1.075938e+23,
+                "radiusMeters": 2410300.0,
+                "color": "#6f6558",
+                "rotation": {
+                  "kind": "locked",
+                  "periodSeconds": 1441931.1552000002,
+                  "obliquityToOrbitRadians": 0.0
+                },
+                "orbit": {
+                  "semiMajorAxisMeters": 1882700000.0,
+                  "eccentricity": 0.0074,
+                  "inclinationRadians": 0.003351032163829113,
+                  "longitudeOfAscendingNodeRadians": 5.215881563000014,
+                  "argumentOfPeriapsisRadians": 0.9187936781273749,
+                  "meanAnomalyRadians": 3.166166889457873
+                },
+                "orbitPlane": "parent-equator",
+                "gravityField": {
+                  "j2": 3.27e-05,
+                  "referenceRadiusMeters": 2410300.0
+                },
+                "children": []
+              }
+            ]
+          },
+          {
+            "id": "halo",
+            "name": "Halo",
+            "massKg": 5.6834e+26,
+            "radiusMeters": 60268000.0,
+            "color": "#d9c38a",
+            "rotation": {
+              "periodSeconds": 38361.96,
+              "obliquityRadians": 0.4896027936567866,
+              "poleLongitudeRadians": 1.3880169445835935,
+              "angleAtEpochRadians": 0.0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 1426666414179.921,
+              "eccentricity": 0.05386179,
+              "inclinationRadians": 0.04338874330931084,
+              "longitudeOfAscendingNodeRadians": 1.9837835429754036,
+              "argumentOfPeriapsisRadians": 5.915557074367245,
+              "meanAnomalyRadians": 5.538896034175403
+            },
+            "orbitPlane": "ecliptic",
+            "gravityField": {
+              "j2": 0.016298,
+              "referenceRadiusMeters": 60330000.0
+            },
+            "children": [
+              {
+                "id": "haze",
+                "name": "Haze",
+                "massKg": 1.3452e+23,
+                "radiusMeters": 2574700.0,
+                "color": "#d8a44a",
+                "rotation": {
+                  "kind": "locked",
+                  "periodSeconds": 1377684.3743999999,
+                  "obliquityToOrbitRadians": 0.0
+                },
+                "orbit": {
+                  "semiMajorAxisMeters": 1221870000.0,
+                  "eccentricity": 0.0288,
+                  "inclinationRadians": 0.006083170574901036,
+                  "longitudeOfAscendingNodeRadians": 0.4897393881096089,
+                  "argumentOfPeriapsisRadians": 3.150877805210403,
+                  "meanAnomalyRadians": 2.8502972014319394
+                },
+                "orbitPlane": "parent-equator",
+                "gravityField": {
+                  "j2": 3.3089e-05,
+                  "referenceRadiusMeters": 2575000.0
+                },
+                "children": []
+              }
+            ]
+          },
+          {
+            "id": "azure",
+            "name": "Azure",
+            "massKg": 8.681e+25,
+            "radiusMeters": 25559000.0,
+            "color": "#9fd8e0",
+            "rotation": {
+              "periodSeconds": 62063.99999999999,
+              "obliquityRadians": 1.7055671343561096,
+              "poleLongitudeRadians": 1.355190208001112,
+              "angleAtEpochRadians": 0.0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 2870658170655.7324,
+              "eccentricity": 0.04725744,
+              "inclinationRadians": 0.013485074058964219,
+              "longitudeOfAscendingNodeRadians": 1.2918390439753027,
+              "argumentOfPeriapsisRadians": 1.6918759478238066,
+              "meanAnomalyRadians": 2.4833212746064897
+            },
+            "orbitPlane": "ecliptic",
+            "gravityField": {
+              "j2": 0.00334343,
+              "referenceRadiusMeters": 25559000.0
+            },
+            "children": []
+          },
+          {
+            "id": "abyss",
+            "name": "Abyss",
+            "massKg": 1.02413e+26,
+            "radiusMeters": 24764000.0,
+            "color": "#3f5fd0",
+            "rotation": {
+              "periodSeconds": 57996.0,
+              "obliquityRadians": 0.48915271111858477,
+              "poleLongitudeRadians": -0.7114823273986132,
+              "angleAtEpochRadians": 0.0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 4498396417009.467,
+              "eccentricity": 0.00859048,
+              "inclinationRadians": 0.030893086454925476,
+              "longitudeOfAscendingNodeRadians": 2.300068641354461,
+              "argumentOfPeriapsisRadians": 4.767899814813145,
+              "meanAnomalyRadians": 4.536376156304037
+            },
+            "orbitPlane": "ecliptic",
+            "gravityField": {
+              "j2": 0.003411,
+              "referenceRadiusMeters": 25225000.0
+            },
+            "children": []
+          }
+        ]
+      }
+    },
+    "stellar": null,
+    "bodies": {
+      "abyss": {
+        "label": "Abyss · SOLAR SCENERY",
+        "terrain": null,
+        "air_density_scale": null,
+        "air_datum_meters": 0.0,
+        "sea_level_meters": null,
+        "visual": {
+          "surface": {
+            "kind": "GasEnvelope",
+            "low": [
+              0.025,
+              0.06,
+              0.28
+            ],
+            "high": [
+              0.12,
+              0.32,
+              0.72
+            ],
+            "bands": 12.0,
+            "turbulence": 0.8,
+            "storm": 0.7
+          },
+          "rings": null,
+          "surface_color": null,
+          "atmosphere": false,
+          "scattering": null,
+          "clouds": false,
+          "cloud_profile": null,
+          "ocean": false,
+          "color_datum_meters": 0.0,
+          "rock_height_meters": 100000000.0,
+          "snow_height_meters": 1000000000.0
+        }
+      },
+      "ares": {
+        "label": "Ares · SOLAR SCENERY",
+        "terrain": {
+          "kind": "cratered",
+          "options": {
+            "name": "ares impact terrain",
+            "radiusMeters": 3389500.0,
+            "maxHeightMeters": 14000.0,
+            "craterCount": 48,
+            "craterRadiusRadians": 0.2,
+            "roughness": 1.0,
+            "seed": 47,
+            "lowColor": [
+              0.13,
+              0.035,
+              0.014
+            ],
+            "highColor": [
+              0.65,
+              0.25,
+              0.09
+            ]
+          }
+        },
+        "air_density_scale": null,
+        "air_datum_meters": 0.0,
+        "sea_level_meters": null,
+        "visual": {
+          "surface": {
+            "kind": "SolidSurface"
+          },
+          "rings": null,
+          "surface_color": null,
+          "atmosphere": true,
+          "scattering": {
+            "kind": "Custom",
+            "height_meters": 80000.0,
+            "rayleigh_scattering": [
+              5e-07,
+              3e-07,
+              1.5e-07
+            ],
+            "rayleigh_scale_height": 11000.0,
+            "mie_scattering": 4e-07,
+            "mie_extinction": 5e-07,
+            "mie_scale_height": 8000.0,
+            "mie_anisotropy": 0.7,
+            "ozone_absorption": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "ozone_center_height": 0.0,
+            "ozone_width": 1.0
+          },
+          "clouds": false,
+          "cloud_profile": null,
+          "ocean": false,
+          "color_datum_meters": 0.0,
+          "rock_height_meters": 100000000.0,
+          "snow_height_meters": 1000000000.0
+        }
+      },
+      "aurelia": {
+        "label": "AURELIA · SOL SYSTEM · 6371 km RADIUS · 9.82 m/s² · 23.9 h DAY | SCENERY TERRAIN",
+        "terrain": {
+          "kind": "layered",
+          "options": {
+            "radiusMeters": 6371000.0,
+            "seed": 7
+          }
+        },
+        "air_density_scale": 1.0,
+        "air_datum_meters": 5000.0,
+        "sea_level_meters": 5000.0,
+        "visual": {
+          "surface": {
+            "kind": "SolidSurface"
+          },
+          "rings": null,
+          "surface_color": null,
+          "atmosphere": true,
+          "scattering": {
+            "kind": "EarthScaled",
+            "density_scale": 1.0
+          },
+          "clouds": true,
+          "cloud_profile": {
+            "bottom_meters": 1500.0,
+            "top_meters": 8000.0,
+            "extinction_per_meter": 0.0011,
+            "coverage": 0.62
+          },
+          "ocean": true,
+          "color_datum_meters": 5000.0,
+          "rock_height_meters": 7600.0,
+          "snow_height_meters": 9800.0
+        }
+      },
+      "azure": {
+        "label": "Azure · SOLAR SCENERY",
+        "terrain": null,
+        "air_density_scale": null,
+        "air_datum_meters": 0.0,
+        "sea_level_meters": null,
+        "visual": {
+          "surface": {
+            "kind": "GasEnvelope",
+            "low": [
+              0.12,
+              0.4,
+              0.43
+            ],
+            "high": [
+              0.32,
+              0.68,
+              0.69
+            ],
+            "bands": 8.0,
+            "turbulence": 0.12,
+            "storm": 0.0
+          },
+          "rings": null,
+          "surface_color": null,
+          "atmosphere": false,
+          "scattering": null,
+          "clouds": false,
+          "cloud_profile": null,
+          "ocean": false,
+          "color_datum_meters": 0.0,
+          "rock_height_meters": 100000000.0,
+          "snow_height_meters": 1000000000.0
+        }
+      },
+      "cinder": {
+        "label": "Cinder · SOLAR SCENERY",
+        "terrain": {
+          "kind": "cratered",
+          "options": {
+            "name": "cinder impact terrain",
+            "radiusMeters": 2439700.0,
+            "maxHeightMeters": 7000.0,
+            "craterCount": 180,
+            "craterRadiusRadians": 0.11,
+            "roughness": 0.7,
+            "seed": 31,
+            "lowColor": [
+              0.09,
+              0.07,
+              0.055
+            ],
+            "highColor": [
+              0.52,
+              0.43,
+              0.34
+            ]
+          }
+        },
+        "air_density_scale": null,
+        "air_datum_meters": 0.0,
+        "sea_level_meters": null,
+        "visual": {
+          "surface": {
+            "kind": "SolidSurface"
+          },
+          "rings": null,
+          "surface_color": null,
+          "atmosphere": false,
+          "scattering": null,
+          "clouds": false,
+          "cloud_profile": null,
+          "ocean": false,
+          "color_datum_meters": 0.0,
+          "rock_height_meters": 100000000.0,
+          "snow_height_meters": 1000000000.0
+        }
+      },
+      "halo": {
+        "label": "Halo · SOLAR SCENERY",
+        "terrain": null,
+        "air_density_scale": null,
+        "air_datum_meters": 0.0,
+        "sea_level_meters": null,
+        "visual": {
+          "surface": {
+            "kind": "GasEnvelope",
+            "low": [
+              0.35,
+              0.25,
+              0.12
+            ],
+            "high": [
+              0.8,
+              0.69,
+              0.43
+            ],
+            "bands": 24.0,
+            "turbulence": 0.3,
+            "storm": 0.0
+          },
+          "rings": {
+            "inner_radius": 1.25,
+            "outer_radius": 2.35,
+            "color": [
+              0.65,
+              0.53,
+              0.34
+            ],
+            "opacity": 0.8
+          },
+          "surface_color": null,
+          "atmosphere": false,
+          "scattering": null,
+          "clouds": false,
+          "cloud_profile": null,
+          "ocean": false,
+          "color_datum_meters": 0.0,
+          "rock_height_meters": 100000000.0,
+          "snow_height_meters": 1000000000.0
+        }
+      },
+      "selene": {
+        "label": "Selene · SOLAR SCENERY",
+        "terrain": {
+          "kind": "cratered",
+          "options": {
+            "name": "selene impact terrain",
+            "radiusMeters": 1737400.0,
+            "maxHeightMeters": 8500.0,
+            "craterCount": 120,
+            "craterRadiusRadians": 0.16,
+            "roughness": 0.5,
+            "seed": 19,
+            "lowColor": [
+              0.07,
+              0.075,
+              0.08
+            ],
+            "highColor": [
+              0.56,
+              0.55,
+              0.52
+            ]
+          }
+        },
+        "air_density_scale": null,
+        "air_datum_meters": 0.0,
+        "sea_level_meters": null,
+        "visual": {
+          "surface": {
+            "kind": "SolidSurface"
+          },
+          "rings": null,
+          "surface_color": null,
+          "atmosphere": false,
+          "scattering": null,
+          "clouds": false,
+          "cloud_profile": null,
+          "ocean": false,
+          "color_datum_meters": 0.0,
+          "rock_height_meters": 100000000.0,
+          "snow_height_meters": 1000000000.0
+        }
+      },
+      "sol": {
+        "label": "Sol · SOLAR SCENERY",
+        "terrain": null,
+        "air_density_scale": null,
+        "air_datum_meters": 0.0,
+        "sea_level_meters": null,
+        "visual": {
+          "surface": {
+            "kind": "EmissiveStar",
+            "color": [
+              1.0,
+              0.65,
+              0.28
+            ],
+            "radiance": 6.0,
+            "granulation": 0.6
+          },
+          "rings": null,
+          "surface_color": null,
+          "atmosphere": false,
+          "scattering": null,
+          "clouds": false,
+          "cloud_profile": null,
+          "ocean": false,
+          "color_datum_meters": 0.0,
+          "rock_height_meters": 100000000.0,
+          "snow_height_meters": 1000000000.0
+        }
+      },
+      "velvet": {
+        "label": "Velvet · SOLAR SCENERY",
+        "terrain": null,
+        "air_density_scale": null,
+        "air_datum_meters": 0.0,
+        "sea_level_meters": null,
+        "visual": {
+          "surface": {
+            "kind": "GasEnvelope",
+            "low": [
+              0.26,
+              0.1,
+              0.045
+            ],
+            "high": [
+              0.82,
+              0.66,
+              0.44
+            ],
+            "bands": 18.0,
+            "turbulence": 1.0,
+            "storm": 1.0
+          },
+          "rings": null,
+          "surface_color": null,
+          "atmosphere": false,
+          "scattering": null,
+          "clouds": false,
+          "cloud_profile": null,
+          "ocean": false,
+          "color_datum_meters": 0.0,
+          "rock_height_meters": 100000000.0,
+          "snow_height_meters": 1000000000.0
+        }
+      },
+      "vesper": {
+        "label": "Vesper · SOLAR SCENERY",
+        "terrain": {
+          "kind": "cratered",
+          "options": {
+            "name": "vesper impact terrain",
+            "radiusMeters": 6051800.0,
+            "maxHeightMeters": 9000.0,
+            "craterCount": 22,
+            "craterRadiusRadians": 0.12,
+            "roughness": 1.0,
+            "seed": 73,
+            "lowColor": [
+              0.1,
+              0.07,
+              0.02
+            ],
+            "highColor": [
+              0.48,
+              0.34,
+              0.12
+            ]
+          }
+        },
+        "air_density_scale": null,
+        "air_datum_meters": 0.0,
+        "sea_level_meters": null,
+        "visual": {
+          "surface": {
+            "kind": "SolidSurface"
+          },
+          "rings": null,
+          "surface_color": null,
+          "atmosphere": true,
+          "scattering": {
+            "kind": "Custom",
+            "height_meters": 120000.0,
+            "rayleigh_scattering": [
+              1.8e-05,
+              1.5e-05,
+              8e-06
+            ],
+            "rayleigh_scale_height": 16000.0,
+            "mie_scattering": 1.2e-05,
+            "mie_extinction": 1.5e-05,
+            "mie_scale_height": 18000.0,
+            "mie_anisotropy": 0.7,
+            "ozone_absorption": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "ozone_center_height": 0.0,
+            "ozone_width": 1.0
+          },
+          "clouds": true,
+          "cloud_profile": {
+            "bottom_meters": 45000.0,
+            "top_meters": 70000.0,
+            "extinction_per_meter": 0.0008,
+            "coverage": 0.96
+          },
+          "ocean": false,
+          "color_datum_meters": 0.0,
+          "rock_height_meters": 100000000.0,
+          "snow_height_meters": 1000000000.0
+        }
+      }
+    }
+  },
+  "launch_body": "aurelia",
+  "craft": {
+    "version": 2,
+    "name": "VOID two-stage rendezvous rocket",
+    "parts": [
+      {
+        "id": "p1",
+        "definitionId": "flight-rcs-pod",
+        "resources": {
+          "monopropellant": 20.0
+        },
+        "moduleStages": {},
+        "stage": null,
+        "attachment": null
+      },
+      {
+        "id": "p2",
+        "definitionId": "flight-upper-tank",
+        "resources": {
+          "liquidPropellant": 1470.0
+        },
+        "moduleStages": {},
+        "stage": null,
+        "attachment": {
+          "parentId": "p1",
+          "parentNodeId": "bottom",
+          "nodeId": "top"
+        }
+      },
+      {
+        "id": "p3",
+        "definitionId": "flight-upper-engine",
+        "resources": {},
+        "moduleStages": {},
+        "stage": 1,
+        "attachment": {
+          "parentId": "p2",
+          "parentNodeId": "bottom",
+          "nodeId": "top"
+        }
+      },
+      {
+        "id": "p4",
+        "definitionId": "flight-decoupler",
+        "resources": {},
+        "moduleStages": {},
+        "stage": 1,
+        "attachment": {
+          "parentId": "p3",
+          "parentNodeId": "bottom",
+          "nodeId": "top"
+        }
+      },
+      {
+        "id": "p5",
+        "definitionId": "flight-booster-tank",
+        "resources": {
+          "liquidPropellant": 5350.0
+        },
+        "moduleStages": {},
+        "stage": null,
+        "attachment": {
+          "parentId": "p4",
+          "parentNodeId": "bottom",
+          "nodeId": "top"
+        }
+      },
+      {
+        "id": "p6",
+        "definitionId": "flight-booster-engine",
+        "resources": {},
+        "moduleStages": {},
+        "stage": 0,
+        "attachment": {
+          "parentId": "p5",
+          "parentNodeId": "bottom",
+          "nodeId": "top"
+        }
+      },
+      {
+        "id": "leg0",
+        "definitionId": "flight-landing-strut",
+        "resources": {},
+        "moduleStages": {},
+        "stage": null,
+        "attachment": {
+          "parentId": "p5",
+          "parentNodeId": "leg0",
+          "nodeId": "top"
+        }
+      },
+      {
+        "id": "foot0",
+        "definitionId": "flight-foot-0",
+        "resources": {},
+        "moduleStages": {},
+        "stage": null,
+        "attachment": {
+          "parentId": "leg0",
+          "parentNodeId": "bottom",
+          "nodeId": "top"
+        }
+      },
+      {
+        "id": "leg1",
+        "definitionId": "flight-landing-strut",
+        "resources": {},
+        "moduleStages": {},
+        "stage": null,
+        "attachment": {
+          "parentId": "p5",
+          "parentNodeId": "leg1",
+          "nodeId": "top"
+        }
+      },
+      {
+        "id": "foot1",
+        "definitionId": "flight-foot-1",
+        "resources": {},
+        "moduleStages": {},
+        "stage": null,
+        "attachment": {
+          "parentId": "leg1",
+          "parentNodeId": "bottom",
+          "nodeId": "top"
+        }
+      },
+      {
+        "id": "leg2",
+        "definitionId": "flight-landing-strut",
+        "resources": {},
+        "moduleStages": {},
+        "stage": null,
+        "attachment": {
+          "parentId": "p5",
+          "parentNodeId": "leg2",
+          "nodeId": "top"
+        }
+      },
+      {
+        "id": "foot2",
+        "definitionId": "flight-foot-2",
+        "resources": {},
+        "moduleStages": {},
+        "stage": null,
+        "attachment": {
+          "parentId": "leg2",
+          "parentNodeId": "bottom",
+          "nodeId": "top"
+        }
+      },
+      {
+        "id": "leg3",
+        "definitionId": "flight-landing-strut",
+        "resources": {},
+        "moduleStages": {},
+        "stage": null,
+        "attachment": {
+          "parentId": "p5",
+          "parentNodeId": "leg3",
+          "nodeId": "top"
+        }
+      },
+      {
+        "id": "foot3",
+        "definitionId": "flight-foot-3",
+        "resources": {},
+        "moduleStages": {},
+        "stage": null,
+        "attachment": {
+          "parentId": "leg3",
+          "parentNodeId": "bottom",
+          "nodeId": "top"
+        }
+      }
+    ]
+  },
+  "launch_site": [
+    0.8383866435942036,
+    0.45801271084729195,
+    0.29552020666133955
+  ]
+}

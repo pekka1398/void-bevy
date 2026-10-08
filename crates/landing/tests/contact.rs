@@ -601,3 +601,52 @@ fn contact_constraint_keeps_real_micrometer_motion_in_native_local_authority() {
     );
     assert!(displacement.y > 0.5e-6);
 }
+
+#[test]
+fn boundary_resistance_is_not_credited_as_an_extra_half_contact_impulse() {
+    let Env {
+        mut ephemeris,
+        frame,
+        ..
+    } = plain_pebble();
+    let start = DVec3::new(100_000.0, 0.0, 0.0);
+    let mut world = ContactWorld::new(frame, None, options(), 0.0, start, &mut ephemeris);
+    let handle = world.add_body(
+        &ephemeris,
+        &spec(
+            SimpleShape::Box {
+                half_extents: DVec3::splat(0.2),
+            },
+            500.,
+            0.,
+            0.,
+        ),
+        FrameState {
+            position: start,
+            velocity: DVec3::Y * 200.,
+        },
+        DQuat::IDENTITY,
+        DVec3::ZERO,
+    );
+    world.world.bodies[handle].set_angvel(rapier3d::math::Vector::Y * 9., false);
+    let inertia = 500. * 0.4_f64.powi(2) / 6.;
+    world.apply_resistance_impulse(
+        handle,
+        -DVec3::Y * (500. * 190.),
+        -DVec3::Y * (inertia * 8.),
+    );
+    let boundary = world.state(&ephemeris, handle, DVec3::ZERO).velocity;
+    assert!(
+        (boundary.y - 10.).abs() < 1e-4,
+        "boundary {boundary:?}, native {:?}, mass {}",
+        world.body(handle).linvel(),
+        world.body(handle).mass()
+    );
+    world.step(&mut ephemeris, None);
+    let velocity = world.state(&ephemeris, handle, DVec3::ZERO).velocity;
+    assert!(
+        (velocity.y - 10.).abs() < 0.05,
+        "resistance double counted: {velocity}"
+    );
+    assert!(f64::from(world.body(handle).angvel().length()) < 1.1);
+}

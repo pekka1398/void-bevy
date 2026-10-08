@@ -168,6 +168,7 @@ fn surroundings_are_read_in_the_body_frame() {
     ] {
         let there = at.transform(surface, frame).apply_state(state);
         let s = env.surroundings(&at, &frames, frame, there, b);
+        assert_eq!(env.air(&at, &frames, frame, there, b), s.air);
         assert_eq!(env.ground(&at, &frames, frame, there.position, b), s.ground);
         let turn = at.transform(frame, surface);
         let air = s.air.expect("air on the pad");
@@ -203,6 +204,7 @@ fn absent_air_ground_and_sea_are_none() {
         velocity: DVec3::ZERO,
     };
     let s = env.surroundings(&at, &frames, surface, high, b);
+    assert_eq!(env.air(&at, &frames, surface, high, b), s.air);
     assert!(s.air.is_none() && s.ground.is_some() && s.sea.is_some());
     let just_below = State {
         position: DVec3::X * (radius + 119_999.0),
@@ -214,6 +216,7 @@ fn absent_air_ground_and_sea_are_none() {
             .is_some()
     );
     let moon = index(&e, "selene");
+    assert!(env.air(&at, &frames, surface, high, moon).is_none());
     let s = env.surroundings(
         &at,
         &frames,
@@ -246,6 +249,23 @@ fn invalid_queries_and_descriptions_panic() {
     assert!(panics(|| {
         env.surroundings(&at, &frames, surface, still(DVec3::ZERO), b);
     }));
+    for (state, body) in [
+        (still(DVec3::ZERO), b),
+        (still(DVec3::X * radius), 999),
+        (still(DVec3::NAN), b),
+        (still(DVec3::X * (radius - 6000.0)), b),
+        (
+            State {
+                position: DVec3::X * radius,
+                velocity: DVec3::NAN,
+            },
+            b,
+        ),
+    ] {
+        assert!(panics(|| {
+            env.air(&at, &frames, surface, state, body);
+        }));
+    }
     assert!(panics(|| {
         env.surroundings(&at, &frames, surface, still(DVec3::X * radius), 999);
     }));

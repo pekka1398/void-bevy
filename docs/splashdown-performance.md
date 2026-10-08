@@ -1,4 +1,29 @@
-# 濺落卡頓定位（2026-10-08，尚未修正）
+# 濺落卡頓：model26基線與model27候選（2026-10-08）
+
+## 目前候選
+
+使用者要求嘗試不反向的平滑阻力更新。`work/splashdown-performance` 的model27
+在Contact Scene將水阻力改為accepted-boundary impulse；浮力仍按原排水體積、
+浮心、有效重力計算。Scene保持原nominal cadence，不再由水阻力拆整個世界的步。
+目前可玩、待人類判斷入水動態，未合入master；操作見[water-review.md](water-review.md)。
+
+COM上的平方阻力更新為 `v / (1 + dt*c*|v|/mass)`。偏心作用點使用
+`B = I/m - [r]× I_world^-1 [r]×`，解 `(I + dt*c*|u|*B) u_next = u`，
+同一衝量同時更新平移及旋轉；旋轉阻尼另做implicit tensor更新。
+各零件依既有順序更新同一剛體，不clip浮力／重力／引擎／碰撞後的總速度。
+阻力用連續力更新後的預測速度，native resistance接口不再額外補半個contact衝量。
+
+純阻力更新耗能，不是跨碰撞、浮力及幾何改變的全步能量證明。
+浸水幾何每接受步凍結；海面不做流體／波浪模擬，阻力仍按浸水體積縮放。
+不同零件依序splitting；高速入水穿入深度、翻轉及恢復須人類看遊戲。
+Orbit保留原adaptive連續水力求值；主遊戲近海collision Scene使用新衝量。
+
+模型升至27，拒絕26的journal／save；world4、FleetCheckpoint12、Craft3不變。
+`crates/fleet-flight/fixtures/water-performance-world.json` 是明確取出的原InitialWorld
+配方，不是遷移或放行舊recording。以下量測及算法是model26歷史基線。
+
+## 原基線
+
 
 使用者在 model26 水場景的入水瞬間看到明显停頓。此次定位使用原候選二進位
 `c7c638b`／SHA256 `fab9667f72cdfecfb01f91c77cf123d49a1eaad13c8dcc084ebaedd08dd52009`，
@@ -51,7 +76,7 @@ Profiler 的 frame_interval 使用 Bevy Time，可能夾到250ms，不能把它�
 
 測量分支 `work/splashdown-performance`／`void-bevy-water-perf` 只增加一個 readonly
 bound getter 與 headless example。候選 integration 的 executable 沒有換掉。
-在測量 worktree 使用：
+基線9c9d9a4的測量命令（current model27會拒絕此26 journal）：
 
 ```sh
 cargo run -p void-fleet-flight --example splashdown_timing -j 2 -- \

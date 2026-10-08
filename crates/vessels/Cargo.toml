@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+step-timing = []
+
 [dependencies]
 serde.workspace = true
 glam.workspace = true

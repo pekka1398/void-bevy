@@ -769,6 +769,25 @@ impl<F: ContactFrame> ContactWorld<F> {
         self.record_mut(handle).pending_contact_delta += delta;
     }
 
+    /// Resistance integrated at the accepted boundary, rather than an in-step
+    /// contact correction. Its velocity change is already fully represented in
+    /// the native half-step velocity: do not add another half impulse in state().
+    pub fn apply_resistance_impulse(
+        &mut self,
+        handle: RigidBodyHandle,
+        linear: DVec3,
+        angular_about_com: DVec3,
+    ) {
+        assert!(linear.is_finite() && angular_about_com.is_finite());
+        let b = &mut self.world.bodies[handle];
+        assert!(b.is_dynamic());
+        if b.is_sleeping() {
+            return;
+        }
+        b.apply_impulse(v32(linear), false);
+        b.apply_torque_impulse(v32(angular_about_com), false);
+    }
+
     /// Query actual collider geometry, including freshly streamed tiles before broad-phase rebuild.
     /// The ray origin is f64 contact-frame position; conversion occurs only after origin subtraction.
     /// Own-body colliders are excluded. Sensors never provide mechanical support.

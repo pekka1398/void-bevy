@@ -11,7 +11,23 @@ pub fn splashdown_with(
     descent: f64,
     tilt: f64,
 ) -> String {
-    assert!(descent.is_finite() && descent >= 0. && tilt.is_finite());
+    splashdown_at(session, craft, descent, tilt, 0.)
+}
+/// Body tilt and trajectory angle are separate; both are radians from local vertical.
+pub fn splashdown_at(
+    session: &mut FlightSession,
+    craft: &void_assembly::Craft,
+    speed: f64,
+    tilt: f64,
+    entry_angle: f64,
+) -> String {
+    assert!(
+        speed.is_finite()
+            && speed >= 0.
+            && tilt.is_finite()
+            && entry_angle.is_finite()
+            && (0. ..=std::f64::consts::FRAC_PI_2).contains(&entry_angle)
+    );
     let sim = session.sim();
     let fleet = &sim.fleet;
     let body = sim.home;
@@ -70,13 +86,12 @@ pub fn splashdown_with(
     let transform = fleet
         .frames()
         .transform(fleet.body_frames(body).1, fleet.origin_frame());
+    let upright = DQuat::from_rotation_arc(DVec3::Y, direction);
     let state = transform.apply_state(void_frames::State {
         position: direction * (radius + level + 8.),
-        velocity: -direction * descent,
+        velocity: speed * (-direction * entry_angle.cos() + upright * DVec3::X * entry_angle.sin()),
     });
-    let rotation = transform.rotation()
-        * DQuat::from_rotation_arc(DVec3::Y, direction)
-        * DQuat::from_rotation_z(tilt);
+    let rotation = transform.rotation() * upright * DQuat::from_rotation_z(tilt);
     let outcome = session.execute(Action::LaunchState {
         craft: craft.clone(),
         position: state.position,

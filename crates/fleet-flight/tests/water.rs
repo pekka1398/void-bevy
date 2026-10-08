@@ -206,7 +206,7 @@ fn airless_ground_water_sampling_is_same_in_both_air_modes() {
     );
 }
 #[test]
-fn fully_submerged_fast_motion_dissipates_and_checkpoint_retimes_exactly() {
+fn fully_submerged_fast_motion_damps_and_buoyancy_can_reverse_descent() {
     let mut planet = void_landing::earth_size();
     planet.sea_level = Some(1800.);
     let initial = InitialWorld::new(&planet, &void_assembly::reentry_capsule(), DVec3::X, true)
@@ -240,7 +240,8 @@ fn fully_submerged_fast_motion_dissipates_and_checkpoint_retimes_exactly() {
         panic!("submerged launch")
     };
     session.execute(Action::Select { vessel: id.clone() });
-    let mut previous = 20000.;
+    let mut previous_tangent = 10000.;
+    let mut final_speed_squared = 20000.;
     for _ in 0..15 {
         session.execute(Action::Advance {
             seconds: 1. / 60.,
@@ -252,13 +253,21 @@ fn fully_submerged_fast_motion_dissipates_and_checkpoint_retimes_exactly() {
             .body_fixed_state(&id, sim.home)
             .velocity
             .length_squared();
+        let velocity = sim.fleet.body_fixed_state(&id, sim.home).velocity;
+        let tangent_speed = (velocity - direction * velocity.dot(direction)).length_squared();
+        // Buoyancy is allowed to reverse descent and increase upward kinetic energy.
+        // The horizontal component has no driving force here and must dissipate.
         assert!(
-            speed.is_finite() && speed <= previous + 1.,
-            "energy growth {previous} -> {speed}"
+            speed.is_finite() && tangent_speed <= previous_tangent + 1.,
+            "horizontal energy growth {previous_tangent} -> {tangent_speed}"
         );
-        previous = speed;
+        previous_tangent = tangent_speed;
+        final_speed_squared = speed;
     }
-    assert!(previous < 100., "stiff drag failed to dissipate {previous}");
+    assert!(
+        final_speed_squared < 100.,
+        "stiff drag failed to dissipate {final_speed_squared}"
+    );
     let base = void_fleet_flight::checkpoint::FlightCheckpoint::capture(
         session.sim(),
         session.recording_initial().clone(),
