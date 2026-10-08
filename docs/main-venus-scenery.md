@@ -1,6 +1,6 @@
 # 主遊戲 Vesper：金星觀感
 
-work/venus-scenery，基線74aec6b，未合併，候選實作與agent驗證完成。規格見[main-venus](specs/main-venus.md)。
+work/venus-scenery，基線74aec6b，未合併，候選實作與agent驗證完成；root審查完成，等待人類驗收。規格見[main-venus](specs/main-venus.md)。
 
 入口：`./tools/venus-acceptance.sh orbit|near|far|plains|shield|upland`（擇一）。binary在本worktree的`target/acceptance/void-app-venus`。重新建置：`cargo build -p void-app -j 2`，再複製`target/debug/void-app`至上述驗收名稱。
 
@@ -10,7 +10,7 @@ work/venus-scenery，基線74aec6b，未合併，候選實作與agent驗證完�
 
 ## 候選驗證（2026-10-08）
 
-實作完成，待root審查／人類驗收，未合併／push。候選binary SHA256：`15fd4fd89c81b439ed50438d7b57e795254819f8187f96cba927bdf33aeea196`。獨立target由第三方快取開始，全部workspace本地crate artifacts/fingerprints及incremental清除後從本worktree重建；沒有共享主target的本地產物。
+實作完成，root審查完成，等待人類驗收，未合併／push。候選binary SHA256：`15fd4fd89c81b439ed50438d7b57e795254819f8187f96cba927bdf33aeea196`。獨立target由第三方快取開始，全部workspace本地crate artifacts/fingerprints及incremental清除後從本worktree重建；沒有共享主target的本地產物。
 
 model29／world5／FleetCheckpoint12／Craft3。新增CloudProfile必填形貌與RGB albedo，Volcanic terrain enum；舊model28／world4明確拒絕，不自動修補存檔。固定water-performance-world測試資料僅升schema並明寫舊EarthWeather/.99，保持該固定場景原來配置。
 
@@ -40,7 +40,7 @@ agent GUI使用TigerVNC :13＋Openbox、RTX5060 Laptop Vulkan。實際VNC操作n
 
 ## Root審查補修候選（2026-10-08）
 
-此節取代上方初輪binary／final-*的「最後候選」地位。root已看初輪phase、ground與Aurelia，並獨立重驗初輪ground journal/save通過；root要求共用ContinuousDeck不暗藏Vesper外觀，以及補實際地貌觀察。補修已完成，仍待root最後審查與人類驗收，沒有merge/push。
+此節取代上方初輪binary／final-*的「最後候選」地位。root已看初輪phase、ground與Aurelia，並獨立重驗初輪ground journal/save通過；root要求共用ContinuousDeck不暗藏Vesper外觀，以及補實際地貌觀察。補修已完成，root審查完成，沒有待修項，等待人類驗收，沒有merge/push。
 
 最新驗收binary SHA256：`6c9994f78fcd0dc3fd4d3b0d116c7435a3b6f78bbc156e7cc4fd1fa3a28e6475`。
 
@@ -65,3 +65,5 @@ cargo run -p void-terrain --example volcanic_profile -j 2 -- 0.44514744410845786
 root對補修工作區另行獨立重驗volcanic3及scenery lib7通過；此證據只覆蓋該兩個針對性範圍，不代表全量驗證或人類驗收。
 
 root其後已看補修review-upland／shield-high，接受文件如實描述濃霾可見限制；並以同SHA `6c9994f78fcd0dc3fd4d3b0d116c7435a3b6f78bbc156e7cc4fd1fa3a28e6475`獨立verify最新review-shield-v2 journal及review-shield-save，兩者皆通過T+1.016667s。這是root驗證，不是人類驗收。
+
+最終狀態：root已核對補修接口／diff、正常濃霾GUI與sampler剖面，獨立核心測試及新journal/save通過，沒有待修項。root審查完成，等待人類驗收。
