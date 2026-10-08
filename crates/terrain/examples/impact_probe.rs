@@ -1,13 +1,18 @@
 //! Diagnostic image of the actual terrain sampler (not a game or a prebaked game asset).
-//! cargo run -p void-terrain --example impact_probe -- /tmp/cinder.ppm [longitude radians]
+//! cargo run -p void-terrain --example impact_probe -- /tmp/cinder.ppm [longitude radians] [cinder|ares]
 use glam::DVec3;
 use std::io::Write;
-use void_terrain::{ImpactOptions, Terrain, TerrainConfig};
+use void_terrain::{AresOptions, ImpactOptions, Terrain, TerrainConfig};
 fn main() {
     let args: Vec<_> = std::env::args().collect();
     let path = args.get(1).expect("output PPM path");
     let longitude: f64 = args.get(2).map_or(0.0, |s| s.parse().unwrap());
-    let t = Terrain::from_config(&TerrainConfig::Impact(ImpactOptions::cinder(2_439_700.0)));
+    let config = match args.get(3).map(String::as_str).unwrap_or("cinder") {
+        "cinder" => TerrainConfig::Impact(ImpactOptions::cinder(2_439_700.0)),
+        "ares" => TerrainConfig::Ares(AresOptions::ares(3_389_500.0)),
+        _ => panic!("probe terrain must be cinder or ares"),
+    };
+    let t = Terrain::from_config(&config);
     let eye = DVec3::new(longitude.cos(), longitude.sin(), 0.18).normalize();
     let right = DVec3::Z.cross(eye).normalize();
     let up = eye.cross(right);
