@@ -102,3 +102,7 @@ Pebble 傾角測試維持既有 ignored。app 最終28項（含2項實際方向�
 
 GUI 與錄放證據在 [status](status.md) 另記錄來源 commit／觀察範圍，不能以測試數量
 代替人類驗收。證據與執行檔摘要保存於 `target/acceptance/` 與外部 review archive。
+
+補記（2026-10-08）：人類回報的入水卡頓已定位為物理推進的效能缺陷，無 renderer
+也能重現秒級停頓，尚未修正；參見 [量測記錄](splashdown-performance.md)。水的即時
+效能目前未通過，不能用上述漂浮／存讀成功代替。

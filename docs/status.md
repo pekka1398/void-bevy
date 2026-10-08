@@ -192,3 +192,12 @@ GPU 截圖診斷加入後的配對樣本正常，未取得異常同幀的 GPU �
 原開發暫存位於 `/tmp/void-next-feature-evidence/`。驗收二進位及 SHA256/source manifest
 位於整合工作區 `target/acceptance/`，各功能 worktree 的同目錄有明確指向組合版的入口，
 不偽裝成各自分支已驗證的二進位。詳細需求核對見 [root review](next-features-review.md)。
+
+## 人類驗收回報：水濺落效能待修正（2026-10-08）
+
+使用者觀察入水瞬間明顯停頓，root 隨後量測確認：原候選的同一場景即使無渲染，
+推進0.05s在入水區間最高耗時1.83–3.01s；主遊戲 simulation span 最大2.629s，
+CPU繪圖準備平均6.26ms。主要瓶頸為水穩定性界線把16.67ms拆至約0.04ms，並在
+每個accepted小步推進整個Fleet，重複幾何／環境／native retiming。沒有改動候選
+物理模型，尚未修正；原浮力／錄放檢查不代表即時效能通過。水的效能驗收待處理。
+證據、量測限制與重現入口見 [濺落效能定位](splashdown-performance.md)。
