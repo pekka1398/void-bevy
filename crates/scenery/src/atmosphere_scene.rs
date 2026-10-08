@@ -160,7 +160,11 @@ impl CloudProfile {
     /// The deck's integrated density moment (smooth tapers and mean structure).
     pub fn vertical_optical_depth(&self) -> f64 {
         assert_eq!(self.morphology, CloudMorphology::ContinuousDeck);
-        (self.top_meters - self.bottom_meters) * self.extinction_per_meter * 0.65
+        (self.top_meters - self.bottom_meters)
+            * self.extinction_per_meter
+            * 0.9
+            * (0.75 + 0.15 * 0.5)
+            * crate::clouds::deck_column_integral(0.0)
     }
     pub fn validate(&self) {
         assert_eq!(

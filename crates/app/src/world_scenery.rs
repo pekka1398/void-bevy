@@ -185,10 +185,11 @@ pub fn build_scenes(
             && clouds.morphology == void_scenery::atmosphere_scene::CloudMorphology::ContinuousDeck
         {
             let tau = clouds.vertical_optical_depth();
-            let transmission = clouds.single_scattering_albedo.map(|a| {
-                // Diffusion approximation to absorbing, optically thick overcast illumination.
-                ((-((0.3 * (1.0 - a)).sqrt()) * tau).exp() / (1.0 + 0.05 * tau)) as f32
-            });
+            let transmission = void_scenery::clouds::deck_diffuse_transmission(
+                tau,
+                clouds.single_scattering_albedo,
+            )
+            .map(|v| v as f32);
             uniforms.continuous_cloud = Vec4::new(
                 transmission[0],
                 transmission[1],

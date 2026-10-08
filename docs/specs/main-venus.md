@@ -38,3 +38,9 @@ agent必須實際GUI操作並view_image查看截圖；仍待root審查與人類�
 ## Root審查补修
 
 ContinuousDeck外觀由CloudDeckAppearance明示absorber_tint、latitude_frequency、band_contrast、warp、texture_scale，不從Vesper shader常量推斷；EarthWeather使用None並維持原分支。新增shield/upland普通地面fixture與同main camera中景，沒有另建觀察runtime。根審查確認保留正常霾，不為能看完整盾山而關閉大氣或提高不合理坡度；同sampler剖面補證與新含deck錄放證據見main-venus-scenery.md末節。人類驗收尚未完成。
+
+## 2026-10-09 穿雲連續性修正
+
+人類連續wheel升高暴露黑層／亮度跳變，先前驗收候選重新開啟。雲density taper與上覆柱深度須為同一場，diffuse與直接sun beam不能重複滅光；必須驗證地面→雲底→雲內→雲頂整段主camera行為，以frame-tree eye高度記錄，不能只靠端點截圖或CPU連續性。物理／序列化未變，simulation model29/world5維持；光學版本與binary hash另記。
+
+本輪已完成root主遊戲連續wheel及agent雲頂60–72km每2km、兩曝光受控GUI補驗；root確認黑層消失、沒有待修項，恢復等待人類驗收。最新SHA與有效證據見main-venus-scenery.md開頭及末節。

@@ -1,5 +1,7 @@
 # 目前狀態
 
+**穿雲黑層修正與全段核對已完成；root審查完成，等待人類驗收。先前4a1d927的ready曾因人類發現問題撤回，下方保留該歷史與本輪新結論。**
+
 ## Vesper景觀候選（未合併）
 
 2026-10-08，work/venus-scenery：主遊戲連續厚雲與自訂火山地形、雲下暖色漫射及普通地面fixture已接線；model29/world5。針對性headless及agent TigerVNC驗證完成，root審查完成，等待人類驗收，不代表已合入master。仍只有光學大氣，沒有新增Vesper物理氣動／熱模型。見[main-venus-scenery](main-venus-scenery.md)。
