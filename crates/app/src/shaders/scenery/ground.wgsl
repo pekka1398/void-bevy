@@ -7,6 +7,7 @@
 
 #import bevy_pbr::mesh_functions::{get_world_from_local, mesh_position_local_to_world, mesh_normal_local_to_world}
 #import bevy_pbr::view_transformations::position_world_to_clip
+#import void::impact::{impact_detail, impact_plains, impact_noise, rayed_color, regional_albedo}
 #import void::atmosphere::{AtmosphereShape, PI, sun_transmittance, sky_irradiance}
 
 struct Ground {
@@ -31,6 +32,19 @@ struct Ground {
     bottom_radius: f32,
     top_radius: f32,
     horizon: f32,
+    /// Explicit airless regolith recipe; terrestrial branch stays unchanged.
+    regolith: f32,
+    impact_seed: u32,
+    impact_density: f32,
+    plains_fraction: f32,
+    impact_basin_count: u32,
+    impact_basins: array<vec4<f32>,32>,
+    impact_fills: array<vec4<f32>,8>,
+    impact_mature: vec4<f32>,
+    impact_plain_color: vec4<f32>,
+    impact_fresh: vec4<f32>,
+    impact_rays: array<vec4<f32>,32>,
+    impact_ray_params: array<vec4<f32>,32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> ground: Ground;
@@ -61,6 +75,7 @@ struct Vertex {
     @location(1) normal: vec3<f32>,
     @location(2) color: vec4<f32>,
     @location(3) height: f32,
+    @location(4) cell: f32,
 }
 
 struct VertexOutput {
@@ -69,6 +84,7 @@ struct VertexOutput {
     @location(1) world_normal: vec3<f32>,
     @location(2) color: vec3<f32>,
     @location(3) height: f32,
+    @location(4) cell: f32,
 }
 
 @vertex
@@ -83,6 +99,7 @@ fn vertex(v: Vertex) -> VertexOutput {
     out.world_normal = mesh_normal_local_to_world(v.normal, v.instance_index);
     out.color = v.color.rgb;
     out.height = v.height;
+    out.cell = v.cell;
     return out;
 }
 
@@ -159,6 +176,57 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         detail += (periodic_value_noise(q, WAVE_PERIOD / wavelength) - 0.5) * visible * (0.35 * pow(0.8, f32(index)));
     }
     let mottled = albedo * (detail + 1.0);
+    // Airless particulate rock. Lommel-Seeliger/Lambert mixture approximates the broad lunar-like
+    // disk and rough regolith phase response; it is not a calibrated Hapke fit. Use sampler material
+    // directly: altitude must not turn an impact rim into terrestrial brown rock or snow.
+    if ground.regolith > 0.5 {
+        let q = detail_position / 0.125;
+        let footprint = max(fwidth(q).x, max(fwidth(q).y, fwidth(q).z));
+        let grain = periodic_value_noise(q, WAVE_PERIOD / 0.125);
+        let relief = (grain - 0.5) * 0.006 * (1.0 - smoothstep(0.3, 1.0, footprint));
+        let dx = dpdx(body_position);
+        let dy = dpdy(body_position);
+        let tx = cross(dy, normal);
+        let ty = cross(normal, dx);
+        let determinant = dot(dx, tx);
+        var n = normal;
+        if abs(determinant) > 1e-12 {
+            n = normalize(normal - (tx * dpdx(relief) + ty * dpdy(relief)) / determinant);
+        }
+        var plain = impact_plains(up,ground.impact_seed,ground.plains_fraction);
+        let seed = f32(ground.impact_seed % 10007u)*0.173;
+        for(var i=0u;i<ground.impact_basin_count;i++) {
+            let basin=ground.impact_basins[i];
+            let x=length(up-basin.xyz)/basin.w;
+            if x<1.8 {
+                let q=x*(1.0+0.045*impact_noise(up,11.0/basin.w,seed+59.0));
+                plain=max(plain,(1.0-smoothstep(0.68,1.01,q))*ground.impact_fills[i/4u][i%4u]);
+            }
+        }
+        let pixel = max(length(dpdx(up)),length(dpdy(up)))*ground.bottom_radius;
+        let impacts = impact_detail(up,ground.bottom_radius,in.cell,max(pixel,0.25),ground.impact_seed,ground.impact_density,plain);
+        n=normalize(n-impacts.slope);
+        let eye = normalize(-body_position);
+        let mu0 = max(dot(n, sun), 0.0);
+        let mu = max(dot(n, eye), 0.0);
+        let phase = max(dot(eye, sun), 0.0);
+        let particulate = 0.68 * (2.0 * mu0 / max(mu0 + mu, 0.001)) + 0.32 * mu0;
+        let opposition = 1.0 + 0.12 * pow(phase, 24.0);
+        let lit = smoothstep(-0.002, 0.002, sun_mu);
+        var albedo = in.color;
+        if ground.impact_fresh.w>0.5 {
+            var fresh=impacts.fresh;
+            for(var i=0u;i<u32(ground.impact_mature.w);i++) {
+                let ray=ground.impact_rays[i];
+                let params=ground.impact_ray_params[i];
+                fresh=max(fresh,rayed_color(up,ray.xyz,ray.w,params.y,params.x));
+            }
+            let base=regional_albedo(up,ground.impact_seed,plain,ground.impact_mature.xyz,ground.impact_plain_color.xyz);
+            albedo=mix(base.xyz,ground.impact_fresh.xyz*base.w,fresh*0.7)*(1.0-impacts.dark);
+        }
+        let regolith = albedo * (1.0 + detail * 0.62 + (grain-0.5)*0.12*(1.0-smoothstep(0.3,1.0,footprint)));
+        return vec4(regolith * (sunlight * particulate * opposition * lit + vec3(2e-5)) / PI, 1.0);
+    }
     // A tilted surface sees part of the sky: (1 + N·up) / 2 of it.
     let land = mottled * (sunlight * max(dot(normal, sun), 0.0) + sky_light * (dot(normal, up) * 0.5 + 0.5)) / PI;
 

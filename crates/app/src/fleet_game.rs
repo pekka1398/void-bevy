@@ -349,6 +349,41 @@ fn docking_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
         }
     }
 }
+/// Main-game acceptance starting sites, expressed through the ordinary InitialWorld contract.
+/// No alternate camera or physics runtime is created.
+fn cinder_fixture(initial: &mut InitialWorld, site: &str) {
+    let description = initial
+        .world
+        .bodies
+        .get("cinder")
+        .expect("Cinder fixture needs solar scenery");
+    let Some(void_terrain::TerrainConfig::Impact(options)) = &description.terrain else {
+        panic!("Cinder fixture requires impact terrain");
+    };
+    let direction = match site {
+        "basin" => DVec3::from_array(options.basins[0].direction),
+        "rim" => {
+            let basin = &options.basins[0];
+            let center = DVec3::from_array(basin.direction);
+            (center
+                + center.cross(DVec3::Z).normalize()
+                    * (basin.radius_meters / options.radius_meters * 1.05))
+                .normalize()
+        }
+        "ejecta" => {
+            let impact = &options.rayed_impacts[1];
+            let center = DVec3::from_array(impact.direction);
+            (center
+                + center.cross(DVec3::Z).normalize()
+                    * (impact.radius_meters / options.radius_meters * 1.7))
+                .normalize()
+        }
+        _ => panic!("--cinder-site must be basin/rim/ejecta"),
+    };
+    initial.launch_body = "cinder".into();
+    initial.launch_site = direction;
+}
+
 fn scenery_description(sim: &void_fleet_flight::FleetFlight) -> String {
     let id = &sim.fleet.ephemeris.bodies()[sim.observation_body()].id;
     match sim.world.bodies.get(id) {
@@ -357,6 +392,7 @@ fn scenery_description(sim: &void_fleet_flight::FleetFlight) -> String {
             id,
             match d.visual.surface {
                 void_scenery::solar::SurfaceRecipe::SolidSurface => "solid LOD",
+                void_scenery::solar::SurfaceRecipe::Regolith => "regolith LOD",
                 void_scenery::solar::SurfaceRecipe::GasEnvelope { .. } => "gas visual",
                 void_scenery::solar::SurfaceRecipe::EmissiveStar { .. } => "emissive star",
             },
@@ -635,7 +671,7 @@ fn argument(name: &str) -> Option<String> {
 pub fn run(main_game: bool) {
     if std::env::args().any(|a| a == "--help") {
         println!(
-            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
+            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--cinder-site basin|rim|ejecta: paused main-game surface fixture\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
         );
         return;
     }
@@ -701,6 +737,17 @@ pub fn run(main_game: bool) {
     let air =
         planet.planet.air_density_scale.is_some() && !std::env::args().any(|a| a == "--vacuum");
     let replay_path = argument("--replay");
+    if argument("--cinder-site").is_some() {
+        assert!(
+            argument("--world").is_none()
+                && argument("--load").is_none()
+                && replay_path.is_none()
+                && argument("--planet").is_none()
+                && argument("--terrain").is_none()
+                && !std::env::args().any(|a| a == "--reentry" || a == "--rendezvous"),
+            "--cinder-site cannot override world/load/replay/planet/terrain or other fixtures"
+        );
+    }
     assert!(
         argument("--world").is_none() || (argument("--load").is_none() && replay_path.is_none()),
         "--world cannot override a checkpoint or replay world"
@@ -737,6 +784,10 @@ pub fn run(main_game: bool) {
                     }
                 }
             }
+            if let Some(site) = argument("--cinder-site") {
+                assert!(main_game, "Cinder fixture is a main-game entry");
+                cinder_fixture(&mut initial, &site);
+            }
             FlightSession::new(if main_game {
                 initial.with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque)
             } else {
@@ -762,7 +813,7 @@ pub fn run(main_game: bool) {
         !lab.rendezvous || (argument("--load").is_none() && replay_path.is_none()),
         "--rendezvous cannot be combined with --load or --replay"
     );
-    lab.paused = !main_game || argument("--load").is_some();
+    lab.paused = !main_game || argument("--load").is_some() || argument("--cinder-site").is_some();
     if argument("--load").is_none() && replay_path.is_none() {
         lab.session.execute(Action::View {
             command: ViewCommand::Configure {
@@ -3578,4 +3629,32 @@ fn draw_map(
         view.map_weight,
         &render,
     );
+}
+
+#[cfg(test)]
+mod mercury_fixture_tests {
+    use super::*;
+    #[test]
+    fn surface_entries_are_real_initial_worlds_with_shared_terrain() {
+        let planet = void_landing::aurelia();
+        let craft = void_vessels::pod_tank("Mercury fixture witness");
+        let mut sites = Vec::new();
+        for site in ["basin", "rim", "ejecta"] {
+            let mut initial = InitialWorld::new(&planet, &craft, DVec3::X, true);
+            initial.world = void_fleet_flight::world::solar_scenery(&planet);
+            cinder_fixture(&mut initial, site);
+            assert_eq!(initial.launch_body, "cinder");
+            assert!((initial.launch_site.length() - 1.0).abs() < 1e-12);
+            sites.push(initial.launch_site);
+            let sim = initial.build();
+            assert_eq!(sim.fleet.ephemeris.bodies()[sim.home].id, "cinder");
+            assert_eq!(sim.fleet.vessel_ids().len(), 1);
+            assert_eq!(
+                sim.planet.terrain.config(),
+                sim.terrains[&sim.home].config()
+            );
+        }
+        assert!((sites[0] - sites[1]).length() > 0.1);
+        assert!((sites[1] - sites[2]).length() > 0.1);
+    }
 }

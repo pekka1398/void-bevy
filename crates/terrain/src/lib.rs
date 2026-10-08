@@ -4,6 +4,7 @@
 
 mod cratered;
 mod hills;
+mod impact;
 mod layered;
 pub mod noise;
 
@@ -14,6 +15,7 @@ use void_math::hypot;
 
 pub use cratered::{Cratered, CrateredOptions};
 pub use hills::{Hills, HillsOptions};
+pub use impact::{Basin, ImpactOptions, ImpactTerrain, RayedImpact};
 pub use layered::{DEFAULT_LAYERED, Layered, LayeredOptions, MAX_HEIGHT, SEA_LEVEL};
 
 /// Plain data that builds a terrain, as landing's `TerrainConfig` (the same JSON):
@@ -23,6 +25,7 @@ pub use layered::{DEFAULT_LAYERED, Layered, LayeredOptions, MAX_HEIGHT, SEA_LEVE
 pub enum TerrainConfig {
     Hills(HillsOptions),
     Cratered(CrateredOptions),
+    Impact(ImpactOptions),
     Layered(LayeredOptions),
 }
 
@@ -31,7 +34,7 @@ impl TerrainConfig {
     /// continents and basins are split at `SEA_LEVEL`; hills have no sea.
     pub fn sea_level_meters(&self) -> Option<f64> {
         match self {
-            TerrainConfig::Hills(_) | TerrainConfig::Cratered(_) => None,
+            TerrainConfig::Hills(_) | TerrainConfig::Cratered(_) | TerrainConfig::Impact(_) => None,
             TerrainConfig::Layered(_) => Some(SEA_LEVEL),
         }
     }
@@ -41,6 +44,7 @@ impl TerrainConfig {
 enum Kind {
     Hills(Hills),
     Cratered(Cratered),
+    Impact(ImpactTerrain),
     Layered(Layered),
 }
 
@@ -64,6 +68,13 @@ impl Terrain {
     }
     pub fn from_config(config: &TerrainConfig) -> Self {
         match config {
+            TerrainConfig::Impact(o) => Self {
+                config: config.clone(),
+                name: o.name.clone(),
+                radius_meters: o.radius_meters,
+                max_height_meters: o.max_height_meters,
+                kind: Kind::Impact(ImpactTerrain::new(o)),
+            },
             TerrainConfig::Cratered(o) => Self {
                 config: config.clone(),
                 name: o.name.clone(),
@@ -94,6 +105,7 @@ impl Terrain {
     pub fn sample(&self, direction: DVec3, cell_meters: Option<f64>) -> (f64, [f64; 3]) {
         match &self.kind {
             Kind::Cratered(c) => c.sample(direction),
+            Kind::Impact(c) => c.sample(direction, cell_meters.unwrap_or(0.25)),
             Kind::Hills(h) => {
                 let length = hypot([direction.x, direction.y, direction.z]);
                 assert!(

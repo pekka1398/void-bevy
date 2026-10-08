@@ -7,6 +7,8 @@ use void_terrain::noise::perlin;
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum SurfaceRecipe {
     SolidSurface,
+    /// Rough, opaque, airless particulate surface; no terrestrial rock/snow overlay.
+    Regolith,
     GasEnvelope {
         low: [f32; 3],
         high: [f32; 3],
@@ -47,7 +49,7 @@ impl RingRecipe {
 impl SurfaceRecipe {
     pub fn validate(&self) {
         match self {
-            Self::SolidSurface => {}
+            Self::SolidSurface | Self::Regolith => {}
             Self::GasEnvelope {
                 low,
                 high,
@@ -86,7 +88,9 @@ impl SurfaceRecipe {
     pub fn color(&self, d: DVec3) -> [f32; 4] {
         assert!(d.is_finite() && (d.length() - 1.0).abs() < 1e-6);
         match self {
-            Self::SolidSurface => panic!("solid color must come from terrain sampler"),
+            Self::SolidSurface | Self::Regolith => {
+                panic!("solid color must come from terrain sampler")
+            }
             Self::GasEnvelope {
                 low,
                 high,

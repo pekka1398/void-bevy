@@ -14,7 +14,7 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderRef;
 use void_scenery::AtmosphereParams;
 
-use crate::tiles::ATTRIBUTE_HEIGHT;
+use crate::tiles::{ATTRIBUTE_CELL, ATTRIBUTE_HEIGHT};
 
 const GROUND_SHADER: &str = "embedded://void_app/shaders/scenery/ground.wgsl";
 const STARS_SHADER: &str = "embedded://void_app/shaders/scenery/stars.wgsl";
@@ -28,6 +28,7 @@ impl Plugin for SceneryPlugin {
         // Compiled into the binary, so the shaders load however the app is started.
         bevy::asset::embedded_asset!(app, "shaders/scenery/atmosphere.wgsl");
         bevy::asset::embedded_asset!(app, "shaders/scenery/ground.wgsl");
+        bevy::asset::embedded_asset!(app, "shaders/scenery/impact.wgsl");
         bevy::asset::embedded_asset!(app, "shaders/scenery/stars.wgsl");
         bevy::asset::embedded_asset!(app, "shaders/scenery/air.wgsl");
         app.add_plugins((
@@ -41,10 +42,13 @@ impl Plugin for SceneryPlugin {
 
 /// Keeps the imported shader modules loaded.
 #[derive(Resource)]
-struct SharedShaders(#[allow(dead_code)] Handle<Shader>);
+struct SharedShaders(#[allow(dead_code)] Vec<Handle<Shader>>);
 
 fn load_shared_shaders(mut commands: Commands, assets: Res<AssetServer>) {
-    commands.insert_resource(SharedShaders(assets.load(ATMOSPHERE_SHADER)));
+    commands.insert_resource(SharedShaders(vec![
+        assets.load(ATMOSPHERE_SHADER),
+        assets.load("embedded://void_app/shaders/scenery/impact.wgsl"),
+    ]));
 }
 
 /// An RGBA f32 table as a linearly filtered half-float texture, clamped at the edges, as the lab
@@ -94,6 +98,18 @@ pub struct GroundUniforms {
     pub bottom_radius: f32,
     pub top_radius: f32,
     pub horizon: f32,
+    pub regolith: f32,
+    pub impact_seed: u32,
+    pub impact_density: f32,
+    pub plains_fraction: f32,
+    pub impact_basin_count: u32,
+    pub impact_basins: [Vec4; 32],
+    pub impact_fills: [Vec4; 8],
+    pub impact_mature: Vec4,
+    pub impact_plain_color: Vec4,
+    pub impact_fresh: Vec4,
+    pub impact_rays: [Vec4; 32],
+    pub impact_ray_params: [Vec4; 32],
 }
 
 impl GroundUniforms {
@@ -104,6 +120,18 @@ impl GroundUniforms {
         snow_height: f64,
     ) -> Self {
         Self {
+            regolith: 0.0,
+            impact_seed: 0,
+            impact_density: 0.0,
+            plains_fraction: 0.0,
+            impact_basin_count: 0,
+            impact_basins: [Vec4::ZERO; 32],
+            impact_fills: [Vec4::ZERO; 8],
+            impact_mature: Vec4::ZERO,
+            impact_plain_color: Vec4::ZERO,
+            impact_fresh: Vec4::ZERO,
+            impact_rays: [Vec4::ZERO; 32],
+            impact_ray_params: [Vec4::ZERO; 32],
             planet_center: Vec3::ZERO,
             sun_illuminance: 1.0,
             sun_direction: Vec3::X,
@@ -181,6 +209,7 @@ impl Material for GroundMaterial {
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
             Mesh::ATTRIBUTE_COLOR.at_shader_location(2),
             ATTRIBUTE_HEIGHT.at_shader_location(3),
+            ATTRIBUTE_CELL.at_shader_location(4),
         ])?];
         Ok(())
     }

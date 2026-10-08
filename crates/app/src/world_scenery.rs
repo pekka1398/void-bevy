@@ -164,6 +164,42 @@ pub fn build_scenes(
             d.visual.rock_height_meters,
             d.visual.snow_height_meters,
         );
+        uniforms.regolith = f32::from(u8::from(matches!(
+            d.visual.surface,
+            void_scenery::solar::SurfaceRecipe::Regolith
+        )));
+        if let void_terrain::TerrainConfig::Impact(options) = terrain.config() {
+            uniforms.impact_seed = options.seed;
+            uniforms.impact_density = options.crater_density as f32;
+            uniforms.plains_fraction = options.plains_fraction as f32;
+            uniforms.impact_basin_count = options.basins.len() as u32;
+            let color = |c: [f64; 3], w: f32| Vec4::new(c[0] as f32, c[1] as f32, c[2] as f32, w);
+            uniforms.impact_mature =
+                color(options.mature_color, options.rayed_impacts.len() as f32);
+            uniforms.impact_plain_color = color(options.plains_color, 0.0);
+            uniforms.impact_fresh = color(options.fresh_color, 1.0);
+            for (i, ray) in options.rayed_impacts.iter().enumerate() {
+                uniforms.impact_rays[i] = color(
+                    ray.direction,
+                    (ray.radius_meters / options.radius_meters) as f32,
+                );
+                uniforms.impact_ray_params[i] = Vec4::new(
+                    ray.freshness as f32,
+                    (ray.ray_seed % 10007) as f32,
+                    0.0,
+                    0.0,
+                );
+            }
+            for (i, basin) in options.basins.iter().enumerate() {
+                uniforms.impact_basins[i] = Vec4::new(
+                    basin.direction[0] as f32,
+                    basin.direction[1] as f32,
+                    basin.direction[2] as f32,
+                    (basin.radius_meters / options.radius_meters) as f32,
+                );
+                uniforms.impact_fills[i / 4][i % 4] = basin.fill as f32;
+            }
+        }
         uniforms.ocean_enabled = f32::from(u8::from(d.visual.ocean));
         uniforms.atmosphere_enabled = f32::from(u8::from(d.visual.atmosphere));
         let material = grounds.add(GroundMaterial {
@@ -225,7 +261,7 @@ fn spawn_far(
                 let d = DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2])).normalize();
                 if let Some(descriptor) = descriptor {
                     match &descriptor.visual.surface {
-                        SurfaceRecipe::SolidSurface => {
+                        SurfaceRecipe::SolidSurface | SurfaceRecipe::Regolith => {
                             let terrain = &sim.terrains[&body.index];
                             let (h, c) = terrain.sample(d, None);
                             *p = (d * (1.0 + h / body.radius_meters)).as_vec3().to_array();

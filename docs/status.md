@@ -2,6 +2,10 @@
 
 更新日期：2026-10-07。現行開發規則見 [AGENTS.md](../AGENTS.md)，需求與方向見 [NOTE.md](../NOTE.md)。本頁區分核心能力、主遊戲接線、驗證及合併；各項完成條件和限制見對應文件。歷史測試結果只適用於記錄的版本。
 
+## Cinder 分支待驗收
+
+2026-10-08：`work/mercury-scenery` 已接入主遊戲 Cinder 的水星式程序地質與 Regolith renderer，尚未合入／人類驗收。獨立可執行入口、格式21與檢查範圍見 [main-mercury-scenery.md](main-mercury-scenery.md)；下列 master 狀態仍描述已驗收 model20。
+
 ## 一句話
 
 TS→Rust 搬遷與主要架構重構已完成。主遊戲具備 assembly／Fleet、多船、完整氣動力矩、有限 RCS、對接／解除、分級、SAS、機動、warp、存讀、錄放與量測。RCS／氣動整合已推送至 origin（`0cd5012`）。本輪另將四種繪圖框架、熱／傳熱／燒蝕／防熱盾與十天體第一輪 scenery 接入主遊戲，使用者已於 2026-10-07 確認驗收完成；十天體外觀不是最終美術版。

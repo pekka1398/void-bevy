@@ -24,6 +24,10 @@ use void_lod::{
 pub const ATTRIBUTE_HEIGHT: MeshVertexAttribute =
     MeshVertexAttribute::new("Height", 917_330_201, VertexFormat::Float32);
 
+/// Physical sampling cell for frequency-aware material detail, constant over each tile.
+pub const ATTRIBUTE_CELL: MeshVertexAttribute =
+    MeshVertexAttribute::new("TerrainCell", 917_330_202, VertexFormat::Float32);
+
 /// Marks a terrain tile entity.
 #[derive(Component)]
 pub struct Tile;
@@ -275,7 +279,13 @@ impl<M: Material> TileField<M> {
                         .expect("a drawn neighbour has a mesh")
                 })
             });
-            let mesh = meshes.add(tile_mesh(data, coarse, n, &self.indices));
+            let mesh = meshes.add(tile_mesh(
+                data,
+                coarse,
+                n,
+                &self.indices,
+                self.lod.options.radius_meters,
+            ));
             let entity = commands
                 .spawn((
                     Tile,
@@ -307,6 +317,7 @@ fn tile_mesh(
     coarse: [Option<&TileMeshData>; 4],
     n: usize,
     indices: &[u32],
+    radius: f64,
 ) -> Mesh {
     let (positions, normals, heights) = stitch_edges(data, coarse, n);
     let count = n * n;
@@ -322,6 +333,10 @@ fn tile_mesh(
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals[..count].to_vec())
     .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
     .with_inserted_attribute(ATTRIBUTE_HEIGHT, heights[..count].to_vec())
+    .with_inserted_attribute(
+        ATTRIBUTE_CELL,
+        vec![void_lod::cell_meters(radius, data.key.level, n) as f32; count],
+    )
     .with_inserted_indices(Indices::U32(indices.to_vec()))
 }
 
