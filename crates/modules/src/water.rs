@@ -216,6 +216,16 @@ fn drag_relaxation_bound(mass: f64, inverse_body: DMat3, arm: DVec3, speed: f64)
     2. * speed * trace(mobility)
 }
 
+/// Solve h*(base+growth*h) <= 0.2 without subtracting nearly equal roots.
+fn relaxation_seconds(maximum: f64, base: f64, growth: f64) -> f64 {
+    assert!(base.is_finite() && base >= 0. && growth.is_finite() && growth >= 0.);
+    if base == 0. && growth == 0. {
+        return maximum;
+    }
+    let discriminant = base.hypot((0.8 * growth).sqrt());
+    maximum.min(0.4 / (base + discriminant))
+}
+
 /// Fleet-owned cache of derived immutable geometry. Never serialized. Keys are
 /// addresses of the PartGraph's immutable static definitions, not mutable poses,
 /// vessel IDs or definition names. A cache lives only as long as its owning Fleet.
@@ -240,6 +250,11 @@ pub struct StepParameters {
     /// Positive-definite inverse body inertia, in body axes, 1/(kg m²).
     pub inverse_inertia: DMat3,
     pub maximum_seconds: f64,
+    /// Bound on every non-water continuous force in the sea-relative frame (N).
+    /// Includes gravity and non-dissipative frame forces, but excludes collision impulses.
+    pub external_force_bound_n: f64,
+    /// Bound on every non-water continuous torque about the vessel COM (N m).
+    pub external_torque_bound_nm: f64,
 }
 pub struct VesselWater {
     environment: std::sync::Arc<void_environment::Environment>,
@@ -373,8 +388,10 @@ impl VesselWater {
         }
         result
     }
-    /// Accepted-step relaxation bound for distributed quadratic point drag and angular drag.
-    /// Uses full hull volume whenever the trial can cross the surface, never reduces a force.
+    /// Accepted-local relaxation criterion. This bounds water drag using the full
+    /// hull, rigid-body kinetic energy and supplied continuous external load bounds.
+    /// An instantaneous collision impulse requires a fresh criterion after acceptance;
+    /// this is not a global accuracy proof across arbitrary contact discontinuities.
     pub fn stable_step_in<S: void_frames::FrameSource + ?Sized>(
         &self,
         at: &void_frames::Snapshot<'_, S>,
@@ -388,6 +405,8 @@ impl VesselWater {
             mass_kg: mass,
             inverse_inertia,
             maximum_seconds: maximum_dt,
+            external_force_bound_n,
+            external_torque_bound_nm,
         } = step;
         assert!(
             mass.is_finite()
@@ -396,75 +415,89 @@ impl VesselWater {
                 && inverse_inertia.determinant() > 0.
                 && maximum_dt.is_finite()
                 && maximum_dt > 0.
+                && external_force_bound_n.is_finite()
+                && external_force_bound_n >= 0.
+                && external_torque_bound_nm.is_finite()
+                && external_torque_bound_nm >= 0.
         );
-        let mut rate = 0.;
-        let body_rotation = DMat3::from_quat(q);
-        let inverse_world = body_rotation * inverse_inertia * body_rotation.transpose();
-        for (part, offset, pose, hull) in &self.parts {
-            let arm = q * *offset;
-            let reach = hull.reach;
-            for body in self.water_bodies.iter().copied() {
-                let sample = self.environment.surroundings(
-                    at,
-                    self.environment.frames(),
-                    query,
-                    void_frames::State {
-                        position: state.position + arm,
-                        velocity: state.velocity + w.cross(arm),
-                    },
-                    body,
-                );
-                let Some(sea) = sample.sea else { continue };
-                let celestial = &self.environment.bodies()[body];
-                let surface = at.transform(self.environment.frames().surface[body], query);
-                let spin = w - surface.to_motion().angular_velocity;
-                let surface_gravity_bound = celestial.gm / celestial.radius_meters.powi(2)
-                    * (1.
-                        + 3. * celestial.j2.abs()
-                            * (celestial.j2_reference_radius_meters / celestial.radius_meters)
-                                .powi(2));
-                let speed = sea.velocity.length()
-                    + spin.length() * reach
-                    + maximum_dt * surface_gravity_bound;
-                if sea.depth < -(reach + speed * maximum_dt) {
+        let inertia = inverse_inertia.inverse();
+        // For a positive tensor lambda_max <= trace. No guessed spin acceleration.
+        let inverse_norm = trace(inverse_inertia);
+        let mut base_rate = 0.;
+        let mut acceleration_rate = 0.;
+        for body in self.water_bodies.iter().copied() {
+            let sample =
+                self.environment
+                    .surroundings(at, self.environment.frames(), query, state, body);
+            let Some(sea) = sample.sea else { continue };
+            let celestial = &self.environment.bodies()[body];
+            let surface = at.transform(self.environment.frames().surface[body], query);
+            let spin_body = q.conjugate() * (w - surface.to_motion().angular_velocity);
+            let energy_root =
+                (mass * sea.velocity.length_squared() + spin_body.dot(inertia * spin_body)).sqrt();
+            let gravity_bound = celestial.gm / celestial.radius_meters.powi(2)
+                * (1.
+                    + 3. * celestial.j2.abs()
+                        * (celestial.j2_reference_radius_meters / celestial.radius_meters).powi(2));
+            let mut buoyancy_force = 0.;
+            let mut buoyancy_torque = 0.;
+            for (_, offset, pose, hull) in &self.parts {
+                let force = 1000. * hull.volume * gravity_bound;
+                let arm = hull
+                    .vertices
+                    .iter()
+                    .map(|v| (*offset + *pose * *v).length())
+                    .fold(0., f64::max);
+                buoyancy_force += force;
+                buoyancy_torque += force * arm;
+            }
+            let force = external_force_bound_n + buoyancy_force;
+            let torque = external_torque_bound_nm + buoyancy_torque;
+            // Water point/rotational drag do non-positive work. For Q=sqrt(2E),
+            // Q' <= sqrt(F²/m + lambda_max(I^-1) T²); gyroscopic torque does no work.
+            let energy_growth = (force * force / mass + inverse_norm * torque * torque).sqrt();
+            for (part, offset, pose, hull) in &self.parts {
+                let mobility = hull
+                    .vertices
+                    .iter()
+                    .map(|v| {
+                        drag_relaxation_bound(mass, inverse_inertia, *offset + *pose * *v, 0.5)
+                    })
+                    .fold(0., f64::max);
+                let point_speed = mobility.sqrt() * energy_root;
+                let speed_growth = mobility.sqrt() * energy_growth;
+                // Overestimate entry displacement using the furthest body-local point,
+                // independent of future orientation. Full-volume buoyancy above does not
+                // depend on already being wet, so entry cannot evade the growth envelope.
+                let reach = offset.length() + hull.reach;
+                let travel =
+                    point_speed * maximum_dt + 0.5 * speed_growth * maximum_dt * maximum_dt;
+                if sea.depth < -(reach + travel) {
                     continue;
                 }
-                let volume = hull.volume;
                 let size = if part.shape == Shape::Box {
                     void_assembly::part_box_size(part)
                 } else {
                     DVec3::new(2. * part.radius, part.height, 2. * part.radius)
                 };
-                let part_rotation = DMat3::from_quat(q * *pose);
-                let point_rate = hull
-                    .vertices
-                    .iter()
-                    .map(|vertex| {
-                        drag_relaxation_bound(
-                            mass,
-                            inverse_inertia,
-                            *offset + *pose * *vertex,
-                            speed,
-                        )
-                    })
-                    .fold(0., f64::max);
                 let angular_inertia = DVec3::new(
                     size.y * size.y + size.z * size.z,
                     size.x * size.x + size.z * size.z,
                     size.x * size.x + size.y * size.y,
-                ) * (1000. * volume / 12.);
-                let angular_matrix = part_rotation
-                    * DMat3::from_diagonal(angular_inertia)
-                    * part_rotation.transpose();
-                rate += 1.2 * 1000. * volume * point_rate + trace(inverse_world * angular_matrix);
-                break;
+                ) * (1000. * hull.volume / 12.);
+                let rotation = DMat3::from_quat(*pose);
+                let angular_rate = trace(
+                    inverse_inertia
+                        * rotation
+                        * DMat3::from_diagonal(angular_inertia)
+                        * rotation.transpose(),
+                );
+                let coefficient = 2.4 * 1000. * hull.volume * mobility;
+                base_rate += coefficient * point_speed + angular_rate;
+                acceleration_rate += coefficient * speed_growth;
             }
         }
-        if rate == 0. {
-            maximum_dt
-        } else {
-            maximum_dt.min(0.2 / rate)
-        }
+        relaxation_seconds(maximum_dt, base_rate, acceleration_rate)
     }
     /// Conservative entry envelope for one bounded translation leg. Terrain band guards take
     /// ownership first where configured; this also protects explicit sea worlds without terrain.
@@ -590,6 +623,36 @@ mod tests {
         let volume = displacement(&p, normal, 1. / 3.0_f64.sqrt()).volume;
         assert!((volume - 20. / 3.).abs() < 1e-10, "{volume}");
         assert!((displacement(&p, DVec3::Y, 1.).volume - 8.).abs() < 1e-10);
+    }
+    #[test]
+    fn relaxation_root_satisfies_requested_local_criterion() {
+        for base in [0., 0.01, 10., 1e6] {
+            for growth in [0., 0.01, 10., 1e9] {
+                let h = relaxation_seconds(0.05, base, growth);
+                assert!(h.is_finite() && h > 0. && h <= 0.05);
+                let residual = h * (base + growth * h);
+                assert!(residual <= 0.2 + 1e-14);
+                if h < 0.05 {
+                    assert!((residual - 0.2).abs() < 1e-14);
+                }
+            }
+        }
+    }
+    #[test]
+    fn rigid_body_energy_bounds_point_speed_including_spin() {
+        let mass = 20.;
+        let inertia = DMat3::from_diagonal(DVec3::new(3., 8., 4.));
+        let inverse = inertia.inverse();
+        for i in 0..100 {
+            let t = i as f64 * 0.13;
+            let velocity = DVec3::new(t.sin() * 4., t.cos() * 2., t.sin());
+            let spin = DVec3::new(t.cos(), t.sin() * 2., -t.cos());
+            let arm = DVec3::new(t.sin() * 2., t.cos() * 3., 1.);
+            let q_squared = mass * velocity.length_squared() + spin.dot(inertia * spin);
+            let mobility_trace = drag_relaxation_bound(mass, inverse, arm, 0.5);
+            let actual_squared = (velocity + spin.cross(arm)).length_squared();
+            assert!(actual_squared <= q_squared * mobility_trace + 1e-12);
+        }
     }
     #[test]
     fn fleet_hull_cache_reuses_static_geometry_and_releases_ownership() {
