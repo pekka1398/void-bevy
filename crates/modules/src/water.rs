@@ -206,29 +206,32 @@ fn trace(matrix: DMat3) -> f64 {
 fn cross_matrix(v: DVec3) -> DMat3 {
     DMat3::from_cols(v.cross(DVec3::X), v.cross(DVec3::Y), v.cross(DVec3::Z))
 }
-/// Bound the largest mass-whitened point-drag eigenvalue. The non-zero eigenvalues
-/// are those of B^(1/2) K B^(1/2), B = I/m - [r]x I_body^-1 [r]x. Its trace
-/// bounds its largest eigenvalue. For fixed positive K this trace is convex in r,
-/// so taking its maximum over hull vertices also bounds every displaced centroid.
-/// K(u) = |u| I + uu^T/|u| has operator Lipschitz constant at most 3.
-/// K(v)+3*margin*I is therefore a positive matrix upper bound.
-fn drag_relaxation_bound(
-    mass: f64,
-    inverse_world: DMat3,
-    arm: DVec3,
-    velocity: DVec3,
-    margin: f64,
-) -> f64 {
+/// Bound the mass-whitened point-drag Jacobian with K <= 2*speed*I.
+/// trace(B K_bound), B=I/m-[r]x I_body^-1[r]x, bounds its largest eigenvalue.
+/// This is a convex quadratic in the body-local point r. Taking its maximum at
+/// the hull vertices bounds every displaced centroid and is rotation invariant.
+fn drag_relaxation_bound(mass: f64, inverse_body: DMat3, arm: DVec3, speed: f64) -> f64 {
     let cross = cross_matrix(arm);
-    let mobility = DMat3::IDENTITY / mass - cross * inverse_world * cross;
-    let speed = velocity.length();
-    speed * trace(mobility)
-        + if speed > 0. {
-            velocity.dot(mobility * velocity) / speed
-        } else {
-            0.
-        }
-        + 3. * margin * trace(mobility)
+    let mobility = DMat3::IDENTITY / mass - cross * inverse_body * cross;
+    2. * speed * trace(mobility)
+}
+
+/// Fleet-owned cache of derived immutable geometry. Never serialized. Keys are
+/// addresses of the PartGraph's immutable static definitions, not mutable poses,
+/// vessel IDs or definition names. A cache lives only as long as its owning Fleet.
+#[derive(Default)]
+pub struct HullCache {
+    hulls: std::cell::RefCell<std::collections::HashMap<usize, std::sync::Arc<Hull>>>,
+}
+impl HullCache {
+    fn hull(&self, definition: &'static PartDefinition) -> std::sync::Arc<Hull> {
+        let key = std::ptr::from_ref(definition) as usize;
+        self.hulls
+            .borrow_mut()
+            .entry(key)
+            .or_insert_with(|| std::sync::Arc::new(Hull::new(definition)))
+            .clone()
+    }
 }
 
 /// Immutable geometry assembled once per accepted leg; every trial queries the shared environment.
@@ -240,7 +243,7 @@ pub struct StepParameters {
 }
 pub struct VesselWater {
     environment: std::sync::Arc<void_environment::Environment>,
-    parts: Vec<(PartDefinition, DVec3, DQuat, Hull)>,
+    parts: Vec<(&'static PartDefinition, DVec3, DQuat, std::sync::Arc<Hull>)>,
     water_bodies: Vec<usize>,
 }
 impl VesselWater {
@@ -249,6 +252,15 @@ impl VesselWater {
         graph: &void_assembly::PartGraph,
         members: &[String],
         centre: DVec3,
+    ) -> Self {
+        Self::new_cached(environment, graph, members, centre, &HullCache::default())
+    }
+    pub fn new_cached(
+        environment: &std::sync::Arc<void_environment::Environment>,
+        graph: &void_assembly::PartGraph,
+        members: &[String],
+        centre: DVec3,
+        cache: &HullCache,
     ) -> Self {
         Self {
             environment: environment.clone(),
@@ -264,10 +276,10 @@ impl VesselWater {
                 .map(|id| {
                     let p = graph.part(id);
                     (
-                        p.definition.clone(),
+                        p.definition,
                         p.pose.position - centre,
                         p.pose.rotation,
-                        Hull::new(p.definition),
+                        cache.hull(p.definition),
                     )
                 })
                 .collect(),
@@ -423,8 +435,6 @@ impl VesselWater {
                 } else {
                     DVec3::new(2. * part.radius, part.height, 2. * part.radius)
                 };
-                let velocity = sea.velocity;
-                let margin = spin.length() * reach + maximum_dt * surface_gravity_bound;
                 let part_rotation = DMat3::from_quat(q * *pose);
                 let point_rate = hull
                     .vertices
@@ -432,10 +442,9 @@ impl VesselWater {
                     .map(|vertex| {
                         drag_relaxation_bound(
                             mass,
-                            inverse_world,
-                            arm + part_rotation * *vertex,
-                            velocity,
-                            margin,
+                            inverse_inertia,
+                            *offset + *pose * *vertex,
+                            speed,
                         )
                     })
                     .fold(0., f64::max);
@@ -583,6 +592,21 @@ mod tests {
         assert!((displacement(&p, DVec3::Y, 1.).volume - 8.).abs() < 1e-10);
     }
     #[test]
+    fn fleet_hull_cache_reuses_static_geometry_and_releases_ownership() {
+        let cache = HullCache::default();
+        let definition = void_assembly::catalog().first().unwrap();
+        let a = cache.hull(definition);
+        let b = cache.hull(definition);
+        assert!(std::sync::Arc::ptr_eq(&a, &b));
+        assert_eq!(cache.hulls.borrow().len(), 1);
+        let weak = std::sync::Arc::downgrade(&a);
+        drop(cache);
+        assert!(weak.upgrade().is_some()); // a trial evaluator retains its own hull
+        drop(a);
+        drop(b);
+        assert!(weak.upgrade().is_none()); // no process-global retention
+    }
+    #[test]
     fn tensor_drag_bound_covers_centroids_and_velocity_envelope() {
         let mut p = part(Shape::Box);
         p.box_size_meters = Some(DVec3::new(0.1, 4., 0.1));
@@ -594,7 +618,7 @@ mod tests {
             .faces
             .iter()
             .flatten()
-            .map(|v| drag_relaxation_bound(100., inverse, *v, velocity, margin))
+            .map(|v| drag_relaxation_bound(100., inverse, *v, velocity.length() + margin))
             .fold(0., f64::max);
         for i in 0..101 {
             let t = i as f64 / 100.;
