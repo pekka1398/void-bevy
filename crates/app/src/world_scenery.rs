@@ -139,6 +139,18 @@ pub fn build_scenes(
             air.cloud_top = clouds.top_meters as f32;
             air.cloud_extinction = clouds.extinction_per_meter as f32;
             air.coverage = clouds.coverage as f32;
+            if let Some(deck) = &clouds.deck {
+                air.cloud_deck_bands = Vec4::new(
+                    deck.latitude_frequency as f32,
+                    deck.band_contrast as f32,
+                    deck.warp as f32,
+                    0.0,
+                );
+                air.cloud_deck_tint =
+                    Vec3::from_array(deck.absorber_tint.map(|v| v as f32)).extend(0.0);
+                air.cloud_deck_scale =
+                    Vec3::from_array(deck.texture_scale.map(|v| v as f32)).extend(0.0);
+            }
             air.cloud_morphology = match clouds.morphology {
                 void_scenery::atmosphere_scene::CloudMorphology::EarthWeather => 0.0,
                 void_scenery::atmosphere_scene::CloudMorphology::ContinuousDeck => 1.0,

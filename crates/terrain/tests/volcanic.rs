@@ -31,3 +31,22 @@ fn invalid_cell_is_rejected() {
     )))
     .sample(glam::DVec3::Z, Some(f64::NAN));
 }
+
+#[test]
+fn authored_volcanic_landmarks_are_sunlit_distinct_and_real_relief() {
+    let options = VolcanicOptions::vesper(6_051_800.0);
+    let field = void_terrain::Volcanic::new(&options);
+    let sun = glam::DVec3::X;
+    let shield = field.sunlit_shield_rim(sun);
+    let upland = field.sunlit_upland(sun);
+    for d in [shield, upland] {
+        assert!(d.dot(sun) > 0.45);
+        assert!((d.length() - 1.0).abs() < 1e-12);
+        let h = field.sample(d, 10.0).0;
+        assert!(h > 4000.0);
+        let tangent = glam::DVec3::Z.cross(d).normalize();
+        let nearby = (d + tangent * 0.003).normalize();
+        assert!((field.sample(nearby, 10.0).0 - h).abs() > 10.0);
+    }
+    assert!((shield - upland).length() > 0.01);
+}

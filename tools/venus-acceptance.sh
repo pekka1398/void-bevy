@@ -12,6 +12,6 @@ fi
 cd "$project_dir"
 case "$mode" in
     near|orbit|far) exec "$binary" --body vesper --view "$mode" "$@" ;;
-    plains) exec "$binary" --vesper-site plains --exposure 20 "$@" ;;
-    *) echo "Usage: $0 near|orbit|far|plains [main-game options]" >&2; exit 2 ;;
+    plains|shield|upland) exec "$binary" --vesper-site "$mode" --exposure 20 "$@" ;;
+    *) echo "Usage: $0 near|orbit|far|plains|shield|upland [main-game options]" >&2; exit 2 ;;
 esac

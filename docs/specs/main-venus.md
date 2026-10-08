@@ -34,3 +34,7 @@ agent必須實際GUI操作並view_image查看截圖；仍待root審查與人類�
 分支model29／world5／FleetCheckpoint12／Craft3。舊版本明確拒絕；CloudProfile沒有默認補欄位。地形f64規則改變由model版本覆蓋。
 
 連續雲高階散射使用半無限層反射率形式及衰減尾項補足原三階cumulus近似，雲下地面與air source使用同一有效擴散傳輸形式。此係數為視覺近似，非實測金星反照率擬合。雲的極弱暖色紋理不代表UV測量；遠端不顯露地形。驗證與二進位摘要見main-venus-scenery.md。
+
+## Root審查补修
+
+ContinuousDeck外觀由CloudDeckAppearance明示absorber_tint、latitude_frequency、band_contrast、warp、texture_scale，不從Vesper shader常量推斷；EarthWeather使用None並維持原分支。新增shield/upland普通地面fixture與同main camera中景，沒有另建觀察runtime。根審查確認保留正常霾，不為能看完整盾山而關閉大氣或提高不合理坡度；同sampler剖面補證與新含deck錄放證據見main-venus-scenery.md末節。人類驗收尚未完成。
