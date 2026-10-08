@@ -5,7 +5,7 @@
 使用者要求嘗試不反向的平滑阻力更新。`work/splashdown-performance` 的model27
 在Contact Scene將水阻力改為accepted-boundary impulse；浮力仍按原排水體積、
 浮心、有效重力計算。Scene保持原nominal cadence，不再由水阻力拆整個世界的步。
-目前可玩、待人類判斷入水動態，未合入master；操作見[water-review.md](water-review.md)。
+使用者已認可入水動態並授權合入master（ad21813）；操作見[water-review.md](water-review.md)。
 
 COM上的平方阻力更新為 `v / (1 + dt*c*|v|/mass)`。偏心作用點使用
 `B = I/m - [r]× I_world^-1 [r]×`，解 `(I + dt*c*|u|*B) u_next = u`，

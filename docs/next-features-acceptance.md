@@ -1,7 +1,8 @@
 # 四功能整合版驗收
 
-工作區 `void-bevy-integration`，分支 `work/four-feature-integration`。四個功能分支
-保留，沒有合入或 push 到 master；人類最終驗收待進行。共同範圍見
+原候選工作區 `void-bevy-integration`／`work/four-feature-integration`保留作歷史核對。
+目前master已合入四功能整合版及model27水修正（ad21813），未push。水的人類動態
+驗收已通過；其他功能的root檢查和限制仍見下文。共同範圍見
 [共同規格](specs/playable-vehicles-and-multiscale.md)。
 
 ## 執行
@@ -18,7 +19,7 @@
 ./scripts/run-next-features.sh stars
 ```
 
-每次只開一個場景。rover／aircraft／water 按主遊戲預設開始運行；stars fixture／
+每次只開一個場景。rover／aircraft按主遊戲預設開始運行；model27 water、stars fixture／
 eva-space 預設暫停，先核對 HUD 再按 P 切換。可追加 `--record /absolute/new-journal.jsonl --save
 /absolute/checkpoint.json`；錄影路徑必須尚不存在。P 暫停／開始，F6 存檔、暫停後
 F7 讀檔，F8 結束錄製。F4 顯示實際碰撞體；滑鼠拖曳環繞、滾輪縮放。PrintScreen
@@ -88,12 +89,13 @@ Bubble 保留 source system chart 並重定位 split anchor，Orbit 才依遲滯
 
 ## 版本與驗證
 
-組合版 Flight model 26、FleetCheckpoint 12、world schema 4、Craft 3；明示保留
+目前主線Flight model27、FleetCheckpoint12、world schema4、Craft3；明示保留
 未使用新幾何／狀態的既有 Craft 2。舊模型、缺必要欄位或不相容 checkpoint 直接拒絕，
 沒有自動修復／轉換。位置／物理公共接口使用 f64；native Rapier 目前是 f32 ABI，
 局部物理座標與浮動原點避免先轉遠方絕對 f32。沒有宣稱 native solver 是 f64。
 
-root 受影響核心檢查：assembly、rotation、landing、vessels、modules、frames、
+以下是原model26整合候選的root受影響核心檢查；model27新增水修正見water-review。
+核心檢查：assembly、rotation、landing、vessels、modules、frames、
 environment、multiscale、fleet-flight 的 lib/tests，345 passed、0 failed；一個已结案的
 Pebble 傾角測試維持既有 ignored。app 最終28項（含2項實際方向測試）通過。
 所屬核心與 app all-targets Clippy `-D warnings` 通過，fmt 通過；沒有跑全 workspace。

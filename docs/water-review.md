@@ -1,7 +1,7 @@
 # 水阻力候選驗收
 
 分支 `work/splashdown-performance`；worktree `/home/pekka/Desktop/void-bevy-water-perf`。
-model27，未合入master。本次implicit阻力、主遊戲控制及最後核對由主agent自行完成。
+model27；使用者於2026-10-08認可斜入水與漂浮動態，隨後授權合入master（ad21813）。本次implicit阻力、主遊戲控制及最後核對由主agent自行完成。
 
 ## 操作
 
@@ -61,4 +61,4 @@ GUI recording包含同步journal寫入成本；性能另跑不錄製場景，不
 29 passed及lint通過。TigerVNC實際跑20m/s傾45°、200m/s船身90°／入水60°，
 主遊戲R／Shift+R重建、model27視窗journal的headless驗證通過。
 不錄製GUI profile：兩次首次Scene建立約69–71ms，其餘simulation span最慢約3ms；
-profile含暫停幀，不用其中位數宣稱遊戲frame rate。人類動態驗收尚未完成。
+profile含暫停幀，不用其中位數宣稱遊戲frame rate。使用者的人類動態驗收已通過，並明確授權merge；沒有push。

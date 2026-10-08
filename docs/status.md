@@ -1,14 +1,21 @@
 # 目前狀態
 
-## 水卡頓修正候選（2026-10-08，未人類驗收）
+## 四功能與水修正已合入 master（2026-10-08）
 
-`work/splashdown-performance`／`void-bevy-water-perf` 的model27改用平滑水阻力衝量，
-保留排水浮力、原船runtime及normal Scene cadence。主agent自行實作與核對；
-尚未合入master，未替換原model26 integration候選。遊戲內P開始、R重跑、
-Shift+R換六組速度／角度；入口與證據見[water-review.md](water-review.md)。
+使用者驗收水的減速、斜入水及漂浮後，明確授權合併；master由183b9ba
+fast-forward至ad21813，包含此前整合版的EVA／rover、飛機零件與控制、
+三星系以及model27平滑水阻力修正。其他功能的headless／root GUI核對沿用
+整合證據，不把水的人類驗收擴寫為其他功能已完成獨立人類驗收。
 
+原agent實作透過cherry-pick及接縫修正整合，不重複merge原分支；worktree保留。
+水星work/mercury-scenery另外未合入。未push。model27／FleetCheckpoint12／world4／Craft3。
+驗收入口已可從主線scripts執行；詳見[water-review.md](water-review.md)。
 
-更新日期：2026-10-07。現行開發規則見 [AGENTS.md](../AGENTS.md)，需求與方向見 [NOTE.md](../NOTE.md)。本頁區分核心能力、主遊戲接線、驗證及合併；各項完成條件和限制見對應文件。歷史測試結果只適用於記錄的版本。
+更新日期：2026-10-08。現行開發規則見 [AGENTS.md](../AGENTS.md)，需求與方向見 [NOTE.md](../NOTE.md)。本頁區分核心能力、主遊戲接線、驗證及合併；歷史測試结果只適用於記錄版本。
+
+合併後核對（master/ad21813）：fleet-flight的aircraft、eva、eva_stellar、stellar_world、
+stellar_wrench_frames、vehicles及water七組整合測試，37 passed／0 failed。
+未跑全workspace；主線程式碼與已驗收候選逐檔相同，主線驗收入口的binary摘要也已核對。
 
 ## 一句話
 
@@ -148,11 +155,11 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 `/home/pekka/Archives/VOID/2026-10-05/review-recordings/`，同層 README.txt
 記錄用途與版本限制，SHA-256 摘要核對搬移前後一致。
 
-## 四功能的待驗收整合版（2026-10-08）
+## 四功能 model26 整合版的歷史核對（2026-10-08）
 
 `work/four-feature-integration`／`void-bevy-integration`，實際程式來源 `c7c638b`。
-四功能分支的實作已完成，root 審查後接入同一主遊戲。尚未合入／push master，
-人類最終驗收待進行；上面的 master 能力表維持主線歷史結論。
+四功能分支的實作已完成，root審查後接入同一主遊戲。以下為合併前model26
+核對紀錄；目前master已包含此整合版與model27水修正，見頁首合併狀態。
 啟動入口、操作、重新編譯及限制見 [四功能驗收](next-features-acceptance.md)。
 
 | 範圍 | 核心與主遊戲 | root 審查的主要接縫 |
