@@ -5495,6 +5495,7 @@ name = "void-app"
 version = "0.0.0"
 dependencies = [
  "bevy",
+ "fontique",
  "glam 0.32.1",
  "half",
  "serde_json",

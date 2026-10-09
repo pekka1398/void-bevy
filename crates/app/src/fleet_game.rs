@@ -1,4 +1,5 @@
 //! Shared Fleet flight scene used by the independent integration lab and the main game.
+mod ui;
 use crate::{
     flight::game_planet_by_id,
     overlay::unique_edges,
@@ -1323,12 +1324,18 @@ pub fn run(main_game: bool) {
             Update,
             (
                 begin_profile_frame,
+                ui::interactions,
+                ui::scroll_panels,
                 controls,
                 simulate,
                 refresh_scenery,
                 draw,
                 draw_map,
                 instruments,
+                ui::refresh,
+                ui::stages,
+                ui::indicators,
+                ui::apply_font,
                 update_scenery,
                 capture_frame,
             )
@@ -1573,12 +1580,14 @@ fn new_lab(session: FlightSession, craft: Craft) -> Lab {
         prediction: None,
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn setup(
     mut commands: Commands,
     lab: NonSend<Lab>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    mut fonts: Option<ResMut<Assets<Font>>>,
     window: Single<&Window>,
     benchmark: Option<Res<RenderBenchmark>>,
 ) {
@@ -1625,53 +1634,29 @@ fn setup(
         },
         Transform::default().looking_to(Vec3::new(-1.0, -0.4, -0.7), Vec3::Z),
     ));
-    commands.spawn((
-        Hud,
-        Text::new(""),
-        TextFont {
-            font_size: FontSize::Px(14.0),
-            ..default()
-        },
-        Node {
-            position_type: PositionType::Absolute,
-            left: px(12),
-            top: px(12),
-            ..default()
-        },
-    ));
     if lab.main_game {
         crate::map::spawn_map_labels(&mut commands, lab.session.sim().fleet.ephemeris.bodies());
-        let ball = crate::navball::spawn_navball(
+        ui::spawn(
             &mut commands,
             &mut images,
-            150.0,
+            fonts.as_mut().expect("main game font assets"),
             f64::from(window.scale_factor()),
         );
-        commands.entity(ball).insert((
-            Node {
-                position_type: PositionType::Absolute,
-                bottom: px(40),
-                left: percent(50),
-                width: px(150),
-                height: px(150),
-                ..default()
-            },
-            UiTransform::from_translation(bevy::ui::Val2::percent(-50, 0)),
-        ));
+    } else {
+        commands.insert_resource(ui::UiState::default());
         commands.spawn((
-            NavballHeading,
+            Hud,
             Text::new(""),
             TextFont {
-                font_size: FontSize::Px(13.0),
+                font_size: FontSize::Px(14.0),
                 ..default()
             },
             Node {
                 position_type: PositionType::Absolute,
-                bottom: px(12),
-                left: percent(50),
+                left: px(12),
+                top: px(12),
                 ..default()
             },
-            UiTransform::from_translation(bevy::ui::Val2::percent(-50, 0)),
         ));
     }
 }
@@ -1736,7 +1721,7 @@ fn instruments(
         let reading = crate::navball::draw_navball(&mut ball, &input, &mut images, &mut labels);
         for mut text in &mut heading {
             text.0 = format!(
-                "HDG {:03} | {:+.0} deg",
+                "HDG {:03}° · {:+.0}°",
                 reading.heading.round() as i64 % 360,
                 reading.pitch
             );
@@ -1821,11 +1806,25 @@ fn controls(
     scroll: Res<AccumulatedMouseScroll>,
     window: Single<&Window>,
     markers: Query<(&Interaction, &crate::map::MapMarker)>,
+    ui_state: Option<Res<ui::UiState>>,
     mut lab: NonSendMut<Lab>,
 ) {
     let lab = &mut *lab;
+    if ui_state.as_ref().is_some_and(|s| s.editing) {
+        if lab.playback.is_none() {
+            neutral_pilot(lab);
+        }
+        return;
+    }
+    let empty_buttons = ButtonInput::default();
+    let empty_motion = AccumulatedMouseMotion::default();
+    let empty_scroll = AccumulatedMouseScroll::default();
+    let over_ui = ui_state.as_ref().is_some_and(|s| s.pointer);
+    let buttons = if over_ui { &empty_buttons } else { &*buttons };
+    let motion = if over_ui { &empty_motion } else { &*motion };
+    let scroll = if over_ui { &empty_scroll } else { &*scroll };
     let (over_label, clicked) =
-        crate::map::label_click(&markers, &buttons, lab.view.map_or(0.0, |s| s.map_weight));
+        crate::map::label_click(&markers, buttons, lab.view.map_or(0.0, |s| s.map_weight));
     if lab.playback.is_none()
         && let Some(kind) = clicked
     {
@@ -1845,7 +1844,7 @@ fn controls(
             command: ViewCommand::Focus { body },
         });
     }
-    lab.pointer_over_label = over_label;
+    lab.pointer_over_label = over_label || over_ui;
     if !window.focused {
         if lab.playback.is_none() {
             neutral_pilot(lab);
@@ -2276,7 +2275,7 @@ fn controls(
             });
         }
     }
-    view_controls(lab, &keys, &buttons, &motion, &scroll);
+    view_controls(lab, &keys, buttons, motion, scroll);
 }
 fn plot_controls(lab: &mut Lab, keys: &ButtonInput<KeyCode>) {
     use void_orbit::FrameSpec;
@@ -3744,7 +3743,7 @@ mod tests {
             "E taxi nose {start:?} -> {end:?}, right {right:?}"
         );
     }
-    fn initialized_scene(main_game: bool) -> App {
+    pub(super) fn initialized_scene(main_game: bool) -> App {
         let planet = game_planet_by_id(if main_game { "aurelia" } else { "pebble" }, None);
         let craft = void_assembly::flight_rocket();
         let site = demo_rocket(&planet.planet.terrain).launch_site.normalize();
@@ -3766,6 +3765,7 @@ mod tests {
             .insert_resource(Assets::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>::default())
             .insert_resource(Assets::<StandardMaterial>::default())
             .insert_resource(Assets::<Image>::default())
+            .insert_resource(Assets::<Font>::default())
             .insert_resource(Assets::<crate::scenery::GroundMaterial>::default())
             .insert_resource(Assets::<crate::scenery::StarMaterial>::default())
             .insert_non_send(lab)
@@ -4246,6 +4246,118 @@ mod tests {
             void_fleet_flight::session::world_mark(app.world().non_send::<Lab>().session.sim())
         );
     }
+    #[test]
+    fn native_hud_initializes_and_visual_toggles_restore_authored_layers() {
+        let mut app = initialized_scene(true);
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(AccumulatedMouseMotion::default())
+            .insert_resource(AccumulatedMouseScroll::default())
+            .add_message::<bevy::input::keyboard::KeyboardInput>()
+            .add_systems(
+                Update,
+                (
+                    ui::interactions,
+                    ui::refresh,
+                    ui::stages,
+                    ui::indicators,
+                    ui::apply_font,
+                )
+                    .chain()
+                    .after(draw),
+            );
+        app.init_resource::<bevy::text::FontCx>();
+        app.update();
+        for off in [true, false] {
+            {
+                let mut lab = app.world_mut().non_send_mut::<Lab>();
+                for setting in [
+                    Toggle::VisualAir,
+                    Toggle::VisualClouds,
+                    Toggle::VisualOcean,
+                    Toggle::VisualStars,
+                ] {
+                    lab.session.execute(Action::View {
+                        command: ViewCommand::Toggle { setting },
+                    });
+                }
+                let vesper = lab
+                    .session
+                    .sim()
+                    .fleet
+                    .ephemeris
+                    .bodies()
+                    .iter()
+                    .find(|b| b.id.rsplit('/').next() == Some("vesper"))
+                    .expect("Vesper authored")
+                    .index;
+                lab.session.execute(Action::View {
+                    command: ViewCommand::Focus { body: Some(vesper) },
+                });
+            }
+            app.update();
+            let layers = app
+                .world_mut()
+                .query::<&crate::air::AirLayers>()
+                .single(app.world())
+                .unwrap();
+            if off {
+                assert!(
+                    layers
+                        .0
+                        .iter()
+                        .all(|(a, _)| a.enabled == 0. && a.clouds_enabled == 0.)
+                );
+            } else {
+                assert!(
+                    layers
+                        .0
+                        .iter()
+                        .any(|(a, _)| a.enabled > 0. && a.clouds_enabled > 0.)
+                );
+            }
+            let sky = app
+                .world_mut()
+                .query_filtered::<&Visibility, With<Sky>>()
+                .single(app.world())
+                .unwrap();
+            assert_eq!(
+                *sky,
+                if off {
+                    Visibility::Hidden
+                } else {
+                    Visibility::Inherited
+                }
+            );
+            let Ground::World(world) = app.world().resource::<Ground>() else {
+                panic!("world scenery");
+            };
+            let sim = app.world().non_send::<Lab>().session.sim();
+            let vesper = sim
+                .fleet
+                .ephemeris
+                .bodies()
+                .iter()
+                .find(|b| b.id.rsplit('/').next() == Some("vesper"))
+                .unwrap()
+                .index;
+            let material = world.bodies[&vesper].material.clone();
+            let g = &app
+                .world()
+                .resource::<Assets<crate::scenery::GroundMaterial>>()
+                .get(&material)
+                .unwrap()
+                .ground;
+            if off {
+                assert_eq!(g.atmosphere_enabled, 0.);
+                assert_eq!(g.ocean_enabled, 0.);
+                assert_eq!(g.continuous_cloud, Vec4::ZERO);
+            } else {
+                assert!(g.atmosphere_enabled > 0.);
+                assert!(g.continuous_cloud.x > 0.);
+            }
+        }
+    }
 }
 
 #[derive(Component)]
@@ -4276,6 +4388,7 @@ fn setup_scenery(
     let (positions, colors) = void_scenery::generate_stars(&void_scenery::DEFAULT_STARS);
     commands.spawn((
         Sky,
+        Visibility::Inherited,
         Mesh3d(meshes.add(crate::scenery::star_mesh(positions, &colors))),
         MeshMaterial3d(
             stars
@@ -4364,7 +4477,7 @@ fn update_scenery(
         ),
         With<LabCamera>,
     >,
-    mut sky: Query<&mut Transform, (With<Sky>, Without<LabCamera>)>,
+    mut sky: Query<(&mut Transform, &mut Visibility), (With<Sky>, Without<LabCamera>)>,
     mut light: Query<&mut Transform, (With<SceneSun>, Without<Sky>, Without<LabCamera>)>,
     mut far: Query<
         (
@@ -4409,8 +4522,13 @@ fn update_scenery(
             );
         }
     }
-    for mut t in &mut sky {
+    for (mut t, mut visibility) in &mut sky {
         *t = Transform::from_rotation(q.conjugate().as_quat());
+        *visibility = if sim.presentation.visual_stars {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     }
     for (body, mut t, mut visibility) in &mut far {
         let into = sample.to_camera(fleet, fleet.body_frames(body.0).1, q);

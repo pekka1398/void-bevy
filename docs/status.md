@@ -1,5 +1,10 @@
 # 目前狀態
 
+## 主遊戲原生 UI 已合入 master（2026-10-09）
+
+`work/game-ui`／`void-bevy-ui` 以封存 `ref/void/src` 的 HUD 為參考，已接時間／warp、分級燃料條與Δv、油門、高度／速度、原導航球、軌道／機動、DEV及說明。使用現有 Action／ViewCommand；新增四種純視覺開關，model31／world5。根審查、針對性 headless、lint、build及已記錄的 agent GUI核對通過；使用者在正常桌面視窗確認初步外觀可接受，完整控制／載具 GUI驗收仍分範圍待續。使用者已明確授權合併；`work/game-ui` 的 `bd20325` 採入主線，未 push。詳見 [main-game-ui](main-game-ui.md) 與 [spec](specs/game-ui.md)。
+
+
 ## Ares／Vesper 已合入 master（2026-10-09）
 
 使用者明確授權合併 Mars／Venus 並移除兩個 worktree。Mars `4a482f4`、Venus `eb17fe6` 已整合；保留兩邊程序地形、光學、普通地面 fixture 與主 camera 入口，三種 surface fixture 互斥。共同 GroundUniforms 與 WGSL 欄位順序一致；Vesper 厚雲漫射修正與 Ares 材質／薄塵參數同時保留。
@@ -135,7 +140,7 @@ A／B 兩批工作（主遊戲整合＋存檔；profiling、疊圖、錄放、�
 | 12 | 參考框架切換 | 完成：frames 樹、orbit-lab 四種繪圖框架、multiscale 的跨星系換框架；已統一到同一棵樹並完成視窗驗收；四種主遊戲 plot frame 本輪接入並已驗收 |
 | 13 | 其他天體的程序地形 | 多天體 lab 已支持同世界多個可著陸天體；主遊戲已接第一輪十天體外觀／五個固體地形（已驗收），非最終美術 |
 | 14 | 水上漂浮 | 未做：環境介面已提供海平面與深度（`Surroundings::sea`），浮力、水阻力、濺落等水的物理之後做 |
-| 15 | UI | 只有 HUD 與按鍵操作，正式 UI 未做 |
+| 15 | UI | 主遊戲原生 HUD 與互動面板已接入；完整設定／組裝／流程 UI 未完成 |
 | 16 | 太空人 EVA | 未做 |
 | 17 | 車輛 | 未做 |
 | 18 | multiscale | 核心與 lab 完成，並在接縫檢查中與 Fleet 共用；未接入主遊戲 |
