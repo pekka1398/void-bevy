@@ -24,7 +24,6 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 void-terrain.workspace = true
 void-landing.workspace = true
 void-scenery.workspace = true
-void-math.workspace = true
 void-navball.workspace = true
 void-sas.workspace = true
 void-view.workspace = true

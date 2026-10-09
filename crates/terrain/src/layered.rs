@@ -14,7 +14,6 @@
 
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
-use void_math::hypot;
 
 use crate::noise::{fbm, noise, noise_with_gradient, smoothstep};
 
@@ -77,7 +76,7 @@ impl Layered {
     /// Height above the reference sphere and the ground cover's linear albedo, at a unit
     /// body-fixed direction, leaving out detail finer than about two `cell_meters`.
     pub fn sample(&self, d: DVec3, cell_meters: f64) -> (f64, [f64; 3]) {
-        let length = hypot([d.x, d.y, d.z]);
+        let length = d.length();
         assert!(
             (length - 1.0).abs() < 1e-6,
             "layered terrain: not a unit direction {d}"
@@ -180,9 +179,9 @@ fn ground_cover(
     belt: f64,
     resolved: &impl Fn(f64) -> f64,
 ) -> [f64; 3] {
-    let latitude = void_math::asin(d.z.clamp(-1.0, 1.0));
+    let latitude = f64::asin(d.z.clamp(-1.0, 1.0));
     let tropics = (latitude.abs() - 0.44) / 0.14;
-    let subtropics = void_math::exp(-(tropics * tropics));
+    let subtropics = f64::exp(-(tropics * tropics));
     let wetness = 0.55 + 0.9 * fbm(qx * 2.5 + 311.0, qy * 2.5, qz * 2.5, 4)
         - 0.55 * subtropics
         - 0.2 * belt

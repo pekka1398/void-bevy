@@ -27,4 +27,3 @@ pub use planet_lod::{
     HOLMAN_SPLIT_DISTANCE_RATIOS, LodCamera, LodCollapse, LodNode, LodSelection, LodView,
     PlanetLod, PlanetLodOptions, TileRequest,
 };
-pub use void_math::{hypot, length};

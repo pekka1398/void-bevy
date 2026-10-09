@@ -70,7 +70,7 @@ impl DemoTerrain {
 
     /// Height above the reference radius and display colour at a unit direction.
     pub fn sample_direction(&self, d: DVec3) -> SurfaceSample {
-        let length = void_math::hypot([d.x, d.y, d.z]);
+        let length = d.length();
         assert!(
             length.is_finite() && (length - 1.0).abs() <= 1e-6,
             "DemoTerrain: expected a unit direction; preset={}; direction={d}; length={length}",

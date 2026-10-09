@@ -2,8 +2,6 @@
 //! radiation, low-speed convection, Sutton–Graves stagnation heating at high Mach with a hot-wall
 //! correction, and an ablator spent as a finite latent-heat reserve.
 
-use void_math::pow;
-
 use crate::{Air, clamp, finite, positive, smooth, validate_air};
 
 pub const STEFAN_BOLTZMANN: f64 = 5.670374419e-8;
@@ -125,11 +123,11 @@ pub fn stagnation_flux(density: f64, speed: f64, nose_radius: f64) -> f64 {
     finite(density, "heating density");
     finite(speed, "heating speed");
     positive(nose_radius, "nose radius");
-    EARTH_SUTTON_GRAVES * (density / nose_radius).sqrt() * pow(speed, 3.0)
+    EARTH_SUTTON_GRAVES * (density / nose_radius).sqrt() * f64::powf(speed, 3.0)
 }
 
 fn film_coefficient(air: &Air, speed: f64) -> f64 {
-    (5.0 + 12.0 * speed.sqrt()) * pow(air.density / 1.225, 0.6)
+    (5.0 + 12.0 * speed.sqrt()) * f64::powf(air.density / 1.225, 0.6)
 }
 
 pub fn heat_load(spec: &ThermalSpec, state: &ThermalState, env: &HeatEnvironment) -> HeatLoad {
@@ -189,7 +187,7 @@ pub fn heat_load(spec: &ThermalSpec, state: &ThermalState, env: &HeatEnvironment
         radiation_w: spec.emissivity
             * STEFAN_BOLTZMANN
             * spec.radiating_area
-            * (pow(state.skin_k, 4.0) - pow(env.background_k, 4.0)),
+            * (f64::powf(state.skin_k, 4.0) - f64::powf(env.background_k, 4.0)),
         conduction_w: spec.conductance_wk * (state.skin_k - state.core_k),
     }
 }
@@ -235,8 +233,11 @@ fn advance_with_limit(
     };
     let mut left = dt;
     while left > 1e-12 {
-        let radiation_slope =
-            4.0 * spec.emissivity * STEFAN_BOLTZMANN * spec.radiating_area * pow(state.skin_k, 3.0);
+        let radiation_slope = 4.0
+            * spec.emissivity
+            * STEFAN_BOLTZMANN
+            * spec.radiating_area
+            * f64::powf(state.skin_k, 3.0);
         let h = if env.air.density > 0.0 {
             film_coefficient(&env.air, env.speed) * spec.convection_area
         } else {

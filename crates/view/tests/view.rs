@@ -158,7 +158,7 @@ fn view_states_and_camera_match_the_lab() {
             let (a, b) = (f(&step["a"]), f(&step["b"]));
             match k % 4 {
                 0 => camera.drag(a * 400.0, b * 900.0, up),
-                1 => camera.zoom(void_math::exp(a * 2.0), 8.0, 2e13),
+                1 => camera.zoom(f64::exp(a * 2.0), 8.0, 2e13),
                 2 => camera.corotate(up, a * 0.3),
                 _ => camera.clamp_to_up(if k % 8 == 3 { -up } else { up }),
             }

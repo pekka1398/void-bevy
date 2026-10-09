@@ -5,8 +5,6 @@ use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use glam::DVec3;
 
-use void_math::{atan, length, tan};
-
 /// Cube face index: 0 +X, 1 −X, 2 +Y, 3 −Y, 4 +Z, 5 −Z.
 pub type CubeFace = u8;
 
@@ -63,8 +61,8 @@ pub fn face_frame(face: CubeFace) -> &'static FaceFrame {
 /// from either face.
 pub fn cube_to_sphere(face: CubeFace, u: f64, v: f64) -> DVec3 {
     let FaceFrame { n, a, b } = face_frame(face);
-    let p = *n + *a * tan(u * FRAC_PI_4) + *b * tan(v * FRAC_PI_4);
-    p * (1.0 / length(p))
+    let p = *n + *a * f64::tan(u * FRAC_PI_4) + *b * f64::tan(v * FRAC_PI_4);
+    p * (1.0 / p.length())
 }
 
 /// Inverse of `cube_to_sphere`: the face whose normal is closest to the direction, and its
@@ -87,7 +85,7 @@ pub fn sphere_to_cube(direction: DVec3) -> (CubeFace, f64, f64) {
     let FaceFrame { n, a, b } = face_frame(face);
     let dn = direction.dot(*n);
     let (su, sv) = (direction.dot(*a) / dn, direction.dot(*b) / dn);
-    (face, atan(su) / FRAC_PI_4, atan(sv) / FRAC_PI_4)
+    (face, f64::atan(su) / FRAC_PI_4, f64::atan(sv) / FRAC_PI_4)
 }
 
 /// One quadtree node on one cube face; x and y count tiles along the face's u and v axes.
@@ -214,7 +212,7 @@ pub fn tiles_around(
     level: u32,
     radius_meters: f64,
 ) -> Vec<TileKey> {
-    let r = length(point);
+    let r = point.length();
     assert!(
         r > 0.0 && r.is_finite(),
         "tiles around: invalid point {point}"
@@ -229,7 +227,7 @@ pub fn tiles_around(
     } else {
         DVec3::new(0.0, -d.z, d.y)
     };
-    let t1 = t1 / length(t1);
+    let t1 = t1 / t1.length();
     let t2 = d.cross(t1);
     // The tangent warp keeps every tile within a factor 1.5 of the face-centre width.
     let smallest = FRAC_PI_2 * radius_meters / f64::from(1_u32 << level) / 1.5;

@@ -13,7 +13,6 @@ mod volcanic;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 use void_lod::{SurfaceSample, SurfaceSampler};
-use void_math::hypot;
 
 pub use ares::{AresOptions, AresTerrain, ShieldVolcano};
 pub use cratered::{Cratered, CrateredOptions};
@@ -135,7 +134,7 @@ impl Terrain {
             Kind::Cratered(c) => c.sample(direction),
             Kind::Impact(c) => c.sample(direction, cell_meters.unwrap_or(0.25)),
             Kind::Hills(h) => {
-                let length = hypot([direction.x, direction.y, direction.z]);
+                let length = direction.length();
                 assert!(
                     length.is_finite() && (length - 1.0).abs() <= 1e-9,
                     "{} terrain: expected a unit direction, got {direction} (length {length})",
@@ -173,8 +172,8 @@ pub fn lattice_directions(count: usize) -> Vec<DVec3> {
             let z = 1.0 - 2.0 * (i as f64 + 0.5) / count as f64;
             let r = (1.0 - z * z).sqrt();
             DVec3::new(
-                void_math::cos(golden * i as f64) * r,
-                void_math::sin(golden * i as f64) * r,
+                f64::cos(golden * i as f64) * r,
+                f64::sin(golden * i as f64) * r,
                 z,
             )
         })
@@ -232,8 +231,8 @@ pub fn check_terrain_contract(terrain: &Terrain, samples: usize) -> Vec<Contract
         } else {
             DVec3::new(0.0, -d.z, d.y)
         };
-        let n = d + t / hypot([t.x, t.y, t.z]) * step;
-        let near = terrain.sample(n / hypot([n.x, n.y, n.z]), None);
+        let n = d + t / t.length() * step;
+        let near = terrain.sample(n / n.length(), None);
         // Written this way so a NaN height counts as a jump.
         #[allow(clippy::neg_cmp_op_on_partial_ord)]
         if !((near.0 - a.0).abs() < 1.0) {

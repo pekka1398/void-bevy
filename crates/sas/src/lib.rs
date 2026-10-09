@@ -19,7 +19,6 @@
 
 use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
-use void_math::{atan2, hypot};
 use void_rotation::{Mat3, matrix};
 
 /// Off: the pilot's command passes through. Pilot: a key is held; SAS stops spin on the other
@@ -105,11 +104,11 @@ pub fn attitude_error(target: DQuat, current: DQuat) -> DVec3 {
     if r.w < 0.0 {
         r = DQuat::from_xyzw(-r.x, -r.y, -r.z, -r.w);
     }
-    let s = hypot([r.x, r.y, r.z]);
+    let s = r.length();
     if s == 0.0 {
         return DVec3::ZERO;
     }
-    let angle = 2.0 * atan2(s, r.w);
+    let angle = 2.0 * f64::atan2(s, r.w);
     DVec3::new(r.x / s * angle, r.y / s * angle, r.z / s * angle)
 }
 
@@ -221,7 +220,7 @@ impl StabilityAssist {
         } else {
             if self.phase != SasPhase::Holding {
                 self.phase = SasPhase::Damping;
-                if hypot([w.x, w.y, w.z]) < lock_rate {
+                if w.length() < lock_rate {
                     self.phase = SasPhase::Holding;
                     self.locked = Some(rotation);
                 }

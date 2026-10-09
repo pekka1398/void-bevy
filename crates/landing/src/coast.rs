@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use glam::DVec3;
-use void_math::hypot;
 use void_orbit::{
     AdvanceOutcome, EphemerisSource, PropagationRun, Tolerances, Trajectory, VesselPropagator,
     VesselState,
@@ -29,7 +28,7 @@ pub struct CoastPrediction {
 
 fn clearance(position: DVec3, terrain: &Terrain) -> f64 {
     let p = position;
-    let r = hypot([p.x, p.y, p.z]);
+    let r = p.length();
     r - terrain.radius_meters - terrain.height(DVec3::new(p.x / r, p.y / r, p.z / r))
 }
 
@@ -66,8 +65,7 @@ pub fn predict_coast(
     let end = time + horizon_seconds;
     while run.time < end - 1e-8 {
         let v = previous.velocity;
-        let h = (clearance(previous.position, terrain) / hypot([v.x, v.y, v.z]).max(1.0))
-            .clamp(1.0, 15.0);
+        let h = (clearance(previous.position, terrain) / v.length().max(1.0)).clamp(1.0, 15.0);
         let target = end.min(run.time + h);
         let outcome = propagator.advance(
             ephemeris,
@@ -190,7 +188,7 @@ impl EncounterPhysicsGate {
             (second_id.to_string(), first_id.to_string())
         };
         let d = second.position - first.position;
-        let distance_meters = hypot([d.x, d.y, d.z]);
+        let distance_meters = d.length();
         assert!(
             distance_meters.is_finite(),
             "encounter gate: non-finite position"
@@ -203,7 +201,7 @@ impl EncounterPhysicsGate {
             0.0
         };
         let c = DVec3::new(d.x + v.x * time, d.y + v.y * time, d.z + v.z * time);
-        let closest = hypot([c.x, c.y, c.z]);
+        let closest = c.length();
         let was_active = self.active.contains_key(&key);
         let threshold = if was_active {
             self.ranges.pack_meters

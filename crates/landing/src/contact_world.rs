@@ -27,7 +27,6 @@ use glam::{DMat3, DQuat, DVec3};
 use rapier3d::math::{Rotation, Vector};
 use rapier3d::prelude::*;
 use void_lod::{OrderedMap, TileMeshOptions, build_tile_indices, build_tile_mesh, tiles_around};
-use void_math::hypot;
 use void_orbit::EphemerisSource;
 use void_rotation::{Mat3, fictitious_torque, rotation_step};
 use void_terrain::Terrain;
@@ -176,7 +175,7 @@ fn rotate(q: DQuat, v: DVec3) -> DVec3 {
 }
 
 fn normalise_rotation(q: DQuat) -> DQuat {
-    let length = hypot([q.x, q.y, q.z, q.w]);
+    let length = q.length();
     assert!(
         length > 0.0 && length.is_finite(),
         "contact world: invalid rotation"
@@ -450,7 +449,7 @@ impl<F: ContactFrame> ContactWorld<F> {
         // Establish a local origin before rounding the initial pose: at planet-radius coordinates
         // f32 can erase a small drop clearance and start a standing body inside the terrain.
         let initial = self.to_local(state.position);
-        if hypot([initial.x, initial.y, initial.z]) > self.options.recenter_meters {
+        if initial.length() > self.options.recenter_meters {
             self.recenter(state.position);
         }
         let p = self.to_local(state.position);
@@ -1213,11 +1212,11 @@ impl<F: ContactFrame> ContactWorld<F> {
             // asleep at the start was not kicked: it moved only if a contact woke it.
             let start = v64(start_translation);
             let moved = t - start;
-            let rounding =
-                1e-6 * (hypot([t.x, t.y, t.z]) + hypot([start.x, start.y, start.z])) + 1e-9;
+            let rounding = 1e-6 * (t.length() + start.length()) + 1e-9;
             let free = !constrained.contains(&handle)
                 && v.is_some_and(|v| same32(v, body.linvel()))
-                && hypot([moved.x - exact.x, moved.y - exact.y, moved.z - exact.z]) <= rounding;
+                && (moved - exact).length()
+                    <= rounding;
             let solver_delta = match v {
                 Some(v) if !free => DVec3::new(after.x - v.x, after.y - v.y, after.z - v.z),
                 _ => DVec3::ZERO,
@@ -1301,7 +1300,7 @@ impl<F: ContactFrame> ContactWorld<F> {
     fn recenter_if_needed(&mut self) {
         for (handle, _) in &self.bodies {
             let t = v64(self.world.bodies[*handle].translation());
-            if hypot([t.x, t.y, t.z]) > self.options.recenter_meters {
+            if t.length() > self.options.recenter_meters {
                 let to = DVec3::new(
                     self.origin.x + t.x,
                     self.origin.y + t.y,
@@ -1335,7 +1334,7 @@ impl<F: ContactFrame> ContactWorld<F> {
         let n = tile_resolution;
         for p in positions {
             // Tiles matter only once the body could reach the ground.
-            if hypot([p.x, p.y, p.z]) - r - terrain.max_height_meters > tile_reach_meters {
+            if p.length() - r - terrain.max_height_meters > tile_reach_meters {
                 continue;
             }
             for key in tiles_around(p, tile_reach_meters, tile_level, r) {

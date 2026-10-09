@@ -5,7 +5,6 @@
 //! Split view (KSP's two views): M switches between flight and map, each with its own zoom range.
 
 use glam::DVec3;
-use void_math::{acos, hypot, log};
 
 use crate::path_frame::PathFrameKind;
 
@@ -40,7 +39,7 @@ pub const BODY_MIN_RADII: f64 = 1.02;
 pub const MAX_DISTANCE: f64 = 2e13;
 
 fn length(v: DVec3) -> f64 {
-    hypot([v.x, v.y, v.z])
+    v.length()
 }
 
 fn normalize(v: DVec3) -> DVec3 {
@@ -80,9 +79,9 @@ fn zoom_weight(radii: [f64; 2], zoom_scale: f64, reference_radius: f64) -> f64 {
         return 0.0;
     }
     smoothstep(
-        log(radii[0] * reference_radius),
-        log(radii[1] * reference_radius),
-        log(zoom_scale),
+        f64::ln(radii[0] * reference_radius),
+        f64::ln(radii[1] * reference_radius),
+        f64::ln(zoom_scale),
     )
 }
 
@@ -133,7 +132,7 @@ pub fn perpendicular(a: DVec3) -> DVec3 {
 /// unique great circle; they turn about `perpendicular(a)`.
 pub fn slerp_unit(a: DVec3, b: DVec3, s: f64) -> DVec3 {
     assert!((0.0..=1.0).contains(&s), "slerp unit: s={s}");
-    let angle = acos(dot(a, b).clamp(-1.0, 1.0));
+    let angle = f64::acos(dot(a, b).clamp(-1.0, 1.0));
     if angle == 0.0 {
         return a;
     }
@@ -178,7 +177,7 @@ impl OrbitCamera {
         self.direction = normalize(rotate(self.direction, up, -dx_pixels * RADIANS_PER_PIXEL));
         // Elevation is set as an angle from up, clamped before turning, so a long drag stops at
         // the pole instead of wrapping over it.
-        let from_up = acos(dot(up, self.direction).clamp(-1.0, 1.0));
+        let from_up = f64::acos(dot(up, self.direction).clamp(-1.0, 1.0));
         let target = (from_up - dy_pixels * RADIANS_PER_PIXEL)
             .clamp(MIN_ANGLE_FROM_UP, std::f64::consts::PI - MIN_ANGLE_FROM_UP);
         // Rotating up about (up × direction) turns it toward the direction.
@@ -206,7 +205,7 @@ impl OrbitCamera {
     /// Keep the direction at least `MIN_ANGLE_FROM_UP` away from up and down, keeping its
     /// azimuth.
     pub fn clamp_to_up(&mut self, up: DVec3) {
-        let angle = acos(dot(up, self.direction).clamp(-1.0, 1.0));
+        let angle = f64::acos(dot(up, self.direction).clamp(-1.0, 1.0));
         let clamped = angle.clamp(MIN_ANGLE_FROM_UP, std::f64::consts::PI - MIN_ANGLE_FROM_UP);
         if clamped == angle {
             return;

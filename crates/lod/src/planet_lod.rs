@@ -10,7 +10,6 @@ use crate::adjacency::{FACE_EDGES, selected_neighbor};
 use crate::cube::{CUBE_FACES, MAX_CODED_LEVEL, TileKey, cube_to_sphere, face_frame};
 use crate::mesh::{TileMeshData, cell_meters};
 use crate::ordered::OrderedMap;
-use void_math::{acos, asin, hypot, length, tan};
 
 /// Priority offset that queues culled children of split tiles after every visible request.
 const CULLED_PREFETCH_PENALTY: f64 = 1e15;
@@ -71,7 +70,7 @@ pub struct LodCamera {
     pub distance_scale: f64,
     /// The camera splits no tile at or beyond this level; observers may still.
     pub max_level: u32,
-    /// Viewport height over 2 tan(vertical fov / 2): pixels per meter at one meter of distance.
+    /// Viewport height over 2 f64::tan(vertical fov / 2): pixels per meter at one meter of distance.
     pub focal_pixels: f64,
     /// An observer splits a tile only while the children's cells would still be at least this
     /// many pixels at the tile's nearest point to the camera.
@@ -382,7 +381,7 @@ impl PlanetLod {
         let radial = (delta.dot(node.center_direction).abs()
             - self.options.lod_surface_band_meters)
             .max(0.0);
-        hypot([u, v, radial])
+        DVec3::new(u, v, radial).length()
     }
 
     /// Largest threshold − distance over the observers and the camera; positive means split. A
@@ -720,7 +719,7 @@ impl PlanetLod {
     /// Hidden only when the tile's whole direction cap lies beyond the largest horizon angle the
     /// declared global surface radius allows; no per-tile mesh heights are used.
     fn below_horizon(&self, node: &LodNode, observer: DVec3) -> bool {
-        let observer_radius = length(observer);
+        let observer_radius = observer.length();
         assert!(
             observer_radius.is_finite(),
             "below horizon: invalid observer {observer}"
@@ -730,9 +729,9 @@ impl PlanetLod {
             return false;
         }
         let top = self.options.radius_meters + self.options.max_surface_height_meters;
-        let horizon_angle = acos(occluder / observer_radius) + acos(occluder / top);
+        let horizon_angle = f64::acos(occluder / observer_radius) + f64::acos(occluder / top);
         let center_angle =
-            acos((observer.dot(node.center_direction) / observer_radius).clamp(-1.0, 1.0));
+            f64::acos((observer.dot(node.center_direction) / observer_radius).clamp(-1.0, 1.0));
         center_angle - node.angular_radius > horizon_angle
     }
 
@@ -824,7 +823,7 @@ impl Walk {
 
 fn tangent_axis(axis: DVec3, radial: DVec3) -> DVec3 {
     let tangent = axis - radial * axis.dot(radial);
-    let length = length(tangent);
+    let length = tangent.length();
     assert!(
         length.is_finite() && length >= 1e-12,
         "tangent axis: invalid basis from {axis} and {radial}"
@@ -834,14 +833,14 @@ fn tangent_axis(axis: DVec3, radial: DVec3) -> DVec3 {
 
 /// Upper angular radius of a tangent-warped cube-face UV rectangle.
 fn tile_angular_radius(u0: f64, v0: f64, u1: f64, v1: f64) -> f64 {
-    let center_u = tan((u0 + u1) * FRAC_PI_4 / 2.0);
-    let center_v = tan((v0 + v1) * FRAC_PI_4 / 2.0);
-    let du = (tan(u0 * FRAC_PI_4) - center_u)
+    let center_u = f64::tan((u0 + u1) * FRAC_PI_4 / 2.0);
+    let center_v = f64::tan((v0 + v1) * FRAC_PI_4 / 2.0);
+    let du = (f64::tan(u0 * FRAC_PI_4) - center_u)
         .abs()
-        .max((tan(u1 * FRAC_PI_4) - center_u).abs());
-    let dv = (tan(v0 * FRAC_PI_4) - center_v)
+        .max((f64::tan(u1 * FRAC_PI_4) - center_u).abs());
+    let dv = (f64::tan(v0 * FRAC_PI_4) - center_v)
         .abs()
-        .max((tan(v1 * FRAC_PI_4) - center_v).abs());
+        .max((f64::tan(v1 * FRAC_PI_4) - center_v).abs());
     // Normalising cube vectors of length ≥ 1 cannot enlarge their chord distance.
-    2.0 * asin((hypot([du, dv]) / 2.0).min(1.0))
+    2.0 * f64::asin((du.hypot(dv) / 2.0).min(1.0))
 }

@@ -8,7 +8,6 @@ pub use aero::*;
 pub use thermal::*;
 
 use glam::{DQuat, DVec3};
-use void_math::hypot;
 
 pub use void_assembly::rotate;
 /// The atmosphere model lives in `void-environment`; aero keeps the names it always had.
@@ -47,14 +46,14 @@ pub(crate) fn validate_rotation(q: DQuat) {
         finite(v, "rotation");
     }
     assert!(
-        (hypot([q.x, q.y, q.z, q.w]) - 1.0).abs() <= 1e-8,
+        (q.length() - 1.0).abs() <= 1e-8,
         "Rotation must be a unit quaternion"
     );
 }
 
 /// Length as `Math.hypot`.
 pub fn length(v: DVec3) -> f64 {
-    hypot([v.x, v.y, v.z])
+    v.length()
 }
 
 /// The lab's `normalize`: a zero or non-finite vector has no direction.
@@ -71,7 +70,7 @@ pub fn normalize(v: DVec3) -> DVec3 {
 }
 
 pub fn unit(q: DQuat) -> DQuat {
-    let n = positive(hypot([q.x, q.y, q.z, q.w]), "quaternion length");
+    let n = positive(q.length(), "quaternion length");
     DQuat::from_xyzw(q.x / n, q.y / n, q.z / n, q.w / n)
 }
 

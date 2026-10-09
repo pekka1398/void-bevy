@@ -1,7 +1,6 @@
 //! A star field fixed in the sky: directions and colours of one-pixel points far beyond the scene.
 
 use glam::DVec3;
-use void_math::{cos, pow, sin};
 
 #[derive(Clone, Copy, Debug)]
 pub struct StarFieldOptions {
@@ -57,21 +56,21 @@ pub fn generate_stars(o: &StarFieldOptions) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
             // Near the plane: a normally distributed galactic latitude.
             let longitude = random() * 2.0 * std::f64::consts::PI;
             let latitude = gaussian(&mut random) * o.band_width;
-            a * (cos(latitude) * cos(longitude))
-                + b * (cos(latitude) * sin(longitude))
-                + pole * sin(latitude)
+            a * (f64::cos(latitude) * f64::cos(longitude))
+                + b * (f64::cos(latitude) * f64::sin(longitude))
+                + pole * f64::sin(latitude)
         } else {
             let z = random() * 2.0 - 1.0;
             let phi = random() * 2.0 * std::f64::consts::PI;
             let s = (1.0 - z * z).sqrt();
-            DVec3::new(s * cos(phi), s * sin(phi), z)
+            DVec3::new(s * f64::cos(phi), s * f64::sin(phi), z)
         };
         let p = three_normalize(direction) * STAR_DISTANCE;
         positions.push([p.x as f32, p.y as f32, p.z as f32]);
         // Inverse of N(<m) ∝ 10^(0.34 m), capped at the brightest real stars.
-        let magnitude = (o.faintest + libm::log10(random().max(1e-12)) / 0.34).max(-1.5);
-        let brightness = pow(10.0, -0.25 * magnitude);
-        let [red, green, blue] = temperature_color(3200.0 + pow(random(), 1.6) * 9000.0);
+        let magnitude = (o.faintest + f64::log10(random().max(1e-12)) / 0.34).max(-1.5);
+        let brightness = f64::powf(10.0, -0.25 * magnitude);
+        let [red, green, blue] = temperature_color(3200.0 + f64::powf(random(), 1.6) * 9000.0);
         colors.push([
             (red * brightness) as f32,
             (green * brightness) as f32,
@@ -95,7 +94,7 @@ fn temperature_color(kelvin: f64) -> [f64; 3] {
 
 fn gaussian(random: &mut impl FnMut() -> f64) -> f64 {
     let u = random().max(1e-12);
-    (-2.0 * libm::log(u)).sqrt() * cos(2.0 * std::f64::consts::PI * random())
+    (-2.0 * f64::ln(u)).sqrt() * f64::cos(2.0 * std::f64::consts::PI * random())
 }
 
 fn mulberry32(seed: u32) -> impl FnMut() -> f64 {

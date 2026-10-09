@@ -2,7 +2,6 @@ use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
-use void_math::hypot;
 
 pub const G0: f64 = 9.80665;
 pub type ModelResult<T> = Result<T, String>;
@@ -334,16 +333,16 @@ pub fn rotate(q: DQuat, v: DVec3) -> DVec3 {
     )
 }
 fn align(from: DVec3, to: DVec3) -> DQuat {
-    let a = from / hypot(from.to_array());
-    let b = to / hypot(to.to_array());
+    let a = from / from.length();
+    let b = to / to.length();
     if a.dot(b) < -0.999999999 {
         let axis = a.cross(if a.x.abs() < 0.9 { DVec3::X } else { DVec3::Y });
-        let axis = axis / hypot(axis.to_array());
+        let axis = axis / axis.length();
         return DQuat::from_xyzw(axis.x, axis.y, axis.z, 0.0);
     }
     let axis = a.cross(b);
     let w = 1.0 + a.dot(b);
-    let norm = hypot([axis.x, axis.y, axis.z, w]);
+    let norm = glam::DVec4::new(axis.x, axis.y, axis.z, w).length();
     DQuat::from_xyzw(axis.x / norm, axis.y / norm, axis.z / norm, w / norm)
 }
 /// Validate untrusted craft data and derive every part pose from its paired stack nodes.

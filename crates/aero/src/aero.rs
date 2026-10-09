@@ -2,7 +2,6 @@
 //! element's own airflow, not CFD or a voxel flow solution.
 
 use glam::{DQuat, DVec3};
-use void_math::{atan2, cos, exp, pow, sin};
 
 use crate::{
     Air, finite, finite_vec, inverse, length, positive, rotate, smooth, validate_air,
@@ -208,22 +207,22 @@ pub fn wing_polar(s: &WingAero, alpha: f64, mach: f64) -> Polar {
     finite(alpha, "alpha");
     finite(mach, "Mach");
     assert!(mach >= 0.0, "Negative Mach");
-    let a = atan2(
-        sin(alpha - s.zero_lift_radians),
-        cos(alpha - s.zero_lift_radians),
+    let a = f64::atan2(
+        f64::sin(alpha - s.zero_lift_radians),
+        f64::cos(alpha - s.zero_lift_radians),
     );
     let stall = smooth(s.stall_radians * 0.8, s.stall_radians * 1.35, a.abs());
     let slope = 2.0 * std::f64::consts::PI * s.aspect_ratio / (s.aspect_ratio + 2.0 / s.efficiency)
-        * cos(s.sweep_radians);
-    let cl_attached = slope * sin(a) * cos(a);
-    let cl_separated = 1.05 * sin(2.0 * a);
-    let compressibility = 1.0 + 0.18 * exp(-pow((mach - 0.85) / 0.28, 2.0));
+        * f64::cos(s.sweep_radians);
+    let cl_attached = slope * f64::sin(a) * f64::cos(a);
+    let cl_separated = 1.05 * f64::sin(2.0 * a);
+    let compressibility = 1.0 + 0.18 * f64::exp(-f64::powf((mach - 0.85) / 0.28, 2.0));
     let supersonic = 1.0 / (1.0 + 0.0_f64.max(mach * mach - 1.0)).sqrt();
     let cl = ((1.0 - stall) * cl_attached + stall * cl_separated) * compressibility * supersonic;
     let wave = 0.12 * smooth(0.65, 1.15, mach) / (1.0 + 0.0_f64.max(mach - 1.15) * 0.3);
     let cd = s.cd0
         + cl * cl / (std::f64::consts::PI * s.efficiency * s.aspect_ratio)
-        + 1.8 * stall * pow(sin(a), 2.0)
+        + 1.8 * stall * f64::powf(f64::sin(a), 2.0)
         + wave;
     Polar { cl, cd, stall }
 }
@@ -249,7 +248,10 @@ pub fn aerodynamic_forces(
         );
     }
     let base_speed = finite(length(state.velocity - wind), "airspeed");
-    let q_pa = finite(0.5 * air.density * pow(base_speed, 2.0), "dynamic pressure");
+    let q_pa = finite(
+        0.5 * air.density * f64::powf(base_speed, 2.0),
+        "dynamic pressure",
+    );
     let mach = finite(
         if air.density > 0.0 {
             base_speed / positive(air.sound_speed, "sound speed")
@@ -292,9 +294,9 @@ pub fn aerodynamic_forces(
                     let side_speed = length(side);
                     let reynolds = air.density * speed * s.length_meters
                         / positive(air.viscosity, "viscosity");
-                    let cf = 0.074 / pow(reynolds.max(1.0), 0.2);
+                    let cf = 0.074 / f64::powf(reynolds.max(1.0), 0.2);
                     let cd_axial = (if axial >= 0.0 { s.front_cd } else { s.rear_cd })
-                        * (1.0 + 0.7 * exp(-pow((mach - 1.1) / 0.4, 2.0)));
+                        * (1.0 + 0.7 * f64::exp(-f64::powf((mach - 1.1) / 0.4, 2.0)));
                     let area = if axial >= 0.0 {
                         s.front_area
                     } else {
@@ -306,7 +308,7 @@ pub fn aerodynamic_forces(
                         + vhat * (-q_pa * s.wet_area * cf);
                     cd = -local_force.dot(vhat)
                         / (q_pa * s.front_area.max(s.rear_area).max(s.side_area).max(1e-12));
-                    alpha_radians = atan2(side_speed, axial);
+                    alpha_radians = f64::atan2(side_speed, axial);
                 }
                 AeroShape::Wing(s) => {
                     let span = s.normal.cross(s.chord);
@@ -315,7 +317,7 @@ pub fn aerodynamic_forces(
                     local_force = vhat * (-q_pa * s.area * s.cd0);
                     cd = s.cd0;
                     if section_speed > 0.0 {
-                        let section_q = 0.5 * air.density * pow(section_speed, 2.0);
+                        let section_q = 0.5 * air.density * f64::powf(section_speed, 2.0);
                         let deflection = if s.control == ControlSurface::None {
                             0.0
                         } else {
@@ -323,7 +325,7 @@ pub fn aerodynamic_forces(
                                 * s.control_sign
                                 * s.max_deflection_radians
                         };
-                        alpha_radians = atan2(
+                        alpha_radians = f64::atan2(
                             -section_velocity.dot(s.normal),
                             section_velocity.dot(s.chord),
                         ) + s.incidence_radians

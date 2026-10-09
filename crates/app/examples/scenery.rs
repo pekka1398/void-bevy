@@ -254,7 +254,7 @@ impl Scenery {
 
     fn here(&self) -> Where {
         let position = self.view.pose().position;
-        let r = void_math::hypot([position.x, position.y, position.z]);
+        let r = position.length();
         let up = position / r;
         let surface = self.surface_height(up);
         Where {
@@ -262,7 +262,7 @@ impl Scenery {
             up,
             surface,
             height: r - self.radius - surface,
-            latitude: void_math::asin(up.z),
+            latitude: f64::asin(up.z),
             longitude: up.y.atan2(up.x),
         }
     }
@@ -730,7 +730,7 @@ fn frame(
         here.latitude / DEG,
         here.longitude / DEG,
         (s.view.tilt_radians() - FRAC_PI_2) / DEG,
-        void_math::asin(sun_mu.clamp(-1.0, 1.0)) / DEG,
+        f64::asin(sun_mu.clamp(-1.0, 1.0)) / DEG,
         hours(s.local_time()),
         RATES[s.rate].1,
         s.declination_degrees,

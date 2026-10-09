@@ -18,7 +18,6 @@
 //!   ground, contacts supply it.
 
 use glam::{DQuat, DVec3};
-use void_math::hypot;
 
 /// Row-major 3 × 3.
 pub type Mat3 = [f64; 9];
@@ -142,7 +141,7 @@ pub fn inertia_in(q: DQuat, inertia_local: &Mat3) -> Mat3 {
 
 /// q turned by the rotation vector w dt (exact for a constant w).
 fn advance(q: DQuat, w: DVec3, dt: f64) -> DQuat {
-    let rate = hypot([w.x, w.y, w.z]);
+    let rate = w.length();
     if rate == 0.0 {
         return q;
     }
@@ -155,7 +154,7 @@ fn advance(q: DQuat, w: DVec3, dt: f64) -> DQuat {
         dw * q.z + dx * q.y - dy * q.x + dz * q.w,
         dw * q.w - dx * q.x - dy * q.y - dz * q.z,
     );
-    let l = hypot([r.x, r.y, r.z, r.w]);
+    let l = r.length();
     DQuat::from_xyzw(r.x / l, r.y / l, r.z / l, r.w / l)
 }
 
@@ -163,8 +162,8 @@ fn advance(q: DQuat, w: DVec3, dt: f64) -> DQuat {
 /// axes (`rotation`: body axes to frame). Built on the inertial angular momentum L = I (ω + Ω),
 /// which nothing changes, so seen from the frame it only turns by −Ω dt. Midpoint in the attitude,
 /// so second order for a tumble:
-///   L(t) = rot(−Ω t) L₀;  q½ = exp(ω₀ dt/2) q₀;  ω½ = I(q½)⁻¹ L(dt/2) − Ω
-///   q₁ = exp(ω½ dt) q₀;  ω₁ = I(q₁)⁻¹ L(dt) − Ω
+///   L(t) = rot(−Ω t) L₀;  q½ = f64::exp(ω₀ dt/2) q₀;  ω½ = I(q½)⁻¹ L(dt/2) − Ω
+///   q₁ = f64::exp(ω½ dt) q₀;  ω₁ = I(q₁)⁻¹ L(dt) − Ω
 /// A body still in space (ω = −Ω) and a spin about a principal axis come out exact; |L| is kept
 /// exactly always.
 pub fn free_rotation_step(
@@ -181,7 +180,7 @@ pub fn free_rotation_step(
         &inertia_in(rotation, inertia_local),
         angular_velocity + frame_spin,
     );
-    let rate = hypot([frame_spin.x, frame_spin.y, frame_spin.z]);
+    let rate = frame_spin.length();
     let at = |t: f64| {
         if rate == 0.0 {
             l0

@@ -9,4 +9,3 @@ publish = false
 glam.workspace = true
 void-assembly.workspace = true
 void-environment.workspace = true
-void-math.workspace = true

@@ -53,7 +53,7 @@ impl Volcanic {
                 let z = 2.0 * random() - 1.0;
                 let a = std::f64::consts::TAU * random();
                 let r = (1.0 - z * z).sqrt();
-                DVec3::new(r * void_math::cos(a), r * void_math::sin(a), z)
+                DVec3::new(r * f64::cos(a), r * f64::sin(a), z)
             })
             .collect();
         Self {

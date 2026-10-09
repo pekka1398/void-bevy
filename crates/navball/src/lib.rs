@@ -7,7 +7,6 @@
 //! lab's canvas does; its text labels are handed back for the caller to draw.
 
 use glam::DVec3;
-use void_math::{atan2, hypot};
 
 mod paint;
 
@@ -72,7 +71,7 @@ fn cross(a: DVec3, b: DVec3) -> DVec3 {
 }
 
 fn length(a: DVec3) -> f64 {
-    hypot([a.x, a.y, a.z])
+    a.length()
 }
 
 fn scale(a: DVec3, k: f64) -> DVec3 {
@@ -153,14 +152,14 @@ pub fn heading_pitch(basis: &NavballBasis, direction: DVec3) -> (f64, f64) {
         dot(direction, basis.east),
         dot(direction, basis.up),
     );
-    let heading = atan2(e, n) * 180.0 / std::f64::consts::PI;
+    let heading = f64::atan2(e, n) * 180.0 / std::f64::consts::PI;
     (
         if heading < 0.0 {
             heading + 360.0
         } else {
             heading
         },
-        atan2(u, hypot([n, e])) * 180.0 / std::f64::consts::PI,
+        f64::atan2(u, n.hypot(e)) * 180.0 / std::f64::consts::PI,
     )
 }
 

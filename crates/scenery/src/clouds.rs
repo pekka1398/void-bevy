@@ -2,7 +2,6 @@
 //! references for the shader's density and shell intervals.
 
 use glam::DVec3;
-use void_math::{asin, cos, hypot, pow, sin};
 use void_terrain::noise::noise;
 
 /// Heights above the live sea level, never above the ocean-floor reference sphere.
@@ -30,7 +29,7 @@ pub fn cloud_smooth(a: f64, b: f64, v: f64) -> f64 {
 /// Global weather on body-fixed directions: (humidity, vertical type). No cube-face coordinates or
 /// tile state.
 pub fn cloud_weather(d: DVec3) -> (f64, f64) {
-    let latitude = asin(d.z.clamp(-1.0, 1.0));
+    let latitude = f64::asin(d.z.clamp(-1.0, 1.0));
     // Warp broad weather systems before adding weaker regional structure.
     let x = d.x + 0.18 * noise(d.x * 3.0 + 71.0, d.y * 3.0, d.z * 3.0);
     let y = d.y + 0.18 * noise(d.x * 3.0, d.y * 3.0 + 29.0, d.z * 3.0);
@@ -40,10 +39,11 @@ pub fn cloud_weather(d: DVec3) -> (f64, f64) {
             + 0.6 * noise(x * 23.0, y * 23.0 + 17.0, z * 23.0)
             + 0.18 * noise(x * 47.0 + 7.0, y * 47.0, z * 47.0)
             + 0.06 * noise(x * 89.0, y * 89.0 + 53.0, z * 89.0)
-            + 0.12 * cos(latitude * 4.0),
+            + 0.12 * f64::cos(latitude * 4.0),
     );
     let kind = clamp01(
-        0.45 + 0.5 * noise(d.x * 11.0, d.y * 11.0, d.z * 11.0 + 31.0) + 0.25 * cos(latitude * 2.0),
+        0.45 + 0.5 * noise(d.x * 11.0, d.y * 11.0, d.z * 11.0 + 31.0)
+            + 0.25 * f64::cos(latitude * 2.0),
     );
     (humidity, kind)
 }
@@ -66,9 +66,9 @@ pub fn weather_direction(x: usize, y: usize) -> DVec3 {
     let latitude = std::f64::consts::PI * (y as f64 / (WEATHER_HEIGHT - 1) as f64 - 0.5);
     let longitude = std::f64::consts::PI * (2.0 * x as f64 / WEATHER_WIDTH as f64 - 1.0);
     DVec3::new(
-        cos(latitude) * cos(longitude),
-        cos(latitude) * sin(longitude),
-        sin(latitude),
+        f64::cos(latitude) * f64::cos(longitude),
+        f64::cos(latitude) * f64::sin(longitude),
+        f64::sin(latitude),
     )
 }
 
@@ -299,7 +299,7 @@ pub fn cloud_density(
     let sheet = cloud_smooth(0.55, 0.85, coverage) * (1.0 - 0.6 * kind);
     let base = cells * (1.0 - sheet) + 0.32 * coverage * sheet;
     let filtered_base = base * (1.0 - unresolved)
-        + (pow(coverage, 3.0) * 0.45 * (1.0 - sheet) + 0.32 * coverage * sheet)
+        + (f64::powf(coverage, 3.0) * 0.45 * (1.0 - sheet) + 0.32 * coverage * sheet)
             * clamp01(1.0 - h * h * 0.6)
             * unresolved;
     clamp01(filtered_base * profile - (1.0 - detail) * 0.16 * o.detail_weight)
@@ -315,7 +315,7 @@ pub fn cloud_shell_intervals(
     outer: f64,
     scene_distance: f64,
 ) -> Vec<(f64, f64)> {
-    let r = hypot([origin.x, origin.y, origin.z]);
+    let r = origin.length();
     let mu = (origin.x * direction.x + origin.y * direction.y + origin.z * direction.z) / r;
     let roots = |radius: f64| {
         let altitude = r - radius;

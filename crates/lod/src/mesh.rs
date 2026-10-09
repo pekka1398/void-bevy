@@ -10,7 +10,6 @@ use crate::adjacency::{
     FACE_EDGES, FaceEdge, edge_reversed_on_neighbor, neighbor_key, same_edge_on_neighbor,
 };
 use crate::cube::{TileKey, cube_to_sphere};
-use void_math::{hypot, length};
 
 /// Rendered surface above the reference radius, and its display colour (linear 0–1).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -148,7 +147,7 @@ pub fn build_tile_mesh(
             let tu = ex[c + 1] - ex[c - 1];
             let tv = ex[c + e] - ex[c - e];
             let normal = tu.cross(tv);
-            let length = length(normal);
+            let length = normal.length();
             assert!(
                 length.is_finite() && length >= 1e-12,
                 "degenerate tile normal at {key} ({i}, {j})"
@@ -225,7 +224,7 @@ fn half_resolution_error(positions: &[[f32; 3]], n: usize) -> f64 {
                 };
                 *d = at(i, j, axis) - interpolated;
             }
-            worst = worst.max(hypot(delta));
+            worst = worst.max(DVec3::from_array(delta).length());
         }
     }
     worst
