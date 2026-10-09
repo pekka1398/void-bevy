@@ -779,6 +779,29 @@ impl FlightSession {
         }
         outcome
     }
+    /// Restore an external candidate first; rejected files never append journal
+    /// intents or touch the live world. Successful loads use the same LoadWorld
+    /// action and outcome as replay, without restoring the candidate twice.
+    pub fn load_external_checkpoint(&mut self, path: impl AsRef<Path>) -> Result<(), String> {
+        let (checkpoint, restored) = crate::checkpoint::FlightCheckpoint::read_external(path)?;
+        let action = Action::LoadWorld {
+            checkpoint: Box::new(checkpoint),
+        };
+        let index = self.retained_counts().0;
+        if let Some(stream) = &mut self.stream {
+            stream.intent(index, &action);
+        }
+        self.current_initial = action.replacement_initial().expect("load initial").clone();
+        self.sim = restored;
+        let outcome = Outcome::Applied;
+        if let Some(stream) = &mut self.stream {
+            stream.commit(index, &outcome);
+        }
+        if let Some(recording) = &mut self.recording {
+            recording.entries.push(Entry { action, outcome });
+        }
+        Ok(())
+    }
     pub fn recording_initial(&self) -> &InitialWorld {
         &self.current_initial
     }

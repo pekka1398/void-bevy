@@ -1,5 +1,9 @@
 //! Shared Fleet flight scene used by the independent integration lab and the main game.
+mod completion;
+mod menus;
+mod review;
 mod ui;
+mod workshop;
 use crate::{
     flight::game_planet_by_id,
     overlay::unique_edges,
@@ -75,6 +79,25 @@ fn port_pose(lab: &Lab, port: &PortAddress) -> (DVec3, DVec3) {
     )
 }
 fn neutral_pilot(lab: &mut Lab) {
+    let selected = lab.session.sim().selected.clone();
+    if let Some(previous) = lab.session.sim().fleet.vehicle_control(&selected)
+        && (previous.drive != 0.0 || previous.steer != 0.0)
+    {
+        lab.session.execute(Action::Vehicle {
+            control: void_assembly::VehicleControl {
+                drive: 0.0,
+                steer: 0.0,
+                brake: previous.brake,
+            },
+        });
+    }
+    if let Some(previous) = lab.session.sim().fleet.eva_control(&selected)
+        && previous != void_assembly::EvaControl::default()
+    {
+        lab.session.execute(Action::Eva {
+            control: void_assembly::EvaControl::default(),
+        });
+    }
     let id = &lab.session.sim().selected;
     let c = lab.session.sim().fleet.control(id);
     let rcs = lab.session.sim().fleet.rcs_control(id);
@@ -1324,8 +1347,11 @@ pub fn run(main_game: bool) {
             Update,
             (
                 begin_profile_frame,
+                menus::update.run_if(resource_exists::<menus::MenuState>),
+                workshop::process.run_if(resource_exists::<workshop::Workshop>),
                 ui::interactions,
                 ui::scroll_panels,
+                completion::update.run_if(resource_exists::<completion::Cockpit>),
                 controls,
                 simulate,
                 refresh_scenery,
@@ -1333,9 +1359,11 @@ pub fn run(main_game: bool) {
                 draw_map,
                 instruments,
                 ui::refresh,
+                ui::capabilities,
                 ui::stages,
                 ui::indicators,
                 ui::apply_font,
+                workshop::refresh.run_if(resource_exists::<workshop::Workshop>),
                 update_scenery,
                 capture_frame,
             )
@@ -1366,6 +1394,7 @@ pub fn run(main_game: bool) {
                 benchmark_tick.after(crate::render_metrics::collect),
             );
     }
+    review::configure(&mut app, main_game);
     app.run();
 }
 // Capture the GPU window image independently of the desktop/VNC presentation path.
@@ -1642,6 +1671,9 @@ fn setup(
             fonts.as_mut().expect("main game font assets"),
             f64::from(window.scale_factor()),
         );
+        let toolbar = completion::spawn(&mut commands);
+        menus::spawn(&mut commands, toolbar);
+        workshop::spawn(&mut commands);
     } else {
         commands.insert_resource(ui::UiState::default());
         commands.spawn((
@@ -1797,6 +1829,31 @@ fn crew_transfer(lab: &mut Lab) {
 fn axis(keys: &ButtonInput<KeyCode>, plus: KeyCode, minus: KeyCode) -> f64 {
     keys.pressed(plus) as i32 as f64 - keys.pressed(minus) as i32 as f64
 }
+fn restart_session(lab: &mut Lab) {
+    let initial = lab.session.recording_initial().clone();
+    lab.craft = initial.craft.clone();
+    lab.session.execute(Action::ResetWorld {
+        initial: Box::new(initial),
+    });
+    lab.dirty = true;
+    lab.prediction = None;
+    lab.paused = true;
+    lab.rate = 0;
+    lab.spawned = 0;
+    lab.own_port = None;
+    lab.target_port = None;
+    lab.notice.clear();
+    if lab.rendezvous {
+        rendezvous_fixture(lab);
+    }
+    if lab.reentry {
+        reentry_fixture(lab);
+    }
+    if lab.water_review.is_some() {
+        water_fixture(lab);
+    }
+    neutral_pilot(lab);
+}
 #[allow(clippy::too_many_arguments)]
 fn controls(
     time: Res<Time>,
@@ -1807,9 +1864,29 @@ fn controls(
     window: Single<&Window>,
     markers: Query<(&Interaction, &crate::map::MapMarker)>,
     ui_state: Option<Res<ui::UiState>>,
+    cockpit: Option<Res<completion::Cockpit>>,
+    menu: Option<Res<menus::MenuState>>,
+    workshop: Option<Res<workshop::Workshop>>,
     mut lab: NonSendMut<Lab>,
 ) {
     let lab = &mut *lab;
+    let mut combined_keys = menu
+        .as_ref()
+        .map_or_else(|| (*keys).clone(), |m| menus::effective_keys(&keys, m));
+    if let Some(cockpit) = &cockpit {
+        for &key in cockpit.held.iter().chain(&cockpit.tapped) {
+            combined_keys.press(key);
+        }
+    }
+    let keys = combined_keys;
+    if menu.as_ref().is_some_and(|s| s.blocking || s.capture_frame)
+        || workshop.as_ref().is_some_and(|s| s.open || s.capture_frame)
+    {
+        if lab.playback.is_none() {
+            neutral_pilot(lab);
+        }
+        return;
+    }
     if ui_state.as_ref().is_some_and(|s| s.editing) {
         if lab.playback.is_none() {
             neutral_pilot(lab);
@@ -1858,23 +1935,10 @@ fn controls(
         return;
     }
     if keys.just_pressed(KeyCode::F6) {
-        lab.session.save_checkpoint(&lab.save_path);
-        lab.notice = format!("Saved {}", lab.save_path.display());
+        menus::save(lab);
     }
     if keys.just_pressed(KeyCode::F7) {
-        let checkpoint = void_fleet_flight::checkpoint::FlightCheckpoint::read(&lab.save_path);
-        lab.session.execute(Action::LoadWorld {
-            checkpoint: Box::new(checkpoint),
-        });
-        lab.craft = lab.session.recording_initial().craft.clone();
-        lab.dirty = true;
-        lab.prediction = None;
-        lab.paused = true;
-        lab.rate = 0;
-        lab.own_port = None;
-        lab.target_port = None;
-        neutral_pilot(lab);
-        lab.notice = format!("Loaded {}", lab.save_path.display());
+        menus::load(lab);
     }
     if keys.just_pressed(KeyCode::F8) {
         if let Some(path) = lab.record_path.take() {
@@ -1908,27 +1972,7 @@ fn controls(
                 .map_or(0, |i| (i + 1) % WATER_REVIEW_CASES.len());
             lab.water_review = Some(WATER_REVIEW_CASES[next]);
         }
-        let initial = lab.session.recording_initial().clone();
-        lab.session.execute(Action::ResetWorld {
-            initial: Box::new(initial),
-        });
-        lab.dirty = true;
-        lab.prediction = None;
-        lab.paused = true;
-        lab.rate = 0;
-        lab.spawned = 0;
-        lab.own_port = None;
-        lab.target_port = None;
-        lab.notice.clear();
-        if lab.rendezvous {
-            rendezvous_fixture(lab);
-        }
-        if lab.reentry {
-            reentry_fixture(lab);
-        }
-        if lab.water_review.is_some() {
-            water_fixture(lab);
-        }
+        restart_session(lab);
     }
     if keys.just_pressed(KeyCode::Tab)
         && lab.main_game
@@ -4245,6 +4289,119 @@ mod tests {
             before,
             void_fleet_flight::session::world_mark(app.world().non_send::<Lab>().session.sim())
         );
+    }
+    #[test]
+    fn neutral_pilot_releases_rover_and_eva_controls() {
+        let planet = game_planet_by_id("aurelia", None);
+        let site = demo_rocket(&planet.planet.terrain).launch_site.normalize();
+        let craft = void_assembly::crew_rover();
+        let initial = InitialWorld::new(&planet.planet, &craft, site, true);
+        let mut lab = new_lab(FlightSession::new(initial), craft);
+        assert!(matches!(
+            lab.session.execute(Action::Vehicle {
+                control: void_assembly::VehicleControl {
+                    drive: 1.,
+                    steer: 0.5,
+                    brake: 0.
+                }
+            }),
+            Outcome::Applied
+        ));
+        neutral_pilot(&mut lab);
+        let id = lab.session.sim().selected.clone();
+        let c = lab.session.sim().fleet.vehicle_control(&id).unwrap();
+        assert_eq!((c.drive, c.steer), (0., 0.));
+        crew_transfer(&mut lab);
+        let id = lab.session.sim().selected.clone();
+        assert_eq!(
+            lab.session.sim().fleet.control_profile(&id),
+            Some(void_assembly::ControlProfile::Eva)
+        );
+        assert!(matches!(
+            lab.session.execute(Action::Eva {
+                control: void_assembly::EvaControl {
+                    forward: 1.,
+                    strafe: 0.5,
+                    yaw: 0.2
+                }
+            }),
+            Outcome::Applied
+        ));
+        neutral_pilot(&mut lab);
+        assert_eq!(
+            lab.session.sim().fleet.eva_control(&id),
+            Some(void_assembly::EvaControl::default())
+        );
+    }
+    #[test]
+    fn rover_hud_hides_uninstalled_flight_capabilities() {
+        let mut app = initialized_scene(true);
+        {
+            let mut lab = app.world_mut().non_send_mut::<Lab>();
+            let mut initial = lab.session.recording_initial().clone();
+            initial.craft = void_assembly::crew_rover();
+            lab.session.execute(Action::ResetWorld {
+                initial: Box::new(initial),
+            });
+            lab.dirty = true;
+        }
+        app.add_systems(Update, ui::capabilities.before(draw));
+        app.update();
+        let mut panels = app.world_mut().query::<(&ui::CapabilityPanel, &Node)>();
+        let mut count = 0;
+        for (_, node) in panels.iter(app.world()) {
+            count += 1;
+            assert_eq!(
+                node.display,
+                Display::None,
+                "Rover has no rocket staging, main engine or reaction wheel"
+            );
+        }
+        assert_eq!(count, 3);
+    }
+    #[test]
+    fn completion_systems_initialize_and_menu_captures_pilot() {
+        let mut app = initialized_scene(true);
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(AccumulatedMouseMotion::default())
+            .insert_resource(AccumulatedMouseScroll::default())
+            .insert_resource(UiScale::default())
+            .init_resource::<bevy::text::FontCx>()
+            .add_message::<bevy::input::keyboard::KeyboardInput>()
+            .add_systems(
+                Update,
+                (
+                    menus::update,
+                    workshop::process,
+                    ui::interactions,
+                    completion::update,
+                    controls,
+                    workshop::refresh,
+                    ui::refresh,
+                    ui::stages,
+                    ui::indicators,
+                    ui::apply_font,
+                )
+                    .chain()
+                    .before(draw),
+            );
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+        assert!(app.world().resource::<menus::MenuState>().blocking);
+        assert!(app.world().non_send::<Lab>().paused);
+        let id = app.world().non_send::<Lab>().session.sim().selected.clone();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+        app.update();
+        assert_eq!(app.world().non_send::<Lab>().session.sim().selected, id);
     }
     #[test]
     fn native_hud_initializes_and_visual_toggles_restore_authored_layers() {

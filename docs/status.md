@@ -1,5 +1,11 @@
 # 目前狀態
 
+## 主遊戲 UI 補全候選（2026-10-09，尚未合併）
+
+`work/ui-completion` 由 master `95c0581` 開始，接上主遊戲組裝、依載具能力顯示的駕駛／對接控制、船隻與天體導航清單，以及暫停、存讀檔、重啟、畫面與主要按鍵設定。組裝發射共用現有 Fleet／PartGraph／Action，不建立另一套遊戲 runtime；外部存檔驗證失敗保留當前世界。model31／world5 不變。
+
+使用者授權連續實作，外觀與人類操作檢視延後；沒有授權本輪合併或 push。針對性驗證、實際桌面畫面證據及目前的二維組裝／本次執行設定範圍見 [UI 補全規格](specs/ui-completion.md)。驗收入口為 `tools/ui-completion-acceptance.sh`，工作區主線原有 NOTE／狀態整理與其他任務文件保持原樣。
+
 ## 主遊戲原生 UI 已合入 master（2026-10-09）
 
 `work/game-ui`／`void-bevy-ui` 以封存 `ref/void/src` 的 HUD 為參考，已接時間／warp、分級燃料條與Δv、油門、高度／速度、原導航球、軌道／機動、DEV及說明。使用現有 Action／ViewCommand；新增四種純視覺開關，model31／world5。根審查、針對性 headless、lint、build及已記錄的 agent GUI核對通過；使用者在正常桌面視窗確認初步外觀可接受，完整控制／載具 GUI驗收仍分範圍待續。使用者已明確授權合併；`work/game-ui` 的 `bd20325` 採入主線，未 push。詳見 [main-game-ui](main-game-ui.md) 與 [spec](specs/game-ui.md)。

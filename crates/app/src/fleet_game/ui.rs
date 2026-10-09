@@ -20,6 +20,12 @@ pub(super) struct Panel;
 pub(super) struct Dev;
 #[derive(Component)]
 pub(super) struct Help;
+#[derive(Component)]
+pub(super) enum CapabilityPanel {
+    Stage,
+    Sas,
+    Throttle,
+}
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Field {
     Start,
@@ -73,9 +79,14 @@ pub(super) struct UiState {
     dev: bool,
     help: bool,
 }
+impl UiState {
+    pub(super) fn text_editing(&self) -> bool {
+        self.field.is_some()
+    }
+}
 const INK: Color = Color::srgb(0.81, 0.84, 0.89);
 const BG: Color = Color::srgba(0.031, 0.039, 0.063, 0.82);
-fn panel(commands: &mut Commands, node: Node) -> Entity {
+pub(super) fn panel(commands: &mut Commands, node: Node) -> Entity {
     commands
         .spawn((
             Panel,
@@ -87,7 +98,7 @@ fn panel(commands: &mut Commands, node: Node) -> Entity {
         ))
         .id()
 }
-fn base() -> Node {
+pub(super) fn base() -> Node {
     Node {
         position_type: PositionType::Absolute,
         padding: UiRect::axes(px(10), px(6)),
@@ -99,7 +110,7 @@ fn base() -> Node {
         ..default()
     }
 }
-fn text(commands: &mut Commands, parent: Entity, value: &str, size: f32) -> Entity {
+pub(super) fn text(commands: &mut Commands, parent: Entity, value: &str, size: f32) -> Entity {
     let e = commands
         .spawn((
             Text::new(value),
@@ -170,7 +181,7 @@ fn observe_button(commands: &mut Commands, entity: Entity, action: Click) {
     );
 }
 
-fn row(commands: &mut Commands, parent: Entity) -> Entity {
+pub(super) fn row(commands: &mut Commands, parent: Entity) -> Entity {
     let e = commands
         .spawn(Node {
             column_gap: px(5),
@@ -227,6 +238,7 @@ pub(super) fn spawn(
             ..base()
         },
     );
+    commands.entity(stages).insert(CapabilityPanel::Stage);
     readout(commands, stages, Readout::Stages, 12.);
     let list = commands
         .spawn((
@@ -271,6 +283,7 @@ pub(super) fn spawn(
         },
     );
     commands.entity(flight).add_child(sas);
+    commands.entity(sas).insert(CapabilityPanel::Sas);
     button(commands, sas, "SAS", Click::Key(KeyCode::KeyT));
     let throttle = panel(
         commands,
@@ -282,6 +295,7 @@ pub(super) fn spawn(
         },
     );
     commands.entity(flight).add_child(throttle);
+    commands.entity(throttle).insert(CapabilityPanel::Throttle);
     text(commands, throttle, "THR", 11.);
     let track = commands
         .spawn((
@@ -517,7 +531,7 @@ pub(super) fn spawn(
     text(
         commands,
         help_body,
-        "Space stage · Shift/Ctrl throttle · X cut\nW/S pitch · A/D yaw · Q/E roll · T SAS\n,/. time rate · P pause · R reset\nDrag orbit camera · wheel zoom into map\nTab vessel · Shift+Tab focus body · click labels\nK ALT/AGL · L SURFACE/ORBIT · G plot frame\nF1 near/orbit/far · ` DEV · ? help\nF6 save · F7 load paused · F8 finish recording\nM maneuver · B execute · Esc abort\nVehicle / EVA / docking controls: DEV status",
+        "Default keys (custom mappings: Esc menu)\nSpace stage · Shift/Ctrl throttle · X cut\nW/S pitch · A/D yaw · Q/E roll · T SAS\n,/. time rate · P pause · R reset\nDrag orbit camera · wheel zoom into map\nTab vessel · Shift+Tab focus body · click labels\nK ALT/AGL · L SURFACE/ORBIT · G plot frame\nF1 near/orbit/far · ` DEV · ? help\nF6 save · F7 load paused · F8 finish recording\nM maneuver · B execute · Esc abort\nVehicle / EVA / docking: contextual pilot panel",
         11.,
     );
     let status = panel(
@@ -541,12 +555,25 @@ pub(super) fn interactions(
     mut clicks: Query<(&Interaction, &Click, &mut BackgroundColor), With<Button>>,
     mut state: ResMut<UiState>,
     mut pending: Option<ResMut<PendingClicks>>,
+    menu: Option<Res<menus::MenuState>>,
+    workshop: Option<Res<workshop::Workshop>>,
     mut lab: NonSendMut<Lab>,
     mut nodes: Query<(&mut Node, Option<&Dev>, Option<&Help>)>,
 ) {
     let queued = pending
         .as_mut()
         .map_or(Vec::new(), |p| std::mem::take(&mut p.0));
+    if menu.as_ref().is_some_and(|s| s.blocking || s.capture_frame)
+        || workshop.as_ref().is_some_and(|s| s.open || s.capture_frame)
+    {
+        state.field = None;
+        state.draft.clear();
+        state.dragging = false;
+        state.editing = true;
+        state.pointer = true;
+        keyboard.clear();
+        return;
+    }
     let was_editing = state.field.is_some();
     state.pointer = all.iter().any(|i| *i != Interaction::None)
         || clicks.iter().any(|(i, _, _)| *i != Interaction::None);
@@ -689,7 +716,7 @@ pub(super) fn interactions(
         }
     }
 }
-fn dispatch(lab: &mut Lab, key: KeyCode) {
+pub(super) fn dispatch(lab: &mut Lab, key: KeyCode) {
     let mut keys = ButtonInput::default();
     keys.press(key);
     match key {
@@ -1348,6 +1375,34 @@ pub(super) fn scroll_panels(
     }
 }
 
+pub(super) fn capabilities(lab: NonSend<Lab>, mut panels: Query<(&CapabilityPanel, &mut Node)>) {
+    let sim = lab.session.sim();
+    let parts = sim.fleet.part_snapshots(&sim.selected);
+    for (kind, mut node) in &mut panels {
+        let available = match kind {
+            CapabilityPanel::Stage => parts
+                .iter()
+                .any(|p| void_assembly::actionable(p.definition)),
+            CapabilityPanel::Sas => {
+                sim.fleet.has_reaction_wheel(&sim.selected)
+                    && sim.fleet.control_profile(&sim.selected)
+                        != Some(void_assembly::ControlProfile::Eva)
+            }
+            CapabilityPanel::Throttle => parts.iter().any(|p| {
+                p.definition
+                    .modules
+                    .iter()
+                    .any(|m| matches!(m, Module::Engine { .. }))
+            }),
+        };
+        node.display = if available {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+}
+
 /// Keep font bytes in the executable so arbitrary working directories render all HUD glyphs.
 pub(super) fn apply_font(
     font: Option<Res<HudFont>>,
@@ -1464,6 +1519,33 @@ mod tests {
                 .visual_air,
             "same click must not double-toggle"
         );
+    }
+    #[test]
+    fn opening_modal_cancels_numeric_draft_and_captures_game_input() {
+        let mut app = super::super::tests::initialized_scene(true);
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .add_message::<bevy::input::keyboard::KeyboardInput>()
+            .add_systems(Update, interactions.before(super::super::draw));
+        {
+            let mut state = app.world_mut().resource_mut::<UiState>();
+            state.field = Some(Field::Start);
+            state.draft = "123".into();
+        }
+        app.world_mut().resource_mut::<menus::MenuState>().blocking = true;
+        let before =
+            void_fleet_flight::session::world_mark(app.world().non_send::<Lab>().session.sim());
+        app.update();
+        let state = app.world().resource::<UiState>();
+        assert!(!state.text_editing());
+        assert!(state.editing);
+        assert_eq!(
+            before,
+            void_fleet_flight::session::world_mark(app.world().non_send::<Lab>().session.sim())
+        );
+        app.world_mut().resource_mut::<menus::MenuState>().blocking = false;
+        app.update();
+        assert!(!app.world().resource::<UiState>().editing);
     }
     #[test]
     fn numeric_commit_and_cancel_capture_the_current_keyboard_frame() {

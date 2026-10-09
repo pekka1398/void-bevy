@@ -127,6 +127,70 @@ impl FlightCheckpoint {
         );
         sim
     }
+    /// Validate an external candidate without mutating a running session. Existing
+    /// invariant validators panic; this boundary converts only candidate restoration
+    /// failures into an explicit rejection. Internal simulation panics remain fatal.
+    pub fn read_external(path: impl AsRef<Path>) -> Result<(Self, FleetFlight), String> {
+        let bytes = fs::read(path).map_err(|e| format!("Read checkpoint: {e}"))?;
+        let checkpoint: Self =
+            serde_json::from_slice(&bytes).map_err(|e| format!("Checkpoint format: {e}"))?;
+        let restored =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| checkpoint.restore()))
+                .map_err(|e| {
+                    let reason = e
+                        .downcast_ref::<String>()
+                        .map(String::as_str)
+                        .or_else(|| e.downcast_ref::<&str>().copied())
+                        .unwrap_or("invalid checkpoint invariant");
+                    format!("Checkpoint rejected: {reason}")
+                })?;
+        Ok((checkpoint, restored))
+    }
+    /// Atomic checked filesystem write; capture and internal invariants stay strict.
+    pub fn write_external(&self, path: impl AsRef<Path>) -> Result<(), String> {
+        self.validate_header();
+        let path = path.as_ref();
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let name = path
+            .file_name()
+            .ok_or("Checkpoint path requires a filename")?;
+        fs::create_dir_all(parent).map_err(|e| format!("Create save directory: {e}"))?;
+        let tmp = parent.join(format!(
+            ".{}.{}.ui.tmp",
+            name.to_string_lossy(),
+            std::process::id()
+        ));
+        let mut owns_tmp = false;
+        let result = (|| -> Result<(), String> {
+            let file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)
+                .map_err(|e| format!("Create save: {e}"))?;
+            owns_tmp = true;
+            let mut file = BufWriter::with_capacity(64 * 1024, file);
+            serde_json::to_writer(&mut file, self).map_err(|e| format!("Encode save: {e}"))?;
+            file.write_all(b"\n")
+                .and_then(|_| file.flush())
+                .map_err(|e| format!("Write save: {e}"))?;
+            file.get_ref()
+                .sync_all()
+                .map_err(|e| format!("Sync save: {e}"))?;
+            drop(file);
+            fs::rename(&tmp, path).map_err(|e| format!("Replace save: {e}"))?;
+            fs::File::open(parent)
+                .and_then(|f| f.sync_all())
+                .map_err(|e| format!("Sync save directory: {e}"))?;
+            Ok(())
+        })();
+        if result.is_err() && owns_tmp {
+            let _ = fs::remove_file(tmp);
+        }
+        result
+    }
     pub fn read(path: impl AsRef<Path>) -> Self {
         let saved: Self =
             serde_json::from_slice(&fs::read(path).expect("world checkpoint: read file"))
