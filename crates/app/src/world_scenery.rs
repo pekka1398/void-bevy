@@ -273,6 +273,14 @@ pub fn build_scenes(
             material.clone(),
         );
         field.no_frustum_culling = true;
+        if std::env::args().any(|arg| arg == "--lod-frustum-bounds") {
+            // Ground vertex shader raises submerged vertices by at most sea_level metres.
+            // Expand in every local axis; include a conservative planetary f32 guard.
+            field.vertex_displacement_bound = Some(
+                uniforms.sea_level.max(0.0) * uniforms.ocean_enabled
+                    + (64.0 * f32::EPSILON * uniforms.bottom_radius).max(1.0),
+            );
+        }
         scenes.insert(
             body,
             BodyScene {
@@ -460,6 +468,13 @@ impl WorldScenery {
                     b.material.clone(),
                 );
                 b.field.no_frustum_culling = true;
+                if std::env::args().any(|arg| arg == "--lod-frustum-bounds") {
+                    b.field.vertex_displacement_bound = Some(
+                        sim.terrains[&index].sea_level_meters().unwrap_or(0.0) as f32
+                            + (64.0 * f32::EPSILON * b.field.lod.options.radius_meters as f32)
+                                .max(1.0),
+                    );
+                }
             }
             self.active = body;
         }
@@ -485,6 +500,16 @@ impl WorldScenery {
         } else {
             None
         };
+    }
+    pub fn set_lod_profiling(&mut self, enabled: bool) {
+        if let Some(b) = self.bodies.get_mut(&self.active) {
+            b.field.set_profiling(enabled);
+        }
+    }
+    pub fn record_lod_profile(&self, profiler: &mut void_diagnostics::Profiler) {
+        if let Some(b) = self.bodies.get(&self.active) {
+            b.field.record_profile(profiler);
+        }
     }
     pub fn finish_builds(&mut self) {
         if let Some(b) = self.bodies.get_mut(&self.active) {

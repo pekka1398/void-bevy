@@ -690,6 +690,18 @@ impl Ground {
         }
         // World GPU/sampler caches are keyed by immutable world configuration, not Arc address.
     }
+    fn set_lod_profiling(&mut self, enabled: bool) {
+        match self {
+            Self::Plain(f, _) => f.set_profiling(enabled),
+            Self::World(w) => w.set_lod_profiling(enabled),
+        }
+    }
+    fn record_lod_profile(&self, profiler: &mut void_diagnostics::Profiler) {
+        match self {
+            Self::Plain(f, _) => f.record_profile(profiler),
+            Self::World(w) => w.record_lod_profile(profiler),
+        }
+    }
     fn finish_builds(&mut self) {
         match self {
             Self::Plain(f, _) => f.finish_builds(),
@@ -1302,6 +1314,22 @@ pub fn run(main_game: bool) {
             .into(),
             ..default()
         });
+    if let Some(value) = argument("--lod-workers") {
+        let workers: usize = value.parse().expect("LOD workers positive integer");
+        assert!(workers > 0 && workers <= 16, "LOD workers must be 1..=16");
+        plugins = plugins.set(bevy::app::TaskPoolPlugin {
+            task_pool_options: bevy::app::TaskPoolOptions {
+                async_compute: bevy::app::TaskPoolThreadAssignmentPolicy {
+                    min_threads: workers,
+                    max_threads: workers,
+                    percent: 0.25,
+                    on_thread_spawn: None,
+                    on_thread_destroy: None,
+                },
+                ..default()
+            },
+        });
+    }
     if benchmark.is_some() {
         plugins = plugins
             .disable::<bevy::winit::WinitPlugin>()
@@ -1399,6 +1427,8 @@ struct RenderBenchmark {
     drain: usize,
     run_updates: usize,
     timeout: f64,
+    screenshot_requested: bool,
+    screenshot_done: bool,
 }
 impl RenderBenchmark {
     fn from_arguments() -> Self {
@@ -1433,10 +1463,15 @@ impl RenderBenchmark {
             drain: 0,
             run_updates: 0,
             timeout: 180.0,
+            screenshot_requested: false,
+            screenshot_done: argument("--benchmark-image").is_none(),
         }
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn benchmark_tick(
+    mut commands: Commands,
+    targets: Query<&bevy::camera::RenderTarget, With<LabCamera>>,
     mut config: ResMut<RenderBenchmark>,
     mut metrics: ResMut<crate::render_metrics::RenderMetrics>,
     mut tag: ResMut<crate::render_metrics::RenderFrameTag>,
@@ -1470,13 +1505,15 @@ fn benchmark_tick(
         if config.updates >= config.settle && config.stable >= 5 {
             config.phase = 1;
             tag.measure = true;
-            if let Some((profile, _)) = &mut lab.profile {
+            if let Some((profile, path)) = &mut lab.profile {
+                // Preserve cold-start tile work separately from settled render samples.
+                profile.write(path.with_extension("warmup.cpu.json"));
                 *profile = void_diagnostics::Profiler::new();
             }
             metrics.benchmark = Some(
                 serde_json::json!({"scenario":config.scenario,"renderer":"offscreen Image target; Winit disabled",
                 "main_game_shaders":lab.main_game,"width":config.width,"height":config.height,
-                "settle_updates":config.updates,"stable_ready_updates":config.stable,
+                "settle_updates":config.updates,"settle_wall_ms":metrics.started.elapsed().as_secs_f64()*1000.0,"stable_ready_updates":config.stable,
                 "drawn_tiles_at_run":drawn,"pending_tiles_at_run":building,"cached_mesh_bytes_at_run":bytes,
                 "requested_delivered_frames":config.frames,
                 "world_checkpoint":std::path::PathBuf::from(argument("--render-benchmark").unwrap()).with_extension("world.json"),
@@ -1494,8 +1531,27 @@ fn benchmark_tick(
             }
         }
     } else {
+        if !config.screenshot_requested {
+            config.screenshot_requested = true;
+            if let Some(path) = argument("--benchmark-image") {
+                use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
+                let target = targets.single().expect("benchmark camera target").clone();
+                commands.spawn(Screenshot(target)).observe(
+                    move |event: On<ScreenshotCaptured>, mut config: ResMut<RenderBenchmark>| {
+                        event
+                            .image
+                            .clone()
+                            .try_into_dynamic()
+                            .expect("screenshot image format")
+                            .save(&path)
+                            .expect("save benchmark image");
+                        config.screenshot_done = true;
+                    },
+                );
+            }
+        }
         config.drain += 1;
-        if config.drain >= 20 {
+        if config.drain >= 20 && config.screenshot_done {
             let report = metrics.benchmark.as_mut().unwrap().as_object_mut().unwrap();
             report.insert("run_main_updates".into(), config.run_updates.into());
             report.insert("drain_updates".into(), config.drain.into());
@@ -2909,6 +2965,7 @@ fn draw(
                 .apply_point(p.local_position)
         })
         .collect();
+    ground.set_lod_profiling(lab.profile.is_some());
     ground.finish_builds();
     let max_level = ground.max_level();
     ground.select(&LodView {
@@ -2931,6 +2988,9 @@ fn draw(
     });
     ground.set_wireframe(&mut commands, lab.session.sim().presentation.wire);
     ground.draw(&mut commands, &mut meshes, &mut tiles, eye);
+    if let Some((profile, _)) = &mut lab.profile {
+        ground.record_lod_profile(profile);
+    }
     for mut v in &mut tile_visibility {
         *v = if lab.session.sim().presentation.terrain {
             Visibility::Inherited

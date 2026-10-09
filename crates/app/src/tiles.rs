@@ -4,8 +4,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 
 use bevy::asset::RenderAssetUsages;
+use bevy::camera::primitives::MeshAabb;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::ecs::query::QueryFilter;
 use bevy::mesh::{Indices, MeshVertexAttribute};
@@ -44,12 +46,40 @@ pub fn level_color(level: u32) -> [f32; 3] {
     [c.red, c.green, c.blue]
 }
 
+/// Last update only: workers never accumulate samples outside an explicit capture.
+#[derive(Default)]
+pub struct TileProfile {
+    pub traversal_ms: f64,
+    pub balance_ms: f64,
+    pub eviction_ms: f64,
+    pub finish_ms: f64,
+    pub schedule_ms: f64,
+    pub draw_ms: f64,
+    pub mesh_ms: f64,
+    pub visited: usize,
+    pub scheduled: usize,
+    pub completed: usize,
+    pub created: usize,
+    pub removed: usize,
+    pub seam_rebuilds: usize,
+    pub worker_ms: Vec<f64>,
+}
+struct BuiltTile {
+    mesh: TileMeshData,
+    build_ms: Option<f64>,
+}
+
 /// The quadtree, its background builds and its drawn tiles, drawn with material `M`.
 pub struct TileField<M: Material = StandardMaterial> {
     pub lod: PlanetLod,
     /// The surface tiles are built on; None draws a smooth sphere coloured by tile level.
     pub terrain: Option<Arc<dyn SurfaceSampler + Send + Sync>>,
-    building: HashMap<u64, Task<TileMeshData>>,
+    building: HashMap<u64, Task<BuiltTile>>,
+    pub profile: TileProfile,
+    profiling: bool,
+    build_slots: usize,
+    drawn_selection: Vec<u64>,
+    wanted: HashMap<u64, [Option<u64>; 4]>,
     /// Drawn tiles: entity and the coarse neighbours its seams are stitched to.
     drawn: HashMap<u64, (Entity, [Option<u64>; 4])>,
     owned_meshes: HashMap<Entity, AssetId<Mesh>>,
@@ -63,6 +93,8 @@ pub struct TileField<M: Material = StandardMaterial> {
     /// Leave tiles out of Bevy's frustum culling, for a material that moves vertices beyond the
     /// mesh's bounds (the sea is raised in the vertex shader).
     pub no_frustum_culling: bool,
+    /// Opt-in conservative bound for material vertex displacement, in local metres.
+    pub vertex_displacement_bound: Option<f32>,
     /// Draw every tile's triangle edges (Bevy's wireframe; needs `WireframePlugin`).
     wireframe: bool,
     /// Their colour; white by default.
@@ -80,6 +112,11 @@ impl<M: Material> TileField<M> {
             lod: PlanetLod::new(options),
             terrain,
             building: HashMap::new(),
+            profile: TileProfile::default(),
+            profiling: false,
+            build_slots: std::thread::available_parallelism().map_or(4, |n| n.get()) * 2,
+            drawn_selection: Vec::new(),
+            wanted: HashMap::new(),
             drawn: HashMap::new(),
             // Skirts are left out: seams are stitched, as the LOD lab draws by default.
             indices: indices[..grid].to_vec(),
@@ -90,6 +127,7 @@ impl<M: Material> TileField<M> {
             last_select_ms: 0.0,
             levels: (0, 0),
             no_frustum_culling: false,
+            vertex_displacement_bound: None,
             wireframe: false,
             wireframe_color: Color::WHITE,
         }
@@ -106,6 +144,8 @@ impl<M: Material> TileField<M> {
             meshes.remove(mesh);
         }
         self.render.clear();
+        self.drawn_selection.clear();
+        self.wanted.clear();
     }
     pub fn owned_mesh_count(&self) -> usize {
         self.owned_meshes.len()
@@ -160,8 +200,50 @@ impl<M: Material> TileField<M> {
         self.building.len()
     }
 
+    pub fn set_profiling(&mut self, enabled: bool) {
+        self.profiling = enabled;
+        self.profile = TileProfile::default();
+    }
+
+    pub fn record_profile(&self, profiler: &mut void_diagnostics::Profiler) {
+        let p = &self.profile;
+        for (name, ms) in [
+            ("lod_traversal", p.traversal_ms),
+            ("lod_balance", p.balance_ms),
+            ("lod_eviction", p.eviction_ms),
+            ("lod_finish_builds", p.finish_ms),
+            ("lod_schedule", p.schedule_ms),
+            ("lod_draw", p.draw_ms),
+            ("lod_create_mesh", p.mesh_ms),
+        ] {
+            profiler.sample(name, ms);
+        }
+        for &ms in &p.worker_ms {
+            profiler.sample("lod_worker_build", ms);
+        }
+        for (name, count) in [
+            ("lod_visited", p.visited),
+            ("lod_scheduled", p.scheduled),
+            ("lod_completed", p.completed),
+            ("lod_mesh_created", p.created),
+            ("lod_mesh_removed", p.removed),
+            ("lod_seam_rebuilds", p.seam_rebuilds),
+            ("lod_pending_builds", self.building.len()),
+            ("lod_requests", self.last_requests),
+            ("lod_drawn", self.drawn.len()),
+            (
+                "lod_async_workers",
+                AsyncComputeTaskPool::get().thread_num(),
+            ),
+            ("lod_cached_mesh_bytes", self.lod.cached_mesh_bytes()),
+        ] {
+            profiler.counter(name, count as f64);
+        }
+    }
+
     /// Accept tiles whose background build has finished.
     pub fn finish_builds(&mut self) {
+        let started = self.profiling.then(Instant::now);
         let mut done = Vec::new();
         for (code, task) in &mut self.building {
             if let Some(tile) = check_ready(task) {
@@ -170,9 +252,18 @@ impl<M: Material> TileField<M> {
         }
         for (code, tile) in done {
             self.building.remove(&code);
-            let key = tile.key;
-            self.lod.accept_tile(Arc::new(tile));
+            self.profile.completed += usize::from(self.profiling);
+            if self.profiling
+                && let Some(ms) = tile.build_ms
+            {
+                self.profile.worker_ms.push(ms);
+            }
+            let key = tile.mesh.key;
+            self.lod.accept_tile(Arc::new(tile.mesh));
             self.lod.unpin_build(key);
+        }
+        if let Some(started) = started {
+            self.profile.finish_ms = started.elapsed().as_secs_f64() * 1e3;
         }
     }
 
@@ -182,13 +273,24 @@ impl<M: Material> TileField<M> {
             render,
             mut requests,
             select_seconds,
+            traversal_seconds,
+            balance_seconds,
+            eviction_seconds,
+            visited,
             ..
         } = self.lod.select(view);
+        if self.profiling {
+            self.profile.traversal_ms = traversal_seconds * 1e3;
+            self.profile.balance_ms = balance_seconds * 1e3;
+            self.profile.eviction_ms = eviction_seconds * 1e3;
+            self.profile.visited = visited;
+        }
+        let started = self.profiling.then(Instant::now);
         self.last_select_ms = select_seconds * 1e3;
         self.last_requests = requests.len();
         self.render = render;
         requests.sort_by(|a, b| b.priority.total_cmp(&a.priority));
-        let slots = std::thread::available_parallelism().map_or(4, |n| n.get()) * 2;
+        let slots = self.build_slots;
         let options = TileMeshOptions {
             radius_meters: self.lod.options.radius_meters,
             resolution: self.lod.options.resolution,
@@ -204,8 +306,10 @@ impl<M: Material> TileField<M> {
             self.lod.pin_build(request.key);
             let key = request.key;
             let terrain = self.terrain.clone();
+            let profiling = self.profiling;
             let task = AsyncComputeTaskPool::get().spawn(async move {
-                match terrain {
+                let started = profiling.then(Instant::now);
+                let mesh = match terrain {
                     Some(terrain) => build_tile_mesh(
                         key,
                         &|d: DVec3, cell: f64| terrain.sample(d, cell),
@@ -219,10 +323,42 @@ impl<M: Material> TileField<M> {
                         };
                         build_tile_mesh(key, &sphere, options)
                     }
+                };
+                BuiltTile {
+                    mesh,
+                    build_ms: started.map(|s| s.elapsed().as_secs_f64() * 1e3),
                 }
             });
             self.building.insert(code, task);
+            self.profile.scheduled += usize::from(self.profiling);
         }
+        if let Some(started) = started {
+            self.profile.schedule_ms = started.elapsed().as_secs_f64() * 1e3;
+        }
+    }
+
+    /// Topology depends only on selected keys, not camera motion or mesh contents.
+    /// Main-game producers do not replace a ready tile in place; replacing a scene creates a
+    /// new field. Like the original draw path, matching tile keys/seams retain their GPU mesh.
+    fn refresh_topology(&mut self) -> bool {
+        if self.drawn_selection == self.render {
+            return false;
+        }
+        let selected: HashSet<u64> = self.render.iter().copied().collect();
+        self.wanted.clear();
+        for &code in &self.render {
+            let key = self.lod.node(code).expect("a selected tile has a node").key;
+            let seams = FACE_EDGES.map(|edge| {
+                selected_neighbor(key, edge, |c| selected.contains(&c)).filter(|&nb| {
+                    self.lod
+                        .node(nb)
+                        .is_some_and(|node| node.key.level + 1 == key.level)
+                })
+            });
+            self.wanted.insert(code, seams);
+        }
+        self.drawn_selection.clone_from(&self.render);
+        true
     }
 
     /// Spawn, move and despawn tile entities for the last selection, relative to the camera at `eye`.
@@ -235,33 +371,29 @@ impl<M: Material> TileField<M> {
         tiles: &mut Query<&mut Transform, F>,
         eye: DVec3,
     ) {
+        let started = self.profiling.then(Instant::now);
         let n = self.lod.options.resolution;
-        let selected: HashSet<u64> = self.render.iter().copied().collect();
+        let topology_changed = self.refresh_topology();
         // Tiles that left the selection, or whose stitched seams changed, are dropped and redrawn.
-        let mut wanted: HashMap<u64, [Option<u64>; 4]> = HashMap::new();
-        for &code in &self.render {
-            let key = self.lod.node(code).expect("a selected tile has a node").key;
-            let seams = FACE_EDGES.map(|edge| {
-                selected_neighbor(key, edge, |c| selected.contains(&c)).filter(|&nb| {
-                    self.lod
-                        .node(nb)
-                        .is_some_and(|node| node.key.level + 1 == key.level)
-                })
-            });
-            wanted.insert(code, seams);
-        }
-        self.drawn.retain(|code, (entity, seams)| {
-            let keep = wanted.get(code) == Some(seams);
-            if !keep {
-                commands.entity(*entity).despawn();
-                if let Some(mesh) = self.owned_meshes.remove(entity) {
-                    meshes.remove(mesh);
+        if topology_changed {
+            let wanted = &self.wanted;
+            self.drawn.retain(|code, (entity, seams)| {
+                let keep = wanted.get(code) == Some(seams);
+                if !keep {
+                    if self.profiling {
+                        self.profile.removed += 1;
+                        self.profile.seam_rebuilds += usize::from(wanted.contains_key(code));
+                    }
+                    commands.entity(*entity).despawn();
+                    if let Some(mesh) = self.owned_meshes.remove(entity) {
+                        meshes.remove(mesh);
+                    }
                 }
-            }
-            keep
-        });
+                keep
+            });
+        }
         let mut levels = (u32::MAX, 0);
-        for (&code, &seams) in &wanted {
+        for (&code, &seams) in &self.wanted {
             let node = self.lod.node(code).expect("selected");
             levels = (levels.0.min(node.key.level), levels.1.max(node.key.level));
             let data = node.data.as_ref().expect("a selected tile has a mesh");
@@ -279,13 +411,25 @@ impl<M: Material> TileField<M> {
                         .expect("a drawn neighbour has a mesh")
                 })
             });
-            let mesh = meshes.add(tile_mesh(
+            let mesh_started = self.profiling.then(Instant::now);
+            let cpu_mesh = tile_mesh(
                 data,
                 coarse,
                 n,
                 &self.indices,
                 self.lod.options.radius_meters,
-            ));
+            );
+            let bounds = self.vertex_displacement_bound.map(|displacement| {
+                assert!(displacement.is_finite() && displacement >= 0.0);
+                let mut bounds = cpu_mesh.compute_aabb().expect("terrain mesh bounds");
+                bounds.half_extents += displacement;
+                bounds
+            });
+            let mesh = meshes.add(cpu_mesh);
+            if let Some(started) = mesh_started {
+                self.profile.mesh_ms += started.elapsed().as_secs_f64() * 1e3;
+                self.profile.created += 1;
+            }
             let entity = commands
                 .spawn((
                     Tile,
@@ -294,7 +438,9 @@ impl<M: Material> TileField<M> {
                     anchor(data.origin, eye),
                 ))
                 .id();
-            if self.no_frustum_culling {
+            if let Some(bounds) = bounds {
+                commands.entity(entity).insert(bounds);
+            } else if self.no_frustum_culling {
                 commands.entity(entity).insert(NoFrustumCulling);
             }
             if self.wireframe {
@@ -309,6 +455,9 @@ impl<M: Material> TileField<M> {
             self.drawn.insert(code, (entity, seams));
         }
         self.levels = (levels.0.min(levels.1), levels.1);
+        if let Some(started) = started {
+            self.profile.draw_ms = started.elapsed().as_secs_f64() * 1e3;
+        }
     }
 }
 
@@ -319,8 +468,12 @@ fn tile_mesh(
     indices: &[u32],
     radius: f64,
 ) -> Mesh {
-    let (positions, normals, heights) = stitch_edges(data, coarse, n);
+    let (mut positions, mut normals, mut heights) = stitch_edges(data, coarse, n);
     let count = n * n;
+    assert!(positions.len() >= count && normals.len() >= count && heights.len() >= count);
+    positions.truncate(count);
+    normals.truncate(count);
+    heights.truncate(count);
     let colors: Vec<[f32; 4]> = data.colors[..count]
         .iter()
         .map(|c| [c[0], c[1], c[2], 1.0])
@@ -329,10 +482,10 @@ fn tile_mesh(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions[..count].to_vec())
-    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals[..count].to_vec())
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
     .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
-    .with_inserted_attribute(ATTRIBUTE_HEIGHT, heights[..count].to_vec())
+    .with_inserted_attribute(ATTRIBUTE_HEIGHT, heights)
     .with_inserted_attribute(
         ATTRIBUTE_CELL,
         vec![void_lod::cell_meters(radius, data.key.level, n) as f32; count],
@@ -343,6 +496,180 @@ fn tile_mesh(
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+    #[test]
+    fn stable_selection_reuses_topology_and_changes_refresh_it() {
+        let planet = void_landing::pebble();
+        let demo = void_landing::demo_rocket(&planet.terrain);
+        let options = void_landing::landing_lod_options(&planet.terrain, &demo.options.contact);
+        let mut field: TileField = TileField::new(options, None, Handle::default());
+        field.render = (0..6)
+            .map(|face| {
+                void_lod::TileKey {
+                    face,
+                    level: 0,
+                    x: 0,
+                    y: 0,
+                }
+                .code()
+            })
+            .collect();
+        assert!(field.refresh_topology());
+        let wanted = field.wanted.clone();
+        assert_eq!(wanted.len(), 6);
+        assert!(wanted.values().all(|seams| *seams == [None; 4]));
+        assert!(!field.refresh_topology());
+        assert_eq!(field.wanted, wanted);
+        field.render.pop();
+        assert!(field.refresh_topology());
+        assert_eq!(field.wanted.len(), 5);
+        assert!(!field.refresh_topology());
+        // Topology caching does not cache camera-relative transforms.
+        let origin = DVec3::splat(1e12);
+        assert_ne!(
+            anchor(origin, origin).translation,
+            anchor(origin, origin + DVec3::X).translation
+        );
+    }
+
+    #[test]
+    fn mesh_attributes_equal_stitched_grid_without_skirts() {
+        use bevy::mesh::VertexAttributeValues;
+        let n = 5;
+        let radius = 100e3;
+        let data = build_tile_mesh(
+            void_lod::TileKey {
+                face: 0,
+                level: 0,
+                x: 0,
+                y: 0,
+            },
+            &|d: DVec3, _: f64| SurfaceSample {
+                height_meters: d.x * 10.0,
+                color: [0.2, 0.3, 0.4],
+            },
+            TileMeshOptions {
+                radius_meters: radius,
+                resolution: n,
+            },
+        );
+        let (indices, grid) = build_tile_indices(n);
+        let (positions, normals, heights) = stitch_edges(&data, [None; 4], n);
+        let mesh = tile_mesh(&data, [None; 4], n, &indices[..grid], radius);
+        let Some(VertexAttributeValues::Float32x3(actual)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("positions")
+        };
+        assert_eq!(actual, &positions[..n * n]);
+        let Some(VertexAttributeValues::Float32x3(actual)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        else {
+            panic!("normals")
+        };
+        assert_eq!(actual, &normals[..n * n]);
+        let Some(VertexAttributeValues::Float32(actual)) = mesh.attribute(ATTRIBUTE_HEIGHT) else {
+            panic!("heights")
+        };
+        assert_eq!(actual, &heights[..n * n]);
+        let Some(Indices::U32(actual)) = mesh.indices() else {
+            panic!("indices")
+        };
+        assert_eq!(actual, &indices[..grid]);
+    }
+
+    #[test]
+    fn stitched_coarse_neighbor_mesh_matches_original_attributes() {
+        use bevy::mesh::VertexAttributeValues;
+        let n = 9;
+        let options = TileMeshOptions {
+            radius_meters: 100_000.0,
+            resolution: n,
+        };
+        let sampler = |d: DVec3, _: f64| SurfaceSample {
+            height_meters: 100.0 + d.z * 10.0,
+            color: [0.2, 0.3, 0.4],
+        };
+        let coarse_key = void_lod::TileKey {
+            face: 0,
+            level: 1,
+            x: 0,
+            y: 0,
+        };
+        let coarse = build_tile_mesh(coarse_key, &sampler, options);
+        let fine_key = void_lod::TileKey {
+            face: 0,
+            level: 2,
+            x: 2,
+            y: 0,
+        };
+        let fine = build_tile_mesh(fine_key, &sampler, options);
+        let mut neighbors = [None; 4];
+        neighbors[void_lod::FaceEdge::UMinus.index()] = Some(&coarse);
+        let (positions, normals, heights) = stitch_edges(&fine, neighbors, n);
+        assert_ne!(
+            positions, fine.positions,
+            "must exercise an actual seam correction"
+        );
+        let (indices, grid) = build_tile_indices(n);
+        let mesh = tile_mesh(&fine, neighbors, n, &indices[..grid], options.radius_meters);
+        assert_eq!(
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION),
+            Some(&VertexAttributeValues::Float32x3(
+                positions[..n * n].to_vec()
+            ))
+        );
+        assert_eq!(
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL),
+            Some(&VertexAttributeValues::Float32x3(normals[..n * n].to_vec()))
+        );
+        assert_eq!(
+            mesh.attribute(ATTRIBUTE_HEIGHT),
+            Some(&VertexAttributeValues::Float32(heights[..n * n].to_vec()))
+        );
+    }
+
+    #[test]
+    fn expanded_bounds_contain_ocean_vertex_displacement_near_and_far() {
+        let radius = 6_371_000.0;
+        let sea = 5000.0_f32;
+        let tile = build_tile_mesh(
+            void_lod::TileKey {
+                face: 0,
+                level: 14,
+                x: 8192,
+                y: 8192,
+            },
+            &|_: DVec3, _: f64| SurfaceSample {
+                height_meters: 0.0,
+                color: [0.0; 3],
+            },
+            TileMeshOptions {
+                radius_meters: radius,
+                resolution: 9,
+            },
+        );
+        let (indices, grid) = build_tile_indices(9);
+        let mesh = tile_mesh(&tile, [None; 4], 9, &indices[..grid], radius);
+        let mut bounds = mesh.compute_aabb().unwrap();
+        bounds.half_extents += sea + 64.0 * f32::EPSILON * radius as f32;
+        for altitude in [10.0, 500_000.0, 10_000_000.0] {
+            let eye = tile.origin.normalize() * (radius + altitude);
+            for rotation in [Quat::IDENTITY, Quat::from_rotation_z(1.3)] {
+                let translation = rotation * (tile.origin - eye).as_vec3();
+                let center = rotation * (-eye).as_vec3();
+                for position in &tile.positions[..81] {
+                    let world = rotation * Vec3::from_array(*position) + translation;
+                    let displaced = world + (world - center).normalize() * sea;
+                    let local = rotation.conjugate() * (displaced - translation);
+                    let delta = (local - glam::Vec3::from(bounds.center)).abs();
+                    assert!(
+                        delta.cmple(glam::Vec3::from(bounds.half_extents)).all(),
+                        "ocean escapes bounds at altitude {altitude}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn unload_releases_entities_meshes_and_cannot_accept_old_jobs() {
         let planet = void_landing::pebble();
@@ -363,7 +690,7 @@ mod lifecycle_tests {
             y: 0,
         };
         let task = pool.spawn(async move {
-            build_tile_mesh(
+            let mesh = build_tile_mesh(
                 key,
                 &|_: DVec3, _: f64| SurfaceSample {
                     height_meters: 123.0,
@@ -373,7 +700,11 @@ mod lifecycle_tests {
                     radius_meters: 100e3,
                     resolution: 33,
                 },
-            )
+            );
+            BuiltTile {
+                mesh,
+                build_ms: None,
+            }
         });
         field.building.insert(key.code(), task);
         let mesh = meshes.add(Sphere::new(1.0).mesh().uv(8, 4));

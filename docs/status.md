@@ -1,3 +1,7 @@
+# LOD profiling 工作分支（2026-10-09）
+
+本工作區為 `work/lod-profiling`，基線 master `95c0581`。細分主遊戲LOD量測、CPU throughput benchmark及三項保持mesh資料的CPU優化已完成；worker8與海面擴張bounds裁切為opt-in實驗。41 app tests、所屬core tests/lint、真實離屏GPU與固定場景pixel/checkpoint等價已核對；未有人類GUI驗收、未merge/push。完整數據、限制與下一步見 [LOD效能](lod-performance.md)。以下主線歷史狀態保留，不能當作本分支已合入。
+
 # 目前狀態
 
 ## 主遊戲原生 UI 已合入 master（2026-10-09）

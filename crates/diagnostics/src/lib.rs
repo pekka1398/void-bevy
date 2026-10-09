@@ -9,6 +9,7 @@ pub struct Profiler {
     spans: Vec<Value>,
     samples: BTreeMap<String, Vec<f64>>,
     threads: BTreeMap<String, u64>,
+    counters: BTreeMap<String, (u64, f64, f64)>,
 }
 impl Default for Profiler {
     fn default() -> Self {
@@ -22,6 +23,7 @@ impl Profiler {
             spans: vec![],
             samples: BTreeMap::new(),
             threads: BTreeMap::new(),
+            counters: BTreeMap::new(),
         }
     }
     pub fn sample(&mut self, name: &str, milliseconds: f64) {
@@ -33,6 +35,17 @@ impl Profiler {
             .entry(name.into())
             .or_default()
             .push(milliseconds);
+    }
+    /// Count or gauge observations (units belong to the metric name), summarized online without retaining every frame.
+    pub fn counter(&mut self, name: &str, value: f64) {
+        assert!(
+            !name.is_empty() && value.is_finite() && value >= 0.0,
+            "profiling: invalid counter sample"
+        );
+        let entry = self.counters.entry(name.into()).or_insert((0, 0.0, 0.0));
+        entry.0 += 1;
+        entry.1 += value;
+        entry.2 = entry.2.max(value);
     }
     pub fn span(&mut self, name: &str, start: Instant, end: Instant) {
         assert!(
@@ -66,7 +79,9 @@ impl Profiler {
                 )
             })
             .collect();
-        json!({"traceEvents":self.spans,"displayTimeUnit":"ms","metrics":metrics,
+        let counters: BTreeMap<_, _> = self.counters.iter().map(|(name, (samples, total, max))|
+            (name, json!({"samples": samples, "total": total, "mean": total / *samples as f64, "max": max}))).collect();
+        json!({"counters": counters, "traceEvents":self.spans,"displayTimeUnit":"ms","metrics":metrics,
             "measurement":"system wall durations and supplied frame intervals; GPU time is not measured",
             "threads":self.threads})
     }
@@ -103,6 +118,20 @@ mod tests {
         assert_eq!(report["traceEvents"][0]["dur"], 250.0);
         assert_eq!(report["metrics"]["simulation"]["p95_ms"], 0.25);
         assert_eq!(report["traceEvents"][0]["ph"], "X");
+    }
+    #[test]
+    fn counters_have_dimensionless_online_summaries() {
+        let mut profile = Profiler::new();
+        profile.counter("tiles", 2.0);
+        profile.counter("tiles", 4.0);
+        let report = profile.report();
+        assert_eq!(
+            report["counters"]["tiles"],
+            json!({
+                "samples": 2, "total": 6.0, "mean": 3.0, "max": 4.0
+            })
+        );
+        assert_eq!(report["metrics"], json!({}));
     }
     #[test]
     fn empty_capture_has_no_invented_samples() {
