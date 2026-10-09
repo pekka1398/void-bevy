@@ -230,7 +230,14 @@ impl FleetFlight {
     pub fn launch_orbital_at(&mut self, body_index: usize, craft: &Craft, offset: DVec3) -> String {
         let frame = PlanetFrame::new(&self.fleet.ephemeris, body_index);
         let body = &frame.body;
-        let r = body.radius_meters + 400_000.0;
+        // Authored exploration fixture: small bodies need a local orbit, rather than
+        // the planetary 400 km altitude. This is not a validated transfer trajectory.
+        let altitude = if body.radius_meters < 1_000_000.0 {
+            body.radius_meters * 0.25
+        } else {
+            400_000.0
+        };
+        let r = body.radius_meters + altitude;
         let local = FrameState {
             position: DVec3::X * r + offset,
             velocity: DVec3::Y * ((body.gm / r).sqrt() - frame.omega * r),

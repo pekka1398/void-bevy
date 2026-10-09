@@ -976,7 +976,7 @@ pub fn run(main_game: bool) {
             }
             let mut initial = InitialWorld::new(&planet.planet, &craft, site, air);
             if main_game && !aircraft_mode && planet.planet.body_id == "aurelia" {
-                initial.world = void_fleet_flight::world::solar_scenery(&planet.planet);
+                initial.world = void_fleet_flight::world::expanded_solar_scenery(&planet.planet);
                 if !air {
                     for body in initial.world.bodies.values_mut() {
                         body.air_density_scale = None;
@@ -3749,7 +3749,7 @@ mod tests {
         let site = demo_rocket(&planet.planet.terrain).launch_site.normalize();
         let mut initial = InitialWorld::new(&planet.planet, &craft, site, main_game);
         if main_game {
-            initial.world = void_fleet_flight::world::solar_scenery(&planet.planet);
+            initial.world = void_fleet_flight::world::expanded_solar_scenery(&planet.planet);
         }
         let sim = FlightSession::new(initial).with_recording();
         let mut lab = new_lab(sim, craft);

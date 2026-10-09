@@ -43,6 +43,6 @@ pub use simulation::{
 };
 pub use system::{
     BodySpec, BuiltSystem, CelestialBody, GRAVITATIONAL_CONSTANT, GravityField, LockedRotationSpec,
-    OrbitPlane, RotationSpec, SpinSpec, SystemSpec, body_orientation, build_system,
+    OrbitPlane, RotationSpec, SpinSpec, SystemSpec, body_orientation, build_system, expanded_sol,
 };
 pub use trajectory::Trajectory;

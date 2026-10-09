@@ -802,3 +802,91 @@ pub fn stellar_neighborhood(planet: &LandingPlanet) -> WorldDescription {
     world.stellar = Some(StellarConfiguration { home, neighbors });
     world
 }
+
+/// Main-game exploration catalog. The golden/lab solar scenery remains a separate fixture.
+/// New solid surfaces are explicitly authored spheres with small procedural crater relief;
+/// no measured irregular shape, Titan air, comet coma/tail or volatile physics is modeled.
+pub fn expanded_solar_scenery(planet: &LandingPlanet) -> WorldDescription {
+    use void_scenery::solar::SurfaceRecipe;
+    let mut world = solar_scenery(planet);
+    let mut expanded = void_orbit::expanded_sol();
+    // Preserve the selected home preset's spin (including deliberate fast-spin fixtures).
+    let home = world
+        .system
+        .root
+        .children
+        .iter()
+        .find(|b| b.id == "aurelia")
+        .expect("expanded scenery requires Aurelia Sol preset");
+    expanded
+        .root
+        .children
+        .iter_mut()
+        .find(|b| b.id == "aurelia")
+        .expect("expanded catalog Aurelia")
+        .rotation = home.rotation;
+    world.system = expanded;
+    for body in build_system(&world.system).bodies {
+        if world.bodies.contains_key(&body.id) {
+            continue;
+        }
+        // Stable IDs also seed the appearance, independent of traversal/body index.
+        let seed = body
+            .id
+            .bytes()
+            .fold(0_u32, |s, b| s.wrapping_mul(31).wrapping_add(b as u32));
+        let height = (body.radius_meters * 0.01).min(2500.0);
+        // Authored palettes convey the major surface identities, not calibrated spectra.
+        let (low, high) = match body.id.as_str() {
+            "ember" => ([0.30, 0.12, 0.025], [0.85, 0.70, 0.22]),
+            "rime" | "enceladus" | "tethys" | "miranda" | "triton" => {
+                ([0.25, 0.27, 0.28], [0.83, 0.81, 0.73])
+            }
+            "haze" => ([0.26, 0.12, 0.025], [0.65, 0.42, 0.13]),
+            "pluto" => ([0.20, 0.09, 0.055], [0.73, 0.68, 0.61]),
+            "halley" | "67p" | "encke" | "halebopp" | "bennu" | "ryugu" => {
+                ([0.025, 0.025, 0.03], [0.13, 0.12, 0.11])
+            }
+            "eris" | "haumea" | "makemake" => ([0.25, 0.23, 0.22], [0.78, 0.74, 0.67]),
+            _ => ([0.12, 0.12, 0.13], [0.48, 0.46, 0.43]),
+        };
+        world.bodies.insert(
+            body.id.clone(),
+            BodyDescription {
+                label: format!(
+                    "{} · {:.2} km RADIUS",
+                    body.name,
+                    body.radius_meters / 1000.0
+                ),
+                terrain: Some(TerrainConfig::Cratered(void_terrain::CrateredOptions {
+                    name: format!("{} authored cratered sphere", body.id),
+                    radius_meters: body.radius_meters,
+                    max_height_meters: height,
+                    crater_count: 24,
+                    crater_radius_radians: 0.12,
+                    roughness: 0.35,
+                    seed,
+                    low_color: low,
+                    high_color: high,
+                })),
+                air_density_scale: None,
+                air_datum_meters: 0.0,
+                sea_level_meters: None,
+                visual: VisualSettings {
+                    surface: SurfaceRecipe::SolidSurface,
+                    rings: None,
+                    surface_color: None,
+                    atmosphere: false,
+                    scattering: None,
+                    clouds: false,
+                    cloud_profile: None,
+                    ocean: false,
+                    color_datum_meters: 0.0,
+                    rock_height_meters: height * 2.0,
+                    snow_height_meters: 1.0e9,
+                },
+            },
+        );
+    }
+    world
+}

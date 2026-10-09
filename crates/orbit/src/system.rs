@@ -409,3 +409,10 @@ pub fn build_system(spec: &SystemSpec) -> BuiltSystem {
 pub fn body_orientation(spin: &Spin, t: f64) -> [DVec3; 3] {
     spin.body_axes(t)
 }
+
+/// Offline exploration catalog, distinct from the frozen 15-body golden Sol fixture.
+/// These are authored Jacobi initial conditions, not a dated observational ephemeris.
+/// See `docs/specs/expanded-bodies.md` for the source and approximation contract.
+pub fn expanded_sol() -> SystemSpec {
+    SystemSpec::from_json(include_str!("../systems/sol-expanded.json"))
+}
