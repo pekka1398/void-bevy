@@ -10,7 +10,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::MeshAabb;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::ecs::query::QueryFilter;
-use bevy::mesh::{Indices, MeshVertexAttribute};
+use bevy::mesh::{Indices, MeshAccessError, MeshVertexAttribute};
 use bevy::pbr::wireframe::{Wireframe, WireframeColor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{PrimitiveTopology, VertexFormat};
@@ -63,6 +63,8 @@ pub struct TileProfile {
     pub removed: usize,
     pub seam_rebuilds: usize,
     pub worker_ms: Vec<f64>,
+    pub mesh_upload_bytes: usize,
+    pub main_mesh_payload_bytes: usize,
 }
 struct BuiltTile {
     mesh: TileMeshData,
@@ -83,7 +85,8 @@ pub struct TileField<M: Material = StandardMaterial> {
     /// Drawn tiles: entity and the coarse neighbours its seams are stitched to.
     drawn: HashMap<u64, (Entity, [Option<u64>; 4])>,
     owned_meshes: HashMap<Entity, AssetId<Mesh>>,
-    indices: Vec<u32>,
+    indices: Indices,
+    mesh_asset_usage: RenderAssetUsages,
     material: Handle<M>,
     render: Vec<u64>,
     pub last_requests: usize,
@@ -108,6 +111,36 @@ impl<M: Material> TileField<M> {
         material: Handle<M>,
     ) -> Self {
         let (indices, grid) = build_tile_indices(options.resolution);
+        let force_u16 = std::env::args().any(|arg| arg == "--lod-u16-indices");
+        let force_u32 = std::env::args().any(|arg| arg == "--lod-u32-indices");
+        assert!(!(force_u16 && force_u32), "choose one LOD index format");
+        // Both representations have identical topology; use U16 when every index fits.
+        let fits_u16 = indices[..grid]
+            .iter()
+            .all(|&index| u16::try_from(index).is_ok());
+        let indices = if force_u16 || (!force_u32 && fits_u16) {
+            Indices::U16(
+                indices[..grid]
+                    .iter()
+                    .map(|&i| u16::try_from(i).expect("tile index exceeds requested U16 format"))
+                    .collect(),
+            )
+        } else {
+            Indices::U32(indices[..grid].to_vec())
+        };
+        let render_only = std::env::args().any(|arg| arg == "--lod-render-only");
+        let retain_main = std::env::args().any(|arg| arg == "--lod-main-world-meshes");
+        assert!(
+            !(render_only && retain_main),
+            "choose one LOD mesh residency policy"
+        );
+        let mesh_asset_usage = if retain_main {
+            RenderAssetUsages::default()
+        } else {
+            // The authoritative f64/raw tile stays in PlanetLod; Bevy can release its
+            // duplicate CPU upload arrays while keeping the handle and cached AABB.
+            RenderAssetUsages::RENDER_WORLD
+        };
         Self {
             lod: PlanetLod::new(options),
             terrain,
@@ -119,7 +152,8 @@ impl<M: Material> TileField<M> {
             wanted: HashMap::new(),
             drawn: HashMap::new(),
             // Skirts are left out: seams are stitched, as the LOD lab draws by default.
-            indices: indices[..grid].to_vec(),
+            indices,
+            mesh_asset_usage,
             material,
             owned_meshes: HashMap::new(),
             render: Vec::new(),
@@ -227,6 +261,8 @@ impl<M: Material> TileField<M> {
             ("lod_completed", p.completed),
             ("lod_mesh_created", p.created),
             ("lod_mesh_removed", p.removed),
+            ("lod_mesh_upload_payload_bytes", p.mesh_upload_bytes),
+            ("lod_main_mesh_payload_bytes", p.main_mesh_payload_bytes),
             ("lod_seam_rebuilds", p.seam_rebuilds),
             ("lod_pending_builds", self.building.len()),
             ("lod_requests", self.last_requests),
@@ -412,12 +448,13 @@ impl<M: Material> TileField<M> {
                 })
             });
             let mesh_started = self.profiling.then(Instant::now);
-            let cpu_mesh = tile_mesh(
+            let cpu_mesh = tile_mesh_for_upload(
                 data,
                 coarse,
                 n,
-                &self.indices,
+                self.indices.clone(),
                 self.lod.options.radius_meters,
+                self.mesh_asset_usage,
             );
             let bounds = self.vertex_displacement_bound.map(|displacement| {
                 assert!(displacement.is_finite() && displacement >= 0.0);
@@ -425,6 +462,9 @@ impl<M: Material> TileField<M> {
                 bounds.half_extents += displacement;
                 bounds
             });
+            if self.profiling {
+                self.profile.mesh_upload_bytes += mesh_payload_bytes(&cpu_mesh);
+            }
             let mesh = meshes.add(cpu_mesh);
             if let Some(started) = mesh_started {
                 self.profile.mesh_ms += started.elapsed().as_secs_f64() * 1e3;
@@ -457,16 +497,56 @@ impl<M: Material> TileField<M> {
         self.levels = (levels.0.min(levels.1), levels.1);
         if let Some(started) = started {
             self.profile.draw_ms = started.elapsed().as_secs_f64() * 1e3;
+            // This gauge scan is instrumentation work, excluded from lod_draw.
+            self.profile.main_mesh_payload_bytes = self
+                .owned_meshes
+                .values()
+                .map(|id| mesh_payload_bytes(meshes.get(*id).expect("app-owned tile mesh")))
+                .sum();
         }
     }
 }
 
+fn mesh_payload_bytes(mesh: &Mesh) -> usize {
+    match mesh.try_attributes() {
+        Ok(attributes) => {
+            let vertices: usize = attributes.map(|(_, values)| values.get_bytes().len()).sum();
+            vertices
+                + match mesh.indices().expect("terrain indices") {
+                    Indices::U16(indices) => indices.len() * size_of::<u16>(),
+                    Indices::U32(indices) => indices.len() * size_of::<u32>(),
+                }
+        }
+        Err(MeshAccessError::ExtractedToRenderWorld) => 0,
+        Err(error) => panic!("invalid terrain mesh payload: {error}"),
+    }
+}
+
+#[cfg(test)]
 fn tile_mesh(
     data: &TileMeshData,
     coarse: [Option<&TileMeshData>; 4],
     n: usize,
     indices: &[u32],
     radius: f64,
+) -> Mesh {
+    tile_mesh_for_upload(
+        data,
+        coarse,
+        n,
+        Indices::U32(indices.to_vec()),
+        radius,
+        RenderAssetUsages::default(),
+    )
+}
+
+fn tile_mesh_for_upload(
+    data: &TileMeshData,
+    coarse: [Option<&TileMeshData>; 4],
+    n: usize,
+    indices: Indices,
+    radius: f64,
+    usage: RenderAssetUsages,
 ) -> Mesh {
     let (mut positions, mut normals, mut heights) = stitch_edges(data, coarse, n);
     let count = n * n;
@@ -478,24 +558,84 @@ fn tile_mesh(
         .iter()
         .map(|c| [c[0], c[1], c[2], 1.0])
         .collect();
-    Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
-    .with_inserted_attribute(ATTRIBUTE_HEIGHT, heights)
-    .with_inserted_attribute(
-        ATTRIBUTE_CELL,
-        vec![void_lod::cell_meters(radius, data.key.level, n) as f32; count],
-    )
-    .with_inserted_indices(Indices::U32(indices.to_vec()))
+    Mesh::new(PrimitiveTopology::TriangleList, usage)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
+        .with_inserted_attribute(ATTRIBUTE_HEIGHT, heights)
+        .with_inserted_attribute(
+            ATTRIBUTE_CELL,
+            vec![void_lod::cell_meters(radius, data.key.level, n) as f32; count],
+        )
+        .with_inserted_indices(indices)
 }
 
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+    #[test]
+    fn render_only_u16_mesh_preserves_vertices_topology_and_cached_bounds() {
+        for n in [33, 65] {
+            let radius = 6_371_000.0;
+            let data = build_tile_mesh(
+                void_lod::TileKey {
+                    face: 0,
+                    level: 14,
+                    x: 8192,
+                    y: 8192,
+                },
+                &|d: DVec3, _: f64| SurfaceSample {
+                    height_meters: 5000.0 + d.z * 10.0,
+                    color: [0.2, 0.3, 0.4],
+                },
+                TileMeshOptions {
+                    radius_meters: radius,
+                    resolution: n,
+                },
+            );
+            let (indices, grid) = build_tile_indices(n);
+            let reference = tile_mesh(&data, [None; 4], n, &indices[..grid], radius);
+            let short = Indices::U16(
+                indices[..grid]
+                    .iter()
+                    .map(|&i| u16::try_from(i).unwrap())
+                    .collect(),
+            );
+            let mut candidate = tile_mesh_for_upload(
+                &data,
+                [None; 4],
+                n,
+                short,
+                radius,
+                RenderAssetUsages::RENDER_WORLD,
+            );
+            assert_eq!(
+                reference.create_packed_vertex_buffer_data(),
+                candidate.create_packed_vertex_buffer_data()
+            );
+            assert_eq!(
+                reference.indices().unwrap().iter().collect::<Vec<_>>(),
+                candidate.indices().unwrap().iter().collect::<Vec<_>>()
+            );
+            assert_eq!(
+                mesh_payload_bytes(&reference) - mesh_payload_bytes(&candidate),
+                grid * 2
+            );
+            let before_bounds = candidate.compute_aabb().unwrap();
+            let extracted = candidate.take_gpu_data().unwrap();
+            assert_eq!(
+                reference.create_packed_vertex_buffer_data(),
+                extracted.create_packed_vertex_buffer_data()
+            );
+            assert_eq!(candidate.compute_aabb().unwrap(), before_bounds);
+            assert!(matches!(
+                candidate.try_attributes(),
+                Err(MeshAccessError::ExtractedToRenderWorld)
+            ));
+            assert_eq!(mesh_payload_bytes(&candidate), 0);
+        }
+    }
+
     #[test]
     fn stable_selection_reuses_topology_and_changes_refresh_it() {
         let planet = void_landing::pebble();

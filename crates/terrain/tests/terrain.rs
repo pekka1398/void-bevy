@@ -138,3 +138,79 @@ fn layered_options_reject_unknown_fields() {
     let bad = r#"{"kind": "layered", "options": {"radiusMeters": 6371000, "seed": 7, "extra": 1}}"#;
     assert!(serde_json::from_str::<TerrainConfig>(bad).is_err());
 }
+
+#[test]
+fn layered_gradient_backends_preserve_height_and_color_bits() {
+    use void_terrain::{DEFAULT_LAYERED, Layered};
+    let terrain = Layered::new(DEFAULT_LAYERED);
+    for direction in lattice_directions(1024) {
+        for cell in [0.125, 1.0, 16.0, 512.0, 16384.0] {
+            let reference = terrain.sample_scalar(direction, cell);
+            let automatic = terrain.sample(direction, cell);
+            assert_eq!(reference.0.to_bits(), automatic.0.to_bits());
+            assert_eq!(reference.1.map(f64::to_bits), automatic.1.map(f64::to_bits));
+        }
+    }
+}
+
+#[test]
+fn layered_tile_meshes_are_bitwise_equal_between_gradient_backends() {
+    use void_lod::SurfaceSample;
+    use void_terrain::{DEFAULT_LAYERED, Layered};
+    let terrain = Layered::new(DEFAULT_LAYERED);
+    for level in [2, 8, 14] {
+        for face in 0..6 {
+            let key = TileKey {
+                face,
+                level,
+                x: (1 << level) / 3,
+                y: (1 << level) / 2,
+            };
+            let options = TileMeshOptions {
+                radius_meters: DEFAULT_LAYERED.radius_meters,
+                resolution: 33,
+            };
+            let sample = |d: DVec3, cell: f64, scalar: bool| {
+                let (height_meters, color) = if scalar {
+                    terrain.sample_scalar(d, cell)
+                } else {
+                    terrain.sample(d, cell)
+                };
+                SurfaceSample {
+                    height_meters,
+                    color: color.map(|c| c as f32),
+                }
+            };
+            let reference = build_tile_mesh(key, &|d, c| sample(d, c, true), options);
+            let automatic = build_tile_mesh(key, &|d, c| sample(d, c, false), options);
+            assert_eq!(
+                reference.origin.to_array().map(f64::to_bits),
+                automatic.origin.to_array().map(f64::to_bits)
+            );
+            for (a, b) in reference.positions.iter().zip(&automatic.positions) {
+                assert_eq!(a.map(f32::to_bits), b.map(f32::to_bits));
+            }
+            for (a, b) in reference.normals.iter().zip(&automatic.normals) {
+                assert_eq!(a.map(f32::to_bits), b.map(f32::to_bits));
+            }
+            for (a, b) in reference.colors.iter().zip(&automatic.colors) {
+                assert_eq!(a.map(f32::to_bits), b.map(f32::to_bits));
+            }
+            for (a, b) in reference.heights.iter().zip(&automatic.heights) {
+                assert_eq!(a.to_bits(), b.to_bits());
+            }
+            assert_eq!(
+                reference.error_meters.to_bits(),
+                automatic.error_meters.to_bits()
+            );
+            assert_eq!(
+                reference.min_height_meters.to_bits(),
+                automatic.min_height_meters.to_bits()
+            );
+            assert_eq!(
+                reference.max_height_meters.to_bits(),
+                automatic.max_height_meters.to_bits()
+            );
+        }
+    }
+}

@@ -77,6 +77,20 @@ impl Layered {
     /// Height above the reference sphere and the ground cover's linear albedo, at a unit
     /// body-fixed direction, leaving out detail finer than about two `cell_meters`.
     pub fn sample(&self, d: DVec3, cell_meters: f64) -> (f64, [f64; 3]) {
+        self.sample_with_gradient(d, cell_meters, noise_with_gradient)
+    }
+
+    /// Portable scalar-gradient reference for profiling and exact-output validation.
+    pub fn sample_scalar(&self, d: DVec3, cell_meters: f64) -> (f64, [f64; 3]) {
+        self.sample_with_gradient(d, cell_meters, crate::noise::noise_with_gradient_scalar)
+    }
+
+    fn sample_with_gradient(
+        &self,
+        d: DVec3,
+        cell_meters: f64,
+        gradient_noise: impl Fn(f64, f64, f64) -> (f64, [f64; 3]),
+    ) -> (f64, [f64; 3]) {
         let length = hypot([d.x, d.y, d.z]);
         assert!(
             (length - 1.0).abs() < 1e-6,
@@ -140,7 +154,7 @@ impl Layered {
                 break;
             }
             let f = r / wavelength;
-            let (n, g) = noise_with_gradient(d.x * f + o(9.0), d.y * f, d.z * f);
+            let (n, g) = gradient_noise(d.x * f + o(9.0), d.y * f, d.z * f);
             // Slope this octave adds, metres per metre, along the surface (radial part dropped).
             let along = g[0] * d.x + g[1] * d.y + g[2] * d.z;
             let scale = (amplitude * f) / r;

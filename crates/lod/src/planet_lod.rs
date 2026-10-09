@@ -158,6 +158,65 @@ struct Margin {
     threshold: f64,
 }
 
+/// Per-selection horizon constants. The node-dependent arithmetic is unchanged.
+struct Horizon {
+    observer: DVec3,
+    radius: f64,
+    angle: Option<f64>,
+}
+impl Horizon {
+    fn new(observer: DVec3, occluder: f64, top: f64) -> Self {
+        let radius = length(observer);
+        assert!(
+            radius.is_finite(),
+            "below horizon: invalid observer {observer}"
+        );
+        Self {
+            observer,
+            radius,
+            angle: (radius > occluder).then(|| acos(occluder / radius) + acos(occluder / top)),
+        }
+    }
+    fn below(&self, node: &LodNode) -> bool {
+        let Some(angle) = self.angle else {
+            return false;
+        };
+        let center_angle =
+            acos((self.observer.dot(node.center_direction) / self.radius).clamp(-1.0, 1.0));
+        center_angle - node.angular_radius > angle
+    }
+}
+enum Horizons {
+    Disabled,
+    Camera(Horizon),
+    Observers(Vec<Horizon>),
+}
+impl Horizons {
+    fn for_view(view: &LodView, options: &PlanetLodOptions) -> Self {
+        if !view.horizon_culling {
+            return Self::Disabled;
+        }
+        let make = |observer| {
+            Horizon::new(
+                observer,
+                options.occluder_radius_meters,
+                options.radius_meters + options.max_surface_height_meters,
+            )
+        };
+        match view.camera {
+            Some(camera) => Self::Camera(make(camera.position)),
+            None => Self::Observers(view.observer_positions.iter().copied().map(make).collect()),
+        }
+    }
+    fn culled(&self, node: &LodNode) -> bool {
+        match self {
+            Self::Disabled => false,
+            Self::Camera(camera) => camera.below(node),
+            Self::Observers(observers) => observers.iter().all(|observer| observer.below(node)),
+        }
+    }
+}
+
 impl PlanetLod {
     pub fn new(options: PlanetLodOptions) -> Self {
         let o = &options;
@@ -315,6 +374,7 @@ impl PlanetLod {
             );
         }
 
+        let horizons = Horizons::for_view(view, &self.options);
         let mut walk = Walk {
             render: Vec::new(),
             requests: OrderedMap::new(),
@@ -333,7 +393,7 @@ impl PlanetLod {
             .all(|&root| self.node_ref(root).data.is_some())
         {
             for root in self.roots {
-                self.visit(root, view, &mut walk);
+                self.visit(root, view, &horizons, &mut walk);
             }
         }
         let traversal_finished = Instant::now();
@@ -358,19 +418,6 @@ impl PlanetLod {
             traversal_seconds: (traversal_finished - started).as_secs_f64(),
             balance_seconds: (balance_finished - traversal_finished).as_secs_f64(),
             eviction_seconds: (finished - balance_finished).as_secs_f64(),
-        }
-    }
-
-    fn culled(&self, node: &LodNode, view: &LodView) -> bool {
-        if !view.horizon_culling {
-            return false;
-        }
-        match &view.camera {
-            Some(c) => self.below_horizon(node, c.position),
-            None => view
-                .observer_positions
-                .iter()
-                .all(|&o| self.below_horizon(node, o)),
         }
     }
 
@@ -435,12 +482,12 @@ impl PlanetLod {
         }
     }
 
-    fn visit(&mut self, code: u64, view: &LodView, walk: &mut Walk) {
+    fn visit(&mut self, code: u64, view: &LodView, horizons: &Horizons, walk: &mut Walk) {
         walk.visited += 1;
         let frame = self.frame;
         self.node_mut(code).last_used_frame = frame;
         let node = self.node_ref(code);
-        if self.culled(node, view) {
+        if horizons.culled(node) {
             walk.culled += 1;
             return;
         }
@@ -471,7 +518,7 @@ impl PlanetLod {
             // A child we cannot see need not exist before we split, but it is built anyway (after
             // every visible tile): when it comes over a widening horizon the parent can stay split,
             // instead of redrawing coarse and forcing balancing to collapse the ground beside it.
-            if self.culled(child_node, view) {
+            if horizons.culled(child_node) {
                 walk.request(child_node, margin - CULLED_PREFETCH_PENALTY);
                 continue;
             }
@@ -480,7 +527,7 @@ impl PlanetLod {
         }
         if ready {
             for child in children {
-                self.visit(child, view, walk);
+                self.visit(child, view, horizons, walk);
             }
         } else {
             // Keeping a ready parent visible while its children build is the defined split
@@ -717,25 +764,6 @@ impl PlanetLod {
         code
     }
 
-    /// Hidden only when the tile's whole direction cap lies beyond the largest horizon angle the
-    /// declared global surface radius allows; no per-tile mesh heights are used.
-    fn below_horizon(&self, node: &LodNode, observer: DVec3) -> bool {
-        let observer_radius = length(observer);
-        assert!(
-            observer_radius.is_finite(),
-            "below horizon: invalid observer {observer}"
-        );
-        let occluder = self.options.occluder_radius_meters;
-        if observer_radius <= occluder {
-            return false;
-        }
-        let top = self.options.radius_meters + self.options.max_surface_height_meters;
-        let horizon_angle = acos(occluder / observer_radius) + acos(occluder / top);
-        let center_angle =
-            acos((observer.dot(node.center_direction) / observer_radius).clamp(-1.0, 1.0));
-        center_angle - node.angular_radius > horizon_angle
-    }
-
     fn evict(&mut self, rendered: &[u64]) {
         if self.ready_count <= self.options.max_cached_tiles {
             return;
@@ -844,4 +872,90 @@ fn tile_angular_radius(u0: f64, v0: f64, u1: f64, v1: f64) -> f64 {
         .max((tan(v1 * FRAC_PI_4) - center_v).abs());
     // Normalising cube vectors of length ≥ 1 cannot enlarge their chord distance.
     2.0 * asin((hypot([du, dv]) / 2.0).min(1.0))
+}
+
+#[cfg(test)]
+mod horizon_cache_tests {
+    use super::*;
+    #[test]
+    fn cached_horizons_match_reference_at_caps_and_extreme_scales() {
+        let options = PlanetLodOptions {
+            radius_meters: 6_371_000.0,
+            min_surface_height_meters: 0.0,
+            max_surface_height_meters: 16_000.0,
+            occluder_radius_meters: 6_371_000.0,
+            lod_surface_band_meters: 16_000.0,
+            resolution: 33,
+            max_level: 21,
+            split_distance_ratios: vec![0.1; 21],
+            retain_frames: 90,
+            max_cached_tiles: 2500,
+        };
+        let occluder = options.occluder_radius_meters;
+        let top = options.radius_meters + options.max_surface_height_meters;
+        let mut lod = PlanetLod::new(options);
+        for face in CUBE_FACES {
+            for level in [0, 8, 21] {
+                let code = lod.create_node(
+                    TileKey {
+                        face,
+                        level,
+                        x: (1 << level) / 2,
+                        y: (1 << level) / 2,
+                    },
+                    None,
+                );
+                let node = lod.node(code).unwrap();
+                for radius in [
+                    0.0,
+                    occluder - 1.0,
+                    occluder,
+                    occluder + 0.001,
+                    top,
+                    top + 500_000.0,
+                    1e20,
+                ] {
+                    for direction in [
+                        DVec3::X,
+                        DVec3::Y,
+                        DVec3::Z,
+                        node.center_direction,
+                        -node.center_direction,
+                    ] {
+                        let observer = direction * radius;
+                        let r = length(observer);
+                        let reference = if r <= occluder {
+                            false
+                        } else {
+                            let horizon_angle = acos(occluder / r) + acos(occluder / top);
+                            let center_angle =
+                                acos((observer.dot(node.center_direction) / r).clamp(-1.0, 1.0));
+                            center_angle - node.angular_radius > horizon_angle
+                        };
+                        assert_eq!(
+                            Horizon::new(observer, occluder, top).below(node),
+                            reference,
+                            "face {face} level {level} observer {observer}"
+                        );
+                    }
+                }
+                // Values one ulp around the old predicate's angular boundary.
+                let r = top + 50.0;
+                let angle = acos(occluder / r) + acos(occluder / top) + node.angular_radius;
+                let across = node.lod_axis_u;
+                for delta in [-1e-12, 0.0, 1e-12] {
+                    let angle = angle + delta;
+                    let observer =
+                        (node.center_direction * libm_cos(angle) + across * libm_sin(angle)) * r;
+                    let measured_r = length(observer);
+                    let reference =
+                        acos((observer.dot(node.center_direction) / measured_r).clamp(-1.0, 1.0))
+                            - node.angular_radius
+                            > acos(occluder / measured_r) + acos(occluder / top);
+                    assert_eq!(Horizon::new(observer, occluder, top).below(node), reference);
+                }
+            }
+        }
+    }
+    use void_math::{cos as libm_cos, sin as libm_sin};
 }

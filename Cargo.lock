@@ -5518,6 +5518,7 @@ dependencies = [
  "void-terrain",
  "void-vessels",
  "void-view",
+ "wgpu",
 ]
 
 [[package]]

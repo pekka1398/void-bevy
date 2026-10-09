@@ -1429,6 +1429,9 @@ struct RenderBenchmark {
     timeout: f64,
     screenshot_requested: bool,
     screenshot_done: bool,
+    lifecycle_bodies: Vec<String>,
+    lifecycle_next: usize,
+    lifecycle_checks: Vec<serde_json::Value>,
 }
 impl RenderBenchmark {
     fn from_arguments() -> Self {
@@ -1465,6 +1468,18 @@ impl RenderBenchmark {
             timeout: 180.0,
             screenshot_requested: false,
             screenshot_done: argument("--benchmark-image").is_none(),
+            lifecycle_bodies: argument("--benchmark-cycle-bodies")
+                .map(|value| {
+                    let ids: Vec<_> = value.split(',').map(str::to_owned).collect();
+                    assert!(
+                        ids.iter().all(|id| !id.is_empty()),
+                        "benchmark body cycle requires explicit IDs"
+                    );
+                    ids
+                })
+                .unwrap_or_default(),
+            lifecycle_next: 0,
+            lifecycle_checks: Vec::new(),
         }
     }
 }
@@ -1476,6 +1491,7 @@ fn benchmark_tick(
     mut metrics: ResMut<crate::render_metrics::RenderMetrics>,
     mut tag: ResMut<crate::render_metrics::RenderFrameTag>,
     ground: Res<Ground>,
+    store: Res<bevy::diagnostic::DiagnosticsStore>,
     mut lab: NonSendMut<Lab>,
     mut exit: MessageWriter<bevy::app::AppExit>,
 ) {
@@ -1503,6 +1519,42 @@ fn benchmark_tick(
             && metrics.last_paths.contains("render/ui/elapsed_cpu");
         config.stable = if ready { config.stable + 1 } else { 0 };
         if config.updates >= config.settle && config.stable >= 5 {
+            if config.lifecycle_next < config.lifecycle_bodies.len() {
+                let id = config.lifecycle_bodies[config.lifecycle_next].clone();
+                let body = lab.session.sim().world.body_index(&id);
+                let Ground::World(world) = &*ground else {
+                    panic!("body cycle requires main world renderer");
+                };
+                assert!(
+                    world.bodies.contains_key(&body),
+                    "body cycle requires a solid rendered body: {id}"
+                );
+                use bevy::render::diagnostic::MeshAllocatorDiagnosticPlugin as Allocator;
+                let allocations = store
+                    .get(Allocator::allocations_diagnostic_path())
+                    .and_then(|diagnostic| diagnostic.measurement())
+                    .map(|measurement| measurement.value);
+                let slabs = store
+                    .get(Allocator::slabs_size_diagnostic_path())
+                    .and_then(|diagnostic| diagnostic.measurement())
+                    .map(|measurement| measurement.value);
+                config.lifecycle_checks.push(serde_json::json!({"before_transition_to":id,"active":world.active,"drawn":drawn,"allocator_allocations":allocations,"slab_capacity_bytes":slabs}));
+                let radius = lab.session.sim().fleet.ephemeris.bodies()[body].radius_meters;
+                lab.session.execute(Action::View {
+                    command: ViewCommand::BodyPreset {
+                        body,
+                        direction: DVec3::new(-1.0, 0.2, 0.3).normalize(),
+                        distance: radius * 3.5,
+                    },
+                });
+                lab.session.execute(Action::EndFrame {
+                    paused: true,
+                    rate: 0,
+                });
+                config.lifecycle_next += 1;
+                config.stable = 0;
+                return;
+            }
             config.phase = 1;
             tag.measure = true;
             if let Some((profile, path)) = &mut lab.profile {
@@ -1518,6 +1570,7 @@ fn benchmark_tick(
                 "requested_delivered_frames":config.frames,
                 "world_checkpoint":std::path::PathBuf::from(argument("--render-benchmark").unwrap()).with_extension("world.json"),
                 "scene_source":if argument("--load").is_some() { "saved checkpoint" } else { "preset" },
+                "lifecycle_body_sequence":config.lifecycle_bodies,"lifecycle_checks":config.lifecycle_checks,
                 "model_version":void_fleet_flight::session::MODEL_VERSION}),
             );
         }

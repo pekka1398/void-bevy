@@ -80,3 +80,8 @@ target/acceptance/void-app-lod-final --render-benchmark lab-log/lod-profile/repe
 ```
 
 model31 direct saves與headless verify語義保持；不改物理owner、collider sampler或frame tree。詳細原始報告、PNG、binary SHA與source manifest存於工作區 `lab-log/lod-profile/`，均ignored。`instrumentation-baseline.patch` 記錄原baseline量測接線，並保留原baseline與candidate執行檔。
+
+
+## 第二輪延續
+
+後續已加入f64 AVX2／value-only、horizon／tangent cache、U16與render-only預設，以及獨立compute packing量測。第一輪上方數據仍對應`72fd958`，新版storage與驗收binary見[第二輪報告](lod-hardware-review.md)。

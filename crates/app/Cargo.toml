@@ -37,3 +37,7 @@ half = "2.7"
 
 # Same Fontique version used by Bevy 0.19; register deterministic bundled CJK fallback.
 fontique = { version = "=0.9.0", default-features = false }
+
+[dev-dependencies]
+# Same locked wgpu as Bevy; the isolated compute probe needs timestamp query descriptors.
+wgpu = { version = "=29.0.4", default-features = false }

@@ -23,6 +23,8 @@ pub struct RenderFrameTag {
 }
 #[derive(Resource)]
 pub struct RenderMetrics {
+    gpu_support: std::sync::Arc<std::sync::OnceLock<&'static str>>,
+    allocator_gauges: std::collections::BTreeMap<String, (u64, f64, f64, f64)>,
     counters: DrawCounters,
     output: PathBuf,
     pub capture: RenderCapture,
@@ -39,6 +41,8 @@ pub struct RenderMetrics {
 impl RenderMetrics {
     pub fn new(path: PathBuf, limit: Option<usize>) -> Self {
         Self {
+            gpu_support: Default::default(),
+            allocator_gauges: Default::default(),
             output: path,
             counters: DrawCounters::default(),
             capture: RenderCapture::default(),
@@ -54,7 +58,10 @@ impl RenderMetrics {
         }
     }
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"adapter":self.adapter, "benchmark":self.benchmark,
+        let allocator: std::collections::BTreeMap<_,_> = self.allocator_gauges.iter().map(|(name,(samples,total,max,last))|
+            (name,serde_json::json!({"samples":samples,"mean":total/(*samples as f64),"max":max,"last":last}))).collect();
+        serde_json::json!({"adapter":self.adapter, "gpu_preprocessing_max_supported":self.gpu_support.get(),
+            "mesh_allocator":{"gauges":allocator,"measurement":"main-world diagnostic gauges during run updates; not GPU timestamp-correlated; bytes are allocated slab capacity, not live geometry bytes"}, "benchmark":self.benchmark,
             "capture":self.capture.report(), "delivered_frame_ids_including_settle_and_drain":self.delivered,
             "frames_without_pass_diagnostics":self.empty_pass_frames, "render_errors":*self.errors.lock().unwrap(), "draw_calls":{"tracked_capture_enabled":cfg!(feature="render-metrics"),
                 "coverage":"Bevy TrackedRenderPass + VOID air + pinned Bevy tonemapping/upscaling fullscreen passes",
@@ -108,11 +115,16 @@ fn gpu_count_offset(message: &str) -> (u64, u32) {
 struct DrawCounters(
     std::sync::Arc<std::sync::Mutex<(u32, std::collections::BTreeMap<u32, DrawFrame>)>>,
 );
+#[derive(Resource, Clone)]
+struct GpuSupportProbe(std::sync::Arc<std::sync::OnceLock<&'static str>>);
 pub struct RenderMetricsPlugin;
 impl Plugin for RenderMetricsPlugin {
     fn build(&self, app: &mut App) {
         let counters = app.world().resource::<RenderMetrics>().counters.clone();
-        app.sub_app_mut(RenderApp).insert_resource(counters);
+        let support = GpuSupportProbe(app.world().resource::<RenderMetrics>().gpu_support.clone());
+        app.sub_app_mut(RenderApp)
+            .insert_resource(counters)
+            .insert_resource(support);
         if cfg!(feature = "render-metrics") {
             app.sub_app_mut(RenderApp).world_mut().resource_mut::<bevy::render::batching::gpu_preprocessing::IndirectParametersBuffersSettings>()
                 .allow_copies_from_indirect_parameter_buffers=true;
@@ -120,6 +132,7 @@ impl Plugin for RenderMetricsPlugin {
         app.init_resource::<RenderFrameTag>()
             .add_plugins((
                 RenderDiagnosticsPlugin,
+                bevy::render::diagnostic::MeshAllocatorDiagnosticPlugin,
                 ExtractResourcePlugin::<RenderFrameTag>::default(),
             ))
             .add_systems(Startup, adapter_info)
@@ -160,8 +173,18 @@ fn tag_frame(
     tag: Res<RenderFrameTag>,
     cache: Res<PipelineCache>,
     counters: Res<DrawCounters>,
+    support: Res<bevy::render::batching::gpu_preprocessing::GpuPreprocessingSupport>,
+    probe: Res<GpuSupportProbe>,
     mut ctx: RenderContext,
 ) {
+    probe.0.get_or_init(|| {
+        use bevy::render::batching::gpu_preprocessing::GpuPreprocessingMode;
+        match support.max_supported_mode {
+            GpuPreprocessingMode::None => "none",
+            GpuPreprocessingMode::PreprocessingOnly => "preprocessing_only",
+            GpuPreprocessingMode::Culling => "culling",
+        }
+    });
     {
         let mut c = counters.0.lock().unwrap();
         c.0 = tag.id;
@@ -241,7 +264,38 @@ fn tag_gpu_draw_counts(
         );
     }
 }
-pub(crate) fn collect(store: Res<DiagnosticsStore>, mut metrics: ResMut<RenderMetrics>) {
+pub(crate) fn collect(
+    store: Res<DiagnosticsStore>,
+    tag: Res<RenderFrameTag>,
+    mut metrics: ResMut<RenderMetrics>,
+) {
+    if tag.measure {
+        use bevy::render::diagnostic::MeshAllocatorDiagnosticPlugin as Allocator;
+        for path in [
+            Allocator::slabs_diagnostic_path(),
+            Allocator::slabs_size_diagnostic_path(),
+            Allocator::allocations_diagnostic_path(),
+        ] {
+            if let Some(value) = store
+                .get(path)
+                .and_then(|diagnostic| diagnostic.measurement())
+                .map(|measurement| measurement.value)
+            {
+                assert!(
+                    value.is_finite() && value >= 0.0,
+                    "invalid allocator diagnostic"
+                );
+                let gauge = metrics
+                    .allocator_gauges
+                    .entry(path.as_str().to_owned())
+                    .or_insert((0, 0.0, 0.0, 0.0));
+                gauge.0 += 1;
+                gauge.1 += value;
+                gauge.2 = gauge.2.max(value);
+                gauge.3 = value;
+            }
+        }
+    }
     let get = |name: &str| {
         store
             .iter()

@@ -1,3 +1,7 @@
+# LOD 硬體效能第二輪（2026-10-09）
+
+`work/lod-profiling`沿用獨立工作區。f64 AVX2/value-only、horizon/tangent cache、U16 indices與render-only mesh已接入主遊戲；scalar/AVX2與原golden、headless GPU固定圖片/checkpoint、15次天體切換ownership已核對。compute packing僅完成獨立probe，尚未接入renderer；bounds/workers仍為實驗開關。未merge/push、未有人類GUI最終驗收。數據、接縫與限制見[第二輪報告](lod-hardware-review.md)。
+
 # LOD profiling 工作分支（2026-10-09）
 
 本工作區為 `work/lod-profiling`，基線 master `95c0581`。細分主遊戲LOD量測、CPU throughput benchmark及三項保持mesh資料的CPU優化已完成；worker8與海面擴張bounds裁切為opt-in實驗。41 app tests、所屬core tests/lint、真實離屏GPU與固定場景pixel/checkpoint等價已核對；未有人類GUI驗收、未merge/push。完整數據、限制與下一步見 [LOD效能](lod-performance.md)。以下主線歷史狀態保留，不能當作本分支已合入。

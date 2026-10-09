@@ -1,7 +1,7 @@
 //! Tile meshes, as `lab/lod/src/lod/TileMeshBuilder.ts`, and seam stitching (`stitchEdges` in
 //! `TileRenderer.ts`), which is geometry and so lives here rather than with the renderer.
 
-use std::f64::consts::FRAC_PI_2;
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 use std::time::Instant;
 
 use glam::DVec3;
@@ -9,8 +9,8 @@ use glam::DVec3;
 use crate::adjacency::{
     FACE_EDGES, FaceEdge, edge_reversed_on_neighbor, neighbor_key, same_edge_on_neighbor,
 };
-use crate::cube::{TileKey, cube_to_sphere};
-use void_math::{hypot, length};
+use crate::cube::{TileKey, cube_to_sphere, face_frame};
+use void_math::{hypot, length, tan};
 
 /// Rendered surface above the reference radius, and its display colour (linear 0–1).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -115,13 +115,19 @@ pub fn build_tile_mesh(
     let mut heights = vec![0.0_f64; n * n];
     let mut colors = vec![[0.0_f32; 3]; n * n + 4 * n];
     let (mut min_height, mut max_height) = (f64::INFINITY, f64::NEG_INFINITY);
-    for j in 0..e {
-        for i in 0..e {
-            let dir = cube_to_sphere(
-                key.face,
-                b.u0 + (i as f64 - 1.0) * du,
-                b.v0 + (j as f64 - 1.0) * dv,
-            );
+    // Every column/row reuses exactly the same tangent and face-axis product.
+    // Keep the additions and compensated norm in cube_to_sphere's original order.
+    let frame = face_frame(key.face);
+    let u_axes: Vec<_> = (0..e)
+        .map(|i| frame.a * tan((b.u0 + (i as f64 - 1.0) * du) * FRAC_PI_4))
+        .collect();
+    let v_axes: Vec<_> = (0..e)
+        .map(|j| frame.b * tan((b.v0 + (j as f64 - 1.0) * dv) * FRAC_PI_4))
+        .collect();
+    for (j, &v_axis) in v_axes.iter().enumerate() {
+        for (i, &u_axis) in u_axes.iter().enumerate() {
+            let point = frame.n + u_axis + v_axis;
+            let dir = point * (1.0 / length(point));
             let sample = sampler.sample(dir, cell);
             ex[j * e + i] = dir * (radius + sample.height_meters) - origin;
             if (1..=n).contains(&i) && (1..=n).contains(&j) {
@@ -339,4 +345,62 @@ pub fn stitch_edges(
         }
     }
     (positions, normals, heights)
+}
+
+#[cfg(test)]
+mod tangent_cache_tests {
+    use super::*;
+    use std::cell::RefCell;
+    #[test]
+    fn cached_grid_directions_match_scalar_cube_mapping_bitwise() {
+        for face in crate::CUBE_FACES {
+            for level in [0, 4, 18, 21] {
+                for coordinate in [0, (1 << level) / 2, (1 << level) - 1] {
+                    for n in [5, 33, 65] {
+                        let key = TileKey {
+                            face,
+                            level,
+                            x: coordinate,
+                            y: coordinate,
+                        };
+                        let seen = RefCell::new(Vec::new());
+                        let sampler = |direction: DVec3, _: f64| {
+                            seen.borrow_mut().push(direction);
+                            SurfaceSample {
+                                height_meters: 0.0,
+                                color: [0.0; 3],
+                            }
+                        };
+                        build_tile_mesh(
+                            key,
+                            &sampler,
+                            TileMeshOptions {
+                                radius_meters: 6_371_000.0,
+                                resolution: n,
+                            },
+                        );
+                        let seen = seen.into_inner();
+                        let bounds = key.uv_bounds();
+                        let du = (bounds.u1 - bounds.u0) / (n - 1) as f64;
+                        let dv = (bounds.v1 - bounds.v0) / (n - 1) as f64;
+                        assert_eq!(seen.len(), 1 + (n + 2) * (n + 2));
+                        for j in 0..n + 2 {
+                            for i in 0..n + 2 {
+                                let expected = cube_to_sphere(
+                                    face,
+                                    bounds.u0 + (i as f64 - 1.0) * du,
+                                    bounds.v0 + (j as f64 - 1.0) * dv,
+                                );
+                                assert_eq!(
+                                    seen[1 + j * (n + 2) + i].to_array().map(f64::to_bits),
+                                    expected.to_array().map(f64::to_bits),
+                                    "face {face} level {level} n {n} i {i} j {j}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
