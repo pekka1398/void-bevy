@@ -11,6 +11,10 @@ pub fn fixture() -> (FleetFlight, InitialWorld) {
         .with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque);
     initial.world = stellar_neighborhood(&planet);
     initial.launch_body = "Sol/aurelia".into();
+    initial.launch_site = initial
+        .world
+        .daylight_terrain_site(&initial.launch_body)
+        .unwrap();
     let mut sim = initial.build();
     let built = sim.world.build();
     // Replace the initial fleet with the declared cruise-only fleet. The world,
@@ -38,4 +42,25 @@ pub fn fixture() -> (FleetFlight, InitialWorld) {
     sim.presentation.speed_surface = false;
     sim.presentation.altitude_agl = false;
     (sim, initial)
+}
+
+pub fn mixed_fixture() -> (FleetFlight, InitialWorld, String) {
+    let (mut sim, initial) = fixture();
+    let ground = sim.fleet.launch_landed(
+        &void_vessels::pod_tank("Sleeping home craft"),
+        sim.home,
+        initial.launch_site,
+    );
+    // Actual contact physics establishes sleep; do not force a sleeping flag.
+    sim.fleet.advance(30.0);
+    assert!(
+        sim.fleet.rails_blocker().is_none(),
+        "home craft did not settle for the fixture"
+    );
+    assert_eq!(
+        sim.fleet.snapshot(&ground).mode,
+        void_vessels::VesselMode::Ground
+    );
+    assert_eq!(sim.fleet.rails_coast_chunk_seconds(), 1000.0);
+    (sim, initial, ground)
 }

@@ -75,3 +75,114 @@ fn distant_coast_agrees_with_short_chunks_without_losing_local_position() {
     assert!((a.local.velocity - b.local.velocity).length() < 1e-8);
     assert_eq!(a.local.mass_kg, b.local.mass_kg);
 }
+
+#[test]
+fn sleeping_home_craft_stays_grounded_during_distant_coast_and_exact_replay() {
+    let (sim, initial, ground) = coast::mixed_fixture();
+    assert_eq!(sim.fleet.rails_coast_chunk_seconds(), 1000.0);
+    let target = sim.fleet.time() + sim.fleet.pending_seconds() + 86_400.0;
+    let before = sim.fleet.body_fixed_state(&ground, sim.home);
+    let resources: Vec<_> = sim
+        .fleet
+        .part_snapshots(&ground)
+        .into_iter()
+        .map(|p| (p.id, p.resources))
+        .collect();
+    let mut original = FlightSession::from_checkpoint(FlightCheckpoint::capture(&sim, initial));
+    original.execute(Action::Advance {
+        seconds: 86_400.0,
+        rails: true,
+    });
+    assert_eq!(original.sim().fleet.time(), target);
+    assert_eq!(
+        original.sim().fleet.snapshot(&ground).mode,
+        void_vessels::VesselMode::Ground
+    );
+    assert_eq!(
+        original
+            .sim()
+            .fleet
+            .body_fixed_state(&ground, original.sim().home),
+        before
+    );
+    let after_resources: Vec<_> = original
+        .sim()
+        .fleet
+        .part_snapshots(&ground)
+        .into_iter()
+        .map(|p| (p.id, p.resources))
+        .collect();
+    assert_eq!(after_resources, resources);
+    assert_eq!(original.sim().fleet.rails_coast_chunk_seconds(), 1000.0);
+    let saved = FlightCheckpoint::capture(original.sim(), original.recording_initial().clone());
+    let saved = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let mut restored = FlightSession::from_checkpoint(saved).with_recording();
+    let action = Action::Advance {
+        seconds: 3600.0,
+        rails: true,
+    };
+    original.execute(action.clone());
+    restored.execute(action);
+    assert_same_mark(
+        &world_mark(original.sim()),
+        &world_mark(restored.sim()),
+        "mixed continue",
+    );
+    let replay = FlightSession::from_recording(restored.recording());
+    assert_same_mark(
+        &world_mark(restored.sim()),
+        &world_mark(replay.sim()),
+        "mixed replay",
+    );
+}
+
+#[test]
+fn near_orbit_companion_still_keeps_short_chunks_with_a_sleeping_home_craft() {
+    let (mut sim, _, _) = coast::mixed_fixture();
+    assert_eq!(sim.fleet.rails_coast_chunk_seconds(), 1000.0);
+    sim.launch_orbital(
+        &void_vessels::pod_tank("Near orbit companion"),
+        glam::DVec3::ZERO,
+    );
+    assert_eq!(sim.fleet.rails_coast_chunk_seconds(), 1.0);
+}
+
+#[test]
+fn ground_control_and_wake_do_not_use_a_distant_chunk() {
+    let (mut sim, _, ground) = coast::mixed_fixture();
+    assert_eq!(sim.fleet.rails_coast_chunk_seconds(), 1000.0);
+    sim.fleet.set_control(
+        &ground,
+        void_vessels::VesselControl {
+            throttle: 0.0,
+            turn: glam::DVec3::X,
+        },
+    );
+    assert_eq!(sim.fleet.rails_coast_chunk_seconds(), 1.0);
+    sim.fleet.advance(1.0 / 60.0);
+    assert!(sim.fleet.rails_blocker().is_some());
+    assert_eq!(sim.fleet.rails_coast_chunk_seconds(), 1.0);
+}
+
+#[test]
+fn sleeping_ground_craft_in_another_system_are_covered_by_their_own_body() {
+    let (mut sim, _, _) = coast::mixed_fixture();
+    let body = sim.world.body_index("Beryl/aurelia");
+    let site = sim.world.daylight_terrain_site("Beryl/aurelia").unwrap();
+    let remote =
+        sim.fleet
+            .launch_landed(&void_vessels::pod_tank("Remote sleeping craft"), body, site);
+    sim.fleet.advance(30.0);
+    assert!(sim.fleet.rails_blocker().is_none());
+    assert_eq!(sim.fleet.vessel_system(&remote), void_frames::SystemId(1));
+    assert_eq!(sim.fleet.rails_coast_chunk_seconds(), 1000.0);
+    let before = sim.fleet.body_fixed_state(&remote, body);
+    let target = sim.fleet.time() + sim.fleet.pending_seconds() + 3600.0;
+    assert!(sim.advance(3600.0, true).unwrap());
+    assert_eq!(sim.fleet.time(), target);
+    assert_eq!(sim.fleet.body_fixed_state(&remote, body), before);
+    assert_eq!(
+        sim.fleet.snapshot(&remote).mode,
+        void_vessels::VesselMode::Ground
+    );
+}

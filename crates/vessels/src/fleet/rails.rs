@@ -72,8 +72,8 @@ impl Fleet {
     }
 
     /// Current policy segment length; derived from all vessels, never the selected vessel.
-    /// Near-field policy remains unchanged. The long segment requires every vessel to be
-    /// independently coasting in Orbit; a sleeping ground scene also keeps the short policy.
+    /// Moving vessels must coast independently in Orbit. Sleeping ground craft are
+    /// covered by their body's envelope; active ground and near-field craft keep short chunks.
     pub fn rails_coast_chunk_seconds(&self) -> f64 {
         let short = if has_atmosphere(&self.environment) {
             self.options.flight_chunk_seconds
@@ -89,18 +89,50 @@ impl Fleet {
     }
 
     fn distant_coast_clear(&self, dt: f64) -> bool {
-        if self.order.is_empty()
-            || self
-                .order
-                .iter()
-                .any(|id| !matches!(self.vessel(id).owner, Owner::Orbit { .. }))
-            || self.rails_blocker().is_some()
-        {
+        if self.rails_blocker().is_some() {
             return false;
         }
         let bodies = self.environment.bodies();
         let at = self.frames();
         let n = bodies.len();
+        let mut envelopes: Vec<_> = (0..n).map(|body| self.coast_body_envelope(body)).collect();
+        let mut orbiting = Vec::new();
+        for id in &self.order {
+            let vessel = self.vessel(id);
+            match vessel.owner {
+                Owner::Orbit { .. } => orbiting.push(id),
+                Owner::Scene { scene, body, .. } => {
+                    let scene = &self.scenes[&scene];
+                    let Some(ground) = scene.ground else {
+                        return false;
+                    };
+                    if !scene.world.asleep()
+                        || !scene.world.body(body).is_sleeping()
+                        || self.controls[id].turn != DVec3::ZERO
+                    {
+                        return false;
+                    }
+                    let planet = self.grounds[ground].spec.body_index;
+                    let position = at
+                        .transform(self.vessel_frame(id), self.frames.inertial[planet])
+                        .apply_point(self.centre_of_mass_local(id));
+                    let envelope = position.length()
+                        + self.coast_vessel_radius(vessel)
+                        + self.options.encounter.pack_meters;
+                    assert!(
+                        envelope.is_finite(),
+                        "rails: non-finite resting craft envelope"
+                    );
+                    // The craft stays fixed to this rotating ground scene while asleep.
+                    // A sphere about the body covers every rotation, including finite
+                    // hull size and encounter distance, without a spin-velocity estimate.
+                    envelopes[planet] = envelopes[planet].max(envelope);
+                }
+            }
+        }
+        if orbiting.is_empty() {
+            return false;
+        }
         let mut body_pairs = Vec::new();
         let mut body_acceleration = vec![0.0; n];
         // All relative states are formed by the frame tree: split system anchors are
@@ -133,9 +165,9 @@ impl Fleet {
                 return false;
             }
         }
-        let mut vessel_acceleration = Vec::with_capacity(self.order.len());
-        let mut vessel_radii = Vec::with_capacity(self.order.len());
-        for id in &self.order {
+        let mut vessel_acceleration = Vec::with_capacity(orbiting.len());
+        let mut vessel_radii = Vec::with_capacity(orbiting.len());
+        for id in &orbiting {
             let vessel = self.vessel(id);
             let extent = self.coast_vessel_radius(vessel);
             vessel_radii.push(extent);
@@ -151,7 +183,7 @@ impl Fleet {
                         velocity: DVec3::ZERO,
                     });
                 let half = state.position.length() * 0.5;
-                if half <= self.coast_body_envelope(body) + extent {
+                if half <= envelopes[body] + extent {
                     return false;
                 }
                 acceleration += gravity_bound(definition, half);
@@ -166,8 +198,8 @@ impl Fleet {
         }
         // An acceleration bound for BOTH craft covers curved gravitational encounters
         // that a straight-line encounter gate alone cannot rule out.
-        for (a, id) in self.order.iter().enumerate() {
-            for (b, other) in self.order.iter().enumerate().skip(a + 1) {
+        for (a, id) in orbiting.iter().enumerate() {
+            for (b, other) in orbiting.iter().enumerate().skip(a + 1) {
                 let relative = self.relative(id, other);
                 if !swept_clear(
                     state_of(relative),

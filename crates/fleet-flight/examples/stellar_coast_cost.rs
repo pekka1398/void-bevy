@@ -1,4 +1,6 @@
 //! Investigation only: declared interstellar starting state, not a completed transfer.
+#[path = "support/interstellar_coast.rs"]
+mod coast;
 use glam::{DQuat, DVec3};
 use std::time::Instant;
 use void_fleet_flight::world::stellar_neighborhood;
@@ -13,6 +15,22 @@ fn main() {
         .unwrap();
     let mut baseline = None;
     let mode = std::env::args().nth(2);
+    if mode.as_deref() == Some("mixed") {
+        let (mut sim, _, ground) = coast::mixed_fixture();
+        let start_time = sim.fleet.time();
+        let selected_chunk = sim.fleet.rails_coast_chunk_seconds();
+        let before = sim.fleet.body_fixed_state(&ground, sim.home);
+        let start = Instant::now();
+        let reached = sim.advance(seconds, true).unwrap();
+        let elapsed = start.elapsed().as_secs_f64();
+        assert_eq!(sim.fleet.body_fixed_state(&ground, sim.home), before);
+        println!(
+            "mixed target={seconds}s reached={reached} simulated={} selected_chunk={selected_chunk}s wall={elapsed:.6}s ground_mode={:?}",
+            sim.fleet.time() - start_time,
+            sim.fleet.snapshot(&ground).mode
+        );
+        return;
+    }
     let chunks: &[f64] = if mode.as_deref() == Some("default") {
         &[1000.0]
     } else {

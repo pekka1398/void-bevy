@@ -1,8 +1,8 @@
 Interstellar integration investigation, 2026-10-09
 Branch: work/interstellar-integration; base master 95c0581.
 Delivery is saved as a branch commit (see git log); not merged or pushed.
-Current branch compatibility: model33 / FleetCheckpoint13 / world5 / Craft3.
-The model32 measurements below are the first investigation stage, not the
+Current branch compatibility: model34 / FleetCheckpoint13 / world5 / Craft3.
+The model32/33 measurements below are previous investigation stages, not the
 current branch's compatibility or coast policy.
 
 Scope: long-duration integration first. Full relativistic dynamics, proper time,
@@ -112,3 +112,51 @@ For the already generated checkpoint, from this worktree:
 
 Human review still needs to check controls, camera/map, observable time advance
 and pause/save/load in the main window. Headless replay is separate evidence.
+
+Stage 3: sleeping ground craft coexist with guarded distant coast (model34)
+
+Sleeping ground scenes no longer force short segments when a distant Orbit
+craft exists. Their fixed ground-relative hulls and encounter distance expand
+the protection sphere of the actual hosting body. This sphere covers every
+rotation; it does not omit the resting craft or freeze a separate runtime.
+Only the Orbit craft need the free-flight acceleration sweep. Existing
+ContactWorld::idle_to advances the same sleeping owners and shared ephemeris.
+All-ground fleets keep their former policy. Active ground scenes, pending
+ground turn controls, water/engine/actuator rails blockers and near Orbit craft
+retain the short policy or explicit rails refusal. Wake proceeds through normal
+accepted physics; no sleep flags are forced by the acceptance fixture.
+
+Accepted stepping changes: model34 explicitly rejects model33 and older flight
+checkpoints/journals. Checkpoint13, world5, Craft3 schemas are unchanged.
+Previous generated model33 acceptance files remain as historical evidence;
+rerun the script to generate new model34 starting data, rather than migrating.
+
+The script now prepares a distant normal RCS rocket plus a pod/tank resting on
+authored daylight dry terrain. Preparation runs 30 seconds of contact physics
+before saving, so the main window starts around T+30 s. Tab selects either ship.
+F6/F7 use a unique save path beside the starting state and recording, rather
+than the default shared save filename. A verified starting checkpoint is also
+available in target/interstellar-review/mixed-model34.world.json.
+
+Headless cost: 86400 s mixed cruise completed in 0.440689 wall s, selected
+segment 1000 s; ground craft remained Ground with exactly unchanged body-fixed
+state. Timing excludes fixture preparation and graphics; no short-step accuracy
+reference is claimed by this cost measurement.
+Reproduce: cargo run -p void-fleet-flight --example stellar_coast_cost -j 2 -- 86400 mixed
+
+Model34 targeted validation (pre-commit code): vessels lib13/fleet19/thermal2;
+fleet-flight checkpoint10/stellar_world13/warp3/thermal1; all passed.
+Distant_coast6 passed: prior coast/restore/reference cases plus mixed day-long
+coast, exact save/continuation/replay, typed resource preservation, near-orbit
+limiting, ground turn/wake rejection, and resting craft in the Beryl system.
+Clock assertions include the existing pending substep time; no tolerance was
+loosened for the small contact-clock remainder. Core lib/tests/examples and
+main-app lib Clippy, formatting and script syntax checks passed. The worktree's
+main-game executable was rebuilt with -j 2; its --verify-save accepted the new
+T+30 s two-vessel model34 checkpoint. Binary/source SHA256 manifests are saved
+in target/interstellar-review/model34-{binary,source}.sha256. No full workspace,
+new GUI or human acceptance was run.
+
+Remaining integration work includes near-orbit companions and bounded-progress
+large requests, sustained engine burns, and the separately requested relativistic
+dynamics/time/visual model. Those are not implemented by the sleeping-ground fix.

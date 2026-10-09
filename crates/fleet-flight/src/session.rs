@@ -15,9 +15,9 @@ pub mod durable;
 
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-// Model 33 adds guarded distant-coast rails chunks after model 32's stable
-// ground-band bound. Accepted stepping differs; older saves/journals are rejected.
-pub const MODEL_VERSION: u32 = 33;
+// Model 34 includes sleeping ground craft in the guarded distant-coast policy.
+// Accepted stepping differs; older saves/journals are rejected.
+pub const MODEL_VERSION: u32 = 34;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
