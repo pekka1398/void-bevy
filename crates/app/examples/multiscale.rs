@@ -174,10 +174,7 @@ impl Lab {
     /// it can be light-years from its system, so its position must not become a local f64.
     fn focus_frame(&self) -> (FrameId, DVec3) {
         match self.focus {
-            Focus::Probe => (
-                self.frames.systems[self.world.system_index(&self.probe.state.frame)],
-                DVec3::ZERO,
-            ),
+            Focus::Probe => (self.probe.state.frame, DVec3::ZERO),
             Focus::System(i) => (self.frames.systems[i], DVec3::ZERO),
             Focus::Body(i) => (self.frames.inertial[i], DVec3::ZERO),
         }
@@ -187,7 +184,7 @@ impl Lab {
         match self.focus {
             Focus::System(i) => i,
             Focus::Body(i) => self.world.membership[i].system,
-            Focus::Probe => self.world.system_index(&self.probe.state.frame),
+            Focus::Probe => self.world.frame_system(self.probe.state.frame),
         }
     }
 
@@ -225,9 +222,11 @@ impl Lab {
                 self.focus = choices[cycle(at, choices.len())];
             }
             Setting::Frame => {
-                let at = self.world.system_index(&self.probe.state.frame);
-                let frame = self.world.ids[cycle(at, self.world.ids.len())].clone();
-                self.probe.set_frame(&self.world, &frame);
+                let at = self.world.frame_system(self.probe.state.frame);
+                let frame = self
+                    .world
+                    .system_frame(&self.world.ids[cycle(at, self.world.ids.len())]);
+                self.probe.set_frame(&self.world, frame);
             }
         }
     }
@@ -238,7 +237,10 @@ impl Lab {
             Setting::Speed => ("Probe speed, c *", format!("{}", SPEEDS[self.speed])),
             Setting::Rate => ("Time rate", RATES[self.rate].1.into()),
             Setting::Focus => ("Focus", self.focus_name(self.focus)),
-            Setting::Frame => ("Probe frame", self.probe.state.frame.clone()),
+            Setting::Frame => (
+                "Probe frame",
+                self.world.ids[self.world.frame_system(self.probe.state.frame)].clone(),
+            ),
         }
     }
 }
@@ -729,7 +731,7 @@ fn panel(
         } else {
             "world clock, no relativity".into()
         },
-        lab.probe.state.frame,
+        world.ids[world.frame_system(lab.probe.state.frame)],
         distance_text(p.relative(&beryl).length()),
         distance_text(lab.orbit.distance),
         lab.probe.steps,
@@ -750,8 +752,8 @@ fn panel(
         right.push_str(&format!(
             "{:.3} yr  {} -> {}\n  dp {:.2e} m  dv {:.2e} m/s\n",
             e.time / YEAR,
-            e.from,
-            e.to,
+            world.ids[world.frame_system(e.from)],
+            world.ids[world.frame_system(e.to)],
             e.position_jump,
             e.velocity_jump
         ));

@@ -1,13 +1,12 @@
-//! Several star systems in one Newtonian N-body world, as the lab's `CoupledWorld.ts`.
+//! Several star systems in one Newtonian N-body world.
 
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
 use glam::DVec3;
-use void_math::hypot;
 use void_orbit::{BuiltSystem, CelestialBody, HermiteBasis, SystemFrames, yoshida8_sequence};
 
-use void_frames::{BodyId, FrameSource, SplitPosition, SystemId};
+use void_frames::{BodyId, FrameId, FrameSource, SplitPosition, SystemId};
 
 /// A system to place in the world: its built bodies (barycentric), where its barycentre is and
 /// how fast it moves.
@@ -81,6 +80,8 @@ pub struct CoupledWorld {
     samples: VecDeque<Sample>,
     latest: f64,
     pub steps: u64,
+    /// Each system's barycentre frame, by system index, as every `frames` tree numbers them.
+    system_frames: Vec<FrameId>,
 }
 
 impl CoupledWorld {
@@ -177,7 +178,9 @@ impl CoupledWorld {
             samples: VecDeque::new(),
             latest: 0.0,
             steps: 0,
+            system_frames: vec![],
         };
+        world.system_frames = world.build_frames(SystemId(0)).systems;
         world.accelerate();
         world.save();
         world
@@ -304,7 +307,7 @@ impl CoupledWorld {
                 shift.y + pb[b + 1] - pa[a + 1],
                 shift.z + pb[b + 2] - pa[a + 2],
             ];
-            let r = hypot(d);
+            let r = DVec3::from_array(d).length();
             assert!(
                 r > 0.0 && r.is_finite(),
                 "CoupledWorld: coincident/non-finite bodies"
@@ -473,25 +476,13 @@ impl CoupledWorld {
         self.gravity_in(&self.at(t), p)
     }
 
-    /// Gravity of every body in `state` at `p`: the point-mass case of `void_orbit::gravity::pull`
-    /// (this world requires J2 = 0), written in the multiscale lab's arithmetic (`hypot`, r·r·r)
-    /// because its golden checks are bit-exact.
+    /// Gravity of every body in `state` at `p`, each by `void_orbit::gravity::body_pull`.
     pub fn gravity_in(&self, state: &[SystemState], p: &SplitPosition) -> DVec3 {
         let mut out = DVec3::ZERO;
         for (i, body) in self.bodies.iter().enumerate() {
-            let d = self.body_position(i, state).relative(p);
-            let r = hypot(d.to_array());
-            assert!(r > 0.0, "CoupledWorld: gravity at a body centre");
-            let f = body.gm / (r * r * r);
-            out.x += d.x * f;
-            out.y += d.y * f;
-            out.z += d.z * f;
-            let c = void_orbit::gravity::oblateness(body);
-            if c != 0.0 {
-                // Preserve the existing point-mass arithmetic (bit-exact golden fixtures),
-                // while applying the same zonal field that ordinary orbit vessels feel.
-                out += void_orbit::gravity::pull(0.0, c, body.rotation.axis(), -d);
-            }
+            let r = p.relative(&self.body_position(i, state));
+            assert!(r != DVec3::ZERO, "CoupledWorld: gravity at a body centre");
+            out += void_orbit::gravity::body_pull(body, r);
         }
         out
     }
@@ -520,12 +511,34 @@ impl FrameSource for CoupledWorld {
 impl CoupledWorld {
     /// Every system and body as frames; `origin` names the system fleet states would be in.
     pub fn frames(&self, origin: &str) -> SystemFrames {
+        let frames = self.build_frames(SystemId(self.system_index(origin)));
+        assert_eq!(
+            frames.systems, self.system_frames,
+            "CoupledWorld: system frames renumbered"
+        );
+        frames
+    }
+
+    fn build_frames(&self, origin: SystemId) -> SystemFrames {
         SystemFrames::build(
             self.ids.len(),
             &self.bodies,
             |i| SystemId(self.membership[i].system),
-            SystemId(self.system_index(origin)),
+            origin,
         )
+    }
+
+    /// The barycentre frame of system `id`.
+    pub fn system_frame(&self, id: &str) -> FrameId {
+        self.system_frames[self.system_index(id)]
+    }
+
+    /// The index of the system whose barycentre frame is `frame`. Panics for any other frame.
+    pub fn frame_system(&self, frame: FrameId) -> usize {
+        self.system_frames
+            .iter()
+            .position(|&f| f == frame)
+            .unwrap_or_else(|| panic!("CoupledWorld: {frame:?} is no system's barycentre"))
     }
 }
 

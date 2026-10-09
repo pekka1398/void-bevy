@@ -88,7 +88,7 @@ pub fn transfer(world: &CoupledWorld, fraction: f64) -> Traveller {
         world,
         0.0,
         FramedState {
-            frame: "Aster".into(),
+            frame: world.system_frame("Aster"),
             position: SplitPosition::at(DVec3::new(100.0 * AU, 100.0 * AU, 0.0)),
             velocity: DVec3::new(fraction * SPEED_OF_LIGHT, 100.0, 0.0),
         },
