@@ -52,9 +52,21 @@ fn main() {
         max_flight_seconds: 7.0 * 86400.0,
         periapsis_altitude_m: 100000.0,
     };
+    let prediction_mode = std::env::args().skip(2).any(|arg| arg == "--prediction");
+    let snapshot_start = Instant::now();
+    let mut prediction = prediction_mode.then(|| {
+        ep.prediction_snapshot(PredictionBudget::default(), CancellationToken::new())
+            .expect("prediction snapshot budget")
+            .into_source()
+    });
+    let snapshot_ms = snapshot_start.elapsed().as_secs_f64() * 1000.0;
+    let source: &mut dyn EphemerisSource = match &mut prediction {
+        Some(source) => &mut **source,
+        None => &mut ep,
+    };
     let start = Instant::now();
     let result = solve_navigation(
-        &mut ep,
+        source,
         &anchor,
         PlanEngine {
             thrust_newtons: 1e6,
@@ -67,8 +79,15 @@ fn main() {
         },
         &request,
     );
+    let seconds = start.elapsed().as_secs_f64();
+    let retained_bytes = source.retained_bytes();
+    let end_time = source.end_time();
+    let usage = source.prediction_context().map(|context| {
+        let used = context.usage();
+        serde_json::json!({"reserved_bytes":used.reserved_bytes,"ephemeris_steps":used.ephemeris_steps,"vessel_trials":used.vessel_trials})
+    });
     println!(
         "{}",
-        serde_json::json!({"backend":backend,"seconds":start.elapsed().as_secs_f64(),"result":format!("{result:?}"),"retained_bytes":ep.retained_bytes(),"end_time":ep.end_time(),"ephemeris_profile":ep.profile()})
+        serde_json::json!({"backend":backend,"seconds":seconds,"prediction":prediction_mode,"snapshot_ms":snapshot_ms,"prediction_usage":usage,"result":format!("{result:?}"),"retained_bytes":retained_bytes,"end_time":end_time,"ephemeris_profile":ep.profile()})
     );
 }

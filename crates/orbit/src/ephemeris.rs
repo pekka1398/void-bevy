@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Instant};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use glam::DVec3;
 use void_frames::{BodyId, BodyStates, FrameId, FrameSource, SplitPosition, SystemId};
@@ -98,7 +98,9 @@ pub struct Ephemeris {
     q_compensation: Vec<f64>,
     v: Vec<f64>,
     a: Vec<f64>,
-    chunks: BTreeMap<usize, Box<[f64]>>,
+    chunks: BTreeMap<usize, Arc<[f64]>>,
+    prediction: Option<crate::PredictionContext>,
+    prediction_anchor: Option<u64>,
     /// Index of the newest sample; sample k is at epoch + k * step.
     last_step: usize,
     /// Index of the oldest retained sample.
@@ -110,6 +112,25 @@ fn flatten(vectors: &[DVec3]) -> Vec<f64> {
 }
 
 impl Ephemeris {
+    fn continuation_fingerprint(&self) -> u64 {
+        let mut hash = 0xcbf29ce484222325u64;
+        for bits in self
+            .q
+            .iter()
+            .chain(&self.v)
+            .chain(&self.a)
+            .chain(&self.q_compensation)
+            .map(|v| v.to_bits())
+            .chain([
+                self.last_step as u64,
+                self.epoch_seconds.to_bits(),
+                self.step_seconds.to_bits(),
+            ])
+        {
+            hash = (hash ^ bits).wrapping_mul(0x100000001b3);
+        }
+        hash
+    }
     fn resolve_backend(backend: AccelerationBackend) -> AccelerationBackend {
         if matches!(backend, AccelerationBackend::Auto) {
             #[cfg(target_arch = "x86_64")]
@@ -155,12 +176,99 @@ impl Ephemeris {
             v: flatten(&system.velocities),
             a: vec![0.0; n * 3],
             chunks: BTreeMap::new(),
+            prediction: None,
+            prediction_anchor: None,
             last_step: 0,
             first_step: 0,
         };
         ephemeris.compute_accelerations();
         ephemeris.store_sample(0);
         ephemeris
+    }
+
+    fn snapshot(&self, context: crate::PredictionContext) -> Result<Self, crate::PredictionError> {
+        // Charge source payload, metadata and a future COW tail before any cloning.
+        let bytes = self
+            .retained_bytes()
+            .saturating_add(
+                self.chunk_steps
+                    .saturating_mul(self.bodies.len())
+                    .saturating_mul(72),
+            )
+            .saturating_add(self.bodies.iter().fold(0usize, |sum, b| {
+                sum.saturating_add(4096)
+                    .saturating_add(b.id.len())
+                    .saturating_add(b.name.len())
+                    .saturating_add(b.color.len())
+            }))
+            .saturating_add(self.chunks.len().saturating_mul(128));
+        context.reserve_bytes(bytes)?;
+        let mut copy = Self {
+            bodies: self.bodies.clone(),
+            backend: self.backend,
+            simd_q: self.simd_q.clone(),
+            workers: None,
+            #[cfg(target_arch = "x86_64")]
+            spin_workers: None,
+            profile: None,
+            step_seconds: self.step_seconds,
+            epoch_seconds: self.epoch_seconds,
+            chunk_steps: self.chunk_steps,
+            sequence: self.sequence,
+            gm: self.gm.clone(),
+            q: self.q.clone(),
+            q_compensation: self.q_compensation.clone(),
+            v: self.v.clone(),
+            a: self.a.clone(),
+            chunks: self.chunks.clone(),
+            last_step: self.last_step,
+            first_step: self.first_step,
+            prediction: Some(context),
+            prediction_anchor: Some(
+                self.prediction_anchor
+                    .unwrap_or_else(|| self.continuation_fingerprint()),
+            ),
+        };
+        // Pools are recreated on materialization, never cloned or shared with the live source.
+        copy.backend = self.backend;
+        Ok(copy)
+    }
+
+    pub fn try_extend_to(&mut self, t: f64) -> Result<(), crate::PredictionError> {
+        assert!(t.is_finite(), "ephemeris extend to {t}");
+        if let Some(context) = self.prediction.clone() {
+            context.check()?;
+            let steps = ((t - self.end_time()) / self.step_seconds).ceil().max(0.0) as u64;
+            let target = self
+                .last_step
+                .saturating_add(usize::try_from(steps).unwrap_or(usize::MAX));
+            let chunks =
+                (target / self.chunk_steps).saturating_sub(self.last_step / self.chunk_steps);
+            context.preflight_extension(
+                steps,
+                chunks
+                    .saturating_mul(self.chunk_steps)
+                    .saturating_mul(self.bodies.len())
+                    .saturating_mul(72),
+            )?;
+            while self.end_time() < t {
+                context.ephemeris_step()?;
+                let next = self.last_step + 1;
+                if !self.chunks.contains_key(&(next / self.chunk_steps)) {
+                    context.reserve_bytes(
+                        self.chunk_steps
+                            .saturating_mul(self.bodies.len())
+                            .saturating_mul(72),
+                    )?;
+                }
+                self.step();
+                self.last_step = next;
+                self.store_sample(next);
+            }
+        } else {
+            self.extend_to(t);
+        }
+        Ok(())
     }
 
     /// Reset and enable fine timing; instrumentation adds overhead.
@@ -486,7 +594,8 @@ impl Ephemeris {
         let chunk = self
             .chunks
             .entry(chunk_index)
-            .or_insert_with(|| vec![f64::NAN; self.chunk_steps * per_sample].into_boxed_slice());
+            .or_insert_with(|| Arc::from(vec![f64::NAN; self.chunk_steps * per_sample]));
+        let chunk = Arc::make_mut(chunk);
         let base = (step - chunk_index * self.chunk_steps) * per_sample;
         for i in 0..self.bodies.len() {
             let o = base + i * SAMPLE_STRIDE;
@@ -582,6 +691,31 @@ impl FrameSource for Ephemeris {
 /// (`BodyStates`, `states_at`, …). The frame tree sees each body relative to its own system and
 /// every system in the galaxy (`FrameSource`); both views come from the same states.
 pub trait EphemerisSource: BodyStates + FrameSource {
+    fn export_prediction(
+        &self,
+    ) -> Result<Box<dyn crate::PredictionSnapshot>, crate::PredictionError> {
+        Err(crate::PredictionError::UnsupportedSnapshot)
+    }
+    fn adopt_prediction(
+        &mut self,
+        _snapshot: Box<dyn crate::PredictionSnapshot>,
+    ) -> Result<(), crate::PredictionError> {
+        Err(crate::PredictionError::UnsupportedSnapshot)
+    }
+    fn prediction_snapshot(
+        &self,
+        _budget: crate::PredictionBudget,
+        _cancel: crate::CancellationToken,
+    ) -> Result<Box<dyn crate::PredictionSnapshot>, crate::PredictionError> {
+        Err(crate::PredictionError::UnsupportedSnapshot)
+    }
+    fn prediction_context(&self) -> Option<&crate::PredictionContext> {
+        None
+    }
+    fn try_extend_to(&mut self, t: f64) -> Result<(), crate::PredictionError> {
+        self.extend_to(t);
+        Ok(())
+    }
     /// Star systems in the galaxy, numbered from 0.
     fn system_count(&self) -> usize;
     /// The system a body belongs to.
@@ -640,7 +774,83 @@ pub trait EphemerisSource: BodyStates + FrameSource {
     fn body_position(&self, body: usize, t: f64) -> DVec3;
     fn frame_acceleration_at(&self, t: f64) -> DVec3;
 }
+impl crate::PredictionSnapshot for Ephemeris {
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
+    fn into_source(mut self: Box<Self>) -> Box<dyn EphemerisSource> {
+        self.set_acceleration_backend(self.backend);
+        self
+    }
+}
 impl EphemerisSource for Ephemeris {
+    fn export_prediction(
+        &self,
+    ) -> Result<Box<dyn crate::PredictionSnapshot>, crate::PredictionError> {
+        if let Some(context) = &self.prediction {
+            context.check()?;
+        }
+        let mut copy = self.snapshot(crate::PredictionContext::new(
+            crate::PredictionBudget {
+                bytes: usize::MAX,
+                ephemeris_steps: u64::MAX,
+                vessel_trials: u64::MAX,
+            },
+            crate::CancellationToken::new(),
+        ))?;
+        copy.prediction = None;
+        Ok(Box::new(copy))
+    }
+    fn adopt_prediction(
+        &mut self,
+        snapshot: Box<dyn crate::PredictionSnapshot>,
+    ) -> Result<(), crate::PredictionError> {
+        let mut copy = snapshot
+            .into_any()
+            .downcast::<Ephemeris>()
+            .map_err(|_| crate::PredictionError::IncompatibleSnapshot)?;
+        if copy.prediction_anchor != Some(self.continuation_fingerprint())
+            || self.epoch_seconds != copy.epoch_seconds
+            || self.step_seconds != copy.step_seconds
+            || self.gm != copy.gm
+            || self
+                .bodies
+                .iter()
+                .map(|b| &b.id)
+                .ne(copy.bodies.iter().map(|b| &b.id))
+            || copy.end_time() < self.end_time()
+            || copy.start_time() > self.start_time()
+        {
+            return Err(crate::PredictionError::IncompatibleSnapshot);
+        }
+        copy.prediction = None;
+        copy.prediction_anchor = None;
+        // Preserve live pool ownership; source numerical backend is unchanged.
+        copy.workers = self.workers.take();
+        #[cfg(target_arch = "x86_64")]
+        {
+            copy.spin_workers = self.spin_workers.take();
+        }
+        *self = *copy;
+        Ok(())
+    }
+
+    fn prediction_snapshot(
+        &self,
+        budget: crate::PredictionBudget,
+        cancel: crate::CancellationToken,
+    ) -> Result<Box<dyn crate::PredictionSnapshot>, crate::PredictionError> {
+        Ok(Box::new(
+            self.snapshot(crate::PredictionContext::new(budget, cancel))?,
+        ))
+    }
+    fn prediction_context(&self) -> Option<&crate::PredictionContext> {
+        self.prediction.as_ref()
+    }
+    fn try_extend_to(&mut self, t: f64) -> Result<(), crate::PredictionError> {
+        Ephemeris::try_extend_to(self, t)
+    }
+
     fn system_count(&self) -> usize {
         1
     }
@@ -702,6 +912,32 @@ impl FrameSource for Box<dyn EphemerisSource> {
     }
 }
 impl EphemerisSource for Box<dyn EphemerisSource> {
+    fn export_prediction(
+        &self,
+    ) -> Result<Box<dyn crate::PredictionSnapshot>, crate::PredictionError> {
+        (**self).export_prediction()
+    }
+    fn adopt_prediction(
+        &mut self,
+        snapshot: Box<dyn crate::PredictionSnapshot>,
+    ) -> Result<(), crate::PredictionError> {
+        (**self).adopt_prediction(snapshot)
+    }
+
+    fn prediction_snapshot(
+        &self,
+        budget: crate::PredictionBudget,
+        cancel: crate::CancellationToken,
+    ) -> Result<Box<dyn crate::PredictionSnapshot>, crate::PredictionError> {
+        (**self).prediction_snapshot(budget, cancel)
+    }
+    fn prediction_context(&self) -> Option<&crate::PredictionContext> {
+        (**self).prediction_context()
+    }
+    fn try_extend_to(&mut self, t: f64) -> Result<(), crate::PredictionError> {
+        (**self).try_extend_to(t)
+    }
+
     fn system_count(&self) -> usize {
         (**self).system_count()
     }

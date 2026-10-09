@@ -160,3 +160,116 @@ fn all_four_plot_modes_transform_each_future_sample_and_body_consistently() {
         }
     }
 }
+
+#[test]
+fn camera_quality_changes_rebuild_plot_without_changing_physics() {
+    let planet = void_landing::earth_size();
+    let (mut eph, body) = void_landing::planet_ephemeris(&planet);
+    eph.extend_to(100.0);
+    let r = planet.terrain.radius_meters + 100.0;
+    let mut trajectory = Trajectory::new();
+    trajectory.append(0.0, &[r, 0.0, 0.0, 0.0, 1e6, 0.0]);
+    trajectory.append(100.0, &[r, 0.0, 0.0, 0.0, -1e6, 0.0]);
+    let mut plot = PlotPath::default();
+    let mut update = |quality| {
+        plot.update_with_quality(
+            &eph,
+            &trajectory,
+            FrameSpec::BodyInertial { body },
+            1,
+            0.0,
+            trajectory.position(0),
+            body,
+            quality,
+        );
+        plot.points.clone()
+    };
+    let coarse = update(void_view::plot::PlotQuality {
+        max_error_meters: 1000.0,
+        max_points: 8192,
+    });
+    let fine = update(void_view::plot::PlotQuality {
+        max_error_meters: 0.1,
+        max_points: 8192,
+    });
+    assert!(fine.len() > coarse.len());
+    let coarse_again = update(void_view::plot::PlotQuality {
+        max_error_meters: 1000.0,
+        max_points: 8192,
+    });
+    assert_eq!(coarse, coarse_again);
+    assert_eq!(coarse.first(), fine.first());
+    assert_eq!(coarse.last(), fine.last());
+    assert_eq!(trajectory.count(), 2);
+}
+
+#[test]
+fn paused_body_trails_refresh_when_background_source_coverage_changes() {
+    let system = void_orbit::build_system(&void_orbit::SystemSpec::from_json(include_str!(
+        "../../orbit/systems/sol.json"
+    )));
+    let mut eph = void_orbit::Ephemeris::new(
+        &system,
+        void_orbit::EphemerisOptions {
+            step_seconds: 60.0,
+            chunk_steps: 32,
+        },
+    );
+    eph.extend_to(3600.0);
+    let mut cache = BodyPlots::default();
+    let before = cache.update(&eph, FrameSpec::Barycentric, 0.0, DVec3::ZERO);
+    eph.extend_to(7200.0);
+    let after = cache.update(&eph, FrameSpec::Barycentric, 0.0, DVec3::ZERO);
+    let fresh = BodyPlots::default().update(&eph, FrameSpec::Barycentric, 0.0, DVec3::ZERO);
+    assert_eq!(after, fresh);
+    assert_ne!(before[3].last(), after[3].last());
+}
+
+#[test]
+fn paused_plot_events_are_replaced_relative_to_the_new_origin() {
+    let planet = void_landing::earth_size();
+    let (mut eph, body) = void_landing::planet_ephemeris(&planet);
+    eph.extend_to(3600.0);
+    let mut trajectory = Trajectory::new();
+    let r = planet.terrain.radius_meters + 400000.0;
+    let omega = std::f64::consts::TAU / 1800.0;
+    let axes = eph.bodies()[body].rotation.equatorial_basis();
+    let b = axes[1] * 0.8 + axes[2] * 0.6;
+    for i in 0..=256 {
+        let t = i as f64 * 3600.0 / 256.0;
+        let angle = t * omega - 0.3;
+        let p = axes[0] * (r * angle.cos()) + b * (0.8 * r * angle.sin());
+        let v = axes[0] * (-r * omega * angle.sin()) + b * (0.8 * r * omega * angle.cos());
+        trajectory.append(t, &[p.x, p.y, p.z, v.x, v.y, v.z]);
+    }
+    let now = 10.0;
+    let origin = trajectory.sample(now).0;
+    let shift = DVec3::new(12345.0, -54321.0, 4567.0);
+    for spec in [
+        FrameSpec::BodyInertial { body },
+        FrameSpec::BodySurface { body },
+    ] {
+        let mut path = PlotPath::default();
+        path.update(&eph, &trajectory, spec, 1, now, origin, body);
+        let nodes = path.nodes.clone();
+        let apsides = path.apsides.clone();
+        assert!(!nodes.is_empty() && !apsides.is_empty());
+        path.update(&eph, &trajectory, spec, 1, now, origin + shift, body);
+        let mut evaluator = void_orbit::FrameEvaluator::new(&eph, spec);
+        let here = evaluator.evaluate(&eph, now);
+        let delta = void_view::frame_to_ecliptic(
+            &here.axes,
+            void_orbit::to_frame(&here, origin + shift) - void_orbit::to_frame(&here, origin),
+        );
+        assert_eq!(nodes.len(), path.nodes.len());
+        assert_eq!(apsides.len(), path.apsides.len());
+        for ((old, p), (new, q)) in nodes.iter().zip(&path.nodes) {
+            assert_eq!(old, new);
+            assert!((*q - (*p - delta)).length() < 1e-6);
+        }
+        for ((old, p), (new, q)) in apsides.iter().zip(&path.apsides) {
+            assert_eq!(old, new);
+            assert!((*q - (*p - delta)).length() < 1e-6);
+        }
+    }
+}

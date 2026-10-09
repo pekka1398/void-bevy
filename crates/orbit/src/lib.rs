@@ -16,7 +16,12 @@ mod nbody_simd;
 #[cfg(target_arch = "x86_64")]
 mod nbody_spin;
 mod nodes;
+mod prediction;
 mod propagator;
+pub use prediction::{
+    CancellationToken, PredictionBudget, PredictionContext, PredictionError, PredictionSnapshot,
+    PredictionUsage,
+};
 mod reference_frames;
 mod simulation;
 mod system;

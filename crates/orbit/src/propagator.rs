@@ -543,7 +543,9 @@ impl VesselPropagator {
         if let Some(c) = &control {
             c.assert_valid(self.body_count);
         }
-        ephemeris.extend_to(t_end);
+        if ephemeris.try_extend_to(t_end).is_err() {
+            return AdvanceOutcome::Budget;
+        }
         let ephemeris = &*ephemeris;
         self.field.control = control;
         if run.derivative_control.is_none() {
@@ -570,6 +572,16 @@ impl VesselPropagator {
         let (mut y_next, mut dy_next) = ([0.0; DIM], [0.0; DIM]);
         let mut steps = 0;
         while run.time < t_end {
+            if let Some(context) = ephemeris.prediction_context() {
+                if context.vessel_trial().is_err() {
+                    return AdvanceOutcome::Budget;
+                }
+                if let Some(path) = sink.as_deref_mut()
+                    && path.reserve_prediction_sample(context).is_err()
+                {
+                    return AdvanceOutcome::Budget;
+                }
+            }
             if steps >= max_steps {
                 return AdvanceOutcome::Budget;
             }
@@ -627,13 +639,17 @@ impl VesselPropagator {
             let t1 = if last_step { t_end } else { run.time + h };
             let candidate =
                 self.scan_for_impact(ephemeris, run.time, &run.y, &run.dy, t1, &y_next, &dy_next);
-            if let Some(body) = candidate
-                && self.resolve_impact(ephemeris, run, body, h)
-            {
-                if let Some(sink) = sink.as_deref_mut() {
-                    sink.append(run.time, &run.y);
+            if let Some(body) = candidate {
+                match self.resolve_impact(ephemeris, run, body, h) {
+                    Err(_) => return AdvanceOutcome::Budget,
+                    Ok(true) => {
+                        if let Some(sink) = sink.as_deref_mut() {
+                            sink.append(run.time, &run.y);
+                        }
+                        return AdvanceOutcome::Impact { body };
+                    }
+                    Ok(false) => {}
                 }
-                return AdvanceOutcome::Impact { body };
             }
             run.time = t1;
             run.y = y_next;
@@ -710,14 +726,17 @@ impl VesselPropagator {
         run: &mut PropagationRun,
         body: usize,
         accepted_step: f64,
-    ) -> bool {
+    ) -> Result<bool, crate::PredictionError> {
         let radius = ephemeris.bodies()[body].radius_meters;
         let (mut probe_y, mut probe_dy) = ([0.0; DIM], [0.0; DIM]);
         let distance_at = |this: &mut Self,
                            tau: f64,
                            probe_y: &mut [f64; DIM],
                            probe_dy: &mut [f64; DIM]|
-         -> f64 {
+         -> Result<f64, crate::PredictionError> {
+            if let Some(context) = ephemeris.prediction_context() {
+                context.vessel_trial()?;
+            }
             let field = &mut this.field;
             this.stepper.step(
                 &mut |t, y, dy| field.evaluate(ephemeris, t, y, dy),
@@ -729,16 +748,16 @@ impl VesselPropagator {
                 probe_dy,
             );
             let p = ephemeris.body_position(body, run.time + tau);
-            (DVec3::new(probe_y[0], probe_y[1], probe_y[2]) - p).length()
+            Ok((DVec3::new(probe_y[0], probe_y[1], probe_y[2]) - p).length())
         };
         let mut lo = 0.0;
         let mut hi = accepted_step;
-        if distance_at(self, hi, &mut probe_y, &mut probe_dy) >= radius {
+        if distance_at(self, hi, &mut probe_y, &mut probe_dy)? >= radius {
             let samples = IMPACT_SCAN_SAMPLES * 4;
             let mut found = false;
             for j in 1..=samples {
                 let tau = accepted_step * j as f64 / samples as f64;
-                if distance_at(self, tau, &mut probe_y, &mut probe_dy) < radius {
+                if distance_at(self, tau, &mut probe_y, &mut probe_dy)? < radius {
                     hi = tau;
                     found = true;
                     break;
@@ -746,18 +765,18 @@ impl VesselPropagator {
                 lo = tau;
             }
             if !found {
-                return false;
+                return Ok(false);
             }
         }
         while hi - lo > IMPACT_TIME_RESOLUTION_SECONDS {
             let mid = 0.5 * (lo + hi);
-            if distance_at(self, mid, &mut probe_y, &mut probe_dy) < radius {
+            if distance_at(self, mid, &mut probe_y, &mut probe_dy)? < radius {
                 hi = mid;
             } else {
                 lo = mid;
             }
         }
-        distance_at(self, hi, &mut probe_y, &mut probe_dy);
+        distance_at(self, hi, &mut probe_y, &mut probe_dy)?;
         run.time += hi;
         run.y = probe_y;
         run.dy = probe_dy;
@@ -765,6 +784,6 @@ impl VesselPropagator {
             body,
             time: run.time,
         });
-        true
+        Ok(true)
     }
 }

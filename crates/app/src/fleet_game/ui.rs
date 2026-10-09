@@ -58,6 +58,7 @@ pub(super) enum Click {
     NavigationFocus,
     NavigationSetting(u8),
     GenerateNavigation(u8),
+    CancelNavigation,
     Field(Field),
     Toggle(Toggle),
 }
@@ -430,6 +431,7 @@ pub(super) fn spawn(
         "Capture",
         Click::GenerateNavigation(2),
     );
+    button(commands, operations, "Cancel", Click::CancelNavigation);
     text(commands, maneuver, "MANEUVER", 11.);
     readout(commands, maneuver, Readout::Maneuver, 11.);
     for (field, label) in [
@@ -684,6 +686,10 @@ pub(super) fn interactions(
                 2 => state.navigation_altitude = (state.navigation_altitude + 1) % 5,
                 _ => unreachable!(),
             },
+            Click::CancelNavigation => {
+                lab.session
+                    .cancel_navigation("Navigation cancelled by pilot");
+            }
             Click::GenerateNavigation(operation) => {
                 generate_navigation(&mut lab, &state, *operation)
             }
@@ -991,10 +997,20 @@ pub(super) fn refresh(
                     .navigation_target
                     .map_or("none", |i| f.ephemeris.bodies()[i].name.as_str());
                 format!(
-                    "Target: {target}\nMax wait {:.0}d · max flight {:.0}d\nTarget Pe {:.0}km",
+                    "Target: {target}\nMax wait {:.0}d · max flight {:.0}d\nTarget Pe {:.0}km\nPause to calculate · 256 MiB budget\n{}{}",
                     navigation_wait(&state),
                     navigation_flight(&state),
-                    navigation_altitude(&state)
+                    navigation_altitude(&state),
+                    lab.session.navigation_status(),
+                    if lab.plot_path.sampling_status.point_limit_reached
+                        || lab.plot_path.sampling_status.resolution_limit_reached
+                        || lab.plot_plan.sampling_status.point_limit_reached
+                        || lab.plot_plan.sampling_status.resolution_limit_reached
+                    {
+                        "\nPath drawing limit reached; some sections shown coarsely"
+                    } else {
+                        ""
+                    }
                 )
             }
             Readout::Maneuver => plan_description(&lab)
@@ -1516,13 +1532,7 @@ fn generate_navigation(lab: &mut Lab, state: &UiState, operation: u8) {
         .and_then(|p| p.plan.burns().last())
         .map_or(now, |b| now.max(b.end_time))
         + 30.;
-    let reference_body = match lab.session.navigation_reference(&id) {
-        Ok(body) => body,
-        Err(reason) => {
-            lab.notice = reason;
-            return;
-        }
-    };
+    let reference_body = sim.nearby_body(&id); // Worker resolves the reference at the existing plan tail.
     let request = NavigationRequest {
         operation: match operation {
             0 => NavigationOperation::Departure,
@@ -1538,13 +1548,12 @@ fn generate_navigation(lab: &mut Lab, state: &UiState, operation: u8) {
         max_flight_seconds: navigation_flight(state) * 86400.,
         periapsis_altitude_m: navigation_altitude(state) * 1000.,
     };
-    match lab.session.execute(Action::GenerateNavigation { request }) {
-        Outcome::Applied => {
-            lab.notice = "Navigation node generated; inspect prediction before execution".into();
-            lab.prediction = None;
-        }
-        Outcome::Refused(reason) => lab.notice = reason,
-        other => panic!("unexpected navigation outcome {other:?}"),
+    match lab
+        .session
+        .request_navigation_auto_reference(request, lab.paused)
+    {
+        Ok(()) => lab.notice = "Navigation calculating in background; Cancel stops it".into(),
+        Err(reason) => lab.notice = reason,
     }
 }
 

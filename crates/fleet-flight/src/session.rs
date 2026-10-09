@@ -15,7 +15,7 @@ pub mod durable;
 
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 33;
+pub const MODEL_VERSION: u32 = 34;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -128,6 +128,9 @@ pub enum Action {
     },
     Sas {
         enabled: bool,
+    },
+    CommitNavigation {
+        prepared: Box<crate::navigation_job::PreparedNavigation>,
     },
     GenerateNavigation {
         request: void_orbit::NavigationRequest,
@@ -388,6 +391,10 @@ impl Action {
                     Err(reason) => Outcome::Refused(reason),
                 }
             }
+            Self::CommitNavigation { prepared } => match sim.commit_navigation(prepared) {
+                Ok(()) => Outcome::Applied,
+                Err(reason) => Outcome::Refused(reason),
+            },
             Self::GenerateNavigation { request } => {
                 match sim.generate_navigation(&sim.selected.clone(), request) {
                     Ok(()) => Outcome::Applied,
@@ -718,8 +725,163 @@ pub struct FlightSession {
     current_initial: InitialWorld,
     recording: Option<Recording>,
     stream: Option<durable::Writer>,
+    navigation: Option<crate::navigation_job::NavigationJob>,
+    navigation_pending: Option<(void_orbit::NavigationRequest, bool)>,
+    navigation_notice: String,
 }
 impl FlightSession {
+    /// Pause-only initial contract. Replacing a request cancels the old worker, then starts the newest.
+    pub fn request_navigation(
+        &mut self,
+        request: void_orbit::NavigationRequest,
+        paused: bool,
+    ) -> Result<(), String> {
+        self.request_navigation_with_reference(request, paused, false)
+    }
+    /// UI policy explicitly chooses the dominant body at the computed existing-plan tail.
+    pub fn request_navigation_auto_reference(
+        &mut self,
+        request: void_orbit::NavigationRequest,
+        paused: bool,
+    ) -> Result<(), String> {
+        self.request_navigation_with_reference(request, paused, true)
+    }
+    fn request_navigation_with_reference(
+        &mut self,
+        request: void_orbit::NavigationRequest,
+        paused: bool,
+        auto_reference: bool,
+    ) -> Result<(), String> {
+        if !paused {
+            return Err("Pause the simulation before generating navigation".into());
+        }
+        if let Some(job) = &self.navigation {
+            job.cancel.cancel();
+            self.navigation_pending = Some((request, auto_reference));
+            self.navigation_notice = "Cancelling previous navigation; latest request queued".into();
+            return Ok(());
+        }
+        let snapshot_started = std::time::Instant::now();
+        let cancel = void_orbit::CancellationToken::new();
+        let work = self
+            .sim
+            .navigation_work(request, cancel.clone(), auto_reference)?;
+        let (sender, result) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("navigation".into())
+            .spawn(move || {
+                let _ = sender.send(work.run());
+            })
+            .map_err(|e| format!("Cannot start navigation worker: {e}"))?;
+        self.navigation = Some(crate::navigation_job::NavigationJob {
+            cancel,
+            result,
+            started: std::time::Instant::now(),
+        });
+        self.navigation_notice = format!(
+            "Navigation running (256 MiB budget; snapshot {:.2} ms)",
+            snapshot_started.elapsed().as_secs_f64() * 1000.
+        );
+        Ok(())
+    }
+    pub fn cancel_navigation(&mut self, reason: &str) {
+        self.navigation_pending = None;
+        if let Some(job) = &self.navigation {
+            job.cancel.cancel();
+            self.navigation_notice = reason.into();
+        }
+    }
+    pub fn navigation_running(&self) -> bool {
+        self.navigation.is_some()
+    }
+    pub fn navigation_status(&self) -> String {
+        if let Some(job) = &self.navigation {
+            format!(
+                "{} | {:.1}s",
+                self.navigation_notice,
+                job.started.elapsed().as_secs_f64()
+            )
+        } else {
+            self.navigation_notice.clone()
+        }
+    }
+    /// Called once per UI frame. No blocking join, ephemeris extension or verification propagation.
+    pub fn poll_navigation(&mut self, paused: bool) -> Option<Outcome> {
+        if !paused {
+            self.cancel_navigation("Navigation cancelled: simulation resumed");
+        }
+        let job = self.navigation.as_ref()?;
+        let result = match job.result.try_recv() {
+            Ok(result) => result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("Navigation worker terminated unexpectedly".into())
+            }
+        };
+        let cancelled = job.cancel.is_cancelled();
+        self.navigation = None;
+        if let Some((request, auto_reference)) = self.navigation_pending.take() {
+            if let Err(reason) =
+                self.request_navigation_with_reference(request, paused, auto_reference)
+            {
+                self.navigation_notice = reason;
+            }
+            return None;
+        }
+        if cancelled {
+            return None;
+        }
+        let commit_started = std::time::Instant::now();
+        let metrics = result
+            .as_ref()
+            .ok()
+            .map(|r| r.prepared.metrics())
+            .unwrap_or_default();
+        let mut delivery_stages = String::new();
+        let outcome = match result {
+            Ok(result) => {
+                let validated = self.sim.validated_navigation(&result.prepared);
+                let validation_ms = commit_started.elapsed().as_secs_f64() * 1000.;
+                match validated.and_then(|validated| {
+                    self.sim
+                        .fleet
+                        .ephemeris
+                        .adopt_prediction(result.source)
+                        .map_err(|e| e.to_string())?;
+                    Ok(validated)
+                }) {
+                    Ok((inputs, candidate)) => {
+                        let message = result.prepared.message();
+                        let action = Action::CommitNavigation {
+                            prepared: Box::new(result.prepared),
+                        };
+                        let journal_started = std::time::Instant::now();
+                        let outcome =
+                            self.execute_with(action, Some(&result.encoded), move |_, sim| {
+                                sim.install_navigation(inputs, candidate, message);
+                                Outcome::Applied
+                            });
+                        delivery_stages = format!(
+                            " · validate {validation_ms:.2} ms · journal {:.2} ms",
+                            journal_started.elapsed().as_secs_f64() * 1000.
+                        );
+                        outcome
+                    }
+                    Err(reason) => Outcome::Refused(reason),
+                }
+            }
+            Err(reason) => Outcome::Refused(reason),
+        };
+        self.navigation_notice = match &outcome {
+            Outcome::Applied => format!(
+                "Navigation ready; inspect before execution | {metrics} | commit {:.2} ms{delivery_stages}",
+                commit_started.elapsed().as_secs_f64() * 1000.
+            ),
+            Outcome::Refused(reason) => reason.clone(),
+            _ => unreachable!(),
+        };
+        Some(outcome)
+    }
     /// Read-only trial query for the navigation UI; no authoritative command is committed.
     pub fn navigation_reference(&mut self, id: &str) -> Result<usize, String> {
         self.sim.navigation_reference(id)
@@ -739,6 +901,9 @@ impl FlightSession {
             current_initial,
             recording: None,
             stream: None,
+            navigation: None,
+            navigation_pending: None,
+            navigation_notice: String::new(),
         }
     }
     /// Explicit opt-in for headless regression scripts. Live games use --record/begin_stream.
@@ -773,11 +938,33 @@ impl FlightSession {
             .map_or((0, 0), |r| (r.entries.len(), r.marks.len()))
     }
     pub fn execute(&mut self, action: Action) -> Outcome {
+        self.execute_with(action, None, |action, sim| action.apply(sim))
+    }
+    /// The sole live fast path accepts only an already structurally validated worker result.
+    /// Durable replay always uses Action::apply and performs the validation itself.
+    fn execute_with(
+        &mut self,
+        action: Action,
+        encoded: Option<&crate::navigation_job::EncodedNavigation>,
+        apply: impl FnOnce(&Action, &mut FleetFlight) -> Outcome,
+    ) -> Outcome {
+        if !matches!(
+            &action,
+            Action::View { .. }
+                | Action::EndFrame { paused: true, .. }
+                | Action::CommitNavigation { .. }
+        ) {
+            self.cancel_navigation("Navigation cancelled: simulation inputs changed");
+        }
         let index = self.retained_counts().0;
         if let Some(stream) = &mut self.stream {
-            stream.intent(index, &action);
+            if let Some(encoded) = encoded {
+                stream.intent_preencoded(index, encoded);
+            } else {
+                stream.intent(index, &action);
+            }
         }
-        let outcome = action.apply(&mut self.sim);
+        let outcome = apply(&action, &mut self.sim);
         if let Some(initial) = action.replacement_initial() {
             self.current_initial = initial.clone();
         }
@@ -879,6 +1066,9 @@ impl FlightSession {
             current_initial,
             recording: None,
             stream: None,
+            navigation: None,
+            navigation_pending: None,
+            navigation_notice: String::new(),
         }
     }
     pub fn load(path: impl AsRef<Path>) -> Self {
@@ -899,6 +1089,9 @@ impl FlightSession {
             current_initial,
             recording: None,
             stream: None,
+            navigation: None,
+            navigation_pending: None,
+            navigation_notice: String::new(),
         }
     }
 }

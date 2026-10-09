@@ -271,6 +271,12 @@ impl FlightPlan {
                 "flight plan: more than {POSITION_MAX_STEPS} steps to reach T+{t}"
             );
             self.integrate(ephemeris, t, 5000);
+            if ephemeris
+                .prediction_context()
+                .is_some_and(|c| c.check().is_err())
+            {
+                return None;
+            }
         }
         if let Some(impact) = self.impact()
             && impact.time < t
@@ -376,6 +382,9 @@ impl FlightPlan {
                     break;
                 }
                 self.extend(ephemeris, 5000);
+                if let Some(context) = ephemeris.prediction_context() {
+                    context.check().map_err(|e| e.to_string())?;
+                }
             }
             let run = self.run.as_ref().expect("an anchored plan has a run");
             if run.impact.is_some_and(|impact| impact.time <= t) {
@@ -403,7 +412,9 @@ impl FlightPlan {
             0.5 * (mass - mass_after) * self.engine.exhaust_velocity / self.engine.thrust_newtons;
 
         let reference = spec.reference_body;
-        ephemeris.extend_to(from.time);
+        ephemeris
+            .try_extend_to(from.time)
+            .map_err(|e| e.to_string())?;
         let (center_position, center_velocity) = ephemeris.body_state(BodyId(reference), from.time);
         let state = from.state();
         let body = &ephemeris.bodies()[reference];
@@ -547,5 +558,38 @@ impl FlightPlan {
         let run = anchor.restarted();
         self.trajectory.append(run.time, &run.y);
         self.run = Some(run);
+    }
+}
+
+impl FlightPlan {
+    /// Structural validation for a journalled worker result; trajectory integration is never rerun.
+    pub fn matches_navigation_inputs(
+        &self,
+        state: &PropagationRun,
+        engine: PlanEngine,
+        tolerances: Tolerances,
+        previous: &[ManeuverSpec],
+    ) -> bool {
+        self.engine == engine
+            && self.propagator.tolerances == tolerances
+            && self
+                .anchor
+                .as_ref()
+                .is_some_and(|a| a.time == state.time && a.y == state.y)
+            && self.specs.len() == previous.len() + 1
+            && self.specs[..previous.len()] == *previous
+            && self.impact().is_none()
+            && self.complete()
+            && self.statuses.iter().all(Result::is_ok)
+            && self.trajectory.count() > 0
+            && self.trajectory.count() <= 131_072
+            && self.trajectory.first_time() == state.time
+            && self.trajectory.position(0) == state.state().position
+            && self.trajectory.velocity(0) == state.state().velocity
+            && self.run.as_ref().is_some_and(|r| {
+                self.trajectory.last_time() == r.time
+                    && self.trajectory.position(self.trajectory.count() - 1) == r.state().position
+                    && self.trajectory.velocity(self.trajectory.count() - 1) == r.state().velocity
+            })
     }
 }

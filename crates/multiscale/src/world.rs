@@ -1,7 +1,7 @@
 //! Several star systems in one Newtonian N-body world, as the lab's `CoupledWorld.ts`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::{collections::VecDeque, sync::Arc};
 
 use glam::DVec3;
 use void_math::hypot;
@@ -42,6 +42,7 @@ impl SystemState {
     }
 }
 
+#[derive(Clone)]
 struct LiveSystem {
     state: SystemState,
     bodies: Vec<CelestialBody>,
@@ -69,6 +70,7 @@ pub struct Membership {
 /// systems move the barycentre, and what is left of them acts on the members (external tides).
 /// No monopole replacement, cut-off or sphere-of-influence switch. Orbit's Yoshida-8 stepping
 /// and quintic interpolation. O(N²): not a galaxy solver.
+#[derive(Clone)]
 pub struct CoupledWorld {
     pub ids: Vec<String>,
     /// All bodies, ids `system/body`, indices and parents renumbered world-wide.
@@ -76,9 +78,9 @@ pub struct CoupledWorld {
     pub membership: Vec<Membership>,
     pub step_seconds: f64,
     pub sample_limit: usize,
-    seed_signature: serde_json::Value,
+    seed_signature: Arc<serde_json::Value>,
     live: Vec<LiveSystem>,
-    samples: VecDeque<Sample>,
+    samples: VecDeque<Arc<Sample>>,
     latest: f64,
     pub steps: u64,
 }
@@ -173,7 +175,7 @@ impl CoupledWorld {
             step_seconds,
             sample_limit,
             live,
-            seed_signature,
+            seed_signature: Arc::new(seed_signature),
             samples: VecDeque::new(),
             latest: 0.0,
             steps: 0,
@@ -207,6 +209,108 @@ impl CoupledWorld {
                     .sum::<usize>()
             })
             .sum()
+    }
+
+    pub(crate) fn continuation_fingerprint(&self) -> u64 {
+        let mut hash = 0xcbf29ce484222325u64;
+        for g in &self.live {
+            // SplitPosition is exactly serialized here (small live state only).
+            for byte in serde_json::to_vec(&g.state.origin).expect("finite split origin") {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+            }
+            for bits in g
+                .state
+                .positions
+                .iter()
+                .chain(&g.state.velocities)
+                .chain(&g.state.accelerations)
+                .chain(&g.position_correction)
+                .chain(g.origin_correction.as_ref())
+                .chain(g.state.velocity.as_ref())
+                .chain(g.state.acceleration.as_ref())
+                .map(|v| v.to_bits())
+            {
+                hash = (hash ^ bits).wrapping_mul(0x100000001b3);
+            }
+        }
+        for bits in [
+            self.latest.to_bits(),
+            self.step_seconds.to_bits(),
+            self.steps,
+        ] {
+            hash = (hash ^ bits).wrapping_mul(0x100000001b3);
+        }
+        hash
+    }
+    pub(crate) fn compatible_prediction(&self, other: &Self) -> bool {
+        self.ids == other.ids
+            && self.seed_signature == other.seed_signature
+            && self.step_seconds == other.step_seconds
+            && self.time() <= other.time()
+            && self.start_time() >= other.start_time()
+    }
+    pub(crate) fn prediction_copy(
+        &self,
+        context: &void_orbit::PredictionContext,
+    ) -> Result<Self, void_orbit::PredictionError> {
+        context.reserve_bytes(
+            self.retained_bytes()
+                .saturating_add(self.sample_count().saturating_mul(256))
+                .saturating_add(self.bodies.iter().fold(0usize, |sum, b| {
+                    sum.saturating_add(8192)
+                        .saturating_add(b.id.len().saturating_mul(3))
+                        .saturating_add(b.name.len().saturating_mul(3))
+                        .saturating_add(b.color.len().saturating_mul(3))
+                })),
+        )?;
+        Ok(self.clone())
+    }
+    pub(crate) fn try_extend_prediction(
+        &mut self,
+        t: f64,
+        context: &void_orbit::PredictionContext,
+    ) -> Result<(), void_orbit::PredictionError> {
+        assert!(
+            t.is_finite() && t >= self.start_time(),
+            "coupled prediction: invalid extension"
+        );
+        context.check()?;
+        let steps = ((t - self.latest) / self.step_seconds).ceil().max(0.0) as u64;
+        let required = (self.sample_count() as u64).saturating_add(steps);
+        if required > self.sample_limit as u64 {
+            return Err(context.reject(void_orbit::PredictionError::BudgetExceeded {
+                resource: "retained samples",
+                required,
+                limit: self.sample_limit as u64,
+            }));
+        }
+        let sample_bytes = self
+            .bodies
+            .len()
+            .saturating_mul(72)
+            .saturating_add(self.ids.len().saturating_mul(256))
+            .saturating_add(256);
+        context.preflight_extension(
+            steps,
+            usize::try_from(steps)
+                .unwrap_or(usize::MAX)
+                .saturating_mul(sample_bytes),
+        )?;
+        while self.latest < t {
+            context.ephemeris_step()?;
+            // Recheck actual capacity at each step: floating point target rounding must
+            // never admit an uncharged sample or trigger automatic history eviction.
+            if self.sample_count() >= self.sample_limit {
+                return Err(context.reject(void_orbit::PredictionError::BudgetExceeded {
+                    resource: "retained samples",
+                    required: self.sample_count() as u64 + 1,
+                    limit: self.sample_limit as u64,
+                }));
+            }
+            context.reserve_bytes(sample_bytes)?;
+            self.step();
+        }
+        Ok(())
     }
 
     pub fn system_index(&self, id: &str) -> usize {
@@ -370,10 +474,10 @@ impl CoupledWorld {
     }
 
     fn save(&mut self) {
-        self.samples.push_back(Sample {
+        self.samples.push_back(Arc::new(Sample {
             time: self.latest,
             systems: self.live.iter().map(|g| g.state.clone()).collect(),
-        });
+        }));
         if self.samples.len() > self.sample_limit {
             let drop = 512.min(self.samples.len() - 2);
             self.samples.drain(..drop);
@@ -577,7 +681,7 @@ impl CoupledWorld {
             version: 1,
             ids: self.ids.clone(),
             bodies: self.body_signature(),
-            seeds: self.seed_signature.clone(),
+            seeds: (*self.seed_signature).clone(),
             step_seconds: self.step_seconds,
             sample_limit: self.sample_limit,
             latest: self.latest,
@@ -591,7 +695,7 @@ impl CoupledWorld {
                     position_correction: g.position_correction.clone(),
                 })
                 .collect(),
-            samples: self.samples.clone(),
+            samples: self.samples.iter().map(|s| (**s).clone()).collect(),
         }
     }
     /// Reconstruct definitions only; never reintegrate centuries from the initial epoch.
@@ -600,7 +704,7 @@ impl CoupledWorld {
         let mut world = Self::new(seeds, saved.step_seconds, saved.sample_limit);
         assert_eq!(saved.ids, world.ids, "coupled checkpoint: systems changed");
         assert_eq!(
-            saved.seeds, world.seed_signature,
+            saved.seeds, *world.seed_signature,
             "coupled checkpoint: initial placement changed"
         );
         assert_eq!(
@@ -690,7 +794,7 @@ impl CoupledWorld {
         }
         world.latest = saved.latest;
         world.steps = saved.steps;
-        world.samples = saved.samples;
+        world.samples = saved.samples.into_iter().map(Arc::new).collect();
         world
     }
 }

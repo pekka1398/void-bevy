@@ -2633,6 +2633,10 @@ fn simulate(time: Res<Time>, window: Single<&Window>, mut lab: NonSendMut<Lab>) 
     }
 }
 fn simulate_inner(time: &Time, window: &Window, lab: &mut Lab) {
+    if lab.session.poll_navigation(lab.paused).is_some() {
+        lab.notice = lab.session.navigation_status();
+        lab.prediction = None;
+    }
     if lab.paused || !window.focused {
         if lab.playback.is_none() {
             lab.session.execute(Action::EndFrame {
@@ -4692,6 +4696,22 @@ fn draw_map(
         wall_ms: fleet.time() * 1000.0,
     };
     let spec = lab.session.sim().presentation.plotting_frame;
+    // Focus-depth pixel estimate, quantized downward so small camera changes reuse
+    // the mesh samples. It is not a strict bound for paths nearer than the focus.
+    let Some(viewport) = camera.0.logical_viewport_size() else {
+        return;
+    };
+    let pixels_per_radian =
+        f64::from(viewport.y) * f64::from(camera.0.clip_from_view().y_axis.y) / 2.0;
+    let tolerance = 0.75 * sim.presentation.distance / pixels_per_radian;
+    assert!(
+        tolerance.is_finite() && tolerance > 0.0,
+        "invalid plotting camera scale"
+    );
+    let plot_quality = void_view::plot::PlotQuality {
+        max_error_meters: 2.0_f64.powf(tolerance.log2().floor()),
+        max_points: 8192,
+    };
     let apsis_reference = match spec {
         void_orbit::FrameSpec::BodyInertial { body }
         | void_orbit::FrameSpec::BodySurface { body } => body,
@@ -4704,7 +4724,7 @@ fn draw_map(
         let source = prediction_view
             .as_deref()
             .unwrap_or(fleet.ephemeris.as_ref());
-        lab.plot_path.update(
+        lab.plot_path.update_with_quality(
             source,
             &prediction.trajectory,
             spec,
@@ -4712,6 +4732,7 @@ fn draw_map(
             fleet.time(),
             plotting_focus(source, focus, fleet.time()),
             apsis_reference,
+            plot_quality,
         );
     } else {
         lab.plot_path = Default::default();
@@ -4723,7 +4744,7 @@ fn draw_map(
     if let Some(p) = lab.session.sim().plans.get(&lab.plan_vessel) {
         let plan_view = plotting_source(fleet, p.system, p.origin);
         let source = plan_view.as_deref().unwrap_or(fleet.ephemeris.as_ref());
-        lab.plot_plan.update(
+        lab.plot_plan.update_with_quality(
             source,
             &p.plan.trajectory,
             spec,
@@ -4731,6 +4752,7 @@ fn draw_map(
             fleet.time(),
             plotting_focus(source, focus, fleet.time()),
             apsis_reference,
+            plot_quality,
         );
     } else {
         lab.plot_plan = Default::default();

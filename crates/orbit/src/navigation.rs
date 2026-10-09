@@ -43,6 +43,7 @@ pub enum NavigationError {
     InsufficientFuel,
     Impact { body: usize, time: f64 },
     PredictionBudget,
+    Prediction(crate::PredictionError),
     CaptureUnavailable(String),
 }
 impl std::fmt::Display for NavigationError {
@@ -55,6 +56,7 @@ impl std::fmt::Display for NavigationError {
             Self::Impact { body, time } => {
                 write!(f, "predicted impact with body {body} at T+{time:.1}")
             }
+            Self::Prediction(e) => e.fmt(f),
             Self::PredictionBudget => {
                 f.write_str("navigation prediction exhausted its integration budget")
             }
@@ -89,7 +91,8 @@ fn axes(
     state: VesselState,
     reference: usize,
 ) -> Result<DMat3, NavigationError> {
-    ep.extend_to(state.time);
+    ep.try_extend_to(state.time)
+        .map_err(NavigationError::Prediction)?;
     let (p, v) = ep.body_state(BodyId(reference), state.time);
     let r = state.position - p;
     let v = state.velocity - v;
@@ -166,10 +169,13 @@ fn closest(
     path: &Trajectory,
     target: usize,
     from: f64,
-) -> (f64, f64, f64) {
+) -> Result<(f64, f64, f64), NavigationError> {
     let mut best = (from, f64::INFINITY, 0.0);
     // Each adaptive integration interval is searched independently; no one-ellipse assumption.
     for i in 1..path.count() {
+        if let Some(context) = ep.prediction_context() {
+            context.check().map_err(NavigationError::Prediction)?;
+        }
         let lo = path.time(i - 1).max(from);
         let hi = path.time(i);
         if lo > hi {
@@ -195,7 +201,7 @@ fn closest(
             }
         }
     }
-    best
+    Ok(best)
 }
 fn solution(
     ep: &dyn EphemerisSource,
@@ -203,9 +209,9 @@ fn solution(
     target: usize,
     m: ManeuverSpec,
     captured: bool,
-) -> NavigationSolution {
-    let (t, d, v) = closest(ep, &plan.trajectory, target, m.start_time);
-    NavigationSolution {
+) -> Result<NavigationSolution, NavigationError> {
+    let (t, d, v) = closest(ep, &plan.trajectory, target, m.start_time)?;
+    Ok(NavigationSolution {
         maneuver: m,
         delta_v_mps: DVec3::new(m.prograde, m.normal, m.radial).length(),
         closest_time: t,
@@ -214,7 +220,7 @@ fn solution(
         relative_speed_mps: v,
         verified_until: plan.computed_until(),
         captured,
-    }
+    })
 }
 
 /// Universal-variable, zero-revolution Lambert guess; short and long-way branches are both
@@ -282,6 +288,23 @@ fn stumpff(z: f64) -> (f64, f64) {
 }
 
 pub fn solve_navigation(
+    ep: &mut dyn EphemerisSource,
+    anchor: &PropagationRun,
+    engine: PlanEngine,
+    tol: Tolerances,
+    req: &NavigationRequest,
+) -> Result<NavigationSolution, NavigationError> {
+    if let Some(context) = ep.prediction_context() {
+        context.check().map_err(NavigationError::Prediction)?;
+    }
+    let result = solve_navigation_inner(ep, anchor, engine, tol, req);
+    if let Some(context) = ep.prediction_context() {
+        context.check().map_err(NavigationError::Prediction)?;
+    }
+    result
+}
+
+fn solve_navigation_inner(
     ep: &mut dyn EphemerisSource,
     anchor: &PropagationRun,
     engine: PlanEngine,
@@ -356,7 +379,7 @@ pub fn solve_navigation(
                 "no future approach before impact".into(),
             ));
         }
-        let (t, d, _) = closest(ep, &path, req.target_body, req.earliest_departure);
+        let (t, d, _) = closest(ep, &path, req.target_body, req.earliest_departure)?;
         let soi = ep.bodies()[req.target_body]
             .sphere_of_influence_meters
             .ok_or_else(|| {
@@ -374,7 +397,8 @@ pub fn solve_navigation(
     let mut guesses = Vec::new();
     let mut last_error =
         NavigationError::NoSolution("no Lambert transfer fits the search window".into());
-    ep.extend_to(anchor.time);
+    ep.try_extend_to(anchor.time)
+        .map_err(NavigationError::Prediction)?;
     let (reference_position, _) = ep.body_state(BodyId(req.reference_body), anchor.time);
     let parking_period = std::f64::consts::TAU
         * ((anchor.state().position - reference_position)
@@ -434,7 +458,8 @@ pub fn solve_navigation(
             ));
         }
 
-        ep.extend_to(t + req.max_flight_seconds);
+        ep.try_extend_to(t + req.max_flight_seconds)
+            .map_err(NavigationError::Prediction)?;
         let (cp, cv) = ep.body_state(BodyId(parent), t);
         let (rp, rv) = ep.body_state(BodyId(req.reference_body), t);
         let parking = parent != req.reference_body
@@ -502,6 +527,9 @@ pub fn solve_navigation(
     guesses.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut best: Option<NavigationSolution> = None;
     for (_, mut m, arrival, alt, departure_state) in guesses.into_iter().take(10) {
+        if let Some(context) = ep.prediction_context() {
+            context.check().map_err(NavigationError::Prediction)?;
+        }
         let trial_anchor = PropagationRun::new(departure_state);
         for _ in 0..5 {
             let end = arrival + 0.05 * (arrival - m.start_time);
@@ -512,7 +540,7 @@ pub fn solve_navigation(
                     break;
                 }
             };
-            let s = solution(ep, &plan, req.target_body, m, false);
+            let s = solution(ep, &plan, req.target_body, m, false)?;
             let soi = ep.bodies()[req.target_body]
                 .sphere_of_influence_meters
                 .ok_or_else(|| {
@@ -595,7 +623,7 @@ pub fn solve_navigation(
         best.verified_until,
         WINDOW_COAST_BUDGET,
     )?;
-    let verified = solution(ep, &full, req.target_body, best.maneuver, false);
+    let verified = solution(ep, &full, req.target_body, best.maneuver, false)?;
     let soi = ep.bodies()[req.target_body]
         .sphere_of_influence_meters
         .expect("candidate target has an SOI");
@@ -623,7 +651,8 @@ fn capture(
     let mut propagator = VesselPropagator::new(ep, tol);
     let mut selected = None;
     while run.time < end && propagator.accepted_steps < STEP_BUDGET {
-        ep.extend_to(run.time);
+        ep.try_extend_to(run.time)
+            .map_err(NavigationError::Prediction)?;
         let (bp, _) = ep.body_state(BodyId(req.target_body), run.time);
         let distance = (run.state().position - bp).length();
         // Search only a fraction of the local dynamical time at once. Nearby parking
@@ -702,7 +731,7 @@ fn capture(
             "finite-thrust prediction does not produce a bound target orbit".into(),
         ));
     }
-    Ok(solution(ep, &plan, req.target_body, m, true))
+    solution(ep, &plan, req.target_body, m, true)
 }
 
 #[cfg(test)]
@@ -790,7 +819,7 @@ mod tests {
             s.verified_until,
         )
         .unwrap();
-        let independently = solution(&ep, &plan, 2, s.maneuver, false);
+        let independently = solution(&ep, &plan, 2, s.maneuver, false).unwrap();
         assert!((independently.closest_distance_m - s.closest_distance_m).abs() < 0.01);
     }
     #[test]

@@ -15,6 +15,19 @@ impl Trajectory {
         Self::default()
     }
 
+    /// Reserve before the propagator can append; charge actual deque capacity growth.
+    pub(crate) fn reserve_prediction_sample(
+        &mut self,
+        context: &crate::PredictionContext,
+    ) -> Result<(), crate::PredictionError> {
+        if self.samples.len() == self.samples.capacity() {
+            let additional = self.samples.capacity().max(4);
+            context.reserve_bytes(additional.saturating_mul(size_of::<(f64, [f64; 6])>()))?;
+            self.samples.reserve_exact(additional);
+        }
+        Ok(())
+    }
+
     pub fn count(&self) -> usize {
         self.samples.len()
     }

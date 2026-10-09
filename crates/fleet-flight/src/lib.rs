@@ -1,5 +1,6 @@
 //! First integration boundary for assembly/Fleet flight. No Bevy and no fixed two-stage rocket.
 pub mod checkpoint;
+pub mod navigation_job;
 pub mod plans;
 pub mod presentation;
 pub mod session;

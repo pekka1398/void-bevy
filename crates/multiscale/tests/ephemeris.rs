@@ -142,3 +142,76 @@ fn translated_source_subtracts_split_anchor_exactly_once_in_every_query() {
     assert_eq!(clone.physics_offset(), SplitPosition::ORIGIN);
     assert_eq!(clone.body_state(BodyId(3), 0.0).0, p);
 }
+
+#[test]
+fn prediction_snapshot_preserves_coupled_frames_and_retains_reader_history() {
+    use void_orbit::{CancellationToken, PredictionBudget};
+    let world = Rc::new(RefCell::new(CoupledWorld::new(
+        common::compact_seeds(SplitPosition::at(DVec3::new(3e17, -2e16, 5e15))),
+        10.0,
+        8192,
+    )));
+    let mut live = FrameEphemeris::new(world.clone(), "B");
+    live.extend_to(20.0);
+    live.set_physics_offset(SplitPosition::at(DVec3::new(1e8, 3e7, -2e6)));
+    let saved = live
+        .prediction_snapshot(PredictionBudget::default(), CancellationToken::new())
+        .unwrap();
+    let result = std::thread::spawn(move || {
+        let mut copy = saved.into_source();
+        copy.try_extend_to(200.0).unwrap();
+        assert_eq!(copy.start_time(), 0.0);
+        assert_eq!(copy.origin_system(), void_frames::SystemId(1));
+        (0..copy.bodies().len())
+            .map(|b| copy.body_state(BodyId(b), 195.0))
+            .collect::<Vec<_>>()
+    })
+    .join()
+    .unwrap();
+    assert_eq!(live.end_time(), 20.0);
+    live.extend_to(200.0);
+    for (b, state) in result.into_iter().enumerate() {
+        assert_eq!(live.body_state(BodyId(b), 195.0), state);
+    }
+}
+
+#[test]
+fn coupled_prediction_budget_and_adoption_preserve_checkpoint_policy() {
+    use void_orbit::{CancellationToken, PredictionBudget, PredictionError};
+    let seeds = common::compact_seeds(SplitPosition::at(DVec3::ZERO));
+    let world = Rc::new(RefCell::new(CoupledWorld::new(seeds.clone(), 10.0, 8192)));
+    let mut live = FrameEphemeris::new(world.clone(), "A");
+    live.extend_to(20.0);
+    let mut copy = live
+        .prediction_snapshot(PredictionBudget::default(), CancellationToken::new())
+        .unwrap()
+        .into_source();
+    assert!(matches!(
+        copy.try_extend_to(100_000.0),
+        Err(PredictionError::BudgetExceeded {
+            resource: "retained samples",
+            ..
+        })
+    ));
+    assert_eq!(copy.end_time(), 20.0);
+    let mut copy = live
+        .prediction_snapshot(PredictionBudget::default(), CancellationToken::new())
+        .unwrap()
+        .into_source();
+    copy.try_extend_to(100.0).unwrap();
+    live.adopt_prediction(copy.export_prediction().unwrap())
+        .unwrap();
+    assert_eq!(world.borrow().sample_limit, 8192);
+    assert_eq!(world.borrow().time(), 100.0);
+    let restored = CoupledWorld::from_checkpoint(seeds, world.borrow().checkpoint());
+    assert_eq!(restored.at(95.0), world.borrow().at(95.0));
+    let copy = live
+        .prediction_snapshot(PredictionBudget::default(), CancellationToken::new())
+        .unwrap()
+        .into_source();
+    world.borrow_mut().extend_to(110.0, 1);
+    assert_eq!(
+        live.adopt_prediction(copy.export_prediction().unwrap()),
+        Err(PredictionError::IncompatibleSnapshot)
+    );
+}

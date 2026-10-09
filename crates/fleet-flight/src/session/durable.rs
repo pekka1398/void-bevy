@@ -113,6 +113,28 @@ impl Writer {
         });
         self.pending = Some(index);
     }
+    /// Bytes are created exclusively by the navigation worker for its owned prepared command.
+    pub(super) fn intent_preencoded(
+        &mut self,
+        index: usize,
+        action: &crate::navigation_job::EncodedNavigation,
+    ) {
+        assert!(
+            self.pending.is_none(),
+            "journal: previous command did not commit"
+        );
+        write!(
+            self.file,
+            "{{\"kind\":\"Intent\",\"index\":{index},\"action\":"
+        )
+        .expect("journal: write intent header");
+        self.file
+            .write_all(action.as_bytes())
+            .expect("journal: write prepared navigation");
+        self.file.write_all(b"}\n").expect("journal: finish intent");
+        self.file.sync_all().expect("journal: sync prepared intent");
+        self.pending = Some(index);
+    }
     pub(super) fn commit(&mut self, index: usize, outcome: &Outcome) {
         assert_eq!(self.pending, Some(index), "journal: command index changed");
         self.line(Line::Commit {

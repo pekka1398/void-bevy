@@ -76,7 +76,7 @@ impl FleetFlight {
             );
         }
     }
-    fn plan_view(&self, id: &str) -> Option<Box<dyn void_orbit::EphemerisSource>> {
+    pub(crate) fn plan_view(&self, id: &str) -> Option<Box<dyn void_orbit::EphemerisSource>> {
         let (system, origin) = self
             .plans
             .get(id)
@@ -97,7 +97,7 @@ impl FleetFlight {
         }
         view
     }
-    fn plan_state(&self, id: &str) -> PropagationRun {
+    pub(crate) fn plan_state(&self, id: &str) -> PropagationRun {
         let precise = self.fleet.precise_snapshot(id);
         let (position, velocity) = if let Some(plan) = self.plans.get(id) {
             let (system_origin, system_velocity) = self

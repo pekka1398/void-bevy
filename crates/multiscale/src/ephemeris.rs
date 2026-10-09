@@ -14,6 +14,8 @@ pub struct FrameEphemeris {
     bodies: Vec<CelestialBody>,
     offset: SplitPosition,
     query_frame: Option<FrameId>,
+    prediction: Option<void_orbit::PredictionContext>,
+    prediction_anchor: Option<u64>,
 }
 impl FrameEphemeris {
     pub fn new(world: SharedWorld, system: &str) -> Self {
@@ -27,6 +29,8 @@ impl FrameEphemeris {
             bodies,
             offset: SplitPosition::ORIGIN,
             query_frame: None,
+            prediction: None,
+            prediction_anchor: None,
         }
     }
 }
@@ -72,7 +76,97 @@ impl FrameSource for FrameEphemeris {
     }
 }
 
+struct FramePredictionSnapshot {
+    world: CoupledWorld,
+    system_index: usize,
+    bodies: Vec<CelestialBody>,
+    offset: SplitPosition,
+    query_frame: Option<FrameId>,
+    context: Option<void_orbit::PredictionContext>,
+    anchor: u64,
+}
+impl void_orbit::PredictionSnapshot for FramePredictionSnapshot {
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any + Send> {
+        self
+    }
+    fn into_source(self: Box<Self>) -> Box<dyn EphemerisSource> {
+        Box::new(FrameEphemeris {
+            world: Rc::new(RefCell::new(self.world)),
+            system_index: self.system_index,
+            bodies: self.bodies,
+            offset: self.offset,
+            query_frame: self.query_frame,
+            prediction: self.context,
+            prediction_anchor: Some(self.anchor),
+        })
+    }
+}
 impl EphemerisSource for FrameEphemeris {
+    fn export_prediction(
+        &self,
+    ) -> Result<Box<dyn void_orbit::PredictionSnapshot>, void_orbit::PredictionError> {
+        if let Some(context) = &self.prediction {
+            context.check()?;
+        }
+        Ok(Box::new(FramePredictionSnapshot {
+            world: self.world.borrow().clone(),
+            system_index: self.system_index,
+            bodies: self.bodies.clone(),
+            offset: self.offset,
+            query_frame: self.query_frame,
+            context: None,
+            anchor: self
+                .prediction_anchor
+                .unwrap_or_else(|| self.world.borrow().continuation_fingerprint()),
+        }))
+    }
+    fn adopt_prediction(
+        &mut self,
+        snapshot: Box<dyn void_orbit::PredictionSnapshot>,
+    ) -> Result<(), void_orbit::PredictionError> {
+        let copy = snapshot
+            .into_any()
+            .downcast::<FramePredictionSnapshot>()
+            .map_err(|_| void_orbit::PredictionError::IncompatibleSnapshot)?;
+        let mut world = self.world.borrow_mut();
+        if world.continuation_fingerprint() != copy.anchor
+            || !world.compatible_prediction(&copy.world)
+        {
+            return Err(void_orbit::PredictionError::IncompatibleSnapshot);
+        }
+        *world = copy.world;
+        Ok(())
+    }
+
+    fn prediction_snapshot(
+        &self,
+        budget: void_orbit::PredictionBudget,
+        cancel: void_orbit::CancellationToken,
+    ) -> Result<Box<dyn void_orbit::PredictionSnapshot>, void_orbit::PredictionError> {
+        let context = void_orbit::PredictionContext::new(budget, cancel);
+        let world = self.world.borrow().prediction_copy(&context)?;
+        Ok(Box::new(FramePredictionSnapshot {
+            world,
+            system_index: self.system_index,
+            bodies: self.bodies.clone(),
+            offset: self.offset,
+            query_frame: self.query_frame,
+            context: Some(context),
+            anchor: self.world.borrow().continuation_fingerprint(),
+        }))
+    }
+    fn prediction_context(&self) -> Option<&void_orbit::PredictionContext> {
+        self.prediction.as_ref()
+    }
+    fn try_extend_to(&mut self, t: f64) -> Result<(), void_orbit::PredictionError> {
+        if let Some(context) = &self.prediction {
+            self.world.borrow_mut().try_extend_prediction(t, context)
+        } else {
+            self.extend_to(t);
+            Ok(())
+        }
+    }
+
     fn system_count(&self) -> usize {
         self.world.borrow().ids.len()
     }
