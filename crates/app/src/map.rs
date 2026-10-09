@@ -207,7 +207,7 @@ pub fn place_map_labels(
             .iter()
             .find(|(m, ..)| m.kind == label.kind && m.slot == slot)
             .map_or(Vec2::new(60.0, 14.0), |(marker, .., computed)| {
-                let measured = computed.size() * computed.inverse_scale_factor();
+                let measured = computed.unrounded_size() * computed.inverse_scale_factor();
                 // Before the first UI layout, keep the expected line height for placement.
                 Vec2::new(measured.x, measured.y.max(marker.font_size * 1.2))
             });
@@ -238,10 +238,14 @@ pub fn place_map_labels(
         } else {
             Visibility::Inherited
         };
-        node.left = px(at.x - 3.0);
-        node.top = px(at.y
-            - (computed.size().y * computed.inverse_scale_factor()).max(marker.font_size * 1.2)
-                * 0.5);
+        // Rounded layout bounds depend on the fractional position of both edges.
+        // Feeding them back into centering can alternate the anchor by a pixel.
+        let inverse_scale = computed.inverse_scale_factor();
+        let height = (computed.unrounded_size().y * inverse_scale).max(marker.font_size * 1.2);
+        let anchor = Vec2::new(at.x - 3.0, at.y - height * 0.5);
+        let anchor = (anchor / inverse_scale).round() * inverse_scale;
+        node.left = px(anchor.x);
+        node.top = px(anchor.y);
         if let Ok((mut t, mut v)) = texts.get_mut(marker.text) {
             if t.0 != *text {
                 t.0.clone_from(text);
@@ -274,4 +278,88 @@ pub fn label_click(
         }
     }
     (over, clicked)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn label_anchor_stays_fixed_when_rounded_layout_bounds_change() {
+        use bevy::camera::{CameraProjection, ComputedCameraValues, RenderTargetInfo};
+        let mut app = App::new();
+        let camera = Camera {
+            computed: ComputedCameraValues {
+                target_info: Some(RenderTargetInfo {
+                    physical_size: UVec2::new(1280, 720),
+                    scale_factor: 1.0,
+                }),
+                clip_from_view: PerspectiveProjection {
+                    aspect_ratio: 1280.0 / 720.0,
+                    ..default()
+                }
+                .get_clip_from_view(),
+                ..default()
+            },
+            ..default()
+        };
+        let label = MapLabel {
+            kind: LabelKind::Star,
+            text: "Sol".into(),
+            relative: DVec3::new(0.0, 0.0, -100.0),
+            color: "#ffd27a".into(),
+            priority: 1.0,
+        };
+        app.add_systems(
+            Update,
+            move |mut markers: Query<(&MapMarker, &mut Node, &mut Visibility, &ComputedNode)>,
+                  mut texts: Query<(&mut Text, &mut Visibility), Without<MapMarker>>| {
+                place_map_labels(
+                    &camera,
+                    &GlobalTransform::IDENTITY,
+                    &mut markers,
+                    &mut texts,
+                    std::slice::from_ref(&label),
+                    1.0,
+                    &|p| p.as_vec3(),
+                );
+            },
+        );
+        let text = app
+            .world_mut()
+            .spawn((Text::new("Sol"), Visibility::Inherited))
+            .id();
+        let marker = app
+            .world_mut()
+            .spawn((
+                MapMarker {
+                    kind: LabelKind::Star,
+                    slot: 0,
+                    text,
+                    font_size: 22.0,
+                },
+                Node::default(),
+                Visibility::Inherited,
+                ComputedNode::default(),
+            ))
+            .id();
+        for scale in [1.0_f32, 1.25, 2.0] {
+            let mut previous = None;
+            for rounded_height in [(26.4 * scale).floor(), (26.4 * scale).ceil()].repeat(3) {
+                *app.world_mut().get_mut::<ComputedNode>(marker).unwrap() = ComputedNode {
+                    size: Vec2::new(100.0 * scale, rounded_height),
+                    unrounded_size: Vec2::new(100.0, 26.4) * scale,
+                    inverse_scale_factor: scale.recip(),
+                    ..default()
+                };
+                app.update();
+                let node = app.world().get::<Node>(marker).unwrap();
+                let position = (node.left, node.top);
+                if let Some(previous) = previous {
+                    assert_eq!(position, previous);
+                }
+                previous = Some(position);
+            }
+        }
+    }
 }
