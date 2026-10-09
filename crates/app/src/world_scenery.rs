@@ -575,9 +575,11 @@ impl WorldScenery {
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
         tiles: &mut Query<&mut Transform, F>,
+        gpu: Option<&mut crate::gpu_lod::UploadContext<'_>>,
     ) {
         if let Some(b) = self.bodies.get_mut(&self.active) {
-            b.field.draw(commands, meshes, tiles, self.eye);
+            b.field
+                .draw_with_gpu(commands, meshes, tiles, self.eye, gpu);
         }
     }
     pub fn update_air(

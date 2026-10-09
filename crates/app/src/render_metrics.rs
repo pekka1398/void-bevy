@@ -20,6 +20,7 @@ use void_diagnostics::render::{RenderCapture, RenderValue};
 pub struct RenderFrameTag {
     pub id: u32,
     pub measure: bool,
+    pub warmup: bool,
 }
 #[derive(Resource)]
 pub struct RenderMetrics {
@@ -28,6 +29,7 @@ pub struct RenderMetrics {
     counters: DrawCounters,
     output: PathBuf,
     pub capture: RenderCapture,
+    warmup_capture: RenderCapture,
     pub adapter: serde_json::Value,
     pub last_pending_pipelines: Option<u32>,
     pub last_paths: BTreeSet<String>,
@@ -46,6 +48,7 @@ impl RenderMetrics {
             output: path,
             counters: DrawCounters::default(),
             capture: RenderCapture::default(),
+            warmup_capture: RenderCapture::default(),
             adapter: serde_json::Value::Null,
             last_pending_pipelines: None,
             last_paths: BTreeSet::new(),
@@ -62,7 +65,7 @@ impl RenderMetrics {
             (name,serde_json::json!({"samples":samples,"mean":total/(*samples as f64),"max":max,"last":last}))).collect();
         serde_json::json!({"adapter":self.adapter, "gpu_preprocessing_max_supported":self.gpu_support.get(),
             "mesh_allocator":{"gauges":allocator,"measurement":"main-world diagnostic gauges during run updates; not GPU timestamp-correlated; bytes are allocated slab capacity, not live geometry bytes"}, "benchmark":self.benchmark,
-            "capture":self.capture.report(), "delivered_frame_ids_including_settle_and_drain":self.delivered,
+            "capture":self.capture.report(),"warmup_capture":self.warmup_capture.report(), "delivered_frame_ids_including_settle_and_drain":self.delivered,
             "frames_without_pass_diagnostics":self.empty_pass_frames, "render_errors":*self.errors.lock().unwrap(), "draw_calls":{"tracked_capture_enabled":cfg!(feature="render-metrics"),
                 "coverage":"Bevy TrackedRenderPass + VOID air + pinned Bevy tonemapping/upscaling fullscreen passes",
                 "known_draw_records":"direct/fixed-count submissions; GPU-counted batches are read back separately and capped by each actual command max_count",
@@ -196,7 +199,12 @@ fn tag_frame(
     let pending = u32::try_from(cache.waiting_pipelines().count())
         .expect("render metrics: too many pipelines");
     let mut bytes = Vec::new();
-    for value in [tag.id, u32::from(tag.measure), pending] {
+    for value in [
+        tag.id,
+        u32::from(tag.measure),
+        pending,
+        u32::from(tag.warmup),
+    ] {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
     // A separate immutable buffer per frame also avoids queue-write aliasing across in-flight frames.
@@ -210,9 +218,14 @@ fn tag_frame(
     let recorder = ctx
         .diagnostic_recorder()
         .expect("render metrics: diagnostic recorder missing");
-    for (i, name) in ["void_frame_id", "void_measure", "void_pending_pipelines"]
-        .into_iter()
-        .enumerate()
+    for (i, name) in [
+        "void_frame_id",
+        "void_measure",
+        "void_pending_pipelines",
+        "void_warmup",
+    ]
+    .into_iter()
+    .enumerate()
     {
         let offset = (i * 4) as u64;
         recorder.record_u32(
@@ -314,6 +327,11 @@ pub(crate) fn collect(
         return;
     }
     let measure = get("render/void_measure").expect("render metrics: incomplete tag");
+    let warmup = get("render/void_warmup").expect("render metrics: missing warmup source tag");
+    assert_eq!(
+        id.time, warmup.time,
+        "render metrics: mismatched warmup source tag"
+    );
     let pending = get("render/void_pending_pipelines").expect("render metrics: incomplete tag");
     assert_eq!(
         id.time, measure.time,
@@ -340,14 +358,18 @@ pub(crate) fn collect(
         .1
         .remove(&frame)
         .expect("draw capture: missing source frame");
-    if measure.value == 0.0
-        || metrics
-            .limit
-            .is_some_and(|limit| metrics.capture.frames() >= limit)
+    if (measure.value == 0.0 && warmup.value == 0.0)
+        || (measure.value == 1.0
+            && metrics
+                .limit
+                .is_some_and(|limit| metrics.capture.frames() >= limit))
     {
         return;
     }
-    assert_eq!(measure.value, 1.0, "render metrics: invalid run tag");
+    assert!(
+        measure.value == 1.0 || (measure.value == 0.0 && warmup.value == 1.0),
+        "render metrics: invalid capture phase"
+    );
     let mut values: Vec<RenderValue> = store
         .iter()
         .filter_map(|d| {
@@ -362,6 +384,7 @@ pub(crate) fn collect(
                     "render/void_frame_id",
                     "render/void_measure",
                     "render/void_pending_pipelines",
+                    "render/void_warmup",
                 ]
                 .contains(&path)
             {
@@ -435,7 +458,11 @@ pub(crate) fn collect(
         }
     }
     if !values.is_empty() {
-        metrics.capture.sample(frame, values);
+        if warmup.value == 1.0 {
+            metrics.warmup_capture.sample(frame, values);
+        } else {
+            metrics.capture.sample(frame, values);
+        }
     }
 }
 

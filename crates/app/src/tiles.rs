@@ -87,6 +87,7 @@ pub struct TileField<M: Material = StandardMaterial> {
     owned_meshes: HashMap<Entity, AssetId<Mesh>>,
     indices: Indices,
     mesh_asset_usage: RenderAssetUsages,
+    gpu_packing: bool,
     material: Handle<M>,
     render: Vec<u64>,
     pub last_requests: usize,
@@ -154,6 +155,7 @@ impl<M: Material> TileField<M> {
             // Skirts are left out: seams are stitched, as the LOD lab draws by default.
             indices,
             mesh_asset_usage,
+            gpu_packing: crate::gpu_lod::enabled(),
             material,
             owned_meshes: HashMap::new(),
             render: Vec::new(),
@@ -407,6 +409,24 @@ impl<M: Material> TileField<M> {
         tiles: &mut Query<&mut Transform, F>,
         eye: DVec3,
     ) {
+        self.draw_with_gpu(commands, meshes, tiles, eye, None);
+    }
+    pub fn draw_with_gpu<F: QueryFilter>(
+        &mut self,
+        commands: &mut Commands,
+        meshes: &mut Assets<Mesh>,
+        tiles: &mut Query<&mut Transform, F>,
+        eye: DVec3,
+        mut gpu: Option<&mut crate::gpu_lod::UploadContext<'_>>,
+    ) {
+        if self.gpu_packing {
+            let context = gpu
+                .as_ref()
+                .expect("GPU LOD packing requires its plugin and upload context");
+            if !context.shared.ready() {
+                return;
+            }
+        }
         let started = self.profiling.then(Instant::now);
         let n = self.lod.options.resolution;
         let topology_changed = self.refresh_topology();
@@ -448,24 +468,52 @@ impl<M: Material> TileField<M> {
                 })
             });
             let mesh_started = self.profiling.then(Instant::now);
-            let cpu_mesh = tile_mesh_for_upload(
-                data,
-                coarse,
-                n,
-                self.indices.clone(),
-                self.lod.options.radius_meters,
-                self.mesh_asset_usage,
-            );
-            let bounds = self.vertex_displacement_bound.map(|displacement| {
-                assert!(displacement.is_finite() && displacement >= 0.0);
-                let mut bounds = cpu_mesh.compute_aabb().expect("terrain mesh bounds");
-                bounds.half_extents += displacement;
+            let (mesh, base_bounds, gpu_handle) = if self.gpu_packing {
+                let context = gpu.as_deref_mut().unwrap();
+                let upload = crate::gpu_lod::upload_data(
+                    data,
+                    coarse,
+                    n,
+                    &self.indices,
+                    self.lod.options.radius_meters,
+                );
+                let base_bounds = upload.bounds;
+                if self.profiling {
+                    self.profile.mesh_upload_bytes += upload.bytes_len();
+                }
+                let mesh = meshes.add(upload.metadata_mesh());
+                let handle = context
+                    .assets
+                    .add(upload.into_asset(mesh.clone(), context.shared));
+                (
+                    mesh,
+                    Some(base_bounds),
+                    Some(crate::gpu_lod::GpuTileHandle(handle)),
+                )
+            } else {
+                let cpu_mesh = tile_mesh_for_upload(
+                    data,
+                    coarse,
+                    n,
+                    self.indices.clone(),
+                    self.lod.options.radius_meters,
+                    self.mesh_asset_usage,
+                );
+                let base_bounds = self
+                    .vertex_displacement_bound
+                    .map(|_| cpu_mesh.compute_aabb().expect("terrain mesh bounds"));
+                if self.profiling {
+                    self.profile.mesh_upload_bytes += mesh_payload_bytes(&cpu_mesh);
+                }
+                (meshes.add(cpu_mesh), base_bounds, None)
+            };
+            let bounds = base_bounds.map(|mut bounds| {
+                if let Some(displacement) = self.vertex_displacement_bound {
+                    assert!(displacement.is_finite() && displacement >= 0.0);
+                    bounds.half_extents += displacement;
+                }
                 bounds
             });
-            if self.profiling {
-                self.profile.mesh_upload_bytes += mesh_payload_bytes(&cpu_mesh);
-            }
-            let mesh = meshes.add(cpu_mesh);
             if let Some(started) = mesh_started {
                 self.profile.mesh_ms += started.elapsed().as_secs_f64() * 1e3;
                 self.profile.created += 1;
@@ -478,9 +526,13 @@ impl<M: Material> TileField<M> {
                     anchor(data.origin, eye),
                 ))
                 .id();
+            if let Some(handle) = gpu_handle {
+                commands.entity(entity).insert(handle);
+            }
             if let Some(bounds) = bounds {
                 commands.entity(entity).insert(bounds);
-            } else if self.no_frustum_culling {
+            }
+            if self.no_frustum_culling && self.vertex_displacement_bound.is_none() {
                 commands.entity(entity).insert(NoFrustumCulling);
             }
             if self.wireframe {
@@ -511,6 +563,9 @@ fn mesh_payload_bytes(mesh: &Mesh) -> usize {
     match mesh.try_attributes() {
         Ok(attributes) => {
             let vertices: usize = attributes.map(|(_, values)| values.get_bytes().len()).sum();
+            if vertices == 0 {
+                return 0;
+            }
             vertices
                 + match mesh.indices().expect("terrain indices") {
                     Indices::U16(indices) => indices.len() * size_of::<u16>(),

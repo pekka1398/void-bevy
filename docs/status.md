@@ -1,3 +1,7 @@
+# LOD resident GPU packing 第三輪（2026-10-09）
+
+主遊戲已增加 opt-in compute packing，直接寫 Bevy resident mesh slabs；f64 sampler／stitch／碰撞與座標樹不變。U16／U32與sea bounds逐位元及固定pixel／checkpoint核對通過，15次天體切換未見allocation數累積。串行ABBA未顯示穩定整體性能優勢，CPU預設保留。動態camera／queue wait／worker配置仍在探索；未merge/push、未有人類GUI最終驗收。實驗、證據及資源事件見[第三輪報告](lod-resident-packing.md)。
+
 # LOD 硬體效能第二輪（2026-10-09）
 
 `work/lod-profiling`沿用獨立工作區。f64 AVX2/value-only、horizon/tangent cache、U16 indices與render-only mesh已接入主遊戲；scalar/AVX2與原golden、headless GPU固定圖片/checkpoint、15次天體切換ownership已核對。compute packing僅完成獨立probe，尚未接入renderer；bounds/workers仍為實驗開關。未merge/push、未有人類GUI最終驗收。數據、接縫與限制見[第二輪報告](lod-hardware-review.md)。

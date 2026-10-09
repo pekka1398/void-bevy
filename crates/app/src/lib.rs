@@ -17,3 +17,5 @@ pub mod multi_body;
 
 pub mod solar_mesh;
 pub mod world_scenery;
+
+pub mod gpu_lod;

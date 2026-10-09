@@ -749,10 +749,11 @@ impl Ground {
         m: &mut Assets<Mesh>,
         t: &mut Query<&mut Transform, F>,
         eye: DVec3,
+        gpu: Option<&mut crate::gpu_lod::UploadContext<'_>>,
     ) {
         match self {
-            Self::Plain(f, _) => f.draw(c, m, t, eye),
-            Self::World(w) => w.draw(c, m, t),
+            Self::Plain(f, _) => f.draw_with_gpu(c, m, t, eye, gpu),
+            Self::World(w) => w.draw(c, m, t, gpu),
         }
     }
 }
@@ -1372,6 +1373,10 @@ pub fn run(main_game: bool) {
     if main_game {
         app.add_plugins(crate::scenery::SceneryPlugin);
     }
+    if crate::gpu_lod::enabled() {
+        assert!(main_game, "GPU LOD packing is available in the main game");
+        app.add_plugins(crate::gpu_lod::GpuLodPackingPlugin);
+    }
     if benchmark_path.is_some() || render_path.is_some() {
         app.add_plugins(crate::render_metrics::RenderMetricsPlugin);
         if benchmark.is_none() {
@@ -1381,6 +1386,9 @@ pub fn run(main_game: bool) {
         }
     }
     if let Some(config) = benchmark {
+        app.world_mut()
+            .resource_mut::<crate::render_metrics::RenderFrameTag>()
+            .warmup = true;
         app.world_mut().spawn(Window {
             resolution: bevy::window::WindowResolution::new(config.width, config.height),
             ..default()
@@ -1491,6 +1499,7 @@ fn benchmark_tick(
     mut metrics: ResMut<crate::render_metrics::RenderMetrics>,
     mut tag: ResMut<crate::render_metrics::RenderFrameTag>,
     ground: Res<Ground>,
+    gpu_shared: Option<Res<crate::gpu_lod::GpuPackingShared>>,
     store: Res<bevy::diagnostic::DiagnosticsStore>,
     mut lab: NonSendMut<Lab>,
     mut exit: MessageWriter<bevy::app::AppExit>,
@@ -1511,7 +1520,10 @@ fn benchmark_tick(
                 .last_paths
                 .iter()
                 .any(|p| p.ends_with("void_air/elapsed_cpu"));
-        let ready = building == 0
+        let ready = gpu_shared
+            .as_ref()
+            .is_none_or(|shared| shared.ready() && shared.pending() == 0)
+            && building == 0
             && requests == 0
             && drawn > 0
             && metrics.last_pending_pipelines == Some(0)
@@ -1557,6 +1569,7 @@ fn benchmark_tick(
             }
             config.phase = 1;
             tag.measure = true;
+            tag.warmup = false;
             if let Some((profile, path)) = &mut lab.profile {
                 // Preserve cold-start tile work separately from settled render samples.
                 profile.write(path.with_extension("warmup.cpu.json"));
@@ -1571,6 +1584,7 @@ fn benchmark_tick(
                 "world_checkpoint":std::path::PathBuf::from(argument("--render-benchmark").unwrap()).with_extension("world.json"),
                 "scene_source":if argument("--load").is_some() { "saved checkpoint" } else { "preset" },
                 "lifecycle_body_sequence":config.lifecycle_bodies,"lifecycle_checks":config.lifecycle_checks,
+                "gpu_lod_packing_at_run":gpu_shared.as_ref().map(|shared|shared.report()),
                 "model_version":void_fleet_flight::session::MODEL_VERSION}),
             );
         }
@@ -1608,6 +1622,10 @@ fn benchmark_tick(
             let report = metrics.benchmark.as_mut().unwrap().as_object_mut().unwrap();
             report.insert("run_main_updates".into(), config.run_updates.into());
             report.insert("drain_updates".into(), config.drain.into());
+            report.insert(
+                "gpu_lod_packing_final".into(),
+                gpu_shared.as_ref().map(|shared| shared.report()).into(),
+            );
             metrics.write();
             println!(
                 "Rendered benchmark: {} delivered frames, {}x{}, {} scenario",
@@ -2817,6 +2835,8 @@ fn draw(
     assets: Res<RenderAssets>,
     mut ground: ResMut<Ground>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut gpu_sources: Option<ResMut<Assets<crate::gpu_lod::GpuTileSource>>>,
+    gpu_shared: Option<Res<crate::gpu_lod::GpuPackingShared>>,
     mut parts: Query<
         (&Visual, &mut Transform, &mut Visibility),
         (Without<Tile>, Without<LabCamera>),
@@ -3040,7 +3060,17 @@ fn draw(
         horizon_culling: true,
     });
     ground.set_wireframe(&mut commands, lab.session.sim().presentation.wire);
-    ground.draw(&mut commands, &mut meshes, &mut tiles, eye);
+    let mut gpu_context = gpu_sources
+        .as_mut()
+        .zip(gpu_shared.as_ref())
+        .map(|(assets, shared)| crate::gpu_lod::UploadContext { assets, shared });
+    ground.draw(
+        &mut commands,
+        &mut meshes,
+        &mut tiles,
+        eye,
+        gpu_context.as_mut(),
+    );
     if let Some((profile, _)) = &mut lab.profile {
         ground.record_lod_profile(profile);
     }
