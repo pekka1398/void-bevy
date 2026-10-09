@@ -132,6 +132,7 @@ pub struct LodSelection {
     pub select_seconds: f64,
     pub traversal_seconds: f64,
     pub balance_seconds: f64,
+    pub balance_cache_hit: bool,
     pub eviction_seconds: f64,
 }
 
@@ -150,6 +151,8 @@ pub struct PlanetLod {
     ready_mesh_bytes: usize,
     /// Builds in flight keep their node alive until the result is accepted.
     pinned_builds: std::collections::HashSet<u64>,
+    last_balanced: Option<Vec<u64>>,
+    balance_cache_enabled: bool,
 }
 
 struct Margin {
@@ -253,6 +256,8 @@ impl PlanetLod {
             ready_count: 0,
             ready_mesh_bytes: 0,
             pinned_builds: Default::default(),
+            last_balanced: None,
+            balance_cache_enabled: true,
         };
         for face in CUBE_FACES {
             lod.roots[usize::from(face)] = lod.create_node(TileKey::root(face), None);
@@ -262,6 +267,13 @@ impl PlanetLod {
 
     pub fn cached_tile_count(&self) -> usize {
         self.ready_count
+    }
+
+    /// Disable only the proven-balanced topology cache for profiling against a
+    /// full neighbour scan. Traversal, requests, prefetch and eviction still run.
+    pub fn set_balance_cache_enabled(&mut self, enabled: bool) {
+        self.balance_cache_enabled = enabled;
+        self.last_balanced = None;
     }
 
     pub fn cached_mesh_bytes(&self) -> usize {
@@ -398,7 +410,23 @@ impl PlanetLod {
         }
         let traversal_finished = Instant::now();
         let mut collapses = Vec::new();
-        let balanced = self.balance_selection(&walk.render, &mut walk.requests, &mut collapses);
+        // An identical ordered key set has identical neighbour-level gaps. A
+        // previously balanced output cannot split/collapse or request balancing
+        // children when used as input, regardless of newly completed builds.
+        // Unbalanced raw inputs are never memoized: ready children can change
+        // their balancing result on the very next frame.
+        let balance_cache_hit =
+            self.balance_cache_enabled && self.last_balanced.as_ref() == Some(&walk.render);
+        let balanced = if balance_cache_hit {
+            walk.render.clone()
+        } else {
+            self.balance_selection(&walk.render, &mut walk.requests, &mut collapses)
+        };
+        if self.balance_cache_enabled {
+            self.last_balanced
+                .get_or_insert_with(Vec::new)
+                .clone_from(&balanced);
+        }
         self.prefetch_balance_children(&walk.pending_splits, &balanced, &mut walk.requests);
         let balance_finished = Instant::now();
         let frame = self.frame;
@@ -417,6 +445,7 @@ impl PlanetLod {
             select_seconds: (finished - started).as_secs_f64(),
             traversal_seconds: (traversal_finished - started).as_secs_f64(),
             balance_seconds: (balance_finished - traversal_finished).as_secs_f64(),
+            balance_cache_hit,
             eviction_seconds: (finished - balance_finished).as_secs_f64(),
         }
     }

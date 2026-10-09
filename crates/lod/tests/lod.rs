@@ -403,3 +403,95 @@ fn stub(key: TileKey) -> TileMeshData {
         build_seconds: 0.0,
     }
 }
+
+#[test]
+fn balanced_cache_matches_full_scan_with_motion_completion_and_eviction() {
+    let options = PlanetLodOptions {
+        radius_meters: 1e6,
+        min_surface_height_meters: 0.0,
+        max_surface_height_meters: 1000.0,
+        occluder_radius_meters: 1e6,
+        lod_surface_band_meters: 1000.0,
+        resolution: 33,
+        max_level: 7,
+        split_distance_ratios: (0..7)
+            .map(|l| {
+                if l < 2 {
+                    f64::INFINITY
+                } else {
+                    0.5 / 2.0_f64.powi(l - 2)
+                }
+            })
+            .collect(),
+        retain_frames: 2,
+        max_cached_tiles: 500,
+    };
+    let mut cached = PlanetLod::new(options.clone());
+    let mut reference = PlanetLod::new(options);
+    reference.set_balance_cache_enabled(false);
+    let mut hits = 0;
+    let mut accepted = 0;
+    let mut collapses = 0;
+    for frame in 0..440 {
+        let angle = if frame < 100 {
+            0.0
+        } else if frame < 340 {
+            (frame - 100) as f64 * 0.08
+        } else {
+            19.12
+        };
+        let eye = DVec3::new(angle.cos(), 0.15, angle.sin()).normalize() * 1_002_000.0;
+        let view = LodView {
+            observer_positions: vec![DVec3::X * 1_002_000.0],
+            camera: Some(LodCamera {
+                position: eye,
+                distance_scale: 1.0,
+                max_level: 7,
+                focal_pixels: 935.0,
+                min_observer_cell_pixels: 2.0,
+            }),
+            distance_scale: 1.0,
+            horizon_culling: true,
+        };
+        let a = cached.select(&view);
+        let b = reference.select(&view);
+        hits += usize::from(a.balance_cache_hit);
+        collapses += a.balance_collapses.len();
+        assert!(!b.balance_cache_hit);
+        assert_eq!(a.render, b.render, "render order frame {frame}");
+        assert_eq!(
+            a.balance_collapses, b.balance_collapses,
+            "collapses frame {frame}"
+        );
+        assert_eq!(
+            (a.frame, a.visited, a.horizon_culled),
+            (b.frame, b.visited, b.horizon_culled)
+        );
+        assert_eq!(
+            a.requests
+                .iter()
+                .map(|r| (r.key, r.priority.to_bits()))
+                .collect::<Vec<_>>(),
+            b.requests
+                .iter()
+                .map(|r| (r.key, r.priority.to_bits()))
+                .collect::<Vec<_>>(),
+            "requests frame {frame}"
+        );
+        let mut requests = a.requests;
+        if frame % 7 == 0 {
+            requests.reverse();
+        }
+        for request in requests.into_iter().take(17) {
+            let mesh = Arc::new(stub(request.key));
+            cached.accept_tile(mesh.clone());
+            reference.accept_tile(mesh);
+            accepted += 1;
+        }
+        assert_eq!(cached.cached_tile_count(), reference.cached_tile_count());
+        assert_eq!(cached.node_count(), reference.node_count());
+    }
+    assert!(hits > 20, "exercise stable cache hits: {hits}");
+    assert!(collapses > 0, "exercise balancing coarsenings");
+    assert!(accepted > cached.cached_tile_count(), "exercise eviction");
+}

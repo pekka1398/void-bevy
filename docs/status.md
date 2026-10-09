@@ -1,3 +1,7 @@
+# LOD 動態與平衡快取第四輪（2026-10-09）
+
+新增worker queue／finish lag及固定步數camera壓力路徑；4／8／16 workers交錯測量未支持改worker預設。已平衡拓撲cache在static ABBA把balance p50從0.36–0.38ms降到約0.003ms；440-frame oracle、原golden與pixel／checkpoint核對通過。動態GPU packing有正面訊號，仍opt-in。app44、landing／Fleet156 tests及所屬LOD/lint通過。未merge/push、未有人類GUI最終驗收；完整證據與限制见[第四輪報告](lod-motion-review.md)。
+
 # LOD resident GPU packing 第三輪（2026-10-09）
 
 主遊戲已增加 opt-in compute packing，直接寫 Bevy resident mesh slabs；f64 sampler／stitch／碰撞與座標樹不變。U16／U32與sea bounds逐位元及固定pixel／checkpoint核對通過，15次天體切換未見allocation數累積。串行ABBA未顯示穩定整體性能優勢，CPU預設保留。動態camera／queue wait／worker配置仍在探索；未merge/push、未有人類GUI最終驗收。實驗、證據及資源事件見[第三輪報告](lod-resident-packing.md)。

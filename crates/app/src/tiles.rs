@@ -51,6 +51,7 @@ pub fn level_color(level: u32) -> [f32; 3] {
 pub struct TileProfile {
     pub traversal_ms: f64,
     pub balance_ms: f64,
+    pub balance_cache_hits: usize,
     pub eviction_ms: f64,
     pub finish_ms: f64,
     pub schedule_ms: f64,
@@ -63,12 +64,16 @@ pub struct TileProfile {
     pub removed: usize,
     pub seam_rebuilds: usize,
     pub worker_ms: Vec<f64>,
+    pub worker_queue_ms: Vec<f64>,
+    pub finish_lag_ms: Vec<f64>,
     pub mesh_upload_bytes: usize,
     pub main_mesh_payload_bytes: usize,
 }
 struct BuiltTile {
     mesh: TileMeshData,
     build_ms: Option<f64>,
+    queue_ms: Option<f64>,
+    completed_at: Option<Instant>,
 }
 
 /// The quadtree, its background builds and its drawn tiles, drawn with material `M`.
@@ -142,8 +147,10 @@ impl<M: Material> TileField<M> {
             // duplicate CPU upload arrays while keeping the handle and cached AABB.
             RenderAssetUsages::RENDER_WORLD
         };
+        let mut lod = PlanetLod::new(options);
+        lod.set_balance_cache_enabled(!std::env::args().any(|arg| arg == "--lod-full-balance"));
         Self {
-            lod: PlanetLod::new(options),
+            lod,
             terrain,
             building: HashMap::new(),
             profile: TileProfile::default(),
@@ -257,8 +264,15 @@ impl<M: Material> TileField<M> {
         for &ms in &p.worker_ms {
             profiler.sample("lod_worker_build", ms);
         }
+        for &ms in &p.worker_queue_ms {
+            profiler.sample("lod_worker_queue_wait", ms);
+        }
+        for &ms in &p.finish_lag_ms {
+            profiler.sample("lod_worker_finish_lag", ms);
+        }
         for (name, count) in [
             ("lod_visited", p.visited),
+            ("lod_balance_cache_hits", p.balance_cache_hits),
             ("lod_scheduled", p.scheduled),
             ("lod_completed", p.completed),
             ("lod_mesh_created", p.created),
@@ -296,6 +310,16 @@ impl<M: Material> TileField<M> {
             {
                 self.profile.worker_ms.push(ms);
             }
+            if self.profiling {
+                if let Some(ms) = tile.queue_ms {
+                    self.profile.worker_queue_ms.push(ms);
+                }
+                if let Some(completed) = tile.completed_at {
+                    self.profile
+                        .finish_lag_ms
+                        .push(completed.elapsed().as_secs_f64() * 1e3);
+                }
+            }
             let key = tile.mesh.key;
             self.lod.accept_tile(Arc::new(tile.mesh));
             self.lod.unpin_build(key);
@@ -313,6 +337,7 @@ impl<M: Material> TileField<M> {
             select_seconds,
             traversal_seconds,
             balance_seconds,
+            balance_cache_hit,
             eviction_seconds,
             visited,
             ..
@@ -320,6 +345,7 @@ impl<M: Material> TileField<M> {
         if self.profiling {
             self.profile.traversal_ms = traversal_seconds * 1e3;
             self.profile.balance_ms = balance_seconds * 1e3;
+            self.profile.balance_cache_hits = usize::from(balance_cache_hit);
             self.profile.eviction_ms = eviction_seconds * 1e3;
             self.profile.visited = visited;
         }
@@ -345,8 +371,16 @@ impl<M: Material> TileField<M> {
             let key = request.key;
             let terrain = self.terrain.clone();
             let profiling = self.profiling;
+            let queued_at = profiling.then(Instant::now);
             let task = AsyncComputeTaskPool::get().spawn(async move {
                 let started = profiling.then(Instant::now);
+                let queue_ms = queued_at.map(|queued| {
+                    started
+                        .expect("profiled worker start")
+                        .duration_since(queued)
+                        .as_secs_f64()
+                        * 1e3
+                });
                 let mesh = match terrain {
                     Some(terrain) => build_tile_mesh(
                         key,
@@ -362,9 +396,13 @@ impl<M: Material> TileField<M> {
                         build_tile_mesh(key, &sphere, options)
                     }
                 };
+                let completed_at = profiling.then(Instant::now);
                 BuiltTile {
                     mesh,
-                    build_ms: started.map(|s| s.elapsed().as_secs_f64() * 1e3),
+                    build_ms: started
+                        .map(|s| completed_at.unwrap().duration_since(s).as_secs_f64() * 1e3),
+                    queue_ms,
+                    completed_at,
                 }
             });
             self.building.insert(code, task);
@@ -899,6 +937,8 @@ mod lifecycle_tests {
             BuiltTile {
                 mesh,
                 build_ms: None,
+                queue_ms: None,
+                completed_at: None,
             }
         });
         field.building.insert(key.code(), task);

@@ -1440,6 +1440,8 @@ struct RenderBenchmark {
     lifecycle_bodies: Vec<String>,
     lifecycle_next: usize,
     lifecycle_checks: Vec<serde_json::Value>,
+    motion_updates: usize,
+    motion_body: Option<String>,
 }
 impl RenderBenchmark {
     fn from_arguments() -> Self {
@@ -1458,6 +1460,12 @@ impl RenderBenchmark {
         let height = u32::try_from(number("--height", "360")).unwrap();
         let frames = number("--benchmark-frames", "120");
         let settle = number("--benchmark-settle", "60");
+        let motion_updates = number("--benchmark-lod-motion", "0");
+        let motion_body = argument("--benchmark-motion-body");
+        assert!(
+            motion_updates == 0 || (motion_body.is_some() && frames >= motion_updates),
+            "LOD motion requires an explicit body and at least as many capture frames as motion updates"
+        );
         assert!(
             width > 0 && height > 0 && frames > 0 && settle > 0,
             "benchmark: zero extent or phase duration"
@@ -1488,6 +1496,8 @@ impl RenderBenchmark {
                 .unwrap_or_default(),
             lifecycle_next: 0,
             lifecycle_checks: Vec::new(),
+            motion_updates,
+            motion_body,
         }
     }
 }
@@ -1584,13 +1594,43 @@ fn benchmark_tick(
                 "world_checkpoint":std::path::PathBuf::from(argument("--render-benchmark").unwrap()).with_extension("world.json"),
                 "scene_source":if argument("--load").is_some() { "saved checkpoint" } else { "preset" },
                 "lifecycle_body_sequence":config.lifecycle_bodies,"lifecycle_checks":config.lifecycle_checks,
+                "lod_motion_updates":config.motion_updates,"lod_motion_body":config.motion_body,
                 "gpu_lod_packing_at_run":gpu_shared.as_ref().map(|shared|shared.report()),
                 "model_version":void_fleet_flight::session::MODEL_VERSION}),
             );
         }
     } else if config.phase == 1 {
         config.run_updates += 1;
-        if metrics.capture.frames() >= config.frames {
+        if config.run_updates <= config.motion_updates {
+            let id = config.motion_body.as_ref().expect("motion body configured");
+            let body = lab.session.sim().world.body_index(id);
+            let radius = lab.session.sim().fleet.ephemeris.bodies()[body].radius_meters;
+            let t = config.run_updates as f64 / config.motion_updates as f64;
+            let direction =
+                glam::DQuat::from_rotation_y(t * 0.4) * DVec3::new(-1.0, 0.2, 0.3).normalize();
+            let distance =
+                radius * (1.0005 + 0.002 * (0.5 - 0.5 * (t * std::f64::consts::TAU).cos()));
+            lab.session.execute(Action::View {
+                command: ViewCommand::BodyPreset {
+                    body,
+                    direction,
+                    distance,
+                },
+            });
+            lab.session.execute(Action::EndFrame {
+                paused: true,
+                rate: 0,
+            });
+        }
+        let (building, requests, _, _) = ground.readiness();
+        let motion_settled = config.motion_updates == 0
+            || (config.run_updates > config.motion_updates + config.settle
+                && building == 0
+                && requests == 0
+                && gpu_shared
+                    .as_ref()
+                    .is_none_or(|shared| shared.pending() == 0));
+        if metrics.capture.frames() >= config.frames && motion_settled {
             config.phase = 2;
             tag.measure = false;
             if let Some((profile, path)) = lab.profile.take() {
