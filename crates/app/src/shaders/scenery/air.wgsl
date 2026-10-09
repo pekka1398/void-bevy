@@ -394,7 +394,7 @@ fn transport(ray: Ray) -> Medium {
                 * air.sun_illuminance * air.enabled;
             // One continuous diffuse illumination field below, inside and above the deck.
             // Its column depth uses the same datum, taper and anchored density as cloud_density.
-            if air.cloud_morphology > 0.5 {
+            if air.clouds_enabled > 0.0 && air.cloud_morphology > 0.5 {
                 source *= deck_diffuse_transmission(position,max(t/air.focal_pixels,1.0));
             }
             if in_cloud {

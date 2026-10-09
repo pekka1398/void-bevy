@@ -601,6 +601,32 @@ impl WorldScenery {
         if let Some(b) = self.bodies.get(&self.active) {
             let mut material = grounds.get_mut(&b.material).expect("world ground material");
             crate::scenery::update_ground(&mut material.ground, self.eye, sun, fleet.time());
+            let descriptor = &sim.world.bodies[&fleet.ephemeris.bodies()[self.active].id];
+            material.ground.atmosphere_enabled = f32::from(u8::from(
+                descriptor.visual.atmosphere && sim.presentation.visual_air,
+            ));
+            material.ground.ocean_enabled = f32::from(u8::from(
+                descriptor.visual.ocean && sim.presentation.visual_ocean,
+            ));
+            material.ground.continuous_cloud = Vec4::ZERO;
+            if sim.presentation.visual_clouds
+                && let Some(clouds) = &descriptor.visual.cloud_profile
+                && clouds.morphology
+                    == void_scenery::atmosphere_scene::CloudMorphology::ContinuousDeck
+            {
+                let tau = clouds.vertical_optical_depth();
+                let transmission = void_scenery::clouds::deck_diffuse_transmission(
+                    tau,
+                    clouds.single_scattering_albedo,
+                )
+                .map(|v| v as f32);
+                material.ground.continuous_cloud = Vec4::new(
+                    transmission[0],
+                    transmission[1],
+                    transmission[2],
+                    tau as f32,
+                );
+            }
         }
         use void_scenery::atmosphere_scene::{AtmosphereVolume, ordered_volumes};
         let volumes: Vec<_> = self
@@ -623,6 +649,9 @@ impl WorldScenery {
                 let eye = -(turn * volumes[i].center);
                 let a = &self.atmospheres[&body];
                 let mut air = a.air;
+                air.enabled *= f32::from(u8::from(sim.presentation.visual_air));
+                air.multiple_enabled *= f32::from(u8::from(sim.presentation.visual_air));
+                air.clouds_enabled *= f32::from(u8::from(sim.presentation.visual_clouds));
                 air.update(
                     eye,
                     (turn.as_quat() * camera.rotation).normalize(),

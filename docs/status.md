@@ -1,5 +1,10 @@
 # 目前狀態
 
+## 主遊戲原生 UI 候選（2026-10-09，未合併）
+
+`work/game-ui`／`void-bevy-ui` 以封存 `ref/void/src` 的 HUD 為參考，已接時間／warp、分級燃料條與Δv、油門、高度／速度、原導航球、軌道／機動、DEV及說明。使用現有 Action／ViewCommand；新增四種純視覺開關，model31／world5。根審查、針對性 headless、lint、build及已記錄的 agent GUI核對通過；使用者在正常桌面視窗確認初步外觀可接受，完整控制／載具 GUI驗收仍分範圍待續。未合併／push。詳見 [main-game-ui](main-game-ui.md) 與 [spec](specs/game-ui.md)。
+
+
 ## Ares／Vesper 已合入 master（2026-10-09）
 
 使用者明確授權合併 Mars／Venus 並移除兩個 worktree。Mars `4a482f4`、Venus `eb17fe6` 已整合；保留兩邊程序地形、光學、普通地面 fixture 與主 camera 入口，三種 surface fixture 互斥。共同 GroundUniforms 與 WGSL 欄位順序一致；Vesper 厚雲漫射修正與 Ares 材質／薄塵參數同時保留。
