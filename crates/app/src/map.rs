@@ -15,7 +15,7 @@ pub const PLAN_COLOR: &str = "#ffca66";
 pub const VESSEL_COLOR: &str = "#7dffb0";
 fn body_label_font_size(body: &CelestialBody) -> f32 {
     if body.parent_index.is_none() {
-        22.0
+        18.0
     } else if matches!(
         body.id.rsplit('/').next().unwrap(),
         "cinder" | "vesper" | "aurelia" | "ares" | "velvet" | "halo" | "azure" | "abyss"
