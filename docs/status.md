@@ -1,12 +1,18 @@
-## N 體效能探索（未合併）
+## N 體效能探索（未合併，2026-10-10 收尾）
 
-`work/nbody-profiling` 以 navigation `60d97e4` 的 58 天體為基底。預設 f64 AVX2
-或 scalar local，原配對／累加順序、步長、Hermite、Kahan 不變；原 scalar 保留量測。
-58 體一天星曆約快 12%，實際月球導航的四次完整解一致；長區間同步星曆延伸／
-記憶體仍是主要待處理問題。獨立任務 workers 與 f32 精度已量測，未接 GPU 或平行導航。
-Orbit 39 + 額外 real-scale witness 1、Fleet 指定 7 通過；逐位元 backends oracle、
-scoped Clippy 通過。未跑 app GUI／人類驗收／全 workspace，未合併或 push。
-詳見 [N 體報告](nbody-performance.md)。
+`work/nbody-profiling` 基於 navigation `60d97e4`。預設使用 f64 AVX2 target rows
+（不支援平台採 scalar local）與單次 RK step 的同時間查詢重用；步長、累加順序、
+Hermite／Kahan、model／save 版本不變。正反序 headless 月球導航 scalar 約
+4.33–4.38 s、Auto 約 2.90 s、4-worker 實驗約 1.87–1.90 s，十次完整解相同。
+Workers 加入閒置 park／喚醒，仍只 explicit opt-in；沒有主遊戲 GPU／多 worker 接線。
+
+本輪 orbit release 44 passed＋另跑既有 ignored witness 1 passed；Fleet plans／
+expanded_bodies 7 passed、orbit all-target Clippy、fmt／diff check 通過。
+沒有 app GUI、人類驗收、全 workspace、合併或 push。同步延遲與約 128 MB 星曆
+保留仍存在，背景工作／取消／memory budget **尚未實作**。
+
+見 [實驗與本輪證據](nbody-experiments.md)、[下一階段實作與驗收規格](specs/performance-next.md)。
+第一輪數字保留於 [N 體報告](nbody-performance.md)，不可當最終預設效能。
 
 # 目前狀態
 

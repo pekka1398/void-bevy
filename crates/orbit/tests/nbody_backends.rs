@@ -5,16 +5,32 @@ use void_orbit::{
 };
 #[test]
 fn backends_preserve_full_states_and_history_across_vector_tails() {
-    let mut backends = vec![AccelerationBackend::ScalarLocal];
+    let mut backends = vec![
+        AccelerationBackend::ScalarLocal,
+        AccelerationBackend::Workers(1),
+        AccelerationBackend::Workers(2),
+        AccelerationBackend::Workers(4),
+        AccelerationBackend::Workers(8),
+    ];
     #[cfg(target_arch = "x86_64")]
     if std::is_x86_feature_detected!("avx2") {
         backends.push(AccelerationBackend::Avx2);
+        backends.push(AccelerationBackend::Avx2Rows);
+        backends.push(AccelerationBackend::SpinWorkers(2));
+        backends.push(AccelerationBackend::SpinWorkers(4));
+        backends.push(AccelerationBackend::SpinWorkers(8));
     }
     let full = build_system(&SystemSpec::from_json(include_str!(
         "../systems/sol-expanded.json"
     )));
     for backend in backends {
         for n in [1, 2, 3, 4, 5, 7, 8, 15, 57, 58] {
+            if let AccelerationBackend::Workers(count) | AccelerationBackend::SpinWorkers(count) =
+                backend
+                && count > n
+            {
+                continue;
+            }
             let mut system = full.clone();
             system.bodies.truncate(n);
             system.positions.truncate(n);
@@ -75,4 +91,10 @@ fn backends_preserve_full_states_and_history_across_vector_tails() {
             assert_eq!(p.acceleration_calls, p.steps * 15);
         }
     }
+}
+
+#[test]
+fn ephemeris_retains_send_sync_for_read_only_parallel_queries() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Ephemeris>();
 }

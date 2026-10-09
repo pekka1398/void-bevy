@@ -10,8 +10,11 @@ pub mod gravity;
 mod hermite;
 mod kepler;
 mod navigation;
+mod nbody_pool;
 #[cfg(target_arch = "x86_64")]
 mod nbody_simd;
+#[cfg(target_arch = "x86_64")]
+mod nbody_spin;
 mod nodes;
 mod propagator;
 mod reference_frames;

@@ -5,8 +5,14 @@ use void_orbit::*;
 fn main() {
     let backend = match std::env::args().nth(1).as_deref() {
         Some("scalar") => AccelerationBackend::ScalarReference,
+        Some("spin2") => AccelerationBackend::SpinWorkers(2),
+        Some("spin4") => AccelerationBackend::SpinWorkers(4),
+        Some("spin8") => AccelerationBackend::SpinWorkers(8),
+        Some("rows") => AccelerationBackend::Avx2Rows,
+        Some("simd") => AccelerationBackend::Avx2,
         Some("local") => AccelerationBackend::ScalarLocal,
-        _ => AccelerationBackend::Auto,
+        Some("auto") | None => AccelerationBackend::Auto,
+        _ => panic!("unknown navigation backend"),
     };
     let system = build_system(&SystemSpec::from_json(include_str!(
         "../systems/sol-expanded.json"

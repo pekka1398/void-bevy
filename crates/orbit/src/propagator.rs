@@ -301,6 +301,17 @@ impl Field {
         y: &[f64; DIM],
         dy: &mut [f64; DIM],
     ) {
+        self.evaluate_with_positions(ephemeris, t, y, dy, true);
+    }
+
+    fn evaluate_with_positions(
+        &mut self,
+        ephemeris: &dyn EphemerisSource,
+        t: f64,
+        y: &[f64; DIM],
+        dy: &mut [f64; DIM],
+        refresh: bool,
+    ) {
         let relative = matches!(
             self.control,
             Some(Control::Thrust(ThrustControl {
@@ -308,9 +319,9 @@ impl Field {
                 ..
             }))
         );
-        if relative {
+        if refresh && relative {
             ephemeris.states_at(t, &mut self.positions, Some(&mut self.velocities));
-        } else {
+        } else if refresh {
             ephemeris.positions_at(t, &mut self.positions);
         }
         let (x, yy, z) = (y[0], y[1], y[2]);
@@ -425,9 +436,15 @@ pub struct VesselPropagator {
     stepper: Dopri5<DIM>,
     field: Field,
     body_count: usize,
+    stage_cache: bool,
 }
 
 impl VesselPropagator {
+    /// Disable repeated stage-time position reuse for oracle and profiling comparisons.
+    pub fn set_stage_cache(&mut self, enabled: bool) {
+        self.stage_cache = enabled;
+    }
+
     pub fn new(ephemeris: &dyn EphemerisSource, tolerances: Tolerances) -> Self {
         assert!(
             tolerances.position_meters > 0.0 && tolerances.velocity_meters_per_second > 0.0,
@@ -456,6 +473,7 @@ impl VesselPropagator {
                 air: None,
             },
             body_count: bodies.len(),
+            stage_cache: true,
         }
     }
 
@@ -559,8 +577,15 @@ impl VesselPropagator {
             let last_step = run.step_hint >= remaining;
             let h = if last_step { remaining } else { run.step_hint };
             let field = &mut self.field;
+            let mut previous_time = None;
+            let cache = self.stage_cache;
             self.stepper.step(
-                &mut |t, y, dy| field.evaluate(ephemeris, t, y, dy),
+                &mut |t, y, dy| {
+                    let bits = t.to_bits();
+                    let refresh = !cache || previous_time != Some(bits);
+                    field.evaluate_with_positions(ephemeris, t, y, dy, refresh);
+                    previous_time = Some(bits);
+                },
                 run.time,
                 &run.y,
                 &run.dy,

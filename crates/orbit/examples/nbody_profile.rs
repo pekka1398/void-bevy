@@ -20,10 +20,17 @@ fn main() {
     assert!(repeats > 0 && days > 0.0 && days <= 30.0);
     let profile = std::env::args().nth(4).as_deref() == Some("profile");
     let backend = match std::env::args().nth(2).as_deref() {
+        Some("spin2") => AccelerationBackend::SpinWorkers(2),
+        Some("spin4") => AccelerationBackend::SpinWorkers(4),
+        Some("spin8") => AccelerationBackend::SpinWorkers(8),
+        Some("rows") => AccelerationBackend::Avx2Rows,
         Some("simd") => AccelerationBackend::Avx2,
+        Some("workers2") => AccelerationBackend::Workers(2),
+        Some("workers4") => AccelerationBackend::Workers(4),
+        Some("workers8") => AccelerationBackend::Workers(8),
         Some("local") => AccelerationBackend::ScalarLocal,
         Some("scalar") | None => AccelerationBackend::ScalarReference,
-        _ => panic!("kernel must be scalar, local, or simd"),
+        _ => panic!("backend must be scalar, local, simd, rows, workers2/4/8, or spin2/4/8"),
     };
     for (name, json) in [
         ("sol15", include_str!("../systems/sol.json")),

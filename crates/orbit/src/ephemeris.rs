@@ -63,6 +63,9 @@ pub enum AccelerationBackend {
     ScalarReference,
     ScalarLocal,
     Avx2,
+    Avx2Rows,
+    Workers(usize),
+    SpinWorkers(usize),
 }
 
 #[derive(Clone, Copy, Debug, Default, serde::Serialize)]
@@ -81,6 +84,9 @@ pub struct Ephemeris {
     bodies: Vec<CelestialBody>,
     backend: AccelerationBackend,
     simd_q: Vec<f64>,
+    workers: Option<crate::nbody_pool::Pool>,
+    #[cfg(target_arch = "x86_64")]
+    spin_workers: Option<crate::nbody_spin::SpinPool>,
     profile: Option<EphemerisProfile>,
     step_seconds: f64,
     epoch_seconds: f64,
@@ -108,7 +114,7 @@ impl Ephemeris {
         if matches!(backend, AccelerationBackend::Auto) {
             #[cfg(target_arch = "x86_64")]
             if std::is_x86_feature_detected!("avx2") {
-                return AccelerationBackend::Avx2;
+                return AccelerationBackend::Avx2Rows;
             }
             return AccelerationBackend::ScalarLocal;
         }
@@ -135,6 +141,9 @@ impl Ephemeris {
             bodies: system.bodies.clone(),
             backend: Self::resolve_backend(AccelerationBackend::default()),
             simd_q: vec![0.0; n * 3],
+            workers: None,
+            #[cfg(target_arch = "x86_64")]
+            spin_workers: None,
             profile: None,
             step_seconds: options.step_seconds,
             epoch_seconds: 0.0,
@@ -165,7 +174,10 @@ impl Ephemeris {
     /// Select a measured kernel. AVX2 explicitly rejects unsupported hardware.
     pub fn set_acceleration_backend(&mut self, backend: AccelerationBackend) {
         let backend = Self::resolve_backend(backend);
-        if matches!(backend, AccelerationBackend::Avx2) {
+        if matches!(
+            backend,
+            AccelerationBackend::Avx2 | AccelerationBackend::Avx2Rows
+        ) {
             #[cfg(target_arch = "x86_64")]
             assert!(
                 std::is_x86_feature_detected!("avx2"),
@@ -174,7 +186,43 @@ impl Ephemeris {
             #[cfg(not(target_arch = "x86_64"))]
             panic!("ephemeris AVX2 unavailable on this architecture");
         }
+        self.workers = if let AccelerationBackend::Workers(count) = backend {
+            Some(crate::nbody_pool::Pool::new(&self.gm, count))
+        } else {
+            None
+        };
+        #[cfg(target_arch = "x86_64")]
+        {
+            self.spin_workers = if let AccelerationBackend::SpinWorkers(count) = backend {
+                Some(crate::nbody_spin::SpinPool::new(&self.gm, count))
+            } else {
+                None
+            };
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        assert!(
+            !matches!(backend, AccelerationBackend::SpinWorkers(_)),
+            "SIMD workers require x86_64"
+        );
         self.backend = backend;
+    }
+
+    /// Exact newest integrator state, before interpolation; primarily for backend diagnostics.
+    pub fn current_states(&self, positions: &mut [DVec3], velocities: &mut [DVec3]) {
+        assert_eq!(
+            positions.len(),
+            self.bodies.len(),
+            "current positions length"
+        );
+        assert_eq!(
+            velocities.len(),
+            self.bodies.len(),
+            "current velocities length"
+        );
+        for i in 0..self.bodies.len() {
+            positions[i] = DVec3::from_slice(&self.q[3 * i..3 * i + 3]);
+            velocities[i] = DVec3::from_slice(&self.v[3 * i..3 * i + 3]);
+        }
     }
 
     pub fn bodies(&self) -> &[CelestialBody] {
@@ -337,8 +385,26 @@ impl Ephemeris {
     }
 
     fn compute_accelerations_inner(&mut self) {
+        if let Some(pool) = &mut self.workers {
+            pool.compute(&self.q, &mut self.a);
+            return;
+        }
         #[cfg(target_arch = "x86_64")]
-        if matches!(self.backend, AccelerationBackend::Avx2) {
+        if let Some(pool) = &mut self.spin_workers {
+            let n = self.gm.len();
+            for i in 0..n {
+                for c in 0..3 {
+                    self.simd_q[c * n + i] = self.q[3 * i + c];
+                }
+            }
+            pool.compute(&self.simd_q, &mut self.a);
+            return;
+        }
+        #[cfg(target_arch = "x86_64")]
+        if matches!(
+            self.backend,
+            AccelerationBackend::Avx2 | AccelerationBackend::Avx2Rows
+        ) {
             // SAFETY: set_acceleration_backend checks CPU support; array sizes are established by new.
             let n = self.gm.len();
             for i in 0..n {
@@ -347,7 +413,11 @@ impl Ephemeris {
                 }
             }
             unsafe {
-                crate::nbody_simd::accelerations(&self.simd_q, &self.gm, &mut self.a);
+                if matches!(self.backend, AccelerationBackend::Avx2Rows) {
+                    crate::nbody_simd::rows(&self.simd_q, &self.gm, &mut self.a);
+                } else {
+                    crate::nbody_simd::accelerations(&self.simd_q, &self.gm, &mut self.a);
+                }
             }
             return;
         }
