@@ -1,3 +1,5 @@
+mod common;
+use common::Setup;
 use glam::{DQuat, DVec3};
 use void_assembly::fresh_craft;
 use void_landing::{FrameState, PlanetFrame, earth_size, planet_environment, planet_ephemeris};
@@ -198,7 +200,7 @@ fn eccentric_chute_torque_enters_orbit_and_bubble_without_spending_trial_state()
 
 #[test]
 fn passive_air_does_not_wake_sleeping_ground_bodies_or_block_idle_rails() {
-    let scene = void_vessels::create_lab_scene(void_vessels::Scenario::Launch);
+    let scene = common::scene(Setup::Launch);
     let mut place = scene
         .fleet
         .environment()

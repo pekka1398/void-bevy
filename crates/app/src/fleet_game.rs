@@ -18,7 +18,8 @@ use void_assembly_lab::parts::RenderAssets;
 use void_fleet_flight::session::{
     Action, FlightSession, InitialWorld, Outcome, Playback, Recording,
 };
-use void_landing::{demo_rocket, landing_lod_options};
+use void_fleet_flight::world::ground_tiles;
+use void_landing::landing_lod_options;
 use void_lod::{LodCamera, LodView};
 use void_vessels::nearby_site;
 
@@ -681,9 +682,8 @@ enum Ground {
 impl Ground {
     fn reset(&mut self, planet: &void_landing::LandingPlanet) {
         if let Self::Plain(field, material) = self {
-            let demo = demo_rocket(&planet.terrain);
             **field = TileField::new(
-                landing_lod_options(&planet.terrain, &demo.options.contact),
+                landing_lod_options(&planet.terrain, &ground_tiles(&planet.terrain)),
                 Some(planet.terrain.clone()),
                 material.clone(),
             );
@@ -892,11 +892,11 @@ pub fn run(main_game: bool) {
         planet.rock_height = 10.0;
         planet.snow_height = 100.0;
         // This explicit acceptance fixture starts on the day side of the authored light.
-        planet.launch_site = Some(DVec3::new(0.8, -0.55, 0.25).normalize());
+        planet.launch_site = DVec3::new(0.8, -0.55, 0.25).normalize();
     }
     if main_game && std::env::args().any(|a| a == "--rover") && id == "terra" {
         // Keep the actual Hills terrain; select a sunlit starting site for visual acceptance.
-        planet.launch_site = Some(DVec3::new(0.8, -0.55, 0.25).normalize());
+        planet.launch_site = DVec3::new(0.8, -0.55, 0.25).normalize();
     }
     let craft = argument("--craft").map_or_else(
         || {
@@ -917,9 +917,7 @@ pub fn run(main_game: bool) {
                 .expect("invalid craft")
         },
     );
-    let site = planet
-        .launch_site
-        .unwrap_or_else(|| demo_rocket(&planet.planet.terrain).launch_site.normalize());
+    let site = planet.launch_site;
     let air =
         planet.planet.air_density_scale.is_some() && !std::env::args().any(|a| a == "--vacuum");
     let replay_path = argument("--replay");
@@ -1593,7 +1591,6 @@ fn setup(
 ) {
     let assets = RenderAssets::new(&mut meshes, &mut materials);
     commands.insert_resource(assets);
-    let demo = demo_rocket(&lab.session.sim().planet.terrain);
     let material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.32, 0.42, 0.28),
         perceptual_roughness: 1.0,
@@ -1601,7 +1598,10 @@ fn setup(
     });
     commands.insert_resource(Ground::Plain(
         Box::new(TileField::new(
-            landing_lod_options(&lab.session.sim().planet.terrain, &demo.options.contact),
+            landing_lod_options(
+                &lab.session.sim().planet.terrain,
+                &ground_tiles(&lab.session.sim().planet.terrain),
+            ),
             Some(lab.session.sim().planet.terrain.clone()),
             material.clone(),
         )),
@@ -3296,7 +3296,7 @@ mod tests {
     fn rendezvous_lab() -> Lab {
         let planet = game_planet_by_id("aurelia", None);
         let craft = void_assembly::rcs_flight_rocket();
-        let site = demo_rocket(&planet.planet.terrain).launch_site.normalize();
+        let site = planet.launch_site;
         let initial = InitialWorld::new(&planet.planet, &craft, site, true)
             .with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque);
         let mut lab = new_lab(FlightSession::new(initial).with_recording(), craft);
@@ -3746,7 +3746,7 @@ mod tests {
     pub(super) fn initialized_scene(main_game: bool) -> App {
         let planet = game_planet_by_id(if main_game { "aurelia" } else { "pebble" }, None);
         let craft = void_assembly::flight_rocket();
-        let site = demo_rocket(&planet.planet.terrain).launch_site.normalize();
+        let site = planet.launch_site;
         let mut initial = InitialWorld::new(&planet.planet, &craft, site, main_game);
         if main_game {
             initial.world = void_fleet_flight::world::solar_scenery(&planet.planet);
@@ -4014,7 +4014,7 @@ mod tests {
         );
         let planet = game_planet_by_id("luna", None);
         let craft = demo_craft();
-        let site = demo_rocket(&planet.planet.terrain).launch_site.normalize();
+        let site = planet.launch_site;
         {
             let mut lab = app.world_mut().non_send_mut::<Lab>();
             lab.session =

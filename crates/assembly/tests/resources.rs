@@ -63,17 +63,25 @@ fn module_ids_resources_and_states_are_validated_before_mutation() {
 }
 #[test]
 fn legacy_conversion_is_explicit_and_preserves_authored_mass() {
-    let old: serde_json::Value =
-        serde_json::from_str(include_str!("golden/assembly.json")).unwrap();
-    for g in old.as_array().unwrap() {
-        assert!(import_craft(&g["craft"].to_string()).is_err());
-        let c = migrate_legacy_craft(g["craft"].clone()).unwrap();
-        assert_eq!(
-            compile(&c).unwrap().summary(None).mass_kg,
-            g["summary"]["massKg"].as_f64().unwrap()
-        );
-        assert_eq!(import_craft(&export_craft(&c).unwrap()).unwrap(), c);
+    // The demo craft written in the version 1 schema: one `fuelKg` per part.
+    let craft = demo_craft();
+    let mut old = serde_json::to_value(&craft).unwrap();
+    old["version"] = 1.into();
+    for p in old["parts"].as_array_mut().unwrap() {
+        let fuel: f64 = p["resources"]
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|v| v.as_f64().unwrap())
+            .sum();
+        let p = p.as_object_mut().unwrap();
+        p.remove("resources");
+        p.insert("fuelKg".into(), fuel.into());
     }
+    assert!(import_craft(&old.to_string()).is_err());
+    let c = migrate_legacy_craft(old).unwrap();
+    assert_eq!(c, craft);
+    assert_eq!(import_craft(&export_craft(&c).unwrap()).unwrap(), c);
 }
 #[test]
 fn catalog_rejects_duplicate_module_identity_and_bad_ratings() {

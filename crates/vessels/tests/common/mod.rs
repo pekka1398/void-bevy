@@ -1,16 +1,19 @@
-//! The six owning TS lab scenarios, usable by both headless checks and the Bevy lab.
-use crate::{Fleet, FleetOptions, GroundSpec, VesselMode};
+//! Fleet scenes the tests start from: a ground launch, orbital encounters and coasts, a spinning
+//! separation, a collision and a tumble.
+#![allow(dead_code)]
 use glam::{DQuat, DVec3};
 use std::sync::Arc;
-use void_assembly::{Craft, add_part, demo_craft, fresh_craft};
+use void_assembly::demo_craft;
 use void_environment::{BodyEnvironment, Environment};
 use void_frames::{BodyId, BodyStates};
 use void_landing::{
     ContactWorldOptions, LandingPlanet, aurelia, level_for_tile_size, pebble, planet_ephemeris,
 };
 use void_orbit::{PropagationRun, VesselState};
+use void_vessels::{Fleet, FleetOptions, GroundSpec, VesselMode, flat_site, nearby_site, pod_tank};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Scenario {
+pub enum Setup {
     Launch,
     Encounter,
     Coast,
@@ -18,7 +21,7 @@ pub enum Scenario {
     Join,
     Sas,
 }
-impl Scenario {
+impl Setup {
     pub const ALL: [Self; 6] = [
         Self::Launch,
         Self::Encounter,
@@ -38,58 +41,15 @@ impl Scenario {
         }
     }
 }
-pub struct LabScene {
+pub struct Scene {
     pub fleet: Fleet,
     pub planet: LandingPlanet,
     pub body_index: usize,
     pub references: Vec<(String, PropagationRun)>,
-    pub scenario: Scenario,
+    pub scenario: Setup,
 }
-pub fn pod_tank(name: &str) -> Craft {
-    let mut c = add_part(&fresh_craft(), "tank-small", "p1", "bottom", "top").unwrap();
-    c.name = name.into();
-    c
-}
-pub fn nearby_site(d: DVec3, metres: f64, radius: f64) -> DVec3 {
-    let east = if d.x.hypot(d.y) > 1e-9 {
-        DVec3::new(-d.y, d.x, 0.0).normalize()
-    } else {
-        DVec3::X
-    };
-    d * (metres / radius).cos() + east * (metres / radius).sin()
-}
-pub fn flat_site(planet: &LandingPlanet) -> DVec3 {
-    let t = &planet.terrain;
-    let base = DVec3::new(0.8, 0.55, 0.25).normalize();
-    let east = DVec3::new(-base.y, base.x, 0.0).normalize();
-    let north = base.cross(east);
-    let mut best = base;
-    let mut slope = f64::INFINITY;
-    for i in -20..20 {
-        for j in -20..20 {
-            let d = (base
-                + east * (i as f64 * 50.0 / t.radius_meters)
-                + north * (j as f64 * 50.0 / t.radius_meters))
-                .normalize();
-            let h = |e: f64, n: f64| {
-                t.height(
-                    (d + east * (e / t.radius_meters) + north * (n / t.radius_meters)).normalize(),
-                )
-            };
-            let value = (h(3.0, 0.0) - h(-3.0, 0.0))
-                .abs()
-                .max((h(0.0, 3.0) - h(0.0, -3.0)).abs())
-                / 6.0;
-            if value < slope {
-                slope = value;
-                best = d;
-            }
-        }
-    }
-    best
-}
-pub fn create_lab_scene(scenario: Scenario) -> LabScene {
-    let planet = if scenario == Scenario::Launch {
+pub fn scene(scenario: Setup) -> Scene {
+    let planet = if scenario == Setup::Launch {
         pebble()
     } else {
         aurelia()
@@ -129,7 +89,7 @@ pub fn create_lab_scene(scenario: Scenario) -> LabScene {
     );
     let mut references = vec![];
     match scenario {
-        Scenario::Launch => {
+        Setup::Launch => {
             let site = flat_site(&planet);
             fleet.launch_landed(&demo_craft(), body_index, site);
             fleet.launch_landed(
@@ -143,8 +103,8 @@ pub fn create_lab_scene(scenario: Scenario) -> LabScene {
                 nearby_site(site, 5000.0, planet.terrain.radius_meters),
             );
         }
-        Scenario::Encounter | Scenario::Coast => {
-            let b = if scenario == Scenario::Encounter {
+        Setup::Encounter | Setup::Coast => {
+            let b = if scenario == Setup::Encounter {
                 initial(DVec3::new(30.0, 0.0, -3850.0), DVec3::Z * 9.0)
             } else {
                 initial(DVec3::Y * 300.0, DVec3::ZERO)
@@ -165,7 +125,7 @@ pub fn create_lab_scene(scenario: Scenario) -> LabScene {
                 ));
             }
         }
-        Scenario::Separate => {
+        Setup::Separate => {
             fleet.launch(
                 &demo_craft(),
                 initial(DVec3::ZERO, DVec3::ZERO),
@@ -173,7 +133,7 @@ pub fn create_lab_scene(scenario: Scenario) -> LabScene {
                 DVec3::Y * 0.05,
             );
         }
-        Scenario::Join => {
+        Setup::Join => {
             fleet.launch(
                 &pod_tank("Join A"),
                 initial(DVec3::ZERO, DVec3::ZERO),
@@ -187,7 +147,7 @@ pub fn create_lab_scene(scenario: Scenario) -> LabScene {
                 DVec3::ZERO,
             );
         }
-        Scenario::Sas => {
+        Setup::Sas => {
             fleet.launch(
                 &pod_tank("Tumbling vessel"),
                 initial(DVec3::ZERO, DVec3::ZERO),
@@ -204,14 +164,14 @@ pub fn create_lab_scene(scenario: Scenario) -> LabScene {
     }
     fleet.advance(0.0);
     assert!(fleet.vessel_ids().iter().all(|id| fleet.snapshot(id).mode
-        == if scenario == Scenario::Launch {
+        == if scenario == Setup::Launch {
             VesselMode::Ground
-        } else if matches!(scenario, Scenario::Encounter | Scenario::Separate) {
+        } else if matches!(scenario, Setup::Encounter | Setup::Separate) {
             VesselMode::Orbit
         } else {
             VesselMode::Bubble
         }));
-    LabScene {
+    Scene {
         fleet,
         planet,
         body_index,

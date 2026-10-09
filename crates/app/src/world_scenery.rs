@@ -263,9 +263,11 @@ pub fn build_scenes(
             transmittance: trans,
             irradiance,
         });
-        let demo = void_landing::demo_rocket(&terrain);
         let mut field = TileField::new(
-            void_landing::landing_lod_options(&terrain, &demo.options.contact),
+            void_landing::landing_lod_options(
+                &terrain,
+                &void_fleet_flight::world::ground_tiles(&terrain),
+            ),
             Some(std::sync::Arc::new(Appearance {
                 terrain,
                 color: d.visual.surface_color,
@@ -450,9 +452,11 @@ impl WorldScenery {
             for (&index, b) in &mut self.bodies {
                 b.field.unload(commands, meshes);
                 let terrain = sim.terrains[&index].clone();
-                let demo = void_landing::demo_rocket(&terrain);
                 b.field = TileField::new(
-                    void_landing::landing_lod_options(&terrain, &demo.options.contact),
+                    void_landing::landing_lod_options(
+                &terrain,
+                &void_fleet_flight::world::ground_tiles(&terrain),
+            ),
                     Some(std::sync::Arc::new(Appearance {
                         terrain,
                         color: b.color,

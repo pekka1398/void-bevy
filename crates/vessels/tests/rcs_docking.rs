@@ -1,3 +1,5 @@
+mod common;
+use common::{Setup, scene};
 use glam::{DMat3, DQuat, DVec3};
 use void_assembly::*;
 use void_modules::{
@@ -62,7 +64,7 @@ fn allocator_translation_rotation_saturation_and_fuel() {
     );
 }
 fn pair(offset: DVec3, velocity: DVec3, rotation: DQuat, spin: DVec3) -> Fleet {
-    let mut s = create_lab_scene(Scenario::Coast);
+    let mut s = scene(Setup::Coast);
     // Keep existing ships distant; tests exercise true docking modules on newly launched craft.
     let snap = s.fleet.snapshot("v1");
     let craft = rendezvous_pod();
@@ -507,7 +509,7 @@ fn just_inside_capture_limits_succeeds() {
 /// Two equal asymmetric supplies accelerate together, keeping a bubble owner throughout the burn.
 /// Only the upper pod has fuel, so mass depletion moves the live scene COM away from its parts origin.
 fn depleted_asymmetric_scene() -> (Fleet, String) {
-    let mut fleet = create_lab_scene(Scenario::Coast).fleet;
+    let mut fleet = scene(Setup::Coast).fleet;
     let start = fleet.snapshot("v1");
     let mut craft = add_part(&rendezvous_pod(), "rcs-pod", "p1", "bottom", "top").unwrap();
     craft.parts[1]

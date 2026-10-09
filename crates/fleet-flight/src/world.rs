@@ -10,6 +10,20 @@ use void_orbit::{
 use void_terrain::{Terrain, TerrainConfig};
 use void_vessels::GroundSpec;
 
+/// The collision tiles of a body's ground scene. The drawn terrain is built from the same options
+/// (`void_landing::landing_lod_options`), so what is drawn is what is collided with.
+pub fn ground_tiles(terrain: &Terrain) -> ContactWorldOptions {
+    ContactWorldOptions {
+        step_seconds: 1.0 / 60.0,
+        tile_level: level_for_tile_size(terrain.radius_meters, 300.0),
+        tile_resolution: 33,
+        tile_reach_meters: 300.0,
+        tile_keep_meters: 600.0,
+        recenter_meters: 5000.0,
+        sleeping: true,
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct VisualSettings {
@@ -365,15 +379,7 @@ impl WorldDescription {
                     body_index: body.index,
                     band_enter_meters: 200.0,
                     band_exit_meters: 400.0,
-                    tiles: ContactWorldOptions {
-                        step_seconds: 1.0 / 60.0,
-                        tile_level: level_for_tile_size(t.radius_meters, 300.0),
-                        tile_resolution: 33,
-                        tile_reach_meters: 300.0,
-                        tile_keep_meters: 600.0,
-                        recenter_meters: 5000.0,
-                        sleeping: true,
-                    },
+                    tiles: ground_tiles(&t),
                 });
                 t
             });

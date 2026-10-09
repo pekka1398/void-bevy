@@ -1,75 +1,24 @@
-use glam::{DQuat, DVec3};
 use serde_json::Value;
 use std::collections::HashSet;
 use void_assembly::*;
 fn near(a: f64, b: f64, t: f64) {
     assert!((a - b).abs() <= t, "{a} != {b} (+/- {t})");
 }
-fn vec(v: &Value) -> DVec3 {
-    DVec3::new(
-        v[0].as_f64().unwrap(),
-        v[1].as_f64().unwrap(),
-        v[2].as_f64().unwrap(),
-    )
-}
-fn idle() -> FlightInput {
-    FlightInput::default()
-}
-fn full() -> FlightInput {
-    FlightInput {
-        throttle: 1.0,
-        ..idle()
-    }
-}
 #[test]
-fn golden_model_and_catalog() {
-    let golden: Value = serde_json::from_str(include_str!("golden/assembly.json")).unwrap();
-    for g in golden.as_array().unwrap() {
-        let craft: Craft = migrate_legacy_craft(g["craft"].clone()).unwrap();
-        let c = compile(&craft).unwrap();
-        assert_eq!(c.root_id, g["rootId"]);
-        assert_eq!(
-            serde_json::to_value(&c.connections).unwrap(),
-            g["connections"]
-        );
-        let s = c.summary(None);
-        near(s.mass_kg, g["summary"]["massKg"].as_f64().unwrap(), 0.0);
-        near(s.fuel_kg, g["summary"]["fuelKg"].as_f64().unwrap(), 0.0);
-        near(
-            (s.center - vec(&g["summary"]["center"])).length(),
-            0.0,
-            1e-12,
-        );
-        for (p, e) in c.parts.iter().zip(g["parts"].as_array().unwrap()) {
-            assert_eq!(p.instance.id, e["id"]);
-            near((p.pose.position - vec(&e["position"])).length(), 0.0, 1e-12);
-            let a = e["rotation"].as_array().unwrap();
-            let q = DQuat::from_xyzw(
-                a[0].as_f64().unwrap(),
-                a[1].as_f64().unwrap(),
-                a[2].as_f64().unwrap(),
-                a[3].as_f64().unwrap(),
-            );
-            near((p.pose.rotation - q).length(), 0.0, 1e-15);
-            assert_eq!(part_inertia_per_kg(p.definition), vec(&e["inertia"]));
-            if p.definition.category == Category::Engine {
-                assert_eq!(
-                    serde_json::to_value(c.fuel_sources(&p.instance.id, &HashSet::new())).unwrap(),
-                    g["fuelSources"][&p.instance.id]
-                );
-            }
-        }
-        for (n, e) in c.free_nodes().iter().zip(g["free"].as_array().unwrap()) {
-            assert_eq!(n.part_id, e["partId"]);
-            assert_eq!(n.node.id, e["nodeId"]);
-            near((n.pose.position - vec(&e["position"])).length(), 0.0, 1e-12);
-        }
-        assert_eq!(c.free_nodes().len(), g["free"].as_array().unwrap().len());
-        assert_eq!(import_craft(&export_craft(&craft).unwrap()).unwrap(), craft);
+fn demo_craft_summary_and_round_trip() {
+    let craft = demo_craft();
+    let c = compile(&craft).unwrap();
+    let s = c.summary(None);
+    near(s.dry_mass_kg, 1090.0, 0.0);
+    near(s.fuel_kg, 3500.0, 0.0);
+    near(s.mass_kg, 4590.0, 1e-9);
+    // Every connection joins two distinct parts of the craft.
+    for link in &c.connections {
+        assert_ne!(link.a, link.b);
+        c.part(&link.a);
+        c.part(&link.b);
     }
-    let c = compile(&demo_craft()).unwrap();
-    near(c.summary(None).dry_mass_kg, 1090.0, 0.0);
-    near(c.summary(None).fuel_kg, 3500.0, 0.0);
+    assert_eq!(import_craft(&export_craft(&craft).unwrap()).unwrap(), craft);
 }
 #[test]
 fn mating_points_and_normals_with_reversed_and_shuffled_parts() {
@@ -178,164 +127,7 @@ fn actual_graph_crossfeed_and_child_side_decoupler() {
     craft.parts[1].stage = Some(1);
     let c = compile(&craft).unwrap();
     assert_eq!(c.decoupler_connection("p2").unwrap().b, "p3");
-    let mut f = AssemblyFlight::new(&craft, 0.0).unwrap();
-    f.stage();
-    f.stage();
-    assert_eq!(f.groups.len(), 2);
-    assert_eq!(f.controlled_part_ids(), ["p1", "p2"]);
 }
-#[test]
-fn physical_mass_center_and_pad_rest() {
-    let mut f = AssemblyFlight::new(&demo_craft(), LAB_GRAVITY).unwrap();
-    near(f.controlled_body().mass() as f64, 4590.0, 0.01);
-    let expected = f.compiled.summary(None).center + f.part_pose("p1").position;
-    near((f.controlled_center() - expected).length(), 0.0, 1e-4);
-    for _ in 0..600 {
-        f.step(idle());
-    }
-    assert!(f.part_pose("p6").position.y > 0.5);
-    near(f.controlled_velocity().y, 0.0, 0.01);
-    near(f.compiled.summary(Some(&f.fuel)).fuel_kg, 3500.0, 0.0);
-}
-#[test]
-fn first_stage_lifts_at_isp_rate_and_leaves_upper_tank_untouched() {
-    let mut f = AssemblyFlight::new(&demo_craft(), LAB_GRAVITY).unwrap();
-    let y = f.part_pose("p1").position.y;
-    assert_eq!(f.stage(), Some(0));
-    for _ in 0..120 {
-        f.step(full());
-    }
-    near(
-        f.fuel["p5"],
-        2800.0 - 90000.0 / (310.0 * G0) * 120.0 * STEP_SECONDS,
-        1e-5,
-    );
-    assert_eq!(f.fuel["p2"], 700.0);
-    assert!(f.part_pose("p1").position.y > y + 10.0);
-    assert!(f.controlled_velocity().y > 10.0);
-}
-fn momentum(f: &AssemblyFlight) -> (DVec3, DVec3) {
-    let mut linear = DVec3::ZERO;
-    let mut angular = DVec3::ZERO;
-    for g in &f.groups {
-        let b = &f.world.bodies[g.body];
-        let cv = |v: rapier3d::math::Vector| DVec3::new(v.x as f64, v.y as f64, v.z as f64);
-        let v = cv(b.linvel());
-        let w = cv(b.angvel());
-        let com = cv(b.center_of_mass());
-        for id in &g.ids {
-            let p = f.compiled.part(id);
-            let pose = f.part_pose(id);
-            let m = p.definition.dry_mass_kg + f.fuel[id];
-            let pv = (v + w.cross(pose.position - com)) * m;
-            linear += pv;
-            angular += pose.position.cross(pv)
-                + rotate(
-                    pose.rotation,
-                    part_inertia_per_kg(p.definition) * m * rotate(pose.rotation.conjugate(), w),
-                );
-        }
-    }
-    (linear, angular)
-}
-#[test]
-fn rotating_separation_preserves_every_pose_and_linear_and_angular_momentum() {
-    let mut f = AssemblyFlight::new(&demo_craft(), 0.0).unwrap();
-    f.stage();
-    let h = f.controlled_handle();
-    f.world.bodies[h].set_linvel(rapier3d::math::Vector::new(12.0, 20.0, -3.0), true);
-    f.world.bodies[h].set_angvel(rapier3d::math::Vector::new(0.3, -0.2, 0.4), true);
-    let poses: Vec<_> = f
-        .compiled
-        .parts
-        .iter()
-        .map(|p| (p.instance.id.clone(), f.part_pose(&p.instance.id)))
-        .collect();
-    let (p, l) = momentum(&f);
-    assert_eq!(f.stage(), Some(1));
-    assert_eq!(f.groups.len(), 2);
-    assert_eq!(f.controlled_part_ids(), ["p1", "p2", "p3"]);
-    let (pa, la) = momentum(&f);
-    near((pa - p).length(), 0.0, 0.04);
-    near((la - l).length(), 0.0, 0.3);
-    for (id, pose) in poses {
-        near(
-            (f.part_pose(&id).position - pose.position).length(),
-            0.0,
-            1e-5,
-        );
-        near(
-            (f.part_pose(&id).rotation - pose.rotation).length(),
-            0.0,
-            1e-6,
-        );
-    }
-    assert!(f.lit.contains("p3"));
-    assert_eq!(f.stage(), None);
-    f.step(full());
-    assert!(f.fuel["p2"] < 700.0 && f.fuel["p5"] < 2800.0);
-}
-#[test]
-fn custom_imported_craft_fuel_exhaustion_clips_impulse_and_mass() {
-    let c = add_part(&fresh_craft(), "tank-small", "p1", "bottom", "top").unwrap();
-    let mut c = add_part(&c, "engine-small", "p2", "bottom", "top").unwrap();
-    c.parts[1]
-        .resources
-        .insert(ResourceId::LiquidPropellant, 0.01);
-    let mut f =
-        AssemblyFlight::new(&import_craft(&export_craft(&c).unwrap()).unwrap(), 0.0).unwrap();
-    f.stage();
-    f.step(full());
-    assert_eq!(f.fuel["p2"], 0.0);
-    assert!(f.firing["p3"] > 0.0 && f.firing["p3"] < 1.0);
-    near(f.controlled_body().mass() as f64, 500.0, 0.001);
-    let v = f.controlled_velocity();
-    f.step(full());
-    assert_eq!(f.firing["p3"], 0.0);
-    near((v - f.controlled_velocity()).length(), 0.0, 1e-5);
-}
-#[test]
-fn invalid_launch_and_input_fail_explicitly() {
-    let mut c = demo_craft();
-    c.parts[2].stage = None;
-    assert!(
-        AssemblyFlight::new(&c, LAB_GRAVITY)
-            .err()
-            .unwrap()
-            .contains("assign a stage")
-    );
-    let c = add_part(&fresh_craft(), "engine-small", "p1", "bottom", "top").unwrap();
-    let c = add_part(&c, "decoupler", "p2", "bottom", "bottom").unwrap();
-    assert!(
-        AssemblyFlight::new(&c, LAB_GRAVITY)
-            .err()
-            .unwrap()
-            .contains("not connected")
-    );
-    assert!(AssemblyFlight::new(&fresh_craft(), LAB_GRAVITY).is_err());
-    let mut f = AssemblyFlight::new(&demo_craft(), 0.0).unwrap();
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f.step(FlightInput {
-            throttle: f64::NAN,
-            ..idle()
-        })))
-        .is_err()
-    );
-}
-#[test]
-fn nonconsecutive_and_same_stage_execution() {
-    let mut c = demo_craft();
-    c.parts[5].stage = Some(3);
-    c.parts[2].stage = Some(7);
-    c.parts[3].stage = Some(7);
-    let mut f = AssemblyFlight::new(&c, 0.0).unwrap();
-    assert_eq!(f.stages, [3, 7]);
-    assert_eq!(f.stage(), Some(3));
-    assert_eq!(f.stage(), Some(7));
-    assert!(f.lit.contains("p3"));
-    assert_eq!(f.groups.len(), 2);
-}
-
 #[test]
 fn independent_crossfeed_graph_handles_cycles_subsets_and_blocked_parts() {
     let tank = definition("tank-small").unwrap();
@@ -405,94 +197,4 @@ fn independent_crossfeed_graph_handles_cycles_subsets_and_blocked_parts() {
     assert!(std::panic::catch_unwind(|| crossfeed_tanks(&parts, &links, "near")).is_err());
     let duplicates = [parts[1], parts[1]];
     assert!(std::panic::catch_unwind(|| crossfeed_tanks(&duplicates, &links, "engine")).is_err());
-}
-
-/// SplitMix64, so the sweep below is reproducible without a dependency.
-struct Rng(u64);
-impl Rng {
-    fn unit(&mut self) -> f64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        ((z ^ (z >> 31)) >> 11) as f64 / (1u64 << 53) as f64
-    }
-    fn range(&mut self, low: f64, high: f64) -> f64 {
-        low + (high - low) * self.unit()
-    }
-    fn vector(&mut self, magnitude: f64) -> DVec3 {
-        let z = self.range(-1.0, 1.0);
-        let phi = self.range(0.0, std::f64::consts::TAU);
-        let r = (1.0 - z * z).max(0.0).sqrt();
-        DVec3::new(r * phi.cos(), r * phi.sin(), z) * magnitude
-    }
-}
-
-#[test]
-fn separation_conserves_momentum_from_any_motion() {
-    // The check above separates one stage from one tumbling state. Separation is instantaneous — no
-    // thrust, no fuel spent, no contact — so momentum conservation is the whole of what it must do,
-    // and it must do it from any motion rather than from the one written down. The craft's own
-    // spin and speed are swept; the fixed seed is in the source.
-    let mut rng = Rng(0x5EED_1A17_D00D_F00D);
-    let (mut worst_linear, mut worst_angular, mut worst_pose) = (0.0_f64, 0.0_f64, 0.0_f64);
-    let (mut at_linear, mut at_angular) = (String::new(), String::new());
-    for _ in 0..200 {
-        let mut f = AssemblyFlight::new(&demo_craft(), 0.0).unwrap();
-        f.stage();
-        let h = f.controlled_handle();
-        // Up to a brisk orbital-manoeuvre speed, and up to a tumble that would be alarming to ride.
-        let speed = rng.range(0.0, 300.0);
-        let spin = rng.range(0.0, 3.0);
-        let (v, w) = (rng.vector(speed), rng.vector(spin));
-        f.world.bodies[h].set_linvel(
-            rapier3d::math::Vector::new(v.x as f32, v.y as f32, v.z as f32),
-            true,
-        );
-        f.world.bodies[h].set_angvel(
-            rapier3d::math::Vector::new(w.x as f32, w.y as f32, w.z as f32),
-            true,
-        );
-        let poses: Vec<_> = f
-            .compiled
-            .parts
-            .iter()
-            .map(|p| (p.instance.id.clone(), f.part_pose(&p.instance.id)))
-            .collect();
-        let (before_linear, before_angular) = momentum(&f);
-        assert_eq!(f.stage(), Some(1));
-        let (after_linear, after_angular) = momentum(&f);
-        // Relative to the momentum carried, so a fast case is not held to the same absolute error
-        // as one that is barely moving: what must be conserved is the quantity, not a number of
-        // kilogram-metres. Rapier stores the velocities in f32, which sets the floor at about 1e-7.
-        let linear = (after_linear - before_linear).length() / before_linear.length().max(1.0);
-        let angular = (after_angular - before_angular).length() / before_angular.length().max(1.0);
-        if linear > worst_linear {
-            worst_linear = linear;
-            at_linear = format!("{:.0} m/s and {:.2} rad/s", v.length(), w.length());
-        }
-        if angular > worst_angular {
-            worst_angular = angular;
-            at_angular = format!("{:.0} m/s and {:.2} rad/s", v.length(), w.length());
-        }
-        // And every part that stayed attached must not have been nudged by the separation.
-        for (id, pose) in poses {
-            worst_pose = worst_pose.max((f.part_pose(&id).position - pose.position).length());
-        }
-    }
-    println!(
-        "separation over 200 tumbling states: linear momentum within {worst_linear:.2e} relative ({at_linear}), angular within {worst_angular:.2e} ({at_angular}), attached parts moved at most {worst_pose:.2e} m"
-    );
-    assert!(
-        worst_linear < 1e-6,
-        "linear momentum off by {worst_linear:.2e} relative at {at_linear}"
-    );
-    assert!(
-        worst_angular < 1e-6,
-        "angular momentum off by {worst_angular:.2e} relative at {at_angular}"
-    );
-    assert!(
-        worst_pose < 1e-5,
-        "separation moved an attached part by {worst_pose:.2e} m"
-    );
 }

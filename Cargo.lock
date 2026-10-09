@@ -5457,14 +5457,9 @@ name = "void-aero"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "rapier3d",
- "serde_json",
  "void-assembly",
  "void-environment",
- "void-frames",
- "void-landing",
  "void-math",
- "void-orbit",
 ]
 
 [[package]]
@@ -5476,11 +5471,9 @@ dependencies = [
  "glam 0.32.1",
  "half",
  "serde_json",
- "void-aero",
  "void-assembly",
  "void-assembly-lab",
  "void-diagnostics",
- "void-environment",
  "void-fleet-flight",
  "void-frames",
  "void-landing",
@@ -5489,7 +5482,6 @@ dependencies = [
  "void-multiscale",
  "void-navball",
  "void-orbit",
- "void-rotation",
  "void-sas",
  "void-scenery",
  "void-terrain",
@@ -5502,7 +5494,6 @@ name = "void-assembly"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "rapier3d",
  "serde",
  "serde_json",
  "void-math",
@@ -5664,10 +5655,7 @@ version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
  "serde",
- "serde_json",
- "void-landing",
  "void-math",
- "void-orbit",
  "void-rotation",
 ]
 

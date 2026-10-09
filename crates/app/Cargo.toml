@@ -17,19 +17,15 @@ void-vessels.workspace = true
 void-diagnostics = { path = "../diagnostics" }
 bevy.workspace = true
 glam.workspace = true
-void-environment.workspace = true
 void-frames.workspace = true
 void-orbit.workspace = true
 void-lod.workspace = true
-# Session log lines keep the lab's field order ("wall" first).
 serde_json = { workspace = true, features = ["preserve_order"] }
 void-terrain.workspace = true
-void-aero.workspace = true
 void-landing.workspace = true
 void-scenery.workspace = true
 void-math.workspace = true
 void-navball.workspace = true
-void-rotation.workspace = true
 void-sas.workspace = true
 void-view.workspace = true
 # The version Bevy already pulls in, for the half-float tables.

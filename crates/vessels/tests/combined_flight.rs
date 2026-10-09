@@ -1,4 +1,6 @@
 //! Combined model: RCS spending and aerodynamic torque share the existing owners.
+mod common;
+use common::{Setup, scene};
 use glam::{DQuat, DVec3};
 use void_assembly::{ResourceId, add_part, rendezvous_pod};
 use void_landing::{FrameState, PlanetFrame, earth_size, planet_environment, planet_ephemeris};
@@ -169,8 +171,8 @@ fn combined_mode_rcs_and_air_have_independent_rails_gates_across_owner_handoffs(
 
 #[test]
 fn full_air_ground_rcs_wakes_sleep_and_updates_live_mass_only_after_acceptance() {
-    use void_vessels::{GroundSpec, Scenario, create_lab_scene, flat_site};
-    let scene = create_lab_scene(Scenario::Launch);
+    use void_vessels::{GroundSpec, flat_site};
+    let scene = scene(Setup::Launch);
     let mut place = scene
         .fleet
         .environment()

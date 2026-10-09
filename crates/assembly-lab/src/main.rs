@@ -1,4 +1,4 @@
-//! Independent assembly editor and local test flight. No dependency on void-app.
+//! Independent assembly editor. No dependency on void-app.
 use bevy::camera::Hdr;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy::text::{EditableText, TextCursorStyle};
 use glam::DVec3;
 use void_assembly::*;
-use void_assembly_lab::parts::{Flame, PartMesh, RenderAssets, SceneLines};
+use void_assembly_lab::parts::{PartMesh, RenderAssets, SceneLines};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -49,7 +49,6 @@ fn main() {
                 inputs,
                 controls,
                 actions,
-                physics,
                 rebuild,
                 draw,
                 scene_lines,
@@ -65,10 +64,6 @@ struct Lab {
     selected: String,
     pending: Option<String>,
     child_node: String,
-    flight: Option<AssemblyFlight>,
-    paused: bool,
-    throttle: f64,
-    accumulator: f64,
     notice: String,
     path: String,
     dirty: bool,
@@ -87,10 +82,6 @@ impl Lab {
             selected,
             pending: None,
             child_node: "top".into(),
-            flight: None,
-            paused: false,
-            throttle: 1.0,
-            accumulator: 0.0,
             notice: "Choose a part, then click a green stack node.".into(),
             path,
             dirty: true,
@@ -120,34 +111,11 @@ impl Lab {
             + 0.04
     }
     fn part_pose(&self, id: &str) -> PartPose {
-        match &self.flight {
-            Some(f) => f.part_pose(id),
-            None => {
-                let mut p = self.compiled.part(id).pose;
-                p.position.y += self.offset();
-                p
-            }
-        }
+        let mut p = self.compiled.part(id).pose;
+        p.position.y += self.offset();
+        p
     }
     fn act(&mut self, a: Action) -> ModelResult<()> {
-        // Building tools are disabled in flight; the original assembly is kept for Return.
-        if self.flight.is_some()
-            && matches!(
-                a,
-                Action::New
-                    | Action::Demo
-                    | Action::Palette(_)
-                    | Action::Attach(_, _)
-                    | Action::ChildNode
-                    | Action::Delete
-                    | Action::Fuel(_)
-                    | Action::StageEdit(_)
-                    | Action::Load
-                    | Action::Name(_)
-            )
-        {
-            return Err("Return to the editor to change the craft.".into());
-        }
         match a {
             Action::New => {
                 self.selected = "p1".into();
@@ -258,37 +226,6 @@ impl Lab {
                 self.fit = true;
                 self.notice = format!("Loaded {}", self.path);
             }
-            Action::Launch => {
-                if self.flight.is_none() {
-                    self.flight = Some(AssemblyFlight::new(&self.craft, LAB_GRAVITY)?);
-                    self.pending = None;
-                    self.paused = false;
-                    self.accumulator = 0.0;
-                    self.fit = true;
-                    self.dirty = true;
-                    self.notice = "Ready on the pad. Space to ignite the first stage.".into();
-                }
-            }
-            Action::Return => {
-                self.flight = None;
-                self.paused = false;
-                self.accumulator = 0.0;
-                self.dirty = true;
-                self.fit = true;
-                self.notice = "Returned to the original assembly.".into();
-            }
-            Action::Stage => {
-                if let Some(f) = &mut self.flight {
-                    self.notice = match f.stage() {
-                        Some(n) => format!("Stage {n}: {} live groups", f.groups.len()),
-                        None => "All stages completed.".into(),
-                    };
-                }
-            }
-            Action::Pause => {
-                self.paused = !self.paused;
-                self.accumulator = 0.0;
-            }
             Action::Fit => self.fit = true,
             Action::Com => self.show_com = !self.show_com,
         }
@@ -310,10 +247,6 @@ enum Action {
     Name(String),
     Save,
     Load,
-    Launch,
-    Return,
-    Stage,
-    Pause,
     Fit,
     Com,
 }
@@ -514,8 +447,8 @@ fn setup(
             button(p,"Fuel -10% capacity",Action::Fuel(-0.1)); button(p,"Fuel +10% capacity",Action::Fuel(0.1));
             button(p,"Stage -1 (below 0 = unset)",Action::StageEdit(-1)); button(p,"Stage +1",Action::StageEdit(1)); button(p,"Remove selected subtree",Action::Delete);
             label(p,"STAGING / LOW TO HIGH",12.0); p.spawn((Text::new(""),font(12.0),StageList));
-            button(p,"Launch test flight",Action::Launch); button(p,"Space / next stage",Action::Stage); button(p,"P / pause or continue",Action::Pause); button(p,"Return to editor",Action::Return); button(p,"F / frame craft",Action::Fit); button(p,"C / center of mass",Action::Com);
-            label(p,"Click a hull to select.\nDrag left: orbit\nDrag right: pan\nWheel: zoom\nFlight: Shift/Ctrl throttle\nX cut / WASD QE turn",12.0);
+            button(p,"F / frame craft",Action::Fit); button(p,"C / center of mass",Action::Com);
+            label(p,"Click a hull to select.\nDrag left: orbit\nDrag right: pan\nWheel: zoom",12.0);
         });
 }
 fn buttons(
@@ -552,10 +485,7 @@ fn inputs(
 fn actions(mut lab: ResMut<Lab>, mut names: Query<&mut EditableText, With<CraftName>>) {
     let mut sync_name = false;
     for a in std::mem::take(&mut lab.queue) {
-        let reset = matches!(
-            a,
-            Action::New | Action::Demo | Action::Load | Action::Return
-        );
+        let reset = matches!(a, Action::New | Action::Demo | Action::Load);
         match lab.act(a) {
             Err(e) => lab.notice = e,
             Ok(()) => sync_name |= reset,
@@ -573,7 +503,6 @@ fn controls(
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
-    time: Res<Time>,
     window: Single<&Window>,
     focus: Res<InputFocus>,
     edits: Query<(), With<EditableText>>,
@@ -583,8 +512,6 @@ fn controls(
     let typing = focus.get().is_some_and(|e| edits.contains(e));
     if !typing {
         for (key, action) in [
-            (KeyCode::Space, Action::Stage),
-            (KeyCode::KeyP, Action::Pause),
             (KeyCode::KeyF, Action::Fit),
             (KeyCode::KeyC, Action::Com),
             (KeyCode::Escape, Action::Cancel),
@@ -592,20 +519,6 @@ fn controls(
         ] {
             if keys.just_pressed(key) {
                 lab.queue.push(action);
-            }
-        }
-        if lab.flight.is_some() {
-            let dt = time.delta_secs_f64();
-            lab.throttle = (lab.throttle
-                + (f64::from(
-                    keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight),
-                ) - f64::from(
-                    keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight),
-                )) * dt
-                    * 0.5)
-                .clamp(0.0, 1.0);
-            if keys.just_pressed(KeyCode::KeyX) {
-                lab.throttle = 0.0;
             }
         }
     }
@@ -654,43 +567,6 @@ fn pick(
         lab.queue.push(Action::Select(p.id.clone()));
     }
 }
-fn physics(
-    keys: Res<ButtonInput<KeyCode>>,
-    focus: Res<InputFocus>,
-    edits: Query<(), With<EditableText>>,
-    time: Res<Time>,
-    window: Single<&Window>,
-    mut lab: ResMut<Lab>,
-) {
-    if !window.focused {
-        lab.accumulator = 0.0;
-        return;
-    }
-    if lab.flight.is_none() || lab.paused {
-        return;
-    }
-    let typing = focus.get().is_some_and(|e| edits.contains(e));
-    let axis = |a, b| {
-        if typing {
-            0.0
-        } else {
-            f64::from(keys.pressed(a)) - f64::from(keys.pressed(b))
-        }
-    };
-    let input = FlightInput {
-        throttle: lab.throttle,
-        turn: DVec3::new(
-            axis(KeyCode::KeyS, KeyCode::KeyW),
-            axis(KeyCode::KeyE, KeyCode::KeyQ),
-            axis(KeyCode::KeyD, KeyCode::KeyA),
-        ),
-    };
-    lab.accumulator += time.delta_secs_f64().min(0.1);
-    while lab.accumulator >= STEP_SECONDS {
-        lab.flight.as_mut().expect("flight").step(input);
-        lab.accumulator -= STEP_SECONDS;
-    }
-}
 fn rebuild(
     mut commands: Commands,
     mut lab: ResMut<Lab>,
@@ -709,33 +585,23 @@ fn rebuild(
         let pose = lab.part_pose(&p.instance.id);
         let root = Transform::from_translation(pose.position.as_vec3())
             .with_rotation(pose.rotation.as_quat());
-        for piece in &assets.parts[&p.definition.id] {
-            let mut entity = commands.spawn((
-                Visual,
-                Mesh3d(piece.mesh.clone()),
-                MeshMaterial3d(piece.material.clone()),
-                root.mul_transform(piece.local),
-            ));
-            if piece.flame {
-                entity.insert((
-                    Flame {
+        // Engine flames are drawn only in flight, which the editor has none of.
+        for piece in assets.parts[&p.definition.id].iter().filter(|p| !p.flame) {
+            commands
+                .spawn((
+                    Visual,
+                    Mesh3d(piece.mesh.clone()),
+                    MeshMaterial3d(piece.material.clone()),
+                    root.mul_transform(piece.local),
+                    PartMesh {
                         id: p.instance.id.clone(),
                         local: piece.local,
                     },
-                    Visibility::Hidden,
-                    Pickable::IGNORE,
-                ));
-            } else {
-                entity
-                    .insert(PartMesh {
-                        id: p.instance.id.clone(),
-                        local: piece.local,
-                    })
-                    .observe(pick);
-            }
+                ))
+                .observe(pick);
         }
     }
-    if lab.pending.is_some() && lab.flight.is_none() {
+    if lab.pending.is_some() {
         for free in lab.compiled.free_nodes() {
             commands
                 .spawn((
@@ -767,20 +633,12 @@ fn draw(
     mut lab: ResMut<Lab>,
     mut orbit: ResMut<Orbit>,
     mut gizmos: Gizmos,
-    mut parts: Query<
-        (&PartMesh, &mut Transform),
-        (Without<MainCamera>, Without<Flame>, Without<Com>),
-    >,
-    mut flames: Query<
-        (&Flame, &mut Transform, &mut Visibility),
-        (Without<MainCamera>, Without<PartMesh>, Without<Com>),
-    >,
+    mut parts: Query<(&PartMesh, &mut Transform), (Without<MainCamera>, Without<Com>)>,
     mut com: Query<
         (&mut Transform, &mut Visibility),
         (
             With<Com>,
             Without<PartMesh>,
-            Without<Flame>,
             Without<MainCamera>,
         ),
     >,
@@ -789,7 +647,6 @@ fn draw(
         (
             With<MainCamera>,
             Without<PartMesh>,
-            Without<Flame>,
             Without<Com>,
         ),
     >,
@@ -801,11 +658,7 @@ fn draw(
         Option<&StageList>,
     )>,
 ) {
-    let target = if lab.flight.is_some() {
-        lab.part_pose(&lab.compiled.root_id).position
-    } else {
-        lab.compiled.summary(None).center + DVec3::Y * lab.offset()
-    };
+    let center = lab.compiled.summary(None).center + DVec3::Y * lab.offset();
     if lab.fit {
         let min = lab
             .compiled
@@ -823,7 +676,7 @@ fn draw(
         orbit.pan = DVec3::ZERO;
         lab.fit = false;
     }
-    let aim = target + orbit.pan;
+    let aim = center + orbit.pan;
     let direction = DVec3::new(
         orbit.pitch.cos() * orbit.yaw.sin(),
         orbit.pitch.sin(),
@@ -837,32 +690,8 @@ fn draw(
             .with_rotation(pose.rotation.as_quat())
             .mul_transform(p.local);
     }
-    for (flame, mut t, mut visible) in &mut flames {
-        let power = lab
-            .flight
-            .as_ref()
-            .map_or(0.0, |f| *f.firing.get(&flame.id).unwrap_or(&0.0));
-        let pose = lab.part_pose(&flame.id);
-        let mut local = flame.local;
-        local.scale.y *= 0.5 + power as f32;
-        *t = Transform::from_translation(pose.position.as_vec3())
-            .with_rotation(pose.rotation.as_quat())
-            .mul_transform(local);
-        *visible = if power > 0.0 && !lab.paused {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
     for (mut t, mut v) in &mut com {
-        t.translation = lab
-            .flight
-            .as_ref()
-            .map_or(
-                lab.compiled.summary(None).center + DVec3::Y * lab.offset(),
-                |f| f.controlled_center(),
-            )
-            .as_vec3();
+        t.translation = center.as_vec3();
         *v = if lab.show_com {
             Visibility::Visible
         } else {
@@ -870,47 +699,24 @@ fn draw(
         };
     }
     if lab.show_com {
-        let center = lab
-            .flight
-            .as_ref()
-            .map_or(
-                lab.compiled.summary(None).center + DVec3::Y * lab.offset(),
-                |f| f.controlled_center(),
-            )
-            .as_vec3();
+        let center = center.as_vec3();
         gizmos.sphere(center, 0.13, Color::srgb(1.0, 0.78, 0.25));
         gizmos.axes(Transform::from_translation(center), 0.65);
     }
     let p = lab.compiled.part(&lab.selected);
-    let s = lab.compiled.summary(lab.flight.as_ref().map(|f| &f.fuel));
+    let s = lab.compiled.summary(None);
     for (mut text, hud, inspector, pending, stages) in &mut texts {
         if hud.is_some() {
             text.0 = format!(
-                "{} | {} parts | {:.0} kg total / {:.1} kg fuel\n{}\n{}",
-                if lab.flight.is_some() {
-                    "TEST FLIGHT"
-                } else {
-                    "EDITOR"
-                },
+                "EDITOR | {} parts | {:.0} kg total / {:.1} kg fuel\n{}",
                 lab.craft.parts.len(),
                 s.mass_kg,
                 s.fuel_kg,
-                lab.flight.as_ref().map_or("".into(), |f| format!(
-                    "T+{:.1}s | {} groups | {:.1}m/s | throttle {:.0}% {}",
-                    f.time,
-                    f.groups.len(),
-                    f.controlled_velocity().length(),
-                    lab.throttle * 100.0,
-                    if lab.paused { "PAUSED" } else { "" }
-                )),
                 lab.notice
             );
         }
         if inspector.is_some() {
-            let fuel = lab
-                .flight
-                .as_ref()
-                .map_or(p.instance.resource_mass(), |f| f.fuel[&p.instance.id]);
+            let fuel = p.instance.resource_mass();
             text.0 = format!(
                 "{} / {}\nDry mass: {:.0} kg\nFuel: {:.1} / {:.0} kg\nStage: {}\n{}",
                 p.instance.id,
@@ -923,12 +729,7 @@ fn draw(
                     format!(
                         "Fuel sources: {}",
                         lab.compiled
-                            .fuel_sources(
-                                &p.instance.id,
-                                lab.flight
-                                    .as_ref()
-                                    .map_or(&std::collections::HashSet::new(), |f| &f.cuts)
-                            )
+                            .fuel_sources(&p.instance.id, &std::collections::HashSet::new())
                             .join(", ")
                     )
                 } else {
@@ -951,17 +752,8 @@ fn draw(
             text.0 = nums
                 .iter()
                 .map(|n| {
-                    let state = lab.flight.as_ref().map_or("", |f| {
-                        if f.stages[..f.next_stage].contains(n) {
-                            "done "
-                        } else if f.stages.get(f.next_stage) == Some(n) {
-                            "next "
-                        } else {
-                            ""
-                        }
-                    });
                     format!(
-                        "{state}{n}: {}",
+                        "{n}: {}",
                         lab.craft
                             .parts
                             .iter()
@@ -978,7 +770,7 @@ fn draw(
 }
 
 fn scene_lines(lab: Res<Lab>, assets: Res<RenderAssets>, mut lines: Gizmos<SceneLines>) {
-    // TS GridHelper: 200 m across, 100 divisions, with brighter central axes.
+    // A grid 200 m across in 100 divisions, with brighter central axes.
     for i in 0..=100 {
         let p = i as f32 * 2.0 - 100.0;
         let color = if i == 50 {
@@ -1007,8 +799,7 @@ fn scene_lines(lab: Res<Lab>, assets: Res<RenderAssets>, mut lines: Gizmos<Scene
             Color::srgb_u8(215, 170, 88),
         )
         .resolution(64);
-    // The selection edges come from THREE.EdgesGeometry(25), including its scale and hull offset.
-    // Keep the original hull material: selection is an outline, as in the TS lab.
+    // Selection is an outline over the hull's own material.
     let p = lab.compiled.part(&lab.selected);
     let pose = lab.part_pose(&lab.selected);
     let root =
@@ -1035,7 +826,6 @@ mod tests {
                 inputs,
                 controls,
                 actions,
-                physics,
                 rebuild,
                 draw,
                 scene_lines,
@@ -1047,37 +837,7 @@ mod tests {
             .expect("assembly Bevy systems must initialize");
     }
     #[test]
-    fn editor_to_custom_test_flight_and_back() {
-        let mut lab = Lab::new(fresh_craft(), String::new());
-        lab.act(Action::Palette("tank-small".into())).unwrap();
-        lab.act(Action::Attach("p1".into(), "bottom".into()))
-            .unwrap();
-        lab.act(Action::Fuel(-0.5)).unwrap();
-        lab.act(Action::Palette("engine-small".into())).unwrap();
-        lab.act(Action::Attach("p2".into(), "bottom".into()))
-            .unwrap();
-        lab.act(Action::Name("My custom rocket".into())).unwrap();
-        let source = lab.craft.clone();
-        lab.act(Action::Launch).unwrap();
-        lab.act(Action::Stage).unwrap();
-        assert!(lab.act(Action::Delete).is_err());
-        assert!(
-            lab.act(Action::Attach("p3".into(), "bottom".into()))
-                .is_err()
-        );
-        for _ in 0..120 {
-            lab.flight.as_mut().unwrap().step(FlightInput {
-                throttle: 1.0,
-                ..default()
-            });
-        }
-        assert!(lab.flight.as_ref().unwrap().fuel["p2"] < 350.0);
-        lab.act(Action::Return).unwrap();
-        assert_eq!(lab.craft, source);
-        assert!(lab.flight.is_none());
-    }
-    #[test]
-    fn invalid_edits_and_load_preserve_editor_and_launch_is_atomic() {
+    fn invalid_edits_and_load_preserve_editor() {
         let mut lab = Lab::new(
             demo_craft(),
             "/no-such-assembly-directory/invalid.json".into(),
@@ -1089,8 +849,6 @@ mod tests {
         assert_eq!(lab.craft, before);
         lab.selected = "p3".into();
         lab.act(Action::StageEdit(-2)).unwrap();
-        assert!(lab.act(Action::Launch).is_err());
-        assert!(lab.flight.is_none());
     }
     #[test]
     fn editor_exports_and_loads_the_actual_craft() {

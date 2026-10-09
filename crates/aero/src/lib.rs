@@ -1,23 +1,11 @@
-//! Aerodynamics, heating and reentry, ported from `lab/aerodynamics`: a layered Earth atmosphere,
-//! body and wing forces at each element's own airflow, two-layer part heating with a finite
-//! ablator, three test vehicles, an aircraft on Rapier and a 6-DOF capsule reentry. No Bevy.
-//!
-//! The vector and quaternion operations keep the lab's operation order, so the results agree with
-//! it bit for bit except where V8's own `sin`, `cos` and `pow` round differently (see `void_math`).
+//! Aerodynamics and heating: body and wing forces at each element's own airflow, and two-layer
+//! part heating with a finite ablator. No Bevy.
 
 mod aero;
-mod entry;
-mod flight;
-mod loads;
 mod thermal;
-mod vehicle;
 
 pub use aero::*;
-pub use entry::*;
-pub use flight::*;
-pub use loads::*;
 pub use thermal::*;
-pub use vehicle::*;
 
 use glam::{DQuat, DVec3};
 use void_math::hypot;

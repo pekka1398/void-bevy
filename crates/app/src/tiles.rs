@@ -346,8 +346,10 @@ mod lifecycle_tests {
     #[test]
     fn unload_releases_entities_meshes_and_cannot_accept_old_jobs() {
         let planet = void_landing::pebble();
-        let demo = void_landing::demo_rocket(&planet.terrain);
-        let options = void_landing::landing_lod_options(&planet.terrain, &demo.options.contact);
+        let options = void_landing::landing_lod_options(
+            &planet.terrain,
+            &void_fleet_flight::world::ground_tiles(&planet.terrain),
+        );
         let mut field: TileField = TileField::new(
             options.clone(),
             Some(planet.terrain.clone()),

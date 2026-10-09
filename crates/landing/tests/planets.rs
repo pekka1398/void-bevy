@@ -1,23 +1,18 @@
-//! Every planet: drawn terrain is the collision terrain, launch and return, and time on rails.
-//! lab/landing's own checks (`landing-check.ts`) with its thresholds.
+//! Every planet: the drawn terrain is the collision terrain.
 
 use std::sync::Arc;
 
 use glam::DVec3;
 use void_landing::{
-    BodyShape, ContactWorldOptions, LanderControl, LanderOptions, LanderSpec, PartJointRocket,
-    PhysicsMode, RocketPart, SimpleShape, aurelia, demo_rocket, landing_lod_options,
-    level_for_tile_size, pebble, planet_by_id, planet_ephemeris,
+    ContactWorldOptions, landing_lod_options, level_for_tile_size, pebble, planet_by_id,
 };
 use void_lod::{
     FACE_EDGES, LodView, PlanetLod, TileMeshData, TileMeshOptions, build_tile_mesh, neighbor_key,
     tile_containing, tiles_around,
 };
-use void_orbit::Tolerances;
 use void_terrain::Terrain;
 
 const PLANETS: [&str; 5] = ["pebble", "luna", "terra", "aurelia", "aurelia-fast"];
-const LAUNCH_SITE: DVec3 = DVec3::new(0.8, 0.55, 0.25);
 
 fn contact(radius: f64) -> ContactWorldOptions {
     ContactWorldOptions {
@@ -152,207 +147,4 @@ fn drawn_terrain_equals_collision_terrain_near_every_part() {
         );
         assert!(bad == 0, "{id}: {problems:?}");
     }
-}
-
-fn boxed(half: DVec3) -> Option<BodyShape> {
-    Some(BodyShape::Simple(SimpleShape::Box { half_extents: half }))
-}
-
-#[test]
-fn launch_and_return_on_every_planet() {
-    for id in PLANETS {
-        let planet = planet_by_id(id);
-        let (mut eph, index) = planet_ephemeris(&planet);
-        let options = LanderOptions {
-            contact: contact(planet.terrain.radius_meters),
-            tolerances: Tolerances {
-                position_meters: 1e-6,
-                velocity_meters_per_second: 1e-9,
-            },
-            band_enter_meters: 200.0,
-            band_exit_meters: 400.0,
-        };
-        let upper = LanderSpec {
-            thrust_newtons: 8000.0,
-            specific_impulse_seconds: 330.0,
-            nozzle_exit_area_m2: 0.0,
-            dry_mass_kg: 300.0,
-            fuel_mass_kg: 200.0,
-            half_extents: DVec3::new(1.0, 1.05, 1.0),
-            contact_shape: boxed(DVec3::new(1.0, 1.05, 1.0)),
-            friction: 0.8,
-            crash_tolerance_meters_per_second: Some(10.0),
-        };
-        let booster = LanderSpec {
-            thrust_newtons: 28000.0,
-            specific_impulse_seconds: 280.0,
-            nozzle_exit_area_m2: 0.0,
-            dry_mass_kg: 500.0,
-            fuel_mass_kg: 900.0,
-            half_extents: DVec3::new(1.0, 1.35, 1.0),
-            contact_shape: boxed(DVec3::new(1.0, 1.35, 1.0)),
-            friction: 0.8,
-            crash_tolerance_meters_per_second: Some(10.0),
-        };
-        let full = LanderSpec {
-            dry_mass_kg: 1000.0,
-            fuel_mass_kg: 900.0,
-            half_extents: DVec3::new(1.0, 2.05, 1.0),
-            ..booster.clone()
-        };
-        let mut rocket = PartJointRocket::landed(
-            &mut eph,
-            index,
-            planet.terrain.clone(),
-            full.clone(),
-            upper,
-            booster.clone(),
-            options,
-            LAUNCH_SITE,
-        );
-        let coast = LanderControl {
-            up: 1.0,
-            ..Default::default()
-        };
-        rocket.advance(&mut eph, 2.0, &coast, None);
-        rocket.advance(
-            &mut eph,
-            20.0,
-            &LanderControl {
-                throttle: 1.0,
-                up: 1.0,
-                ..Default::default()
-            },
-            None,
-        );
-        let mut peak = rocket.clearance(&eph);
-        let mut g = 0;
-        while rocket.mode() == PhysicsMode::Flight && g < 4000 {
-            rocket.advance(&mut eph, 0.5, &coast, None);
-            peak = peak.max(rocket.clearance(&eph));
-            g += 1;
-        }
-        // A vertical burn at the stack's initial thrust-to-weight reaches at least this height; a stack
-        // that bends or tips does not.
-        let gravity = eph.bodies()[index].gm / planet.terrain.radius_meters.powi(2);
-        let burn_only = 0.5
-            * (booster.thrust_newtons / (full.dry_mass_kg + full.fuel_mass_kg) - gravity)
-            * 20.0_f64.powi(2);
-        let changes = &rocket.mode_changes;
-        let ok = changes.len() >= 2
-            && changes[0].from == PhysicsMode::Contact
-            && changes[0].to == PhysicsMode::Flight
-            && changes[1].from == PhysicsMode::Flight
-            && changes[1].to == PhysicsMode::Contact
-            && peak > 0.9 * burn_only;
-        let summary: Vec<String> = changes
-            .iter()
-            .take(2)
-            .map(|c| format!("{:?}→{:?} at {:.0} s", c.from, c.to, c.time))
-            .collect();
-        println!(
-            "launch and return on {id}: {}; peak {:.2} km (a vertical 20 s burn alone reaches {:.2} km)",
-            summary.join(", "),
-            peak / 1000.0,
-            burn_only / 1000.0
-        );
-        assert!(ok, "launch and return on {id}");
-    }
-}
-
-#[test]
-fn on_rails() {
-    let planet = aurelia();
-    let (mut eph, index) = planet_ephemeris(&planet);
-    let demo = demo_rocket(&planet.terrain);
-    let make = |eph: &mut void_orbit::Ephemeris| {
-        PartJointRocket::landed(
-            eph,
-            index,
-            planet.terrain.clone(),
-            demo.full.clone(),
-            demo.upper.clone(),
-            demo.booster.clone(),
-            demo.options,
-            demo.launch_site,
-        )
-    };
-    let coast = LanderControl {
-        up: 1.0,
-        turn: Some(DVec3::ZERO),
-        ..Default::default()
-    };
-
-    // A rocket settling on the pad is awake, then Rapier puts it to sleep; asleep it can go on rails.
-    let mut pad = make(&mut eph);
-    let settling = pad.rails_blocker(0.0);
-    pad.advance(&mut eph, 6.0, &coast, None);
-    let (firing, resting) = (pad.rails_blocker(0.5), pad.rails_blocker(0.0));
-    let before = pad.body_fixed_state(&eph).position;
-    let ok = pad.advance_on_rails(&mut eph, 86_400.0);
-    let moved = (pad.body_fixed_state(&eph).position - before).length();
-    let world_time = pad.contact_worlds()[0].time;
-    pad.advance(&mut eph, 2.0, &coast, None);
-    let after = (pad.body_fixed_state(&eph).position - before).length();
-    println!(
-        "on rails: resting on the ground: settling {settling:?}; throttle up {firing:?}; asleep: a day on rails moved {moved} m, Rapier's clock followed to {world_time:.0} s; 2 s of physics after moved {after:.2e} m"
-    );
-    assert!(settling.is_some() && firing.is_some() && resting.is_none() && ok && moved == 0.0);
-    assert!(
-        (world_time - pad.time() + 2.0).abs() < 1e-6
-            && after < 1e-3
-            && pad.mode() == PhysicsMode::Contact
-    );
-
-    let mut awake = make(&mut eph);
-    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        awake.advance_on_rails(&mut eph, 1.0)
-    }))
-    .is_err();
-    println!("on rails: refused while a part is awake near the ground: {refused}");
-    assert!(refused);
-
-    // A coasting stack: on rails is the same coast as physics time; coming down, rails stop at the
-    // band. The burn has to leave the stack coasting for longer than the 200 s compared below;
-    // unsteered it lobs, so a rocket carrying more fuel needs a longer burn to stay up as long.
-    // Below about 90 s it comes back down inside the window, and the two sides then stop for
-    // different reasons — rails at the band, physics in contact — so the comparison is asserted to
-    // be valid before it is made, rather than reading kilometres and blaming the rails.
-    let burn = LanderControl {
-        throttle: 1.0,
-        ..coast.clone()
-    };
-    let (mut railed, mut simulated) = (make(&mut eph), make(&mut eph));
-    for l in [&mut railed, &mut simulated] {
-        for _ in 0..120 * 60 {
-            l.advance(&mut eph, 1.0 / 60.0, &burn, None);
-        }
-        l.advance(&mut eph, 30.0, &coast, None);
-    }
-    railed.advance_on_rails(&mut eph, 200.0);
-    simulated.advance(&mut eph, 200.0, &coast, None);
-    assert!(
-        railed.mode() == PhysicsMode::Flight && simulated.mode() == PhysicsMode::Flight,
-        "the 200 s comparison only means anything while both sides are still coasting, but they \
-         ended as {:?} on rails and {:?} in physics: lengthen the burn",
-        railed.mode(),
-        simulated.mode()
-    );
-    let gap = (railed.body_fixed_state(&eph).position - simulated.body_fixed_state(&eph).position)
-        .length();
-    let mut stopped = true;
-    while railed.mode() == PhysicsMode::Flight {
-        stopped = railed.advance_on_rails(&mut eph, 20.0);
-    }
-    println!(
-        "on rails: coasting: 200 s on rails vs physics differ by {gap:.2e} m; coming down, rails stopped at {:.0} m in contact, then {:?}",
-        railed.part_clearance(&eph, RocketPart::Upper),
-        railed.rails_blocker(0.0)
-    );
-    assert!(
-        gap < 1e-3
-            && !stopped
-            && railed.mode() == PhysicsMode::Contact
-            && railed.rails_blocker(0.0).is_some()
-    );
 }

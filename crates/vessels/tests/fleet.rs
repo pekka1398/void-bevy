@@ -1,3 +1,5 @@
+mod common;
+use common::{Scene, Setup, scene};
 use glam::{DMat3, DQuat, DVec3};
 use void_assembly::demo_craft;
 use void_landing::FrameState;
@@ -9,7 +11,7 @@ fn state(s: &VesselSnapshot) -> FrameState {
         velocity: s.velocity,
     }
 }
-fn reference_errors(scene: &mut LabScene) -> (f64, f64) {
+fn reference_errors(scene: &mut Scene) -> (f64, f64) {
     let mut prop = VesselPropagator::new(&scene.fleet.ephemeris, scene.fleet.options.tolerances);
     let mut p: f64 = 0.0;
     let mut v: f64 = 0.0;
@@ -55,7 +57,7 @@ fn angular(f: &Fleet) -> DVec3 {
 }
 #[test]
 fn bubble_handoff_and_ten_minute_coast_match_independent_orbits() {
-    let mut scene = create_lab_scene(Scenario::Coast);
+    let mut scene = scene(Setup::Coast);
     let before = scene.fleet.snapshot("v1");
     assert_eq!(before.mode, VesselMode::Bubble);
     assert_eq!(scene.fleet.bubble_count(), 1);
@@ -73,7 +75,7 @@ fn bubble_handoff_and_ten_minute_coast_match_independent_orbits() {
 }
 #[test]
 fn encounter_enters_and_leaves_one_shared_scene() {
-    let mut s = create_lab_scene(Scenario::Encounter);
+    let mut s = scene(Setup::Encounter);
     assert_eq!(s.fleet.bubble_count(), 0);
     s.fleet.advance(700.0);
     assert_eq!(s.fleet.bubble_count(), 0);
@@ -102,7 +104,7 @@ fn encounter_enters_and_leaves_one_shared_scene() {
 }
 #[test]
 fn spinning_separation_keeps_parts_poses_fuel_and_momentum() {
-    let mut s = create_lab_scene(Scenario::Separate);
+    let mut s = scene(Setup::Separate);
     let f = &mut s.fleet;
     let p = momentum(f);
     let l = angular(f);
@@ -138,7 +140,7 @@ fn spinning_separation_keeps_parts_poses_fuel_and_momentum() {
 }
 #[test]
 fn collision_and_join_preserve_part_graph_and_both_momenta() {
-    let mut s = create_lab_scene(Scenario::Join);
+    let mut s = scene(Setup::Join);
     while s.fleet.node_gap("v1/p2", "bottom", "v2/p2", "bottom") > 0.08 && s.fleet.time() < 60.0 {
         s.fleet.advance(1.0 / 60.0);
     }
@@ -170,9 +172,9 @@ fn collision_and_join_preserve_part_graph_and_both_momenta() {
 }
 #[test]
 fn orbit_and_bubble_burn_use_same_propellant_and_thrust() {
-    let mut orbit = create_lab_scene(Scenario::Separate);
+    let mut orbit = scene(Setup::Separate);
     let initial = orbit.fleet.snapshot("v1");
-    let mut bubble = create_lab_scene(Scenario::Separate);
+    let mut bubble = scene(Setup::Separate);
     let companion = FrameState {
         position: initial.position + DVec3::X * 300.0,
         velocity: initial.velocity,
@@ -219,17 +221,17 @@ fn orbit_and_bubble_burn_use_same_propellant_and_thrust() {
 }
 #[test]
 fn sas_stops_spin_and_rails_stops_for_new_encounter() {
-    let mut s = create_lab_scene(Scenario::Sas);
+    let mut s = scene(Setup::Sas);
     s.fleet.set_sas("v1", true);
     s.fleet.advance(30.0);
     assert!(s.fleet.snapshot("v1").angular_velocity.length() < 0.001);
     assert_ne!(s.fleet.sas_phase("v1"), void_sas::SasPhase::Off);
-    let mut s = create_lab_scene(Scenario::Encounter);
+    let mut s = scene(Setup::Encounter);
     assert!(!s.fleet.advance_on_rails(700.0));
     assert!((s.fleet.time() - 190.0).abs() < 20.0);
     s.fleet.advance(0.0);
     assert_eq!(s.fleet.bubble_count(), 1);
-    let mut s = create_lab_scene(Scenario::Coast);
+    let mut s = scene(Setup::Coast);
     assert!(s.fleet.advance_on_rails(3000.0));
     assert_eq!(s.fleet.bubble_count(), 0);
     let (p, _) = reference_errors(&mut s);
@@ -239,7 +241,7 @@ fn sas_stops_spin_and_rails_stops_for_new_encounter() {
 }
 #[test]
 fn landed_scenes_sleep_and_remain_fixed_during_rails() {
-    let mut s = create_lab_scene(Scenario::Launch);
+    let mut s = scene(Setup::Launch);
     assert_eq!(s.fleet.ground_count(), 2);
     let scenes = s.fleet.scene_snapshots();
     assert_eq!(scenes.iter().map(|s| s.members.len()).sum::<usize>(), 3);
@@ -266,7 +268,7 @@ fn landed_scenes_sleep_and_remain_fixed_during_rails() {
 #[test]
 fn fuel_recentring_keeps_live_parts_and_nodes_on_the_physics_owner() {
     for bubble in [false, true] {
-        let mut s = create_lab_scene(Scenario::Separate);
+        let mut s = scene(Setup::Separate);
         if bubble {
             let a = s.fleet.snapshot("v1");
             s.fleet.launch(
@@ -305,7 +307,7 @@ fn fuel_recentring_keeps_live_parts_and_nodes_on_the_physics_owner() {
 }
 #[test]
 fn invalid_controls_and_launch_are_rejected() {
-    let mut s = create_lab_scene(Scenario::Separate);
+    let mut s = scene(Setup::Separate);
     let mut craft = demo_craft();
     craft.parts[5].stage = None;
     assert!(
@@ -343,18 +345,18 @@ fn native_fleet_matches_owning_ts_lab_scenarios() {
     for g in golden.as_array().unwrap() {
         let name = g["scenario"].as_str().unwrap();
         let scenario = match name {
-            "encounter" => Scenario::Encounter,
-            "coast" => Scenario::Coast,
-            "separate" => Scenario::Separate,
-            "join" => Scenario::Join,
-            "sas" => Scenario::Sas,
+            "encounter" => Setup::Encounter,
+            "coast" => Setup::Coast,
+            "separate" => Setup::Separate,
+            "join" => Setup::Join,
+            "sas" => Setup::Sas,
             _ => panic!("unknown scenario"),
         };
-        let mut scene = create_lab_scene(scenario);
-        if scenario == Scenario::Separate {
+        let mut scene = scene(scenario);
+        if scenario == Setup::Separate {
             scene.fleet.decouple("v1/p4");
         }
-        if scenario == Scenario::Join {
+        if scenario == Setup::Join {
             while scene.fleet.node_gap("v1/p2", "bottom", "v2/p2", "bottom") > 0.08
                 && scene.fleet.time() < 60.0
             {
@@ -362,13 +364,13 @@ fn native_fleet_matches_owning_ts_lab_scenarios() {
             }
             scene.fleet.join("v1/p2", "bottom", "v2/p2", "bottom");
         }
-        if scenario == Scenario::Sas {
+        if scenario == Setup::Sas {
             scene.fleet.set_sas("v1", true);
         }
         let duration = match scenario {
-            Scenario::Encounter => 700.0,
-            Scenario::Coast => 600.0,
-            Scenario::Sas => 30.0,
+            Setup::Encounter => 700.0,
+            Setup::Coast => 600.0,
+            Setup::Sas => 30.0,
             _ => 1.0,
         };
         scene.fleet.advance(duration);
@@ -418,7 +420,7 @@ fn native_fleet_matches_owning_ts_lab_scenarios() {
 }
 #[test]
 fn ground_launch_coasts_back_into_contact_and_rails_catches_descent() {
-    let mut s = create_lab_scene(Scenario::Launch);
+    let mut s = scene(Setup::Launch);
     s.fleet.advance(15.0);
     s.fleet.stage("v1");
     s.fleet.set_control(
@@ -457,7 +459,7 @@ fn ground_launch_coasts_back_into_contact_and_rails_catches_descent() {
             Some(VesselMode::Ground)
         ]
     );
-    let s = create_lab_scene(Scenario::Launch);
+    let s = scene(Setup::Launch);
     let frame = void_landing::PlanetFrame::new(&s.fleet.ephemeris, s.body_index);
     let d = s
         .fleet
@@ -525,7 +527,7 @@ fn connected_engines_share_tanks_and_drain_proportionally() {
         .insert(void_assembly::ResourceId::LiquidPropellant, 350.0);
     craft.parts[2].stage = Some(0);
     craft.parts[4].stage = Some(0);
-    let s = create_lab_scene(Scenario::Separate);
+    let s = scene(Setup::Separate);
     let initial = state(&s.fleet.snapshot("v1"));
     let environment = s.fleet.environment().clone();
     let mut fleet = Fleet::new(
@@ -558,7 +560,7 @@ fn connected_engines_share_tanks_and_drain_proportionally() {
 }
 #[test]
 fn vessel_frames_follow_their_physics_owner() {
-    let mut s = create_lab_scene(Scenario::Launch);
+    let mut s = scene(Setup::Launch);
     let (_, surface) = s.fleet.body_frames(s.body_index);
     let check_landed = |f: &Fleet| {
         let origin = f.origin_frame();
@@ -604,7 +606,7 @@ fn vessel_frames_follow_their_physics_owner() {
         );
     }
 
-    let mut s = create_lab_scene(Scenario::Join);
+    let mut s = scene(Setup::Join);
     while s.fleet.bubble_count() == 0 && s.fleet.time() < 60.0 {
         s.fleet.advance(1.0 / 60.0);
     }
@@ -634,7 +636,7 @@ fn vessel_frames_follow_their_physics_owner() {
 fn grounds_and_checkpoints_need_the_environments_terrain() {
     let panics =
         |f: &mut dyn FnMut()| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).is_err();
-    let s = create_lab_scene(Scenario::Launch);
+    let s = scene(Setup::Launch);
     let ground = GroundSpec {
         body_index: s.body_index,
         tiles: void_landing::ContactWorldOptions {
@@ -720,7 +722,7 @@ fn fleet_and_restore_reject_another_worlds_environment() {
 /// pose and the connections in their order.
 #[test]
 fn the_part_graph_is_the_record_and_a_checkpoint_restores_it() {
-    let mut s = create_lab_scene(Scenario::Separate);
+    let mut s = scene(Setup::Separate);
     let f = &mut s.fleet;
     let connections = f.parts().connections().len();
     // The demo's first stage lights its lower engine; the second releases the decoupler and
@@ -817,7 +819,7 @@ fn parts_are_frames_under_their_vessel() {
             }
         }
     };
-    let mut s = create_lab_scene(Scenario::Join);
+    let mut s = scene(Setup::Join);
     check(&s.fleet);
     while s.fleet.node_gap("v1/p2", "bottom", "v2/p2", "bottom") > 0.08 && s.fleet.time() < 60.0 {
         s.fleet.advance(1.0 / 60.0);
@@ -833,7 +835,7 @@ fn parts_are_frames_under_their_vessel() {
     check(f);
     assert_eq!(f.part_snapshots("v1").len(), 4);
 
-    let mut s = create_lab_scene(Scenario::Separate);
+    let mut s = scene(Setup::Separate);
     s.fleet.decouple("v1/p4");
     check(&s.fleet);
     assert_eq!(
@@ -851,7 +853,7 @@ fn parts_are_frames_under_their_vessel() {
 
 #[test]
 fn checkpoint_rejects_disconnected_members() {
-    let s = create_lab_scene(Scenario::Launch);
+    let s = scene(Setup::Launch);
     let original = serde_json::to_value(s.fleet.checkpoint()).unwrap();
     // Removing just one joint is already invalid; removing all must also be rejected.
     for remove_all in [false, true] {
@@ -881,7 +883,7 @@ fn checkpoint_rejects_disconnected_members() {
 
 #[test]
 fn repeated_split_join_and_restore_preserve_graph_and_frames() {
-    let mut scene = create_lab_scene(Scenario::Separate);
+    let mut scene = scene(Setup::Separate);
     let decoupler = "v1/p4";
     let node = scene.fleet.parts().part(decoupler).decoupler().unwrap().0;
     let cut = scene

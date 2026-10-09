@@ -153,3 +153,14 @@ impl ContactFrame for PlanetFrame {
         DVec3::new(0.0, 0.0, self.omega)
     }
 }
+
+/// Rotation taking local +y to the outward vertical at a body-fixed point.
+pub fn upright_at(p: DVec3) -> glam::DQuat {
+    let u = p.normalize();
+    // Shortest arc from (0, 1, 0) to u.
+    let w = 1.0 + u.y;
+    if w < 1e-12 {
+        return glam::DQuat::from_xyzw(1.0, 0.0, 0.0, 0.0);
+    }
+    glam::DQuat::from_xyzw(u.z, 0.0, -u.x, w).normalize()
+}
