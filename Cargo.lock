@@ -5468,29 +5468,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "void-aero-flight-lab"
-version = "0.0.0"
-dependencies = [
- "bevy",
- "glam 0.32.1",
- "void-assembly",
- "void-fleet-flight",
- "void-frames",
- "void-landing",
- "void-modules",
- "void-vessels",
-]
-
-[[package]]
-name = "void-aero-lab"
-version = "0.0.0"
-dependencies = [
- "bevy",
- "glam 0.32.1",
- "void-aero",
-]
-
-[[package]]
 name = "void-app"
 version = "0.0.0"
 dependencies = [
@@ -5582,19 +5559,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "void-fleet-flight-lab"
-version = "0.0.0"
-dependencies = [
- "glam 0.32.1",
- "serde_json",
- "void-app",
- "void-assembly",
- "void-fleet-flight",
- "void-landing",
- "void-vessels",
-]
-
-[[package]]
 name = "void-frames"
 version = "0.0.0"
 dependencies = [
@@ -5666,20 +5630,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "void-multiscale-lab"
-version = "0.0.0"
-dependencies = [
- "bevy",
- "glam 0.32.1",
- "void-assembly-lab",
- "void-frames",
- "void-landing",
- "void-multiscale",
- "void-orbit",
- "void-vessels",
-]
-
-[[package]]
 name = "void-navball"
 version = "0.0.0"
 dependencies = [
@@ -5697,45 +5647,6 @@ dependencies = [
  "serde_json",
  "void-frames",
  "void-math",
-]
-
-[[package]]
-name = "void-orbit-lab"
-version = "0.0.0"
-dependencies = [
- "bevy",
- "glam 0.32.1",
- "serde_json",
- "void-orbit",
- "void-view",
-]
-
-[[package]]
-name = "void-part-state-lab"
-version = "0.0.0"
-dependencies = [
- "bevy",
- "glam 0.32.1",
- "void-assembly",
- "void-fleet-flight",
- "void-frames",
- "void-landing",
- "void-modules",
- "void-vessels",
-]
-
-[[package]]
-name = "void-rcs-docking-lab"
-version = "0.0.0"
-dependencies = [
- "bevy",
- "glam 0.32.1",
- "void-assembly",
- "void-fleet-flight",
- "void-frames",
- "void-landing",
- "void-modules",
- "void-vessels",
 ]
 
 [[package]]
@@ -5773,21 +5684,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "void-seam-check"
-version = "0.0.0"
-dependencies = [
- "glam 0.32.1",
- "serde",
- "serde_json",
- "void-assembly",
- "void-frames",
- "void-landing",
- "void-multiscale",
- "void-orbit",
- "void-vessels",
-]
-
-[[package]]
 name = "void-terrain"
 version = "0.0.0"
 dependencies = [
@@ -5817,20 +5713,6 @@ dependencies = [
  "void-rotation",
  "void-sas",
  "void-terrain",
-]
-
-[[package]]
-name = "void-vessels-lab"
-version = "0.0.0"
-dependencies = [
- "bevy",
- "glam 0.32.1",
- "void-assembly",
- "void-assembly-lab",
- "void-frames",
- "void-landing",
- "void-orbit",
- "void-vessels",
 ]
 
 [[package]]

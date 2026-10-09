@@ -7,8 +7,6 @@
 //! P: run / pause | R: reset | N: one day | Y: +1 year | T: +10 years | 1 cluster, 2 system,
 //! 3 planet, 4 beside the probe | Up / Down pick a setting, Left / Right change it | drag: orbit,
 //! wheel: zoom, click a label to focus it.
-//!
-//! The second scene runs separately with `cargo run -p void-multiscale-lab`.
 
 use std::collections::VecDeque;
 

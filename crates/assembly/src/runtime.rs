@@ -81,7 +81,7 @@ impl AssemblyFlight {
                 .count()
                 > 1
             {
-                return Err("legacy assembly flight supports one liquid engine per part; use void-part-state-lab for modules/resources".into());
+                return Err("legacy assembly flight supports one liquid engine per part; use Fleet flight for modules/resources".into());
             }
         }
         for p in &compiled.parts {
