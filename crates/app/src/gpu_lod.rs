@@ -40,8 +40,9 @@ use std::sync::{
 use void_lod::{TileMeshData, stitch_edges};
 
 pub fn enabled() -> bool {
-    let enabled =
-        std::env::args().any(|arg| arg == "--lod-gpu-pack" || arg == "--lod-gpu-pack-verify");
+    let enabled = std::env::args().any(|arg| {
+        arg == "--lod-gpu-pack" || arg == "--lod-gpu-pack-verify" || arg == "--lod-gpu-pack-batch"
+    });
     assert!(
         !(enabled && std::env::args().any(|arg| arg == "--lod-main-world-meshes")),
         "GPU LOD packing cannot retain ordinary CPU mesh attributes"
@@ -50,6 +51,9 @@ pub fn enabled() -> bool {
 }
 fn verifying() -> bool {
     std::env::args().any(|arg| arg == "--lod-gpu-pack-verify")
+}
+fn batching() -> bool {
+    std::env::args().any(|arg| arg == "--lod-gpu-pack-batch")
 }
 
 #[derive(Default)]
@@ -65,6 +69,7 @@ struct Telemetry {
     prepare_ns: AtomicU64,
     pack_ns: AtomicU64,
     bind_groups: AtomicU64,
+    dispatches: AtomicU64,
     failure: Mutex<Option<String>>,
 }
 #[derive(Resource, Clone, Default, ExtractResource)]
@@ -91,6 +96,7 @@ impl GpuPackingShared {
             "prepare_cpu_total_ms":self.0.prepare_ns.load(Ordering::Relaxed) as f64 / 1e6,
             "pack_encode_cpu_total_ms":self.0.pack_ns.load(Ordering::Relaxed) as f64 / 1e6,
             "bind_groups_created":self.0.bind_groups.load(Ordering::Relaxed),
+            "dispatches":self.0.dispatches.load(Ordering::Relaxed),"batched_dispatch":batching(),
             "verification_enabled":verifying(),"packing":"resident slabs; CPU f64 sampling and seams; no geometry readback except explicit verification"})
     }
 }
@@ -257,6 +263,7 @@ struct Prototypes {
 struct PackPipeline {
     layout: BindGroupLayoutDescriptor,
     pipeline: CachedComputePipelineId,
+    batched: bool,
 }
 
 pub struct GpuLodPackingPlugin;
@@ -329,6 +336,7 @@ fn init_pipeline(
     device: Res<RenderDevice>,
     adapter: Res<RenderAdapter>,
 ) {
+    let batched = batching();
     assert!(
         adapter
             .get_downlevel_capabilities()
@@ -337,8 +345,8 @@ fn init_pipeline(
         "GPU LOD packing requires base-vertex support"
     );
     assert!(
-        device.limits().max_storage_buffers_per_shader_stage >= 3,
-        "GPU LOD packing requires three storage buffers per stage"
+        device.limits().max_storage_buffers_per_shader_stage >= if batched { 4 } else { 3 },
+        "GPU LOD packing needs three storage buffers, or four for batched dispatch"
     );
     let layout = BindGroupLayoutDescriptor::new(
         "resident LOD pack",
@@ -348,7 +356,11 @@ fn init_pipeline(
                 storage_buffer_read_only::<Vec<u32>>(false),
                 storage_buffer::<Vec<u32>>(false),
                 storage_buffer::<Vec<u32>>(false),
-                uniform_buffer::<PackParams>(true),
+                if batched {
+                    storage_buffer_read_only::<Vec<PackParams>>(false)
+                } else {
+                    uniform_buffer::<PackParams>(true)
+                },
             ),
         ),
     );
@@ -357,9 +369,18 @@ fn init_pipeline(
         layout: vec![layout.clone()],
         shader: server.load("embedded://void_app/shaders/lod_pack.wgsl"),
         entry_point: Some("pack".into()),
+        shader_defs: if batched {
+            vec!["BATCHED_PACK".into()]
+        } else {
+            Vec::new()
+        },
         ..default()
     });
-    commands.insert_resource(PackPipeline { layout, pipeline });
+    commands.insert_resource(PackPipeline {
+        layout,
+        pipeline,
+        batched,
+    });
 }
 fn ready(
     cache: Res<PipelineCache>,
@@ -589,7 +610,9 @@ fn pack_tiles(
     for id in ids {
         let bytes = prepared.get(id).unwrap().bytes.as_ref().unwrap().len();
         assert!(bytes <= max_bytes, "GPU tile input exceeds storage limit");
-        if size + bytes > max_bytes {
+        if size + bytes > max_bytes
+            || chunk.len() >= device.limits().max_compute_workgroups_per_dimension as usize
+        {
             chunks.push(std::mem::take(&mut chunk));
             size = 0;
         }
@@ -640,11 +663,15 @@ fn pack_tiles(
                 cell_bits: tile.cell_bits,
                 padding: 0,
             };
-            let uniform_offset = uniforms.push(&params);
+            let uniform_offset = if pipeline.batched {
+                0
+            } else {
+                uniforms.push(&params)
+            };
             input.extend_from_slice(&bytes);
             work.push((
                 *id,
-                uniform_offset,
+                (uniform_offset, params),
                 v_binding,
                 i_binding,
                 vertex_bytes,
@@ -658,17 +685,35 @@ fn pack_tiles(
             contents: &input,
             usage: BufferUsages::STORAGE,
         });
-        uniforms.write_buffer(&device, &queue);
-        let mut groups = Vec::new();
+        if !pipeline.batched {
+            uniforms.write_buffer(&device, &queue);
+        }
         let mut group_indices = Vec::new();
         let mut group_cache = std::collections::HashMap::new();
-        for (_, _, v, i, _, _, v_id, i_id) in &work {
+        let mut group_bindings = Vec::new();
+        let mut group_jobs: Vec<Vec<PackParams>> = Vec::new();
+        for (_, (_, params), v, i, _, _, v_id, i_id) in &work {
             let key = (*v_id, v.offset, v.size, *i_id, i.offset, i.size);
-            if let Some(&index) = group_cache.get(&key) {
-                group_indices.push(index);
-                continue;
-            }
-            let index = groups.len();
+            let index = *group_cache.entry(key).or_insert_with(|| {
+                let index = group_bindings.len();
+                group_bindings.push((v.clone(), i.clone()));
+                group_jobs.push(Vec::new());
+                index
+            });
+            group_jobs[index].push(*params);
+            group_indices.push(index);
+        }
+        let mut groups = Vec::new();
+        let mut job_buffers = Vec::new();
+        for (index, (v, i)) in group_bindings.iter().enumerate() {
+            let parameters = if pipeline.batched {
+                let mut buffer = StorageBuffer::from(group_jobs[index].clone());
+                buffer.write_buffer(&device, &queue);
+                job_buffers.push(buffer);
+                job_buffers.last().unwrap().binding().unwrap()
+            } else {
+                uniforms.binding().unwrap()
+            };
             groups.push(device.create_bind_group(
                 "resident LOD pack",
                 &cache.get_bind_group_layout(&pipeline.layout),
@@ -676,11 +721,9 @@ fn pack_tiles(
                     input_buffer.as_entire_buffer_binding(),
                     BindingResource::Buffer(v.clone()),
                     BindingResource::Buffer(i.clone()),
-                    uniforms.binding().unwrap(),
+                    parameters,
                 )),
             ));
-            group_cache.insert(key, index);
-            group_indices.push(index);
         }
         shared
             .0
@@ -697,10 +740,31 @@ fn pack_tiles(
                 });
             let span = diagnostics.pass_span(&mut pass, "lod_pack");
             pass.set_pipeline(compute);
-            for ((id, offset, _, _, _, _, _, _), &index) in work.iter().zip(&group_indices) {
-                let tile = prepared.get(*id).unwrap();
-                pass.set_bind_group(0, &groups[index], &[*offset]);
-                pass.dispatch_workgroups((tile.n * tile.n).div_ceil(64), 1, 1);
+            if pipeline.batched {
+                for (group, jobs) in groups.iter().zip(&group_jobs) {
+                    let vertices = jobs.iter().map(|job| job.vertices).max().unwrap();
+                    pass.set_bind_group(0, group, &[]);
+                    pass.dispatch_workgroups(
+                        vertices.div_ceil(64),
+                        jobs.len().try_into().unwrap(),
+                        1,
+                    );
+                }
+                shared
+                    .0
+                    .dispatches
+                    .fetch_add(groups.len() as u64, Ordering::Relaxed);
+            } else {
+                for ((id, (offset, _), _, _, _, _, _, _), &index) in work.iter().zip(&group_indices)
+                {
+                    let tile = prepared.get(*id).unwrap();
+                    pass.set_bind_group(0, &groups[index], &[*offset]);
+                    pass.dispatch_workgroups((tile.n * tile.n).div_ceil(64), 1, 1);
+                }
+                shared
+                    .0
+                    .dispatches
+                    .fetch_add(work.len() as u64, Ordering::Relaxed);
             }
             span.end(&mut pass);
         }

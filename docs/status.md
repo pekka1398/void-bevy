@@ -1,3 +1,7 @@
+# LOD GPU batch dispatch 第七輪（2026-10-09）
+
+每組storage windows共用job表、二維dispatch，把GPU pack p50約0.26–0.27ms降到0.035ms；但pipe main intervals沒有改善，仍opt-in。motion11,049與U32/bounds/15-body-cycle9,222tiles位元核對通過，pixel／checkpoint一致、allocation數不累積；app45及scoped lint/build通過。未merge/push；詳見[第七輪報告](lod-batch-review.md)。
+
 # LOD 相同anchor寫入第六輪（2026-10-09）
 
 維持逐幀f64相對座標计算，只跳過位元完全相同的f32 Transform寫入。static每update1512次write降為0，動態／GPU11,148tile位元、pixel／checkpoint一致；app45 tests與scoped lint/build通過。沒有宣稱穩定FPS提升，未merge/push；詳見[第六輪報告](lod-anchor-review.md)。
