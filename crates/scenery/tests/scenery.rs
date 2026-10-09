@@ -399,3 +399,43 @@ fn orbit_view() {
     println!("orbit view: worst {d:e}");
     assert!(d <= 1e-14);
 }
+
+#[test]
+fn small_body_transmittance_inverse_has_exact_shell_endpoints() {
+    use void_scenery::atmosphere::transmittance_to_top;
+    // Deimos caused the top-row inverse to reconstruct 106200.00000000001 m.
+    // Also cover tiny asteroid/comet scales with real scattering and vacuum coefficients.
+    for radius in [242.22, 1700.0, 6200.0, 11080.0] {
+        for vacuum in [false, true] {
+            let mut p = earth_like_atmosphere(radius);
+            if vacuum {
+                p.rayleigh_scattering = [0.0; 3];
+                p.mie_scattering = 0.0;
+                p.mie_extinction = 0.0;
+                p.ozone_absorption = [0.0; 3];
+            }
+            for x in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                assert_eq!(transmittance_ray(&p, x, 0.0).0, p.bottom_radius);
+                assert_eq!(transmittance_ray(&p, x, 1.0).0, p.top_radius);
+            }
+            let table = build_transmittance_table(&p);
+            assert!(
+                table
+                    .iter()
+                    .all(|x| x.is_finite() && (0.0..=1.0).contains(x))
+            );
+            if vacuum {
+                assert!(table.iter().all(|x| *x == 1.0));
+            }
+            // Invalid physical caller state still fails; no tolerance was added to the gate.
+            assert!(
+                std::panic::catch_unwind(|| transmittance_to_top(&p, p.top_radius + 1e-6, 1.0))
+                    .is_err()
+            );
+        }
+    }
+    let p = earth_like_atmosphere(6200.0);
+    for (x, y) in [(-0.1, 0.5), (0.5, 1.1), (f64::NAN, 0.0)] {
+        assert!(std::panic::catch_unwind(|| transmittance_ray(&p, x, y)).is_err());
+    }
+}

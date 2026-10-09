@@ -122,3 +122,15 @@ copy it to `target/acceptance/void-app-bodies` and record its checksum in
 focus and relative rendering, press O for a local orbital fixture, exercise pause/warp
 briefly, and save/load. This checks initial exploration; long-duration warp is not
 accepted as evidence of long-term system stability.
+
+### Renderer integration correction
+
+Main-scene integration exposed an inverse atmosphere-LUT coordinate boundary bug on
+Deimos: reconstructing the top radius from squared radii produced
+106200.00000000001 m, outside its exact 106200 m top. `transmittance_ray` now uses the
+analytic shell radii at normalized y=0/1 and asserts normalized inputs. Physical
+`transmittance_to_top` bounds remain strict. Regression tests cover Deimos, Phobos,
+Bennu and 67P radii, full atmospheric/vacuum LUT construction, and rejection of invalid
+coordinates/outside physical radius. Scenery golden comparison remains bit-identical.
+Headless `cargo test -p void-scenery -j 2` passed all 19 tests on this branch after the
+correction. This is a geometric endpoint correction, not an atmosphere-model fallback.
