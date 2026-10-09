@@ -2,15 +2,19 @@
 //! time, then placed using the frame now. These are presentation coordinates, never physics.
 use crate::{PathCache, frame_to_ecliptic};
 use glam::DVec3;
-use void_orbit::{EphemerisSource, FrameEvaluator, FrameSpec, Trajectory, find_apsides, to_frame};
+use void_orbit::{
+    EphemerisSource, FrameEvaluator, FrameSpec, OrbitNode, Trajectory, find_apsides, find_nodes,
+    to_frame,
+};
 
 #[derive(Default)]
 pub struct PlotPath {
-    signature: Option<(FrameSpec, u64, f64, f64)>,
+    signature: Option<(FrameSpec, usize, u64, f64, f64)>,
     cache: Option<PathCache>,
     last_time: Option<f64>,
     pub points: Vec<DVec3>,
     pub apsides: Vec<(String, DVec3)>,
+    pub nodes: Vec<(OrbitNode, DVec3)>,
 }
 impl PlotPath {
     #[allow(clippy::too_many_arguments)]
@@ -26,19 +30,26 @@ impl PlotPath {
     ) {
         self.points.clear();
         self.apsides.clear();
+        self.nodes.clear();
         if trajectory.count() < 2 || trajectory.last_time() <= now {
             return;
         }
         let start = now.max(trajectory.first_time());
         let end = trajectory.last_time();
         let dt = ((end - trajectory.first_time()) / 512.0).max(0.01);
-        let signature = (spec, generation, trajectory.first_time(), end);
+        let signature = (
+            spec,
+            eph.system_of(reference).0,
+            generation,
+            trajectory.first_time(),
+            end,
+        );
         if self.signature != Some(signature) || self.last_time.is_some_and(|t| now < t) {
             self.cache = Some(PathCache::new(dt));
             self.signature = Some(signature);
         }
         self.last_time = Some(now);
-        let mut evaluator = FrameEvaluator::new(eph, spec);
+        let mut evaluator = FrameEvaluator::new_in_system(eph, spec, eph.system_of(reference));
         let here = evaluator.evaluate(eph, now);
         let focus = to_frame(&here, origin);
         let place = |p: DVec3| frame_to_ecliptic(&here.axes, p - focus);
@@ -55,6 +66,10 @@ impl PlotPath {
             &evaluator.evaluate(eph, end),
             trajectory.sample(end).0,
         )));
+        self.nodes = find_nodes(trajectory, eph, spec, eph.system_of(reference), now, 16)
+            .into_iter()
+            .map(|n| (n, place(n.in_frame)))
+            .collect();
         self.apsides = find_apsides(trajectory, eph, reference, now, 2)
             .into_iter()
             .map(|a| {
@@ -74,7 +89,7 @@ impl PlotPath {
 /// Frame-space body samples refreshed on simulation time, independent of rendering cadence.
 #[derive(Default)]
 pub struct BodyPlots {
-    signature: Option<(FrameSpec, u64, usize)>,
+    signature: Option<(FrameSpec, usize, u64, usize)>,
     samples: Vec<Vec<DVec3>>,
 }
 impl BodyPlots {
@@ -85,8 +100,23 @@ impl BodyPlots {
         now: f64,
         origin: DVec3,
     ) -> Vec<Vec<DVec3>> {
-        let signature = (spec, (now / 2.0).floor().to_bits(), eph.bodies().len());
-        let mut evaluator = FrameEvaluator::new(eph, spec);
+        self.update_in_system(eph, spec, eph.origin_system(), now, origin)
+    }
+    pub fn update_in_system(
+        &mut self,
+        eph: &dyn EphemerisSource,
+        spec: FrameSpec,
+        system: void_frames::SystemId,
+        now: f64,
+        origin: DVec3,
+    ) -> Vec<Vec<DVec3>> {
+        let signature = (
+            spec,
+            system.0,
+            (now / 2.0).floor().to_bits(),
+            eph.bodies().len(),
+        );
+        let mut evaluator = FrameEvaluator::new_in_system(eph, spec, system);
         if self.signature != Some(signature) {
             self.signature = Some(signature);
             let start = (now - 86400.0).max(eph.start_time());

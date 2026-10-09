@@ -479,11 +479,15 @@ fn plotting_description(sim: &void_fleet_flight::FleetFlight) -> String {
     use void_orbit::FrameSpec;
     let bodies = sim.fleet.ephemeris.bodies();
     match sim.presentation.plotting_frame {
-        FrameSpec::Barycentric => "plot: barycentric".into(),
-        FrameSpec::BodyInertial { body } => format!("plot: body inertial / {}", bodies[body].name),
-        FrameSpec::BodySurface { body } => format!("plot: body surface / {}", bodies[body].name),
+        FrameSpec::Barycentric => "plot: system barycentric · ecliptic plane".into(),
+        FrameSpec::BodyInertial { body } => {
+            format!("plot: body inertial / {} · equator", bodies[body].name)
+        }
+        FrameSpec::BodySurface { body } => {
+            format!("plot: body surface / {} · equator", bodies[body].name)
+        }
         FrameSpec::TwoBodyRotating { primary, secondary } => format!(
-            "plot: two-body rotating / {} + {}",
+            "plot: two-body rotating / {} + {} · orbital plane",
             bodies[primary].name, bodies[secondary].name
         ),
     }
@@ -1828,21 +1832,26 @@ fn controls(
     if lab.playback.is_none()
         && let Some(kind) = clicked
     {
-        let bodies = lab.session.sim().fleet.ephemeris.bodies();
-        let body = match kind {
-            void_view::LabelKind::Body(i) => Some(i),
-            void_view::LabelKind::Star => Some(
-                bodies
-                    .iter()
-                    .find(|b| b.parent_index.is_none())
-                    .expect("root body")
-                    .index,
-            ),
-            void_view::LabelKind::Vessel | void_view::LabelKind::Apsis => None,
-        };
-        lab.session.execute(Action::View {
-            command: ViewCommand::Focus { body },
-        });
+        if let void_view::LabelKind::Node(index) = kind {
+            place_maneuver_at_node(lab, index);
+        } else {
+            let bodies = lab.session.sim().fleet.ephemeris.bodies();
+            let body = match kind {
+                void_view::LabelKind::Body(i) => Some(i),
+                void_view::LabelKind::Star => Some(
+                    bodies
+                        .iter()
+                        .find(|b| b.parent_index.is_none())
+                        .expect("root body")
+                        .index,
+                ),
+                void_view::LabelKind::Vessel | void_view::LabelKind::Apsis => None,
+                void_view::LabelKind::Node(_) => unreachable!(),
+            };
+            lab.session.execute(Action::View {
+                command: ViewCommand::Focus { body },
+            });
+        }
     }
     lab.pointer_over_label = over_label || over_ui;
     if !window.focused {
@@ -4686,9 +4695,10 @@ fn draw_map(
         .apply_point(lab.eye);
     let render = |v: DVec3| (q.conjugate() * (v + frame.origin - eye_inertial)).as_vec3();
     if view.map_weight > 0.0 {
-        for (body, points) in bodies.iter().zip(lab.body_plots.update(
+        for (body, points) in bodies.iter().zip(lab.body_plots.update_in_system(
             &fleet.ephemeris,
             spec,
+            fleet.vessel_system(&lab.session.sim().selected),
             fleet.time(),
             frame.origin,
         )) {
@@ -4707,12 +4717,43 @@ fn draw_map(
             );
         }
     }
-    let wanted = void_view::map_labels(
+    let mut wanted = void_view::map_labels(
         bodies,
         &frame,
         lab.session.sim().presentation.focus_body,
         &lab.plot_path.apsides,
     );
+    for (plan, path) in [(false, &lab.plot_path), (true, &lab.plot_plan)] {
+        for (index, (node, position)) in path.nodes.iter().take(8).enumerate() {
+            let kind = match node.kind {
+                void_orbit::NodeKind::Ascending => "AN",
+                void_orbit::NodeKind::Descending => "DN",
+            };
+            let inclination = node
+                .apparent_inclination_radians
+                .map_or(String::new(), |a| format!(" · {:.1}°", a.to_degrees()));
+            wanted.push(void_view::MapLabel {
+                kind: void_view::LabelKind::Node(index + if plan { 8 } else { 0 }),
+                text: format!(
+                    "{}{} +{:.0}s · {:+.1}m/s{}",
+                    if plan { "Plan " } else { "" },
+                    kind,
+                    node.time - fleet.time(),
+                    node.normal_speed_mps,
+                    inclination
+                ),
+                color: if plan {
+                    "#ffca66"
+                } else {
+                    crate::map::PATH_COLOR
+                }
+                .into(),
+                relative: *position,
+                priority: 1e48 - index as f64,
+            });
+        }
+    }
+    wanted.sort_by(|a, b| b.priority.total_cmp(&a.priority));
     let (camera, transform, parented) = *camera;
     assert!(!parented, "map camera must remain a root entity");
     // draw updated this root camera in Update; propagated GlobalTransform still belongs
@@ -4813,5 +4854,139 @@ mod ares_fixture_tests {
                 "{site} must begin in useful daylight: {sun}"
             );
         }
+    }
+}
+
+/// Clicking a crossing edits the selected maneuver, or creates a zero-dv node for editing.
+/// Existing finite burns are centred on the crossing rather than ignited at it.
+fn place_maneuver_at_node(lab: &mut Lab, index: usize) {
+    let path = if index < 8 {
+        &lab.plot_path
+    } else {
+        &lab.plot_plan
+    };
+    let Some((node, _)) = path.nodes.get(index % 8) else {
+        lab.notice = "Crossing is no longer in the prediction".into();
+        return;
+    };
+    let time = node.time;
+    let sim = lab.session.sim();
+    let id = &sim.selected;
+    let action = if let Some(plan) = sim.plans.get(id).filter(|p| p.plan.count() > 0) {
+        let mut spec = plan.plan.maneuver(plan.selected);
+        let half = plan
+            .plan
+            .status(plan.selected)
+            .as_ref()
+            .map_or(0., |b| (b.end_time - b.start_time) * 0.5);
+        spec.start_time = time - half;
+        if spec.start_time < sim.fleet.time() {
+            lab.notice = "Burn centred on this crossing would begin in the past".into();
+            return;
+        }
+        Action::EditManeuver {
+            index: plan.selected,
+            spec,
+        }
+    } else {
+        let reference_body = match sim.presentation.plotting_frame {
+            void_orbit::FrameSpec::BodyInertial { body }
+            | void_orbit::FrameSpec::BodySurface { body } => body,
+            void_orbit::FrameSpec::TwoBodyRotating { primary, .. } => primary,
+            void_orbit::FrameSpec::Barycentric => sim.observation_body(),
+        };
+        Action::AddManeuver {
+            spec: void_orbit::ManeuverSpec {
+                start_time: time,
+                reference_body,
+                reference_mode: void_orbit::ReferenceMode::Auto,
+                prograde: 0.,
+                normal: 0.,
+                radial: 0.,
+            },
+        }
+    };
+    match lab.session.execute(action) {
+        Outcome::Applied => {
+            lab.notice =
+                "Maneuver placed at reference-plane crossing; inspect edited prediction".into()
+        }
+        Outcome::Refused(reason) => lab.notice = reason,
+        other => panic!("unexpected node-placement outcome {other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod navigation_ui_tests {
+    use super::*;
+
+    #[test]
+    fn crossing_click_preserves_focus_and_journals_an_editable_node() {
+        let mut app = tests::initialized_scene(true);
+        let mut lab = app.world_mut().non_send_mut::<Lab>();
+        let craft = lab.craft.clone();
+        let Outcome::Spawned(id) = lab.session.execute(Action::LaunchOrbit {
+            craft,
+            offset: DVec3::ZERO,
+        }) else {
+            panic!("orbit fixture");
+        };
+        lab.session.execute(Action::Select { vessel: id });
+        lab.session.execute(Action::Stage);
+        let focus = lab.session.sim().presentation.focus_body;
+        let selected = lab.session.sim().selected.clone();
+        for key in [
+            KeyCode::Digit1,
+            KeyCode::Digit2,
+            KeyCode::Digit3,
+            KeyCode::Digit4,
+        ] {
+            let mut keys = ButtonInput::default();
+            keys.press(key);
+            plot_controls(&mut lab, &keys);
+            assert_eq!(lab.session.sim().presentation.focus_body, focus);
+            assert_eq!(lab.session.sim().selected, selected);
+        }
+        let time = lab.session.sim().fleet.time() + 600.;
+        let before = lab
+            .session
+            .sim()
+            .fleet
+            .snapshot(&lab.session.sim().selected);
+        lab.plot_path.nodes.push((
+            void_orbit::OrbitNode {
+                kind: void_orbit::NodeKind::Ascending,
+                time,
+                position: DVec3::ZERO,
+                in_frame: DVec3::ZERO,
+                normal_speed_mps: 10.,
+                apparent_inclination_radians: Some(0.1),
+            },
+            DVec3::ZERO,
+        ));
+        place_maneuver_at_node(&mut lab, 0);
+        let sim = lab.session.sim();
+        let plan = &sim.plans[&sim.selected];
+        assert_eq!(plan.plan.count(), 1);
+        assert_eq!(plan.plan.maneuver(0).start_time, time);
+        assert_eq!(plan.plan.maneuver(0).normal, 0.);
+        assert_eq!(sim.presentation.focus_body, focus);
+        let after = sim.fleet.snapshot(&sim.selected);
+        assert_eq!(after.position, before.position);
+        assert_eq!(after.velocity, before.velocity);
+        assert_eq!(after.mass_kg, before.mass_kg);
+        lab.session.execute(Action::EndFrame {
+            paused: true,
+            rate: 0,
+        });
+        let (mut playback, mut replay) = Playback::new(lab.session.recording());
+        while playback.next_frame(&mut replay) {}
+        assert_eq!(
+            replay.sim().plans[&replay.sim().selected]
+                .plan
+                .maneuver(0)
+                .start_time,
+            time
+        );
     }
 }

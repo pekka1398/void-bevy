@@ -11,6 +11,7 @@ pub(super) enum Readout {
     SpeedReference,
     Orbit,
     Maneuver,
+    Navigation,
     Status,
     ViewDiagnostics,
 }
@@ -52,6 +53,11 @@ pub(super) enum Click {
     Dev,
     Help,
     Body,
+    PlotSecondary,
+    NavigationTarget(i8),
+    NavigationFocus,
+    NavigationSetting(u8),
+    GenerateNavigation(u8),
     Field(Field),
     Toggle(Toggle),
 }
@@ -72,6 +78,10 @@ pub(super) struct UiState {
     draft: String,
     dev: bool,
     help: bool,
+    navigation_target: Option<usize>,
+    navigation_wait: usize,
+    navigation_flight: usize,
+    navigation_altitude: usize,
 }
 const INK: Color = Color::srgb(0.81, 0.84, 0.89);
 const BG: Color = Color::srgba(0.031, 0.039, 0.063, 0.82);
@@ -363,19 +373,25 @@ pub(super) fn spawn(
         commands,
         Node {
             right: px(12),
-            top: percent(35),
-            width: px(210),
+            top: px(88),
+            width: px(280),
             ..base()
         },
     );
     commands.entity(orbit).insert((Readout::Orbit, OrbitFade));
     readout(commands, orbit, Readout::Orbit, 12.);
-    button(
-        commands,
-        orbit,
-        "PATH · cycle frame",
-        Click::Key(KeyCode::KeyG),
-    );
+    let frames = row(commands, orbit);
+    for (label, key) in [
+        ("System", KeyCode::Digit1),
+        ("Inertial", KeyCode::Digit2),
+        ("Surface", KeyCode::Digit3),
+        ("Pair", KeyCode::Digit4),
+    ] {
+        button(commands, frames, label, Click::Key(key));
+    }
+    let selectors = row(commands, orbit);
+    button(commands, selectors, "Centre >", Click::Key(KeyCode::KeyJ));
+    button(commands, selectors, "Partner >", Click::PlotSecondary);
     let maneuver = panel(
         commands,
         Node {
@@ -390,6 +406,30 @@ pub(super) fn spawn(
     commands
         .entity(maneuver)
         .insert((Readout::Maneuver, ScrollPosition::default()));
+    text(commands, maneuver, "NAVIGATION", 11.);
+    readout(commands, maneuver, Readout::Navigation, 10.);
+    let targets = row(commands, maneuver);
+    button(commands, targets, "Target <", Click::NavigationTarget(-1));
+    button(commands, targets, "Target >", Click::NavigationTarget(1));
+    button(commands, targets, "Use focus", Click::NavigationFocus);
+    let settings = row(commands, maneuver);
+    button(commands, settings, "Wait >", Click::NavigationSetting(0));
+    button(commands, settings, "Flight >", Click::NavigationSetting(1));
+    button(commands, settings, "Pe >", Click::NavigationSetting(2));
+    let operations = row(commands, maneuver);
+    button(commands, operations, "Depart", Click::GenerateNavigation(0));
+    button(
+        commands,
+        operations,
+        "Correct",
+        Click::GenerateNavigation(1),
+    );
+    button(
+        commands,
+        operations,
+        "Capture",
+        Click::GenerateNavigation(2),
+    );
     text(commands, maneuver, "MANEUVER", 11.);
     readout(commands, maneuver, Readout::Maneuver, 11.);
     for (field, label) in [
@@ -615,6 +655,44 @@ pub(super) fn interactions(
                     command: ViewCommand::Focus { body: Some(next) },
                 });
             }
+            Click::NavigationTarget(step) => {
+                let sim = lab.session.sim();
+                let bodies = sim.fleet.ephemeris.bodies();
+                let system = sim.fleet.vessel_system(&sim.selected);
+                let choices: Vec<_> = bodies
+                    .iter()
+                    .filter(|b| sim.fleet.ephemeris.system_of(b.index) == system)
+                    .map(|b| b.index)
+                    .collect();
+                let current = state
+                    .navigation_target
+                    .and_then(|b| choices.iter().position(|&i| i == b));
+                let index = current.map_or(0, |i| {
+                    (i as isize + *step as isize).rem_euclid(choices.len() as isize) as usize
+                });
+                state.navigation_target = Some(choices[index]);
+            }
+            Click::NavigationFocus => {
+                state.navigation_target = lab.session.sim().presentation.focus_body;
+                if state.navigation_target.is_none() {
+                    lab.notice = "Focus a celestial body before selecting it as target".into();
+                }
+            }
+            Click::NavigationSetting(which) => match which {
+                0 => state.navigation_wait = (state.navigation_wait + 1) % 5,
+                1 => state.navigation_flight = (state.navigation_flight + 1) % 5,
+                2 => state.navigation_altitude = (state.navigation_altitude + 1) % 5,
+                _ => unreachable!(),
+            },
+            Click::GenerateNavigation(operation) => {
+                generate_navigation(&mut lab, &state, *operation)
+            }
+            Click::PlotSecondary => {
+                let mut keys = ButtonInput::default();
+                keys.press(KeyCode::ShiftLeft);
+                keys.press(KeyCode::KeyJ);
+                plot_controls(&mut lab, &keys);
+            }
             Click::Key(key) => dispatch(&mut lab, *key),
         }
     }
@@ -721,7 +799,12 @@ fn dispatch(lab: &mut Lab, key: KeyCode) {
                 turn: c.turn,
             });
         }
-        KeyCode::KeyG => plot_controls(lab, &keys),
+        KeyCode::KeyG
+        | KeyCode::KeyJ
+        | KeyCode::Digit1
+        | KeyCode::Digit2
+        | KeyCode::Digit3
+        | KeyCode::Digit4 => plot_controls(lab, &keys),
         KeyCode::F1 => {
             let body = lab.session.sim().observation_body();
             let radius = lab.session.sim().fleet.ephemeris.bodies()[body].radius_meters;
@@ -885,7 +968,7 @@ pub(super) fn refresh(
                 body.name
             ),
             Readout::Orbit => format!(
-                "ORBIT · {}\nAp {}\nPe {}\nimpact {}\nmap {:.0}%",
+                "ORBIT · {}\nAp {}\nPe {}\nimpact {}\nmap {:.0}%\n{}",
                 body.name,
                 if orbital.apoapsis_radius_meters.is_finite() {
                     distance(orbital.apoapsis_radius_meters - body.radius_meters)
@@ -900,8 +983,20 @@ pub(super) fn refresh(
                         "in {:.0}s",
                         (p.0 - f.time()).max(0.)
                     )),
-                map * 100.
+                map * 100.,
+                plotting_description(sim)
             ),
+            Readout::Navigation => {
+                let target = state
+                    .navigation_target
+                    .map_or("none", |i| f.ephemeris.bodies()[i].name.as_str());
+                format!(
+                    "Target: {target}\nMax wait {:.0}d · max flight {:.0}d\nTarget Pe {:.0}km",
+                    navigation_wait(&state),
+                    navigation_flight(&state),
+                    navigation_altitude(&state)
+                )
+            }
             Readout::Maneuver => plan_description(&lab)
                 .split("\nM add")
                 .next()
@@ -1390,6 +1485,66 @@ pub(super) fn apply_font(
         if text.font != font.mono.clone().into() {
             text.font = font.mono.clone().into();
         }
+    }
+}
+
+fn navigation_wait(state: &UiState) -> f64 {
+    [30., 0., 1., 365., 1825.][state.navigation_wait]
+}
+fn navigation_flight(state: &UiState) -> f64 {
+    [7., 30., 180., 730., 3650.][state.navigation_flight]
+}
+fn navigation_altitude(state: &UiState) -> f64 {
+    [100., 1., 10., 1000., 10000.][state.navigation_altitude]
+}
+fn generate_navigation(lab: &mut Lab, state: &UiState, operation: u8) {
+    use void_orbit::{NavigationOperation, NavigationRequest};
+    let Some(target_body) = state.navigation_target else {
+        lab.notice = "Choose a navigation target".into();
+        return;
+    };
+    let sim = lab.session.sim();
+    if sim.fleet.ephemeris.bodies().get(target_body).is_none() {
+        lab.notice = "Navigation target no longer exists; select a target again".into();
+        return;
+    }
+    let id = sim.selected.clone();
+    let now = sim.fleet.time();
+    let earliest = sim
+        .plans
+        .get(&id)
+        .and_then(|p| p.plan.burns().last())
+        .map_or(now, |b| now.max(b.end_time))
+        + 30.;
+    let reference_body = match lab.session.navigation_reference(&id) {
+        Ok(body) => body,
+        Err(reason) => {
+            lab.notice = reason;
+            return;
+        }
+    };
+    let request = NavigationRequest {
+        operation: match operation {
+            0 => NavigationOperation::Departure,
+            1 => NavigationOperation::Correction,
+            2 => NavigationOperation::Capture,
+            _ => unreachable!(),
+        },
+        target_body,
+        reference_body,
+        earliest_departure: earliest,
+        latest_departure: earliest + navigation_wait(state) * 86400.,
+        min_flight_seconds: 60.,
+        max_flight_seconds: navigation_flight(state) * 86400.,
+        periapsis_altitude_m: navigation_altitude(state) * 1000.,
+    };
+    match lab.session.execute(Action::GenerateNavigation { request }) {
+        Outcome::Applied => {
+            lab.notice = "Navigation node generated; inspect prediction before execution".into();
+            lab.prediction = None;
+        }
+        Outcome::Refused(reason) => lab.notice = reason,
+        other => panic!("unexpected navigation outcome {other:?}"),
     }
 }
 

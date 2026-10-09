@@ -9,6 +9,8 @@ mod frames;
 pub mod gravity;
 mod hermite;
 mod kepler;
+mod navigation;
+mod nodes;
 mod propagator;
 mod reference_frames;
 mod simulation;
@@ -46,3 +48,8 @@ pub use system::{
     OrbitPlane, RotationSpec, SpinSpec, SystemSpec, body_orientation, build_system, expanded_sol,
 };
 pub use trajectory::Trajectory;
+
+pub use navigation::{
+    NavigationError, NavigationOperation, NavigationRequest, NavigationSolution, solve_navigation,
+};
+pub use nodes::{NodeKind, OrbitNode, find_nodes};

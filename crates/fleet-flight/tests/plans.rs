@@ -108,3 +108,96 @@ fn rejected_plan_and_manual_abort_do_not_complete_a_burn() {
     let replay = FlightSession::from_recording(session.recording()).with_recording();
     assert_eq!(before, world_mark(replay.sim()));
 }
+
+fn navigation_request(session: &FlightSession) -> void_orbit::NavigationRequest {
+    void_orbit::NavigationRequest {
+        operation: void_orbit::NavigationOperation::Capture,
+        target_body: session.sim().home,
+        reference_body: session.sim().home,
+        earliest_departure: 100.0,
+        latest_departure: 100.0,
+        min_flight_seconds: 100.0,
+        max_flight_seconds: 12_000.0,
+        periapsis_altitude_m: 400_000.0,
+    }
+}
+
+#[test]
+fn navigation_refusals_preserve_existing_plan_and_are_replayed() {
+    let mut session = fixture();
+    let id = session.sim().selected.clone();
+    add(&mut session, 0.047, 2.0);
+    let before = world_mark(session.sim());
+    let mut request = navigation_request(&session);
+    request.target_body = usize::MAX;
+    assert!(matches!(
+        session.execute(Action::GenerateNavigation { request }),
+        Outcome::Refused(_)
+    ));
+    assert_eq!(before, world_mark(session.sim()));
+    // An invalid pre-existing plan is refused explicitly, not removed or repaired.
+    add(&mut session, 2.0, 1e8);
+    let before = world_mark(session.sim());
+    let request = navigation_request(&session);
+    assert!(
+        matches!(session.execute(Action::GenerateNavigation { request }), Outcome::Refused(reason) if reason.contains("existing plan"))
+    );
+    assert_eq!(before, world_mark(session.sim()));
+    let replay = FlightSession::from_recording(session.recording()).with_recording();
+    assert_eq!(world_mark(session.sim()), world_mark(replay.sim()));
+    assert_eq!(session.sim().plans[&id].plan.count(), 2);
+}
+
+#[test]
+fn navigation_cannot_edit_an_armed_burn() {
+    let mut session = fixture();
+    add(&mut session, 0.047, 2.0);
+    assert_eq!(session.execute(Action::ExecuteManeuver), Outcome::Applied);
+    let before = world_mark(session.sim());
+    let request = navigation_request(&session);
+    assert!(
+        matches!(session.execute(Action::GenerateNavigation { request }), Outcome::Refused(reason) if reason.contains("executing"))
+    );
+    assert_eq!(before, world_mark(session.sim()));
+}
+
+#[test]
+fn navigation_appends_after_existing_burn_without_spending_fuel_and_roundtrips() {
+    let mut session = fixture();
+    let id = session.sim().selected.clone();
+    add(&mut session, 0.047, 10.0);
+    let first = session.sim().plans[&id].plan.maneuver(0);
+    let before_reference = world_mark(session.sim());
+    let home = session.sim().home;
+    assert_eq!(session.navigation_reference(&id).unwrap(), home);
+    assert_eq!(before_reference, world_mark(session.sim()));
+    let mass = session.sim().fleet.snapshot(&id).mass_kg;
+    let request = navigation_request(&session);
+    assert_eq!(
+        session.execute(Action::GenerateNavigation { request }),
+        Outcome::Applied
+    );
+    let plan = &session.sim().plans[&id];
+    assert_eq!(plan.plan.count(), 2);
+    assert_eq!(plan.selected, 1);
+    assert_eq!(
+        serde_json::to_value(first).unwrap(),
+        serde_json::to_value(plan.plan.maneuver(0)).unwrap()
+    );
+    assert!(!plan.executing);
+    assert!(plan.message.contains("bound orbit verified"));
+    assert_eq!(session.sim().fleet.snapshot(&id).mass_kg, mass);
+    // Switching ships keeps the generated plan on its original owner.
+    session.execute(Action::Select {
+        vessel: "v1".into(),
+    });
+    assert!(!session.sim().plans.contains_key("v1"));
+    assert_eq!(session.sim().plans[&id].plan.count(), 2);
+    let saved = FlightCheckpoint::capture(session.sim(), session.recording_initial().clone());
+    let loaded = FlightSession::from_checkpoint(
+        serde_json::from_value(serde_json::to_value(saved).unwrap()).unwrap(),
+    );
+    assert_eq!(world_mark(session.sim()), world_mark(loaded.sim()));
+    let replay = FlightSession::from_recording(session.recording()).with_recording();
+    assert_eq!(world_mark(session.sim()), world_mark(replay.sim()));
+}

@@ -15,7 +15,7 @@ pub mod durable;
 
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 32;
+pub const MODEL_VERSION: u32 = 33;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -128,6 +128,9 @@ pub enum Action {
     },
     Sas {
         enabled: bool,
+    },
+    GenerateNavigation {
+        request: void_orbit::NavigationRequest,
     },
     AddManeuver {
         spec: void_orbit::ManeuverSpec,
@@ -381,6 +384,12 @@ impl Action {
                     return Outcome::Refused("SAS requires a functioning command part".into());
                 }
                 match sim.fleet.request_sas(&sim.selected, *enabled) {
+                    Ok(()) => Outcome::Applied,
+                    Err(reason) => Outcome::Refused(reason),
+                }
+            }
+            Self::GenerateNavigation { request } => {
+                match sim.generate_navigation(&sim.selected.clone(), request) {
                     Ok(()) => Outcome::Applied,
                     Err(reason) => Outcome::Refused(reason),
                 }
@@ -711,6 +720,10 @@ pub struct FlightSession {
     stream: Option<durable::Writer>,
 }
 impl FlightSession {
+    /// Read-only trial query for the navigation UI; no authoritative command is committed.
+    pub fn navigation_reference(&mut self, id: &str) -> Result<usize, String> {
+        self.sim.navigation_reference(id)
+    }
     /// Read-only observation prevents callers from bypassing the command journal.
     pub fn sim(&self) -> &FleetFlight {
         &self.sim

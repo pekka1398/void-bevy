@@ -320,6 +320,7 @@ pub enum LabelKind {
     Body(usize),
     Vessel,
     Apsis,
+    Node(usize),
 }
 
 /// A label to place: position relative to the origin, and its priority (higher wins a crowded

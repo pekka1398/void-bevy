@@ -310,6 +310,35 @@ impl FlightPlan {
         }
     }
 
+    /// Predicted state immediately after existing burns, suitable as an append-only planning
+    /// anchor. Uses the existing finite-thrust schedule without changing or removing nodes.
+    pub fn tail_state(
+        &mut self,
+        ephemeris: &mut dyn EphemerisSource,
+    ) -> Result<PropagationRun, String> {
+        if let Some(reason) = self.statuses.iter().find_map(|s| s.as_ref().err()) {
+            return Err(format!("existing plan is not executable: {reason}"));
+        }
+        let anchor = self.anchor.as_ref().expect("flight plan: no anchor");
+        let Some(burn) = self.schedule.last().copied() else {
+            return Ok(anchor.restarted());
+        };
+        self.integrate(ephemeris, burn.end_time, POSITION_MAX_STEPS);
+        if self.impact().is_some_and(|i| i.time <= burn.end_time) {
+            return Err("existing plan impacts before its final burn ends".into());
+        }
+        if self.computed_until() < burn.end_time {
+            return Err("existing plan exhausted its prediction budget".into());
+        }
+        let (position, velocity) = self.trajectory.sample(burn.end_time);
+        Ok(PropagationRun::new(VesselState {
+            time: burn.end_time,
+            position,
+            velocity,
+            mass_kg: burn.mass_after_kg,
+        }))
+    }
+
     /// Drop trajectory samples before t (keeping the one bracketing it).
     pub fn trim_before(&mut self, t: f64) {
         if self.trajectory.count() > 0 {
