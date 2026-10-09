@@ -1218,6 +1218,13 @@ pub fn run(main_game: bool) {
     lab.profile =
         argument("--profile").map(|path| (void_diagnostics::Profiler::new(), path.into()));
     let benchmark_path = argument("--render-benchmark");
+    let no_pipeline_statistics =
+        std::env::args().any(|arg| arg == "--benchmark-no-pipeline-statistics");
+    let benchmark_pipelined = std::env::args().any(|arg| arg == "--benchmark-pipelined");
+    assert!(
+        benchmark_path.is_some() || !(no_pipeline_statistics || benchmark_pipelined),
+        "benchmark diagnostics/pipelining controls require --render-benchmark"
+    );
     let render_path = argument("--render-profile");
     assert!(
         benchmark_path.is_none() || render_path.is_none(),
@@ -1310,6 +1317,8 @@ pub fn run(main_game: bool) {
         .set(bevy::render::RenderPlugin {
             render_creation: WgpuSettings {
                 features: WgpuFeatures::POLYGON_MODE_LINE,
+                disabled_features: no_pipeline_statistics
+                    .then_some(WgpuFeatures::PIPELINE_STATISTICS_QUERY),
                 ..default()
             }
             .into(),
@@ -1332,9 +1341,11 @@ pub fn run(main_game: bool) {
         });
     }
     if benchmark.is_some() {
-        plugins = plugins
-            .disable::<bevy::winit::WinitPlugin>()
-            .disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>();
+        plugins = plugins.disable::<bevy::winit::WinitPlugin>();
+        if !benchmark_pipelined {
+            plugins =
+                plugins.disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>();
+        }
     }
     app.add_plugins((plugins, WireframePlugin::default()))
         .insert_resource(ClearColor(if main_game {
@@ -1595,6 +1606,8 @@ fn benchmark_tick(
                 "scene_source":if argument("--load").is_some() { "saved checkpoint" } else { "preset" },
                 "lifecycle_body_sequence":config.lifecycle_bodies,"lifecycle_checks":config.lifecycle_checks,
                 "lod_motion_updates":config.motion_updates,"lod_motion_body":config.motion_body,
+                "pipelined_rendering":std::env::args().any(|arg|arg == "--benchmark-pipelined"),
+                "pipeline_statistics_disabled_by_request":std::env::args().any(|arg|arg == "--benchmark-no-pipeline-statistics"),
                 "gpu_lod_packing_at_run":gpu_shared.as_ref().map(|shared|shared.report()),
                 "model_version":void_fleet_flight::session::MODEL_VERSION}),
             );

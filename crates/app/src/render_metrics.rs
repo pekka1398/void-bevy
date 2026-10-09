@@ -122,6 +122,20 @@ struct DrawCounters(
 struct GpuSupportProbe(std::sync::Arc<std::sync::OnceLock<&'static str>>);
 pub struct RenderMetricsPlugin;
 impl Plugin for RenderMetricsPlugin {
+    fn finish(&self, app: &mut App) {
+        let features = app
+            .sub_app(RenderApp)
+            .world()
+            .resource::<RenderDevice>()
+            .features();
+        assert!(
+            features.intersects(
+                bevy::render::settings::WgpuFeatures::TIMESTAMP_QUERY
+                    | bevy::render::settings::WgpuFeatures::PIPELINE_STATISTICS_QUERY
+            ),
+            "Source-frame render diagnostics require a GPU query set: pinned Bevy 0.19.1 reads numeric tag buffers before mapping completes when both query types are unavailable; use --profile for CPU-only profiling"
+        );
+    }
     fn build(&self, app: &mut App) {
         let counters = app.world().resource::<RenderMetrics>().counters.clone();
         let support = GpuSupportProbe(app.world().resource::<RenderMetrics>().gpu_support.clone());

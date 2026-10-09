@@ -1,3 +1,7 @@
+# LOD render thread 對照第五輪（2026-10-09）
+
+新增benchmark pipeline／statistics控制，核對原主遊戲已使用的render thread。相同動態序列serial main interval約18ms、pipe約11ms；pipe下GPU packing未顯示穩定整體優勢，8 workers只明顯改善接受延遲。十組成功配置pixel／checkpoint一致，pipe GPU verify11,038tiles全位元通過，app44與scoped lint/build通過。記錄完全無queries的pinned Bevy numeric mapping失敗，改為初始化明確拒絕不相容的render profiling。未merge/push；詳見[第五輪報告](lod-pipeline-review.md)。
+
 # LOD 動態與平衡快取第四輪（2026-10-09）
 
 新增worker queue／finish lag及固定步數camera壓力路徑；4／8／16 workers交錯測量未支持改worker預設。已平衡拓撲cache在static ABBA把balance p50從0.36–0.38ms降到約0.003ms；440-frame oracle、原golden與pixel／checkpoint核對通過。動態GPU packing有正面訊號，仍opt-in。app44、landing／Fleet156 tests及所屬LOD/lint通過。未merge/push、未有人類GUI最終驗收；完整證據與限制见[第四輪報告](lod-motion-review.md)。
