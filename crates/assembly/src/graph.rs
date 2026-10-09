@@ -350,7 +350,7 @@ impl PartGraph {
         };
         self.set_module_state(id, module, state);
     }
-    /// Legacy part action activates all its actionable modules, preserving the old lab's semantics.
+    /// A whole-part action activates all its actionable modules.
     pub fn stage_part(&mut self, id: &str) {
         let ids: Vec<_> = self.part(id).module_stages.keys().cloned().collect();
         for module in ids {

@@ -1,13 +1,12 @@
-//! The scenery lab's page in Bevy: lab/lod's tiles in the lab's ground and sea shader, the star
-//! field, the air and volumetric clouds integrated together over the scene, the sun's disc, the
-//! orbit view from the ground to 200,000 km, and the lab's exposure and tone mappings (three.js's
-//! ACES filmic, AgX and Neutral).
+//! The scenery on its own: terrain tiles in the ground and sea shader, the star field, the air and
+//! volumetric clouds integrated together over the scene, the sun's disc, the orbit view from the
+//! ground to 200,000 km, and exposure and tone mappings (ACES filmic, AgX and Neutral).
 //!
-//! `--terrain layered|lod|hills` (the lab's `?terrain=`), `--at LAT,LON` in degrees (`?at=`), and
+//! `--terrain layered|lod|hills`, `--at LAT,LON` in degrees, and
 //! `--preset ground|sunset|night|cloud|plane|orbit|space` to start from a preset, `--tone
 //! aces|agx|neutral`.
 //!
-//! Mouse as the lab: left drag pans, right drag orbits the planet centre, Shift + left drag turns,
+//! Mouse: left drag pans, right drag orbits the planet centre, Shift + left drag turns,
 //! the wheel zooms. Keys stand in for the panel: 1–7 presets (ground, sunset, night, cloud layer,
 //! 10 km, 400 km, 20,000 km) · `,` `.` local time · R time rate · `[` `]` sun declination ·
 //! `-` `=` sea level (hold) · Z X exposure · T tone mapping · K L cloud coverage · A atmosphere · M multi-scatter ·
@@ -49,7 +48,7 @@ use void_terrain::{DEFAULT_LAYERED, MAX_HEIGHT, SEA_LEVEL, Terrain, TerrainConfi
 
 const DEG: f64 = PI / 180.0;
 const FOV_DEGREES: f64 = 60.0;
-/// The lab's time-rate choices, hours per second: stopped, 1 min/s, 15 min/s, 2 h/s.
+/// The time-rate choices, hours per second: stopped, 1 min/s, 15 min/s, 2 h/s.
 const RATES: [(f64, &str); 4] = [
     (0.0, "stopped"),
     (0.02, "1 min/s"),
@@ -75,7 +74,7 @@ fn main() {
         .run();
 }
 
-/// A terrain the lab can show (Terrains.ts): its sampler, bounds, sea level and rock and snow heights.
+/// A terrain this example can show: its sampler, bounds, sea level and rock and snow heights.
 struct SceneryTerrain {
     label: String,
     sampler: Arc<dyn SurfaceSampler + Send + Sync>,
@@ -88,7 +87,7 @@ struct SceneryTerrain {
 
 impl SceneryTerrain {
     /// Full-detail height under the camera: a 1 m cell is the layered planet's full detail, and the
-    /// hills and lab/lod's continents ignore the cell.
+    /// hills and the LOD demonstration continents ignore the cell.
     fn height(&self, direction: DVec3) -> f64 {
         self.sampler.sample(direction, 1.0).height_meters
     }
@@ -96,7 +95,7 @@ impl SceneryTerrain {
 
 fn scenery_terrain(id: &str) -> SceneryTerrain {
     match id {
-        // This lab's layered planet: continents, mountain belts, eroded hills down to metres.
+        // The layered planet: continents, mountain belts, eroded hills down to metres.
         "layered" => SceneryTerrain {
             label: "scenery | layered".into(),
             sampler: Arc::new(Terrain::from_config(&TerrainConfig::Layered(
@@ -108,11 +107,11 @@ fn scenery_terrain(id: &str) -> SceneryTerrain {
             rock_height: SEA_LEVEL + 2600.0,
             snow_height: SEA_LEVEL + 4800.0,
         },
-        // lab/lod's kilometre-scale planet: warped continents, flat ocean floor, ridged mountains.
+        // The LOD demonstration planet: warped continents, flat ocean floor, ridged mountains.
         "lod" => {
             let t = DemoTerrain::preset("normal");
             SceneryTerrain {
-                label: format!("lab/lod | {}", t.name),
+                label: format!("LOD demo | {}", t.name),
                 radius_meters: t.radius_meters,
                 max_height_meters: t.max_height_meters,
                 default_sea_level: 300.0,
@@ -121,11 +120,11 @@ fn scenery_terrain(id: &str) -> SceneryTerrain {
                 sampler: Arc::new(t),
             }
         }
-        // lab/landing's Aurelia hills, the ground lab/flight flies over.
+        // Aurelia's hills.
         "hills" => {
             let t = void_landing::aurelia().terrain;
             SceneryTerrain {
-                label: "lab/landing | Aurelia hills".into(),
+                label: "Aurelia hills".into(),
                 radius_meters: t.radius_meters,
                 max_height_meters: t.max_height_meters,
                 default_sea_level: 1800.0,
@@ -196,7 +195,7 @@ struct Scenery {
     rate: usize,
     declination_degrees: f64,
     sea_level: f64,
-    /// Exposure as the lab's slider: ×10^value.
+    /// Exposure: ×10^value.
     exposure: f64,
     tone_mapping: ToneMapping,
 
@@ -438,7 +437,7 @@ fn setup(
         AirSettings::new(&params),
         Hdr,
         Msaa::Off,
-        // three.js's tone mapping runs at the end of the air pass instead.
+        // Tone mapping runs at the end of the air pass instead.
         Tonemapping::None,
         DebandDither::Disabled,
         Projection::Perspective(PerspectiveProjection {
@@ -575,11 +574,11 @@ fn controls(
         }
     }
 
-    // Mouse, as lab/lod: left drag pans, right drag orbits the planet centre, Shift + left drag turns.
+    // Mouse: left drag pans, right drag orbits the planet centre, Shift + left drag turns.
     let (dx, dy) = (f64::from(motion.delta.x), f64::from(motion.delta.y));
     if dx != 0.0 || dy != 0.0 {
         let height = s.here().height;
-        // lab/lod's 0.005 rad per pixel, slowed near the ground so a pixel stays about a pixel of ground.
+        // 0.005 rad per pixel, slowed near the ground so a pixel stays about a pixel of ground.
         let orbit_rate = 0.005 * (height / s.radius).min(1.0);
         let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
         if buttons.pressed(MouseButton::Right) {

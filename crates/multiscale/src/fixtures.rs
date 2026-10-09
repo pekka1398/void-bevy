@@ -1,4 +1,4 @@
-//! The lab's fixtures, as `Fixtures.ts`: three Sun-like systems a few light-years apart, placed
+//! Fixtures: three Sun-like systems a few light-years apart, placed
 //! 30,000 light-years from the origin, and a probe sent from Aster toward Beryl.
 
 use glam::DVec3;
@@ -37,7 +37,7 @@ pub fn planetary_system(name: &str, mass_scale: f64, orbit_radius: f64) -> Built
     build_system(&SystemSpec::from_json(&spec.to_string()))
 }
 
-/// The lab's default placement: 30,000 light-years out. A coordinate placement only; there is
+/// The default placement: 30,000 light-years out. A coordinate placement only; there is
 /// no galaxy potential.
 pub fn default_galaxy() -> SplitPosition {
     SplitPosition::at(DVec3::new(
@@ -73,7 +73,7 @@ pub fn wide_seeds(galaxy: SplitPosition) -> Vec<SystemSeed> {
     ]
 }
 
-/// The wide fixture with one-day steps and the lab's 8,192 samples.
+/// The wide fixture with one-day steps and 8,192 retained samples.
 pub fn wide_world(galaxy: SplitPosition) -> CoupledWorld {
     CoupledWorld::new(wide_seeds(galaxy), 86400.0, 8192)
 }

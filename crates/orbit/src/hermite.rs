@@ -1,4 +1,4 @@
-//! Quintic Hermite interpolation of (x, v, a) samples, as `lab/orbit/src/orbit/Hermite.ts`.
+//! Quintic Hermite interpolation of (x, v, a) samples.
 
 #[derive(Clone, Copy, Debug)]
 pub struct HermiteBasis {

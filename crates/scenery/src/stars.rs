@@ -28,7 +28,7 @@ pub const DEFAULT_STARS: StarFieldOptions = StarFieldOptions {
 /// Distance the stars are drawn at, metres: past any atmosphere and still well inside the far plane.
 pub const STAR_DISTANCE: f64 = 1e12;
 
-/// Positions (at `STAR_DISTANCE`) and linear colours (magnitude-0 star = 1), as f32 like the lab's
+/// Positions (at `STAR_DISTANCE`) and linear colours (magnitude-0 star = 1), as f32 vertex
 /// buffers. Magnitudes follow the number of stars growing about 2.2× per magnitude; brightness falls
 /// 10^(−0.25 m), flatter than the true 10^(−0.4 m), so a one-pixel faint star stays visible.
 pub fn generate_stars(o: &StarFieldOptions) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
@@ -42,12 +42,14 @@ pub fn generate_stars(o: &StarFieldOptions) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
         "generate_stars: galactic_pole length {pole_length}"
     );
     let mut random = mulberry32(o.seed);
-    let pole = three_normalize(o.galactic_pole);
-    let a = three_normalize(pole.cross(if pole.x.abs() < 0.9 {
-        DVec3::X
-    } else {
-        DVec3::Y
-    }));
+    let pole = o.galactic_pole.normalize_or_zero();
+    let a = pole
+        .cross(if pole.x.abs() < 0.9 {
+            DVec3::X
+        } else {
+            DVec3::Y
+        })
+        .normalize_or_zero();
     let b = pole.cross(a);
     let mut positions = Vec::with_capacity(o.count);
     let mut colors = Vec::with_capacity(o.count);
@@ -65,7 +67,7 @@ pub fn generate_stars(o: &StarFieldOptions) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
             let s = (1.0 - z * z).sqrt();
             DVec3::new(s * f64::cos(phi), s * f64::sin(phi), z)
         };
-        let p = three_normalize(direction) * STAR_DISTANCE;
+        let p = direction.normalize_or_zero() * STAR_DISTANCE;
         positions.push([p.x as f32, p.y as f32, p.z as f32]);
         // Inverse of N(<m) ∝ 10^(0.34 m), capped at the brightest real stars.
         let magnitude = (o.faintest + f64::log10(random().max(1e-12)) / 0.34).max(-1.5);
@@ -78,12 +80,6 @@ pub fn generate_stars(o: &StarFieldOptions) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
         ]);
     }
     (positions, colors)
-}
-
-/// three.js's Vector3.normalize: divide by the square root of the sum of squares.
-fn three_normalize(v: DVec3) -> DVec3 {
-    let length = (v.x * v.x + v.y * v.y + v.z * v.z).sqrt();
-    v * (1.0 / if length == 0.0 { 1.0 } else { length })
 }
 
 /// Rough linear RGB of a star's colour, normalised so green is 1.

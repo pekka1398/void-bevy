@@ -48,7 +48,7 @@ impl FreeFallFrame {
     pub fn origin_time(&self) -> f64 {
         self.run.time
     }
-    /// Query a current or future origin, propagating it on demand as in the TS lab.
+    /// Query a current or future origin, propagating it on demand.
     /// The mutable ephemeris is explicit because propagation extends its history.
     pub fn origin_at(&mut self, ephemeris: &mut dyn EphemerisSource, time: f64) -> State {
         self.advance_origin(ephemeris, time);

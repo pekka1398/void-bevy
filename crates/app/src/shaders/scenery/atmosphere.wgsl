@@ -1,4 +1,4 @@
-// lab/scenery's AtmosphereNodes.ts table lookups: sunlight through the air, multiple scattering and
+// Atmosphere table lookups: sunlight through the air, multiple scattering and
 // sky irradiance, from the tables void-scenery builds on the CPU.
 #define_import_path void::atmosphere
 

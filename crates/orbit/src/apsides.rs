@@ -22,8 +22,8 @@ pub struct Apsis {
 
 const TIME_RESOLUTION_SECONDS: f64 = 1e-3;
 
-/// Actual (not osculating) apsides of a trajectory relative to one body, as
-/// `lab/orbit/src/orbit/Apsides.ts`: zeros of the radial velocity, bracketed at step points and
+/// Actual (not osculating) apsides of a trajectory relative to one body: zeros of the radial
+/// velocity, bracketed at step points and
 /// refined by bisection on the trajectory's Hermite interpolation.
 pub fn find_apsides(
     trajectory: &Trajectory,
@@ -96,7 +96,7 @@ pub fn find_apsides(
     found
 }
 
-/// `Math.sign`: −1, 0 or 1 (NaN never reaches here; the ephemeris and trajectory panic first).
+/// −1, 0 or 1 (NaN never reaches here; the ephemeris and trajectory panic first).
 fn sign(x: f64) -> f64 {
     if x > 0.0 {
         1.0
@@ -108,7 +108,7 @@ fn sign(x: f64) -> f64 {
 }
 
 /// The body whose Laplace sphere of influence most deeply contains a point, walking down the body
-/// tree from the root, as `lab/orbit/src/orbit/Dominance.ts`. Only a choice of reference for
+/// tree from the root. Only a choice of reference for
 /// osculating elements and display; the dynamics are always full N-body.
 pub struct DominanceTree {
     soi: Vec<Option<f64>>,

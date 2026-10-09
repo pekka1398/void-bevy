@@ -1,5 +1,5 @@
-//! Tile meshes, as `lab/lod/src/lod/TileMeshBuilder.ts`, and seam stitching (`stitchEdges` in
-//! `TileRenderer.ts`), which is geometry and so lives here rather than with the renderer.
+//! Tile meshes, and seam stitching, which is geometry and so lives here rather than with the
+//! renderer.
 
 use std::f64::consts::FRAC_PI_2;
 use std::time::Instant;
@@ -54,7 +54,7 @@ pub struct TileMeshData {
 }
 
 impl TileMeshData {
-    /// Resident vertex payload, as the lab's `tileBufferBytes`.
+    /// Resident vertex payload in bytes.
     pub fn buffer_bytes(&self) -> usize {
         (self.positions.len() * 3
             + self.normals.len() * 3
@@ -262,7 +262,7 @@ pub fn build_tile_indices(n: usize) -> (Vec<u32>, usize) {
     (indices, grid_index_count)
 }
 
-/// Grid vertex `s` along a face edge, as the lab's `edgeVertex`.
+/// Grid vertex `s` along a face edge.
 fn edge_vertex(edge: FaceEdge, s: usize, n: usize) -> usize {
     match edge {
         FaceEdge::UMinus => s * n,
@@ -317,7 +317,7 @@ pub fn stitch_edges(
             let a = edge_vertex(coarse_edge, lower as usize, n);
             let b = edge_vertex(coarse_edge, upper as usize, n);
             let skirt = n * n + skirt_edge * n + s;
-            // Blends run in f64 and round to f32 only when stored, as the lab's typed arrays do.
+            // Blends run in f64 and round to f32 only when stored.
             heights[destination] =
                 (f64::from(c.heights[a]) * (1.0 - blend) + f64::from(c.heights[b]) * blend) as f32;
             heights[skirt] = heights[destination];

@@ -1,5 +1,5 @@
-//! Simulated time, the ephemeris, one vessel, its controls and its coast prediction, as
-//! `lab/orbit/src/orbit/Simulation.ts`: manual throttle with attitude modes, the flight plan's burns
+//! Simulated time, the ephemeris, one vessel, its controls and its coast prediction: manual
+//! throttle with attitude modes, the flight plan's burns
 //! flown when their time comes, impacts, and the prediction restarted after any thrust.
 
 use glam::DVec3;
@@ -71,7 +71,7 @@ pub enum AttitudeMode {
 }
 
 impl AttitudeMode {
-    /// The lab's name.
+    /// The mode's display name.
     pub fn label(self) -> &'static str {
         match self {
             AttitudeMode::Prograde => "prograde",

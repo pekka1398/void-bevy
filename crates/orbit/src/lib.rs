@@ -1,5 +1,5 @@
-//! The orbit lab's N-body mechanics (`lab/orbit/src/orbit`), ported to Rust. Systems are JSON
-//! files exported from the lab's presets (`systems/`); checks compare with the lab's own output.
+//! N-body orbital mechanics: star systems read from JSON (`systems/`), the ephemeris that
+//! integrates their bodies, and vessels propagated through its gravity.
 
 mod apsides;
 mod dopri5;

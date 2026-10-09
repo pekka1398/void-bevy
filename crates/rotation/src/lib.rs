@@ -1,5 +1,5 @@
 //! Rigid-body rotation seen from a frame that itself turns at a constant angular velocity Ω (a
-//! planet's body-fixed frame), as `lab/rotation/src/RotatingFrame.ts`.
+//! planet's body-fixed frame).
 //!
 //! All vectors are in the frame's axes. ω is the body's angular velocity relative to the frame
 //! (what a physics engine working in the frame stores), I the body's inertia about its mass centre

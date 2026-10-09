@@ -1,4 +1,4 @@
-//! Planets to land on, as `lab/landing/src/planet/Planets.ts`: gravity and spin as an orbit
+//! Planets to land on: gravity and spin as an orbit
 //! system, and a terrain.
 
 use std::f64::consts::PI;
@@ -11,7 +11,7 @@ use void_orbit::{
 };
 use void_terrain::{HillsOptions, Terrain, TerrainConfig};
 
-/// The orbit crate's Sol preset (the orbit lab's `SYSTEM_PRESETS.sol`).
+/// The orbit crate's Sol system.
 const SOL: &str = include_str!("../../orbit/systems/sol.json");
 
 #[derive(Clone, Debug)]
@@ -158,7 +158,7 @@ pub fn earth_size() -> LandingPlanet {
     })
 }
 
-/// The orbit lab's Earth analogue inside its full Sol system, with terra's placeholder hills.
+/// The Earth analogue inside the full Sol system, with terra's placeholder hills.
 pub fn aurelia() -> LandingPlanet {
     aurelia_with_spin(1.0)
 }
@@ -239,7 +239,7 @@ fn with_faster_spin(system: &SystemSpec, body_id: &str, factor: f64) -> SystemSp
     }
 }
 
-/// The planets by id, as the lab's `PLANETS`.
+/// The planets by id.
 pub fn planet_by_id(id: &str) -> LandingPlanet {
     match id {
         "pebble" => pebble(),
@@ -309,8 +309,7 @@ pub fn planet_ephemeris(planet: &LandingPlanet) -> (Ephemeris, usize) {
     (ephemeris, index)
 }
 
-/// The finest level whose tiles are at least `tile_size_meters` across at the equator of a face,
-/// as `TerrainTiles.ts`'s `levelForTileSize`.
+/// The finest level whose tiles are at least `tile_size_meters` across at the equator of a face.
 pub fn level_for_tile_size(radius_meters: f64, tile_size_meters: f64) -> u32 {
     assert!(
         radius_meters > 0.0 && tile_size_meters > 0.0,
@@ -321,7 +320,7 @@ pub fn level_for_tile_size(radius_meters: f64, tile_size_meters: f64) -> u32 {
     (face_span / tile_size_meters).log2().floor().max(0.0) as u32
 }
 
-/// The LOD quadtree's options for a landing planet, as `TerrainView.ts`'s `landingLodOptions`. Its
+/// The LOD quadtree's options for a landing planet. Its
 /// finest level is the collision level. Within reach of any observer, every tile and its neighbours
 /// are at that level, so no drawn edge there is stitched to a coarser tile and the drawn triangles
 /// are the ones Rapier collides with.
@@ -353,7 +352,6 @@ pub fn landing_lod_options(
         resolution: contact.tile_resolution,
         max_level,
         split_distance_ratios,
-        // The LOD lab's defaults.
         retain_frames: 90,
         max_cached_tiles: 2_500,
     }

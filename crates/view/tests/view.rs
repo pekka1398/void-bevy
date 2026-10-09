@@ -14,7 +14,7 @@ use void_view::{
     ellipse_points_in_time, frame_to_ecliptic, orbit_in_surface_frame, rotate, view_state,
 };
 
-fn view_lab_simulation() -> Simulation {
+fn sol_simulation() -> Simulation {
     let path = format!("{}/../orbit/systems/sol.json", env!("CARGO_MANIFEST_DIR"));
     Simulation::new(SimulationOptions {
         system: SystemSpec::from_json(&std::fs::read_to_string(&path).expect(&path)),
@@ -256,7 +256,7 @@ fn osculating_ellipses() {
 fn path_frames_and_surface_orbits() {
     // Path frames through the map's own steps (PathCache, then the turn by the axes now). Samples
     // span a day of Aurelia's spin; "now" is the end.
-    let mut sim = view_lab_simulation();
+    let mut sim = sol_simulation();
     let home_index = sim.body_index("aurelia");
     let home = sim.system.bodies[home_index].clone();
     let day = home.rotation.period_seconds;

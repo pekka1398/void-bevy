@@ -1,4 +1,4 @@
-//! One vessel through the ephemeris' gravity, as `lab/orbit/src/orbit/VesselPropagator.ts`.
+//! One vessel through the ephemeris' gravity.
 
 use serde::{Deserialize, Serialize};
 use std::f64::consts::TAU;
@@ -241,7 +241,7 @@ impl PropagationRun {
         self.derivative_control = None;
     }
 
-    /// An independent copy with the same state and step memory, as the lab's `clone`: the
+    /// An independent copy with the same state and step memory: the
     /// derivative is re-evaluated and an impact is not carried over.
     pub fn restarted(&self) -> Self {
         let mut copy = Self::new(self.state());

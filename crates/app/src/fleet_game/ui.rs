@@ -1,4 +1,4 @@
-//! Native flight HUD, mapped from the archived src/main.ts and style.css.
+//! The flight HUD.
 use super::*;
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]

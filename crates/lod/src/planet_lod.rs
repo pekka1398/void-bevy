@@ -1,4 +1,4 @@
-//! Cube-sphere quadtree selection, as `lab/lod/src/lod/PlanetLod.ts`.
+//! Cube-sphere quadtree selection.
 
 use std::f64::consts::FRAC_PI_4;
 use std::sync::Arc;
@@ -121,7 +121,7 @@ pub struct LodCollapse {
 #[derive(Clone, Debug)]
 pub struct LodSelection {
     pub frame: u64,
-    /// Tile codes to draw, in the lab's order.
+    /// Tile codes to draw, in traversal order.
     pub render: Vec<u64>,
     pub requests: Vec<TileRequest>,
     pub horizon_culled: usize,
@@ -752,7 +752,7 @@ impl PlanetLod {
             })
             .map(|n| (n.code, n.last_used_frame))
             .collect();
-        // Stable, so equal frames keep the nodes' insertion order, as the lab's sort does.
+        // Stable, so equal frames keep the nodes' insertion order.
         candidates.sort_by_key(|&(_, frame)| frame);
         let floor = self.options.max_cached_tiles as f64 * 0.85;
         for (code, _) in candidates {
@@ -786,7 +786,7 @@ impl PlanetLod {
         let Some(children) = self.node_ref(code).children else {
             return unused(self, self.node_ref(code));
         };
-        // Every child is visited, as the lab's map(prune).every(Boolean) does.
+        // Every child is visited, even after one is found not prunable.
         let removable = children.map(|child| self.prune(child)).iter().all(|&r| r);
         if removable {
             for child in children {

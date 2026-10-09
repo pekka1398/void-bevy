@@ -1,4 +1,4 @@
-//! Body and wing forces, as the lab's `Aero.ts`: engineering coefficients evaluated at each
+//! Body and wing forces: engineering coefficients evaluated at each
 //! element's own airflow, not CFD or a voxel flow solution.
 
 use glam::{DQuat, DVec3};

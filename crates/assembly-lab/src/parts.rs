@@ -1,5 +1,5 @@
-//! Bevy meshes from the actual TS PartVisual scene recipes. These are render-only details;
-//! the owning assembly runtime still creates its own simplified cylinder/cone colliders.
+//! Bevy meshes from the parts' visual recipes (`data/visuals.json`). These are render-only
+//! details; the flight runtime creates its own simplified colliders.
 use bevy::gizmos::config::GizmoConfigGroup;
 use bevy::prelude::*;
 use serde::Deserialize;
@@ -101,7 +101,7 @@ impl RenderAssets {
     pub fn new(meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) -> Self {
         let definitions: Vec<VisualDefinition> =
             serde_json::from_str(include_str!("../data/visuals.json"))
-                .expect("invalid TS assembly render data");
+                .expect("invalid assembly render data");
         let mut parts = HashMap::new();
         let mut outlines = HashMap::new();
         for d in definitions {

@@ -1,4 +1,4 @@
-//! Dormand & Prince (1980) RK5(4)7M, as `lab/orbit/src/orbit/Dopri5.ts`.
+//! Dormand & Prince (1980) RK5(4)7M.
 
 const C2: f64 = 1.0 / 5.0;
 const C3: f64 = 3.0 / 10.0;

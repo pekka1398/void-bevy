@@ -1,5 +1,4 @@
-//! Coast prediction and the encounter range gate, as `lab/landing/src/vessel/CoastPrediction.ts`
-//! and `EncounterPhysics.ts`.
+//! Coast prediction and the encounter range gate.
 
 use void_frames::State;
 

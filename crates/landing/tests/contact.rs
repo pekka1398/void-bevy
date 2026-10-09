@@ -1,6 +1,5 @@
-//! Contacts in the rotating frame: lab/landing's own checks (`landing-check.ts`, "P2"), with its
-//! thresholds. Rapier runs natively here and as WebAssembly there, so these compare what the lab
-//! measures, not bits.
+//! Contacts in the rotating frame: free flight against the inertial arc, rest, rolling across
+//! tiles, moving the floating origin, and the queries the vessels rely on.
 
 use std::sync::Arc;
 use void_frames::State;

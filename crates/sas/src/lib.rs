@@ -1,4 +1,4 @@
-//! KSP's stability assist on a craft's steering torque, as `lab/sas/src/StabilityAssist.ts`.
+//! KSP's stability assist on a craft's steering torque.
 //!
 //! It returns the same `turn` command a pilot gives (local axes, each in [−1, 1], times the unit's
 //! maximum torque), so SAS never has more authority than the keys.
@@ -33,7 +33,7 @@ pub enum SasPhase {
 }
 
 impl SasPhase {
-    /// The lab's phase text.
+    /// The phase's display text.
     pub fn label(self) -> &'static str {
         match self {
             SasPhase::Off => "off",
@@ -82,7 +82,7 @@ fn mat_vec(m: &Mat3, v: DVec3) -> DVec3 {
     )
 }
 
-/// JavaScript's `Math.sign`: zero (of either sign) and NaN come back unchanged.
+/// The sign: zero (of either sign) and NaN come back unchanged.
 fn sign(v: f64) -> f64 {
     if v > 0.0 {
         1.0
@@ -121,7 +121,7 @@ pub struct StabilityAssist {
 }
 
 impl StabilityAssist {
-    /// `max_torque`: N m per unit of turn command on each axis (lab/landing's `STEERING_TORQUE`).
+    /// `max_torque`: N m per unit of turn command on each axis.
     pub fn new(max_torque: f64, tuning: SasTuning) -> Self {
         assert!(
             max_torque > 0.0 && max_torque.is_finite(),

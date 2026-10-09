@@ -1,7 +1,7 @@
-//! The two gradient noises the terrains use, as the labs write them: integer hashes with
-//! `Math.imul` (wrapping i32 multiplies here), quintic fades.
+//! The two gradient noises the terrains use: integer hashes with wrapping i32 multiplies,
+//! quintic fades.
 
-/// `Math.imul` hash of an integer lattice point.
+/// Wrapping-multiply hash of an integer lattice point.
 fn hash(x: f64, y: f64, z: f64) -> u32 {
     // Lattice coordinates are floored f64s well inside i32, as ToInt32 sees them.
     let (x, y, z) = (x as i32, y as i32, z as i32);
@@ -34,7 +34,7 @@ fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a + (b - a) * t
 }
 
-/// lab/landing's hills noise (`HillsTerrain.ts`): 3D Perlin noise in about [−1, 1].
+/// The hills' noise: 3D Perlin noise in about [−1, 1].
 pub fn perlin(x: f64, y: f64, z: f64) -> f64 {
     let (ix, iy, iz) = (x.floor(), y.floor(), z.floor());
     let (fx, fy, fz) = (x - ix, y - iy, z - iz);
@@ -58,7 +58,7 @@ pub fn perlin(x: f64, y: f64, z: f64) -> f64 {
     )
 }
 
-/// lab/scenery's noise (`LayeredTerrain.ts`): gradient noise and its gradient in one pass, from
+/// The layered planet's noise: gradient noise and its gradient in one pass, from
 /// Quilez's analytic derivative of quintic-interpolated Perlin noise. In about [−1, 1].
 pub fn noise_with_gradient(x: f64, y: f64, z: f64) -> (f64, [f64; 3]) {
     let (ix, iy, iz) = (x.floor(), y.floor(), z.floor());

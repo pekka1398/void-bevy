@@ -317,20 +317,9 @@ pub fn part_inertia_per_kg(part: &PartDefinition) -> DVec3 {
     let side = (3.0 * part.radius * part.radius + part.height * part.height) / 12.0;
     DVec3::new(side, part.radius * part.radius / 2.0, side)
 }
-/// Same operation order as the lab's quaternion matrix multiplication.
+/// v turned by the unit quaternion q.
 pub fn rotate(q: DQuat, v: DVec3) -> DVec3 {
-    let (x, y, z, w) = (q.x, q.y, q.z, q.w);
-    DVec3::new(
-        (1.0 - 2.0 * (y * y + z * z)) * v.x
-            + 2.0 * (x * y - z * w) * v.y
-            + 2.0 * (x * z + y * w) * v.z,
-        2.0 * (x * y + z * w) * v.x
-            + (1.0 - 2.0 * (x * x + z * z)) * v.y
-            + 2.0 * (y * z - x * w) * v.z,
-        2.0 * (x * z - y * w) * v.x
-            + 2.0 * (y * z + x * w) * v.y
-            + (1.0 - 2.0 * (x * x + y * y)) * v.z,
-    )
+    q * v
 }
 fn align(from: DVec3, to: DVec3) -> DQuat {
     let a = from / from.length();
@@ -679,7 +668,7 @@ pub struct CrossfeedPart<'a> {
     pub definition: &'a PartDefinition,
 }
 
-/// Returns reachable tanks in input part order, matching TS `crossfeedTanks`.
+/// Returns reachable tanks in input part order.
 /// Both ends of each traversed connection must allow crossfeed. Connections to
 /// parts outside this graph are ignored, so callers may pass a subset of a vessel.
 /// Pass only active connections after separation. Cycles are supported.

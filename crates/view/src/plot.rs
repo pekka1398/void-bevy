@@ -1,4 +1,4 @@
-//! Orbit-lab plotting semantics shared by the main map. Every sample is transformed at its own
+//! Plotting semantics shared by the main map. Every sample is transformed at its own
 //! time, then placed using the frame now. These are presentation coordinates, never physics.
 use crate::{PathCache, frame_to_ecliptic};
 use glam::DVec3;

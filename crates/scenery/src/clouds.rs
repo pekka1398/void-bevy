@@ -56,7 +56,7 @@ pub fn weather_coverage(humidity: f64, amount: f64) -> f64 {
     ) * 0.9
 }
 
-/// JavaScript's Math.round on a non-negative value.
+/// Round half up, for a non-negative value.
 fn round_byte(v: f64) -> u8 {
     (v + 0.5).floor() as u8
 }
@@ -326,7 +326,7 @@ pub fn cloud_shell_intervals(
         return Vec::new();
     };
     let (start, end) = (outside.0.max(0.0), scene_distance.min(outside.1));
-    // Written as the TS does, so a NaN end also gives no interval.
+    // Written so that a NaN end also gives no interval.
     #[allow(clippy::neg_cmp_op_on_partial_ord)]
     if !(end > start) {
         return Vec::new();

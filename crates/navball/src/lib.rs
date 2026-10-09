@@ -1,10 +1,10 @@
-//! The navball, as `lab/navball/src/Navball.ts`: the sky and ground around the vessel, seen from
+//! The navball: the sky and ground around the vessel, seen from
 //! outside along its nose. The ball's centre is where the nose points; screen up is the vessel's
 //! top (where the nose goes on pitch up), screen right its right.
 //!
 //! Everything is plain vectors in one caller-chosen frame, so the ball does not care whether that
-//! frame is body-fixed or inertial. [`NavballPainter`] draws it into an RGBA buffer the way the
-//! lab's canvas does; its text labels are handed back for the caller to draw.
+//! frame is body-fixed or inertial. [`NavballPainter`] draws it into an RGBA buffer; its text
+//! labels are handed back for the caller to draw.
 
 use glam::DVec3;
 
@@ -120,10 +120,9 @@ pub fn navball_basis(input: &NavballInput) -> NavballBasis {
     );
     let (north, east) = horizon_axes(input.up, input.pole, input.prime_meridian);
     NavballBasis {
-        // MIRRORED FROM KSP (kept as the lab has it): top × nose makes the ball a globe seen from
-        // outside. Facing east, 60 is on the right and 120 on the left; facing north, W is on the
-        // right. KSP shows the opposite (E on the right when facing north). lab/flight's yaw keys
-        // follow this same axis, so the ball and the keys agree with each other but both are
+        // MIRRORED FROM KSP: top × nose makes the ball a globe seen from outside. Facing east, 60
+        // is on the right and 120 on the left; facing north, W is on the right. KSP shows the
+        // opposite (E on the right when facing north). The game's yaw keys follow this same axis, so the ball and the keys agree with each other but both are
         // mirrored from KSP. Fixing it means changing this axis and the steering together.
         right: cross(input.top, input.nose),
         top: input.top,

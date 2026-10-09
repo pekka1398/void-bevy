@@ -1,4 +1,4 @@
-//! lab/view's page: one view from the vessel out to the whole Sol system. Zooming out from the
+//! One view from the vessel out to the whole Sol system. Zooming out from the
 //! vessel fades the map in (orbits, the vessel's path, labels), then turns the camera's up to the
 //! planet's north and lets go of the ground's spin. `--view split` is KSP's two views instead (M
 //! switches flight and map). `--altitude KM` sets the start orbit about Aurelia (100 km).
@@ -227,7 +227,7 @@ fn setup(
                 inclination_radians: 0.0,
             },
         },
-        // The orbit lab's chemical stage: 250 kN, Isp 350 s, 10 t dry + 30 t propellant.
+        // A chemical stage: 250 kN, Isp 350 s, 10 t dry + 30 t propellant.
         engine: EngineSpec {
             thrust_newtons: 250e3,
             specific_impulse_seconds: 350.0,
@@ -242,8 +242,8 @@ fn setup(
     let bodies = sim.system.bodies.clone();
     let n = bodies.len();
 
-    // The home planet is the landing lab's terrain (Earth-size hills, as its terra planet) streamed
-    // by lab/lod, with the landing lab's tile options.
+    // The home planet's terrain (Earth-size hills, as terra) streamed by the LOD quadtree, with the
+    // landing tile options.
     let radius = bodies[home].radius_meters;
     let terrain = Arc::new(Terrain::from_config(&TerrainConfig::Hills(HillsOptions {
         name: format!("{} hills", bodies[home].name),
@@ -341,7 +341,7 @@ fn setup(
         ));
     }
 
-    // The lab's vessel: hull, nose, bell and plume, about 6 m along its thrust axis (+Y).
+    // The vessel: hull, nose, bell and plume, about 6 m along its thrust axis (+Y).
     let hull = materials.add(StandardMaterial {
         base_color: Color::srgb_u8(0xe8, 0xe4, 0xd8),
         metallic: 0.3,
@@ -571,7 +571,7 @@ fn simulate(time: Res<Time>, mut lab: ResMut<Lab>) {
     lab.reference = reference;
 }
 
-/// lab/lod's observers: the vessel (the probe) and the camera, so a camera far out sees the
+/// The LOD observers: the vessel (the probe) and the camera, so a camera far out sees the
 /// planet's face toward it. Both in Aurelia's body-fixed frame.
 fn terrain(lab: Res<Lab>, mut ground: ResMut<Ground>) {
     let centre = lab.positions[lab.home];

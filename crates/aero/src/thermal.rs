@@ -1,4 +1,4 @@
-//! Part heating, as the lab's `Thermal.ts`: a skin and a core per part, internal conduction,
+//! Part heating: a skin and a core per part, internal conduction,
 //! radiation, low-speed convection, Sutton–Graves stagnation heating at high Mach with a hot-wall
 //! correction, and an ablator spent as a finite latent-heat reserve.
 
@@ -205,7 +205,7 @@ pub fn advance_thermal(
 ) -> ThermalBudget {
     advance_with_limit(spec, state, env, dt, external_core_w, 0.05)
 }
-/// The same solver without the lab's fixed 50 ms accuracy cap. Stable adaptive exchange bounds
+/// The same solver without the fixed 50 ms accuracy cap. Stable adaptive exchange bounds
 /// remain; used for accepted Fleet cooling/rails intervals rather than millions of idle steps.
 pub fn advance_thermal_adaptive(
     spec: &ThermalSpec,

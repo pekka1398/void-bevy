@@ -1,5 +1,5 @@
-//! The LOD quadtree with the LOD lab's landing preset and camera controls, on scenery's layered
-//! terrain (`--terrain layered`, the default), the LOD lab's own continents (`--terrain lod`) or a
+//! The LOD quadtree with the landing preset and an orbit camera, on the layered terrain
+//! (`--terrain layered`, the default), the demonstration continents (`--terrain lod`) or a
 //! smooth sphere coloured by tile level
 //! (`--terrain sphere`). Every tile is its own anchor: its f64 body-fixed origin minus the f64
 //! camera position becomes the f32 translation, so vertices stay small however far the tile is
@@ -22,7 +22,7 @@ use void_lod::{DemoTerrain, LodCamera, LodView, PlanetLodOptions, SurfaceSampler
 use void_terrain::{DEFAULT_LAYERED, LayeredOptions, Terrain, TerrainConfig};
 
 const PRESETS: &str = include_str!("../../lod/presets/planets.json");
-/// The lab's 60° vertical field of view.
+/// A 60° vertical field of view.
 const FOV_Y: f64 = FRAC_PI_3;
 
 fn main() {
@@ -80,10 +80,10 @@ struct View {
     horizon_culling: bool,
 }
 
-/// The LOD lab's orbit camera (`lab/lod/src/app/OrbitCamera.ts`): a unit sub-camera direction `p`
+/// An orbit camera: a unit sub-camera direction `p`
 /// with a tangent frame (`north` is screen-up looking straight down, so the poles are no
 /// singularity), a pan offset, a tilt, and zoom on the distance from the planet centre.
-/// Body-fixed axes with y up, as the lab.
+/// Body-fixed axes with y up.
 struct OrbitCamera {
     p: DVec3,
     north: DVec3,
@@ -181,7 +181,8 @@ fn setup(
     let p = &presets["landing"];
     let f = |v: &Value| v.as_f64().unwrap_or_else(|| panic!("preset value {v}"));
     // The declared height range is the terrain's; the sphere keeps the preset's, so culling and
-    // LOD match the lab. The LOD band covers the whole range, as the landing preset's does.
+    // LOD stay as the preset intends. The LOD band covers the whole range, as the landing preset's
+    // does.
     let (terrain, max_height): (Option<Arc<dyn SurfaceSampler + Send + Sync>>, f64) =
         match terrain_argument().as_str() {
             "layered" => {
@@ -192,7 +193,7 @@ fn setup(
                 let max = t.max_height_meters;
                 (Some(Arc::new(t)), max)
             }
-            // The LOD lab's own continents, on the same preset.
+            // The demonstration continents, on the same preset.
             "lod" => {
                 let t = DemoTerrain::preset("landing");
                 let max = t.max_height_meters;
@@ -209,7 +210,7 @@ fn setup(
         lod_surface_band_meters: max_height,
         resolution: f(&p["tileResolution"]) as usize,
         max_level: f(&p["maxLevel"]) as u32,
-        // The lab writes Infinity, which JSON stores as null.
+        // Infinity is stored as null in JSON.
         split_distance_ratios: p["splitDistanceRatios"]
             .as_array()
             .unwrap()
@@ -236,7 +237,7 @@ fn setup(
         camera_settings,
     });
 
-    // The lab's start: camera along the preset's direction, the probe off its sightline.
+    // The start: camera along the preset's direction, the probe off its sightline.
     let cam = &p["camera"];
     let start = &cam["initialDirection"];
     let direction = DVec3::new(f(&start[0]), f(&start[1]), f(&start[2])).normalize();
@@ -335,7 +336,7 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyB) {
         wireframe.global = !wireframe.global;
     }
-    // As the lab's panel: , and . step the probe's minimum cell size by 0.5 px; 0 turns it off.
+    // , and . step the probe's minimum cell size by 0.5 px; 0 turns it off.
     for (key, step) in [(KeyCode::Comma, -0.5), (KeyCode::Period, 0.5)] {
         if keys.just_pressed(key) {
             planet.camera_settings.2 = (planet.camera_settings.2 + step).max(0.0);
@@ -347,7 +348,7 @@ fn controls(
         view.camera = OrbitCamera::new(view.probe, view.probe.length() + 30_000.0, max);
     }
 
-    // As the lab: right drag orbits the centre, Shift + left drag turns, left drag pans.
+    // Right drag orbits the centre, Shift + left drag turns, left drag pans.
     let (dx, dy) = (f64::from(motion.delta.x), f64::from(motion.delta.y));
     if buttons.pressed(MouseButton::Right) {
         view.camera.orbit_around_center(-dx * 0.005, -dy * 0.005);
@@ -356,7 +357,7 @@ fn controls(
     } else if buttons.pressed(MouseButton::Left) {
         view.camera.pan_screen(dx, dy, f64::from(window.height()));
     }
-    // The lab's wheel: exp(pixels × 1e-4), a line counting as a browser's 100 px notch.
+    // The wheel: exp(pixels × 1e-4), a line counting as a 100 px notch.
     let pixels = match scroll.unit {
         MouseScrollUnit::Line => -f64::from(scroll.delta.y) * 100.0,
         MouseScrollUnit::Pixel => -f64::from(scroll.delta.y),

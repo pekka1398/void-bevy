@@ -1,5 +1,4 @@
-//! The cube sphere and its tiles, as `lab/lod/src/lod/CubeSphere.ts`, `TileKey.ts` and
-//! `TileSearch.ts`. Directions are body-fixed; distances are physical meters.
+//! The cube sphere and its tiles. Directions are body-fixed; distances are physical meters.
 
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
@@ -100,7 +99,7 @@ pub struct TileKey {
 /// Deepest level a tile code can pack: x and y each need `level` bits.
 pub const MAX_CODED_LEVEL: u32 = 21;
 
-/// (face, level, x, y) packed as the orbit lab's `tileCodeOf`: ((level·6 + face)·2²¹ + x)·2²¹ + y.
+/// (face, level, x, y) packed into one code: ((level·6 + face)·2²¹ + x)·2²¹ + y.
 pub fn tile_code_of(face: CubeFace, level: u32, x: u32, y: u32) -> u64 {
     ((u64::from(level) * 6 + u64::from(face)) << MAX_CODED_LEVEL | u64::from(x)) << MAX_CODED_LEVEL
         | u64::from(y)
@@ -183,7 +182,7 @@ impl TileKey {
 }
 
 impl std::fmt::Display for TileKey {
-    /// The lab's `tileId`.
+    /// A readable tile name.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}/{}/{}/{}", self.face, self.level, self.x, self.y)
     }
@@ -233,7 +232,7 @@ pub fn tiles_around(
     let smallest = FRAC_PI_2 * radius_meters / f64::from(1_u32 << level) / 1.5;
     let extent = reach_meters + smallest;
     let steps = ((2.0 * extent) / (smallest / 2.0)).ceil().max(1.0) as u32;
-    // In scan order, as the lab's Map: callers that add colliders per tile keep its order.
+    // In scan order: callers that add colliders per tile keep its order.
     let mut found = crate::ordered::OrderedMap::new();
     for a in 0..=steps {
         for b in 0..=steps {

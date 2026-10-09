@@ -1,4 +1,4 @@
-//! Bodies' orbits as osculating two-body ellipses, as `lab/view/src/ConicPath.ts`. The vessel's
+//! Bodies' orbits as osculating two-body ellipses. The vessel's
 //! path is its N-body prediction instead.
 
 use glam::DVec3;

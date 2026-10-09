@@ -1,8 +1,7 @@
-//! What the map draws relative to, as `lab/view/src/PathFrame.ts`, and the orbit lab's path sample
-//! cache (`lab/orbit/src/app/PathCache.ts`).
+//! What the map draws relative to, and the path sample cache.
 //!
 //! The map has one plotting frame, as Principia's, centred on one reference body:
-//! - inertial: the body's non-rotating equatorial frame (the orbit lab's body-inertial);
+//! - inertial: the body's non-rotating equatorial frame (body-inertial);
 //! - surface: turning with the body (body-surface), so a point on the ground stays still, a
 //!   stationary orbit is a point and a suborbital hop is an arc over the ground.
 //!

@@ -1,4 +1,4 @@
-//! The orbit lab's four plotting frames (`ReferenceFrames.ts`). These describe where paths are
+//! Four plotting frames. These describe where paths are
 //! plotted, not the physical integration frame. Evaluate each path sample at its own time.
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
@@ -130,7 +130,7 @@ impl FrameEvaluator {
         }
     }
 
-    /// Position from the most recent evaluate/rotation-period query, as in the TS scratch API.
+    /// Position from the most recent evaluate/rotation-period query.
     pub fn position(&self, index: usize) -> DVec3 {
         self.positions[index]
     }

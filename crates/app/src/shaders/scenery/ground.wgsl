@@ -1,4 +1,4 @@
-// lab/scenery's GroundMaterial.ts: the lit ground and sea on lab/lod's tiles. Unlit by Bevy: sunlight
+// The lit ground and sea on the terrain tiles. Unlit by Bevy: sunlight
 // is computed here, through the atmosphere's transmittance, so the ground reddens at sunset and goes
 // dark past the terminator; the transport pass then adds the air between the ground and the camera.
 //

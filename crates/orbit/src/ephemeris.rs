@@ -18,7 +18,7 @@ const YOSHIDA8_W: [f64; 7] = [
     1.042_426_208_699_91,
 ];
 
-/// The 15 substep weights, w7 .. w1 w0 w1 .. w7, as the lab's `YOSHIDA8_SEQUENCE`.
+/// The 15 substep weights of Yoshida's eighth-order composition, w7 .. w1 w0 w1 .. w7.
 pub fn yoshida8_sequence() -> [f64; 15] {
     let w0 = 1.0 - 2.0 * YOSHIDA8_W.iter().fold(0.0, |sum, w| sum + w);
     let mut sequence = [0.0; 15];
@@ -65,7 +65,7 @@ pub struct Ephemeris {
     chunk_steps: usize,
     sequence: [f64; 15],
     gm: Vec<f64>,
-    // Flat x, y, z per body, so the arithmetic runs in the orbit lab's order.
+    // Flat x, y, z per body.
     q: Vec<f64>,
     q_compensation: Vec<f64>,
     v: Vec<f64>,

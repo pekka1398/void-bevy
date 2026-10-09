@@ -1,6 +1,6 @@
 //! Drawing `void_view`'s map: bodies' orbits and trajectories as gizmo lines at the map weight's
 //! opacity, and the labels (bodies, the vessel, apsides) as clickable UI markers. A label
-//! overlapping a higher-priority one keeps only its dot, as lab/view's.
+//! overlapping a higher-priority one keeps only its dot.
 //!
 //! Positions come relative to the camera in the ecliptic; `render` turns such a vector into the
 //! caller's render axes.

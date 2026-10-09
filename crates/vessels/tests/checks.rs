@@ -1,6 +1,4 @@
-//! lab/vessels's own checks (`vessels-check.ts`), one test per section, with the lab's thresholds.
-//! Rapier here is native and the lab's is WASM, so contact-driven numbers are not bit for bit; the
-//! thresholds are the lab's and the printed details are for comparing with its output.
+//! The fleet's checks: ownership hand-offs, contact, separation and joining, sleep and rails.
 
 use void_frames::State;
 
@@ -709,8 +707,8 @@ fn landed_pod_settles_sleeps_and_rides_on_rails() {
 }
 
 /// Closed, not a defect: the launch site is sloped terrain, so a tall rocket leaning into the
-/// local slope — about 5.0 degrees here, where TS happened to get 1.5 — is the expected outcome,
-/// and the TS 3-degree threshold is not a property worth holding native to. Kept ignored rather
+/// local slope — about 5.0 degrees here — is the expected outcome, and a 3-degree tilt threshold
+/// is not a property worth holding. Kept ignored rather
 /// than deleted so the settle, sleep and rails parts of the check stay runnable on demand; the
 /// pod on Aurelia above covers those on flat ground. See docs/vessels.md.
 #[test]

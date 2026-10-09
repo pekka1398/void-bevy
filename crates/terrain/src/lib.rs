@@ -1,5 +1,5 @@
-//! A planet's solid surface, as lab/landing's terrain contract (`Surface.ts`, `TerrainConfig.ts`,
-//! `SurfaceContract.ts`) with scenery's layered planet and landing's hills. The same `Terrain`
+//! A planet's solid surface and its contract, with the layered planet, the hills and the impact,
+//! cratered and volcanic terrains. The same `Terrain`
 //! builds drawn tiles and collision tiles, so what is drawn is what is collided with.
 
 mod ares;

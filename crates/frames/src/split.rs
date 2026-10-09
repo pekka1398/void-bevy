@@ -1,7 +1,7 @@
-//! Split positions, as the lab's `SplitPosition.ts`: per axis an integer cell of 2^32 m and a
+//! Split positions: per axis an integer cell of 2^32 m and a
 //! float64 offset in [−2^31, 2^31). Differences subtract the cells exactly before any float64 is
-//! formed, so centimetres survive at any placement. The lab's cells are bigints; here `i128`
-//! (±1.7e38 cells, far past any galaxy).
+//! formed, so centimetres survive at any placement. Cells are `i128` (±1.7e38 cells, far past any
+//! galaxy).
 
 use glam::DVec3;
 
@@ -125,7 +125,7 @@ impl SplitPosition {
         Self::new(offset, self.cell)
     }
 
-    /// JSON with the cells as decimal strings, as the lab's.
+    /// JSON with the cells as decimal strings.
     pub fn serialize(&self) -> String {
         serde_json::json!({
             "cell": self.cell.map(|c| c.to_string()),

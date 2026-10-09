@@ -20,7 +20,7 @@ use void_lod::{
     stitch_edges,
 };
 
-/// Each vertex's surface height above the reference radius, metres (lab/lod's `height` attribute).
+/// Each vertex's surface height above the reference radius, metres.
 pub const ATTRIBUTE_HEIGHT: MeshVertexAttribute =
     MeshVertexAttribute::new("Height", 917_330_201, VertexFormat::Float32);
 
@@ -81,7 +81,7 @@ impl<M: Material> TileField<M> {
             terrain,
             building: HashMap::new(),
             drawn: HashMap::new(),
-            // Skirts are left out: seams are stitched, as the LOD lab draws by default.
+            // Skirts are left out: seams are stitched.
             indices: indices[..grid].to_vec(),
             material,
             owned_meshes: HashMap::new(),
@@ -114,7 +114,7 @@ impl<M: Material> TileField<M> {
         self.wireframe
     }
 
-    /// Triangle edges on every drawn tile, as the LOD lab's mesh-edge overlay.
+    /// Triangle edges on every drawn tile.
     pub fn set_wireframe(&mut self, commands: &mut Commands, on: bool) {
         self.wireframe = on;
         for (entity, _) in self.drawn.values() {
@@ -133,8 +133,8 @@ impl<M: Material> TileField<M> {
         }
     }
 
-    /// Every drawn tile's four edges as polylines relative to the camera at `eye` (the LOD lab's
-    /// red tile boundaries), along the tile's own grid vertices.
+    /// Every drawn tile's four edges as polylines relative to the camera at `eye`, along the tile's
+    /// own grid vertices.
     pub fn boundaries(&self, eye: DVec3) -> Vec<Vec<Vec3>> {
         let n = self.lod.options.resolution;
         let mut lines = Vec::with_capacity(self.drawn.len() * 4);

@@ -1,5 +1,5 @@
-//! The lab's multiscale checks with its thresholds. The moving-origin adapter is
-//! checked in ephemeris.rs; Fleet collision and merge are in multiscale-lab/tests.
+//! The coupled world, frames and traveller: precision across light-years, conservation and
+//! agreement with a flat N-body reference. The moving-origin adapter is checked in ephemeris.rs.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -207,7 +207,7 @@ fn frame_changes_change_neither_gravity_nor_axes() {
     assert!((world.gravity_at(50.0, &pa) - world.gravity_at(50.0, &pb)).length() < 1e-15);
 }
 
-/// The world's gravity is orbit's one law (point masses here) in the multiscale lab's arithmetic.
+/// The world's gravity is orbit's one law.
 #[test]
 fn gravity_is_the_shared_law() {
     let mut world = CoupledWorld::new(compact_seeds(huge()), 10.0, 8192);
@@ -353,8 +353,8 @@ fn the_four_light_year_flight_reaches_beryl_continuously() {
 }
 
 #[test]
-fn a_small_system_builds_as_the_lab_fixture() {
-    // The shared fixture is the lab's: two bodies, barycentric, the planet 2e8 m out.
+fn a_small_system_builds_as_described() {
+    // Two bodies, barycentric, the planet 2e8 m out.
     let s = small_system("A", 1e25);
     assert_eq!(s.bodies.len(), 2);
     let r = (s.positions[1] - s.positions[0]).length();

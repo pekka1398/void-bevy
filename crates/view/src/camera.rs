@@ -1,4 +1,4 @@
-//! The camera and the per-frame view decisions, as `lab/view/src/ViewCamera.ts`.
+//! The camera and the per-frame view decisions.
 //!
 //! Single view: zooming out from the vessel fades the map (orbits, labels) in, then turns the
 //! camera's up from the local vertical to the body's north and lets go of the ground's spin.

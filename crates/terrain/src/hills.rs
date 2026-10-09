@@ -1,4 +1,4 @@
-//! lab/landing's placeholder hills (`HillsTerrain.ts`): fractal Perlin noise on the unit sphere,
+//! Placeholder hills: fractal Perlin noise on the unit sphere,
 //! shaped into rolling hills. The landing planets (Pebble, Luna, Terra, Aurelia) use it.
 
 use glam::DVec3;

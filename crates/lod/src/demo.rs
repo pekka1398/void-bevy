@@ -1,4 +1,4 @@
-//! The LOD lab's terrain (`lab/lod/src/app/DemoSurface.ts`): warped continents, a coastal shelf and
+//! A demonstration terrain for the LOD example: warped continents, a coastal shelf and
 //! ridged mountains, on a preset's parameters (`presets/planets.json`, "seam", "normal", "landing").
 
 use glam::DVec3;
@@ -30,7 +30,7 @@ pub struct DemoTerrainParams {
     pub rock_color: [f64; 3],
 }
 
-/// `samplePlanetSurface` for one preset. It ignores the tile's cell size, as the lab's does.
+/// The demonstration surface for one preset. It ignores the tile's cell size.
 #[derive(Clone, Debug)]
 pub struct DemoTerrain {
     pub name: String,
@@ -49,7 +49,7 @@ struct Preset {
     terrain: DemoTerrainParams,
 }
 
-/// The lab's presets, as `golden/lod.ts` exports them.
+/// The presets, by id.
 pub const PRESETS_JSON: &str = include_str!("../presets/planets.json");
 
 impl DemoTerrain {
@@ -137,7 +137,7 @@ const GRADIENTS: [[f64; 3]; 12] = [
     [0.0, -1.0, -1.0],
 ];
 
-/// `Math.imul` hash on int32, as the lab's.
+/// Wrapping-multiply hash on int32.
 fn hash(x: i32, y: i32, z: i32) -> u32 {
     let h =
         x.wrapping_mul(374_761_393) ^ y.wrapping_mul(668_265_263) ^ z.wrapping_mul(1_442_695_041);

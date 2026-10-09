@@ -1,4 +1,4 @@
-//! lab/scenery's layered planet (`LayeredTerrain.ts`): continents, mountain belts, and eroded hills
+//! The layered planet: continents, mountain belts, and eroded hills
 //! down to metres, so it reads as a planet from 20,000 km and as ground from 2 m.
 //!
 //! 1. Continents (thousands of km): domain-warped fBm whose sign is land or sea. Sea falls to a

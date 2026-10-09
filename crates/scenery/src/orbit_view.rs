@@ -1,10 +1,9 @@
-//! lab/lod's OrbitCamera, with the same state and the same mouse mapping (left drag pans, right drag
-//! orbits the planet centre, Shift + left drag turns, the wheel zooms), made to work from space down
-//! to the ground:
+//! An orbit camera (left drag pans, right drag orbits the planet centre, Shift + left drag turns,
+//! the wheel zooms) that works from space down to the ground:
 //!
 //! - Zoom and pan scale with the height above the surface under the camera, not the distance to the
 //!   centre, so a wheel notch at 2 m moves centimetres and at 20,000 km thousands of kilometres.
-//! - Orbiting slows with height the same way (at most lab/lod's 0.005 rad per pixel).
+//! - Orbiting slows with height the same way (at most 0.005 rad per pixel).
 //! - Tilt runs from straight down (0) past the horizon (π/2) to nearly straight up.
 //! - The camera never goes below `MIN_HEIGHT` above the surface (the caller enforces it).
 //!
@@ -71,7 +70,7 @@ impl OrbitView {
         }
     }
 
-    /// Right, up and backward (three.js camera axes) in body-fixed axes.
+    /// Right, up and backward (camera axes looking down −z) in body-fixed axes.
     pub fn basis(&self) -> (DVec3, DVec3, DVec3) {
         let Pose { forward, up, .. } = self.pose();
         (normalize(cross(forward, up)), up, -forward)
@@ -196,7 +195,7 @@ fn normalize(a: DVec3) -> DVec3 {
 /// Component of `v` perpendicular to unit `n`.
 fn reject(v: DVec3, n: DVec3) -> DVec3 {
     let r = v - n * v.dot(n);
-    // Over a pole, grid north runs down the prime meridian (as lab/navball does).
+    // Over a pole, grid north runs down the prime meridian, as the navball's does.
     if r.length() < 1e-12 {
         return if n.z > 0.0 { -DVec3::X } else { DVec3::X };
     }

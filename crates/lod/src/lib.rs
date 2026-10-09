@@ -1,4 +1,4 @@
-//! The LOD lab's cube-sphere quadtree (`lab/lod/src/lod`), ported to Rust: tile keys and
+//! A cube-sphere quadtree: tile keys and
 //! neighbours, tile meshes and seam stitching, and selection. Rendering and workers are the
 //! engine's; nothing here depends on Bevy.
 

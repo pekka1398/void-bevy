@@ -1,4 +1,4 @@
-//! lab/scenery's look in Bevy: the lit ground and sea (`GroundMaterial`), the star field
+//! The planet's look in Bevy: the lit ground and sea (`GroundMaterial`), the star field
 //! (`StarMaterial`) and the atmosphere's tables as textures. Render space is the planet's body-fixed
 //! axes with the camera at the origin.
 
@@ -51,8 +51,8 @@ fn load_shared_shaders(mut commands: Commands, assets: Res<AssetServer>) {
     ]));
 }
 
-/// An RGBA f32 table as a linearly filtered half-float texture, clamped at the edges, as the lab
-/// uploads it (half floats filter on every device).
+/// An RGBA f32 table as a linearly filtered half-float texture, clamped at the edges (half floats
+/// filter on every device).
 pub fn table_image(data: &[f32], width: usize, height: usize) -> Image {
     assert_eq!(
         data.len(),
@@ -252,7 +252,7 @@ impl Material for StarMaterial {
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_COLOR.at_shader_location(1),
         ])?];
-        // Drawn behind everything; they write no depth, as the lab's.
+        // Drawn behind everything; they write no depth.
         if let Some(depth) = &mut descriptor.depth_stencil {
             depth.depth_write_enabled = Some(false);
         }

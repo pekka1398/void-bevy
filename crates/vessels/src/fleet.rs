@@ -36,7 +36,7 @@ pub use guidance::{GuidanceStatus, GuidedBurn};
 use wrenches::{GuidedAirSource, RigidFlightSource, SceneStepSource};
 
 type SceneGroup = (Option<usize>, Vec<String>, Vec<(u64, usize)>);
-/// Explicit physics configurations; full air dynamics is accepted in its lab before opting
+/// Explicit physics configurations; full air dynamics is accepted on its own before opting
 /// the main game in. ForceOnly retains the original no-spin air sampling and force pathway.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2465,7 +2465,7 @@ impl Fleet {
             node_b: node_b.into(),
         };
         self.parts.check_connection(&connection);
-        // Core join preserves poses; the lab enforces the 0.25 m debug capture range.
+        // Core join preserves poses; the caller enforces the capture range.
         self.settle(&a);
         self.settle(&b);
         let va = self.vessels.remove(&a).unwrap();

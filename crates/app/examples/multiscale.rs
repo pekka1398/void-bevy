@@ -1,4 +1,4 @@
-//! lab/multiscale's page, interstellar scene: three star systems a few light-years apart, placed
+//! The interstellar scene: three star systems a few light-years apart, placed
 //! 30,000 light-years out, and a probe coasting from Aster to Beryl. One continuous world from
 //! metres to light-years: everything is drawn through the frame tree into a camera hung on the
 //! focus's frame (systems meet at the galaxy with exact split subtraction), then scaled to a
@@ -129,7 +129,7 @@ impl Lab {
         lab
     }
 
-    /// The lab's `reset`: a fresh world and probe from the settings, paused.
+    /// A fresh world and probe from the settings, paused.
     fn reset(&mut self) {
         let galaxy = if self.placement == 0 {
             default_galaxy()
@@ -426,7 +426,7 @@ fn keys(time: Res<Time>, input: Res<ButtonInput<KeyCode>>, mut lab: ResMut<Lab>)
     if input.just_pressed(KeyCode::KeyT) {
         lab.request_advance(10.0 * YEAR);
     }
-    // The lab's zoom buttons.
+    // Zoom buttons.
     if input.just_pressed(KeyCode::Digit1) {
         lab.focus = Focus::System(0);
         lab.orbit.distance = 8.0 * LIGHT_YEAR;

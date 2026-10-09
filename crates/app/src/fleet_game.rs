@@ -1,4 +1,4 @@
-//! Shared Fleet flight scene used by the independent integration lab and the main game.
+//! The main game's Fleet flight scene.
 mod ui;
 use crate::{
     flight::game_planet_by_id,

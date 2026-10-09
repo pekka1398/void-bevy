@@ -1,4 +1,4 @@
-//! Rapier rigid bodies in a contact frame, as `lab/landing/src/physics/ContactWorld.ts`: the
+//! Rapier rigid bodies in a contact frame: the
 //! planet's rotating frame on collision tiles streamed around them, or (no terrain) any other
 //! frame.
 //! - Coordinates: Rapier works in f32 relative to an f64 floating origin (body-fixed). The origin
@@ -157,21 +157,14 @@ fn q32_normalized(q: DQuat) -> Rotation {
     q32(q).normalize()
 }
 
-/// `Math.fround` equality: the f64 rounded to f32 equals Rapier's f32.
+/// The f64 rounded to f32 equals Rapier's f32.
 fn same32(a: DVec3, b: Vector) -> bool {
     a.x as f32 == b.x && a.y as f32 == b.y && a.z as f32 == b.z
 }
 
-/// v turned by q, in the lab's operation order.
+/// v turned by q.
 fn rotate(q: DQuat, v: DVec3) -> DVec3 {
-    let cx = q.y * v.z - q.z * v.y + q.w * v.x;
-    let cy = q.z * v.x - q.x * v.z + q.w * v.y;
-    let cz = q.x * v.y - q.y * v.x + q.w * v.z;
-    DVec3::new(
-        v.x + 2.0 * (q.y * cz - q.z * cy),
-        v.y + 2.0 * (q.z * cx - q.x * cz),
-        v.z + 2.0 * (q.x * cy - q.y * cx),
-    )
+    q * v
 }
 
 fn normalise_rotation(q: DQuat) -> DQuat {
@@ -271,7 +264,7 @@ pub struct ContactWorld<F: ContactFrame> {
     pub tile_loads: u64,
     pub tile_unloads: u64,
     pub recenters: u64,
-    /// Bodies in insertion order, as the lab's Set.
+    /// Bodies in insertion order.
     bodies: Vec<(RigidBodyHandle, BodyRecord)>,
     tiles: OrderedMap<TileCollider>,
 }
@@ -1207,7 +1200,7 @@ impl<F: ContactFrame> ContactWorld<F> {
                 after.y * dt + r0.y - r1.y,
                 after.z * dt + r0.z - r1.z,
             );
-            // Free: the solver left the kicked velocity bit for bit and the body moved by exactly that,
+            // Free: the solver left the kicked velocity unchanged and the body moved by exactly that,
             // to f32 rounding (CCD can stop a body short without touching its velocity). A body
             // asleep at the start was not kicked: it moved only if a contact woke it.
             let start = v64(start_translation);

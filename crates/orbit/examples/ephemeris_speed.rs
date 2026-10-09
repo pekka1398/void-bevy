@@ -1,4 +1,4 @@
-//! Times 100 days of ephemeris after 10 days of warm-up, as the TS comparison does.
+//! Times 100 days of ephemeris after 10 days of warm-up.
 //! cargo run --release -p void-orbit --example ephemeris_speed
 
 use std::time::Instant;

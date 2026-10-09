@@ -1,4 +1,4 @@
-//! lab/scenery's CPU side, ported: the atmosphere and its tables, the cloud field's weather and
+//! The sky's CPU side: the atmosphere and its tables, the cloud field's weather and
 //! noise volumes, the star field and the orbit view. The shaders that use them live with the Bevy
 //! app.
 
