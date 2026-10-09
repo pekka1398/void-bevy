@@ -16,6 +16,3 @@ void-lod.workspace = true
 void-orbit.workspace = true
 void-rotation.workspace = true
 void-terrain.workspace = true
-
-[dev-dependencies]
-serde_json.workspace = true

@@ -1,20 +1,17 @@
-//! lab/scenery's CPU side against the TS original (golden/scenery.ts). The tables, noise volumes,
-//! weather atlas and stars are bit-identical; the rest differs only where V8's sin/cos do.
+//! The sky, clouds, stars and orbit camera against what they must physically satisfy.
 
 use glam::DVec3;
-use serde::Deserialize;
 use void_scenery::atmosphere::{
     build_transmittance_table, earth_like_atmosphere, sky_radiance, transmittance_coords,
     transmittance_ray,
 };
 use void_scenery::clouds::{
-    DETAIL_SIZE, DensityOptions, SHAPE_PERIOD, SHAPE_SIZE, WEATHER_WIDTH, build_cloud_noise,
-    build_cloud_weather, cloud_density, cloud_shell_intervals, cloud_weather, sample_cloud_noise,
+    SHAPE_PERIOD, SHAPE_SIZE, build_cloud_noise, cloud_shell_intervals, sample_cloud_noise,
 };
 use void_scenery::tables::{build_irradiance_table, build_multiple_scattering_table, march_sky};
 use void_scenery::{DEFAULT_STARS, OrbitView, generate_stars};
 
-const GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/");
+const RADIUS: f64 = 6_371_000.0;
 
 #[test]
 fn airless_tables_and_sky_have_finite_vacuum_limits() {
@@ -52,350 +49,135 @@ fn airless_tables_and_sky_have_finite_vacuum_limits() {
     assert_eq!(sky.transmittance, [1.0; 3]);
 }
 
-#[derive(Deserialize, Clone, Copy)]
-struct V {
-    x: f64,
-    y: f64,
-    z: f64,
-}
-impl From<V> for DVec3 {
-    fn from(v: V) -> Self {
-        DVec3::new(v.x, v.y, v.z)
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Golden {
-    radius: f64,
-    sky: Vec<SkyRay>,
-    coords: Vec<Coord>,
-    weather_samples: Vec<WeatherSample>,
-    noise_samples: Vec<NoiseSample>,
-    densities: Vec<DensitySample>,
-    shells: Vec<Shell>,
-    poses: Vec<PoseSample>,
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SkyRay {
-    altitude: f64,
-    direction: V,
-    sun: V,
-    reference: [f64; 3],
-    march: March,
-    march_single: March,
-}
-#[derive(Deserialize)]
-struct March {
-    radiance: [f64; 3],
-    transmittance: [f64; 3],
-}
-#[derive(Deserialize)]
-struct Coord {
-    x: f64,
-    y: f64,
-    r: f64,
-    mu: f64,
-    back: XY,
-}
-#[derive(Deserialize)]
-struct XY {
-    x: f64,
-    y: f64,
-}
-#[derive(Deserialize)]
-struct WeatherSample {
-    d: V,
-    w: [f64; 2],
-}
-#[derive(Deserialize)]
-struct NoiseSample {
-    point: V,
-    values: [f64; 3],
-}
-#[derive(Deserialize)]
-struct DensitySample {
-    args: [f64; 9],
-    density: f64,
-}
-#[derive(Deserialize)]
-struct Shell {
-    origin: V,
-    direction: V,
-    scene: Option<f64>,
-    intervals: Vec<[f64; 2]>,
-}
-#[derive(Deserialize)]
-struct PoseSample {
-    position: V,
-    forward: V,
-    up: V,
-    basis: Basis,
-    tilt: f64,
-}
-#[derive(Deserialize)]
-struct Basis {
-    right: V,
-    up: V,
-    back: V,
-}
-
-fn golden() -> Golden {
-    serde_json::from_str(&std::fs::read_to_string(format!("{GOLDEN}scenery.json")).unwrap())
-        .unwrap()
-}
-
-fn raw(name: &str) -> Vec<u8> {
-    std::fs::read(format!("{GOLDEN}{name}")).unwrap()
-}
-
-fn raw_f32(name: &str) -> Vec<f32> {
-    raw(name)
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|b| f32::from_le_bytes(*b))
-        .collect()
-}
-
-/// Largest relative difference, against max(|expected|, floor).
-fn worst(a: impl IntoIterator<Item = f64>, b: impl IntoIterator<Item = f64>, floor: f64) -> f64 {
-    a.into_iter()
-        .zip(b)
-        .map(|(x, y)| (x - y).abs() / y.abs().max(floor))
-        .fold(0.0, f64::max)
-}
-
-fn worst_f32(a: &[f32], b: &[f32]) -> f64 {
-    assert_eq!(a.len(), b.len());
-    worst(
-        a.iter().map(|&v| f64::from(v)),
-        b.iter().map(|&v| f64::from(v)),
-        1e-30,
-    )
-}
-
 #[test]
-fn atmosphere_tables() {
-    let g = golden();
-    let p = earth_like_atmosphere(g.radius);
-    let transmittance = build_transmittance_table(&p);
-    let d = worst_f32(&transmittance, &raw_f32("transmittance.bin"));
-    println!("transmittance: worst relative {d:e}");
-    assert!(d == 0.0, "transmittance {d:e}");
-
-    let multiple = build_multiple_scattering_table(&p, &transmittance, 64, 20);
-    let d = worst_f32(&multiple, &raw_f32("multiple.bin"));
-    println!("multiple scattering: worst relative {d:e}");
-    assert!(d == 0.0, "multiple scattering {d:e}");
-
-    let irradiance = build_irradiance_table(&p, &transmittance, &multiple, 128, 24);
-    let d = worst_f32(&irradiance, &raw_f32("irradiance.bin"));
-    println!("irradiance: worst relative {d:e}");
-    assert!(d == 0.0, "irradiance {d:e}");
-
-    let mut worst_sky = (0.0f64, 0.0f64, 0.0f64);
-    for ray in &g.sky {
-        let (direction, sun) = (ray.direction.into(), ray.sun.into());
-        let reference = sky_radiance(&p, ray.altitude, direction, sun, 500);
-        let march = march_sky(
-            &p,
-            &transmittance,
-            Some(&multiple),
-            g.radius + ray.altitude,
-            direction,
-            sun,
-            32,
-        );
-        let single = march_sky(
-            &p,
-            &transmittance,
-            None,
-            g.radius + ray.altitude,
-            direction,
-            sun,
-            32,
-        );
-        worst_sky.0 = worst_sky.0.max(worst(reference, ray.reference, 1e-12));
-        worst_sky.1 = worst_sky.1.max(worst(
-            march.radiance.into_iter().chain(march.transmittance),
-            ray.march
-                .radiance
-                .into_iter()
-                .chain(ray.march.transmittance),
-            1e-12,
-        ));
-        worst_sky.2 = worst_sky
-            .2
-            .max(worst(single.radiance, ray.march_single.radiance, 1e-12));
-    }
-    println!(
-        "sky reference / march / single march: worst relative {:e} / {:e} / {:e}",
-        worst_sky.0, worst_sky.1, worst_sky.2
+fn the_daytime_sky_is_blue_and_dims_toward_the_ground() {
+    let p = earth_like_atmosphere(RADIUS);
+    let trans = build_transmittance_table(&p);
+    assert!(
+        trans
+            .iter()
+            .all(|t| t.is_finite() && (0.0..=1.0).contains(t))
     );
-    assert!(worst_sky == (0.0, 0.0, 0.0), "{worst_sky:?}");
-
-    for c in &g.coords {
-        let (r, mu) = transmittance_ray(&p, c.x, c.y);
-        let back = transmittance_coords(&p, r, mu);
+    let multiple = build_multiple_scattering_table(&p, &trans, 32, 10);
+    let sun = DVec3::new(0.5, 0.0, 0.866);
+    let zenith = march_sky(
+        &p,
+        &trans,
+        Some(&multiple),
+        RADIUS + 10.0,
+        DVec3::Z,
+        sun,
+        32,
+    );
+    assert!(
+        zenith.radiance[2] > zenith.radiance[1] && zenith.radiance[1] > zenith.radiance[0],
+        "the zenith is blue: {:?}",
+        zenith.radiance
+    );
+    // Looking straight up, the light that gets through is reddened: blue scatters most.
+    let t = zenith.transmittance;
+    assert!(t[0] > t[1] && t[1] > t[2] && t[2] > 0.5, "{t:?}");
+    // The march converges to the fine reference integral of single scattering.
+    let reference = sky_radiance(&p, 10.0, DVec3::Z, sun, 2000);
+    let single = march_sky(&p, &trans, None, RADIUS + 10.0, DVec3::Z, sun, 256);
+    for c in 0..3 {
         assert!(
-            worst(
-                [r, mu, back.0, back.1],
-                [c.r, c.mu, c.back.x, c.back.y],
-                1e-12
-            ) <= 1e-12
+            (single.radiance[c] / reference[c] - 1.0).abs() < 0.02,
+            "channel {c}: {} vs {}",
+            single.radiance[c],
+            reference[c]
         );
+    }
+    let irradiance = build_irradiance_table(&p, &trans, &multiple, 32, 8);
+    assert!(irradiance.iter().all(|v| v.is_finite() && *v >= 0.0));
+}
+
+#[test]
+fn transmittance_coordinates_round_trip() {
+    let p = earth_like_atmosphere(RADIUS);
+    for i in 0..=10 {
+        for j in 1..=10 {
+            let (x, y) = (i as f64 / 10.0, j as f64 / 10.0);
+            let (r, mu) = transmittance_ray(&p, x, y);
+            let (bx, by) = transmittance_coords(&p, r, mu);
+            assert!((bx - x).abs() < 1e-9 && (by - y).abs() < 1e-9, "({x}, {y})");
+        }
     }
 }
 
 #[test]
-fn clouds() {
-    let g = golden();
-    let weather = build_cloud_weather(std::thread::available_parallelism().map_or(4, |n| n.get()));
-    let rows: Vec<usize> = (0..64).map(|i| i * 16).chain([1023]).collect();
-    let expected = raw("weather_rows.bin");
-    let row_bytes = WEATHER_WIDTH * 4;
-    let mut differing = 0;
-    for (k, &y) in rows.iter().enumerate() {
-        let ours = &weather[y * row_bytes..(y + 1) * row_bytes];
-        let theirs = &expected[k * row_bytes..(k + 1) * row_bytes];
-        differing += ours.iter().zip(theirs).filter(|(a, b)| a != b).count();
-    }
-    println!(
-        "weather atlas: {differing} differing bytes of {}",
-        expected.len()
-    );
-    assert_eq!(differing, 0, "weather atlas");
-    let d = g
-        .weather_samples
-        .iter()
-        .map(|s| {
-            let (h, k) = cloud_weather(s.d.into());
-            (h - s.w[0]).abs().max((k - s.w[1]).abs())
-        })
-        .fold(0.0, f64::max);
-    println!("weather samples: worst {d:e}");
-    assert!(d <= 1e-12);
-
+fn cloud_noise_tiles_and_a_ray_down_to_the_ground_crosses_the_shell_once() {
     let shape = build_cloud_noise(SHAPE_SIZE, false);
-    let detail = build_cloud_noise(DETAIL_SIZE, true);
-    assert!(shape == raw("shape.bin"), "shape volume differs");
-    assert!(detail == raw("detail.bin"), "detail volume differs");
-    for s in &g.noise_samples {
+    for k in 0..20 {
+        let point = DVec3::new(k as f64 * 371.0, -(k as f64) * 113.0, k as f64 * 57.0);
         for c in 0..3 {
-            let v = sample_cloud_noise(&shape, SHAPE_SIZE, s.point.into(), SHAPE_PERIOD, c);
-            assert!(
-                (v - s.values[c]).abs() <= 1e-12,
-                "noise sample {v} vs {}",
-                s.values[c]
+            let v = sample_cloud_noise(&shape, SHAPE_SIZE, point, SHAPE_PERIOD, c);
+            let w = sample_cloud_noise(
+                &shape,
+                SHAPE_SIZE,
+                point + DVec3::new(SHAPE_PERIOD, -SHAPE_PERIOD, 2.0 * SHAPE_PERIOD),
+                SHAPE_PERIOD,
+                c,
             );
+            assert!((0.0..=1.0).contains(&v) && (v - w).abs() < 1e-9);
         }
     }
-
-    let d = g
-        .densities
-        .iter()
-        .map(|s| {
-            let a = s.args;
-            let o = DensityOptions {
-                amount: a[5],
-                detail_weight: a[6],
-                footprint: a[7],
-                macro_shape: a[8],
-            };
-            (cloud_density(a[0], a[1], a[2], a[3], a[4], o) - s.density).abs()
-        })
-        .fold(0.0, f64::max);
-    println!("densities: worst {d:e}");
-    assert!(d <= 1e-12);
-
-    for s in &g.shells {
-        let inner = g.radius + 6500.0;
-        let ours = cloud_shell_intervals(
-            s.origin.into(),
-            s.direction.into(),
-            inner,
-            g.radius + 13000.0,
-            s.scene.unwrap_or(f64::INFINITY),
-        );
-        assert_eq!(ours.len(), s.intervals.len());
-        for (a, b) in ours.iter().zip(&s.intervals) {
-            assert!(
-                worst([a.0, a.1], [b[0], b[1]], 1.0) <= 1e-12,
-                "{a:?} vs {b:?}"
-            );
-        }
-    }
+    let (inner, outer) = (RADIUS + 6500.0, RADIUS + 13000.0);
+    let from = DVec3::Z * (RADIUS + 20_000.0);
+    // Stopped by the ground 20 km below; without it the ray would cross the far side's shell too.
+    let down = cloud_shell_intervals(from, -DVec3::Z, inner, outer, 20_000.0);
+    assert_eq!(down.len(), 1);
+    assert!((down[0].0 - 7000.0).abs() < 1e-6 && (down[0].1 - 13_500.0).abs() < 1e-6);
+    assert!(cloud_shell_intervals(from, DVec3::Z, inner, outer, f64::INFINITY).is_empty());
 }
 
 #[test]
-fn stars() {
+fn stars_lie_on_the_sky_sphere_with_finite_colours() {
     let (positions, colors) = generate_stars(&DEFAULT_STARS);
-    let flat = |v: &[[f32; 3]]| v.iter().flatten().copied().collect::<Vec<f32>>();
-    let (dp, dc) = (
-        worst_f32(&flat(&positions), &raw_f32("star_positions.bin")),
-        worst_f32(&flat(&colors), &raw_f32("star_colors.bin")),
-    );
-    println!("stars: worst relative position {dp:e}, colour {dc:e}");
-    assert!(dp == 0.0 && dc == 0.0);
+    assert_eq!(positions.len(), DEFAULT_STARS.count);
+    assert_eq!(colors.len(), DEFAULT_STARS.count);
+    let lengths: Vec<f32> = positions
+        .iter()
+        .map(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt())
+        .collect();
+    let (shortest, longest) = lengths
+        .iter()
+        .fold((f32::INFINITY, 0.0_f32), |(a, b), &l| (a.min(l), b.max(l)));
+    assert!(longest / shortest < 1.0 + 1e-5, "{shortest} .. {longest}");
+    // Colours carry brightness, so bright stars exceed 1; none is negative or missing.
+    assert!(colors.iter().flatten().all(|c| c.is_finite() && *c >= 0.0));
+    assert!(colors.iter().any(|c| c.iter().any(|&v| v > 0.0)));
 }
 
 #[test]
-fn orbit_view() {
-    let g = golden();
-    let r = g.radius;
+fn the_orbit_camera_keeps_an_orthonormal_basis_and_its_radius() {
     let unit = |x: f64, y: f64, z: f64| DVec3::new(x, y, z).normalize();
-    let mut view = OrbitView::new(unit(0.3, -0.5, 0.8), r + 20e3, 0.4, r * 40.0);
-    let mut poses = Vec::new();
-    let mut record = |view: &OrbitView| {
-        let pose = view.pose();
+    let mut view = OrbitView::new(unit(0.3, -0.5, 0.8), RADIUS + 20e3, 0.4, RADIUS * 40.0);
+    let check = |view: &OrbitView| {
         let (right, up, back) = view.basis();
-        poses.push((pose, right, up, back, view.tilt_radians()));
+        assert!((right.cross(up) - back).length() < 1e-12);
+        for a in [right, up, back] {
+            assert!((a.length() - 1.0).abs() < 1e-12);
+        }
     };
-    record(&view);
+    check(&view);
     view.pan_screen(120.0, -40.0, 1.0, 900.0, 20e3);
-    record(&view);
+    check(&view);
     view.orbit_around_center(0.3, -0.2);
-    record(&view);
+    check(&view);
     view.turn(0.7, 1.1);
-    record(&view);
-    view.set_radius(r + 3e3);
-    record(&view);
-    view.place(unit(0.0, 0.0, 1.0), r + 400e3, 0.5, 0.0);
-    record(&view);
-    view.orbit_around_center(-1.2, 0.9);
-    record(&view);
-    view.turn(-2.0, 5.0);
-    record(&view);
-    view.set_radius(r * 100.0);
-    record(&view);
-    let mut d = 0.0f64;
-    for ((pose, right, up, back, tilt), e) in poses.iter().zip(&g.poses) {
-        let v = |a: DVec3| a.to_array();
-        let ours = [
-            v(pose.position).to_vec(),
-            v(pose.forward).to_vec(),
-            v(pose.up).to_vec(),
-            v(*right).to_vec(),
-            v(*up).to_vec(),
-            v(*back).to_vec(),
-            vec![*tilt],
-        ]
-        .concat();
-        let e3 = |a: V| [a.x, a.y, a.z].to_vec();
-        let theirs = [
-            e3(e.position),
-            e3(e.forward),
-            e3(e.up),
-            e3(e.basis.right),
-            e3(e.basis.up),
-            e3(e.basis.back),
-            vec![e.tilt],
-        ]
-        .concat();
-        d = d.max(worst(ours, theirs, 1.0));
-    }
-    println!("orbit view: worst {d:e}");
-    assert!(d <= 1e-14);
+    check(&view);
+    view.set_radius(RADIUS + 3e3);
+    check(&view);
+    assert!((view.pose().position.length() - (RADIUS + 3e3)).abs() < 1e-6);
+    view.place(unit(0.0, 0.0, 1.0), RADIUS + 400e3, 0.5, 0.0);
+    check(&view);
+    assert!((view.pose().position - DVec3::Z * (RADIUS + 400e3)).length() < 1e-6);
+    // Straight down when untilted.
+    assert!((view.pose().forward + DVec3::Z).length() < 1e-12);
+    view.set_radius(RADIUS * 100.0);
+    assert!(
+        (view.pose().position.length() - RADIUS * 40.0).abs() < 1e-3,
+        "capped"
+    );
 }

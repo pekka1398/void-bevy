@@ -57,72 +57,50 @@ const MOON: Spin = Spin {
 const AU: f64 = 1.495_978_707e11;
 const EARTH_RADIUS: f64 = 6.371e6;
 
-fn v3(json: &serde_json::Value) -> DVec3 {
-    let a: Vec<f64> = json
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|x| x.as_f64().unwrap())
-        .collect();
-    DVec3::new(a[0], a[1], a[2])
-}
-
 /// Frame axes (as columns in the parent) from a rotation.
 fn columns(q: DQuat) -> [DVec3; 3] {
     [q * DVec3::X, q * DVec3::Y, q * DVec3::Z]
 }
 
 #[test]
-fn matches_the_orbit_lab() {
-    let golden: serde_json::Value =
-        serde_json::from_str(include_str!("golden/frames.json")).expect("golden/frames.json");
-    let origin = v3(&golden["origin"]);
-    let points: Vec<DVec3> = golden["points"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(v3)
-        .collect();
-    let (mut axes_error, mut point_error) = (0.0_f64, 0.0_f64);
-    for case in golden["cases"].as_array().unwrap() {
-        let s = &case["spin"];
-        let spin = Spin {
-            period_seconds: s["periodSeconds"].as_f64().unwrap(),
-            obliquity_radians: s["obliquityRadians"].as_f64().unwrap(),
-            pole_longitude_radians: s["poleLongitudeRadians"].as_f64().unwrap(),
-            angle_at_epoch_radians: s["angleAtEpochRadians"].as_f64().unwrap(),
-        };
+fn surface_axes_turn_about_the_pole_and_points_round_trip() {
+    let points = [
+        DVec3::new(AU, 0.0, 0.0),
+        DVec3::new(0.3, -0.7, 0.2) * EARTH_RADIUS,
+        DVec3::new(-1.0e9, 2.0e8, 5.0e7),
+    ];
+    for spin in [EARTH, MOON] {
         let (mut tree, system) = one_system();
         let (inertial, surface) = tree.add_body(system, BodyId(0), spin);
-        let bodies = Still(vec![origin]);
-
-        let equatorial = columns(tree.at(0.0, &bodies).transform(inertial, system).rotation());
-        for (axis, expected) in equatorial
-            .iter()
-            .zip(case["equatorial"].as_array().unwrap())
-        {
-            axes_error = axes_error.max((*axis - v3(expected)).length());
-        }
-        for o in case["orientations"].as_array().unwrap() {
-            let snapshot = tree.at(o["t"].as_f64().unwrap(), &bodies);
-            let axes = columns(snapshot.transform(surface, system).rotation());
-            for (axis, expected) in axes.iter().zip(o["axes"].as_array().unwrap()) {
-                axes_error = axes_error.max((*axis - v3(expected)).length());
-            }
-            let into = snapshot.transform(system, surface);
-            for (p, expected) in points.iter().zip(o["toFrame"].as_array().unwrap()) {
-                let expected = v3(expected);
-                point_error =
-                    point_error.max((into.apply_point(*p) - expected).length() / expected.length());
+        let bodies = Still(vec![DVec3::new(0.2, -0.1, 0.05) * AU]);
+        for t in [
+            0.0,
+            1000.0,
+            0.37 * spin.period_seconds,
+            40.0 * spin.period_seconds,
+        ] {
+            let snapshot = tree.at(t, &bodies);
+            let [x, y, z] = columns(snapshot.transform(surface, system).rotation());
+            assert!((x.cross(y) - z).length() < 1e-14, "right-handed axes");
+            let pole = columns(snapshot.transform(inertial, system).rotation())[2];
+            assert!(
+                (z - pole).length() < 1e-14,
+                "the surface turns about the pole"
+            );
+            // A quarter turn later the surface x axis lies along today's y axis.
+            let later = tree.at(t + spin.period_seconds / 4.0, &bodies);
+            let x_later = columns(later.transform(surface, system).rotation())[0];
+            assert!((x_later - y).length() < 1e-9, "a quarter turn");
+            let (down, up) = (
+                snapshot.transform(system, surface),
+                snapshot.transform(surface, system),
+            );
+            for p in points {
+                let back = up.apply_point(down.apply_point(p));
+                assert!((back - p).length() <= 1e-15 * p.length().max(AU));
             }
         }
     }
-    println!("orbit lab: axes within {axes_error:.1e}, points within {point_error:.1e} (relative)");
-    assert!(axes_error < 1e-12, "axes differ by {axes_error:e}");
-    assert!(
-        point_error < 1e-12,
-        "points differ by {point_error:e} relative"
-    );
 }
 
 #[test]

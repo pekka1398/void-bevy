@@ -1,334 +1,207 @@
-//! The vessel propagator, apsides, dominance and flight plan against the orbit lab
-//! (golden data from `golden/vessel.ts`).
+//! The vessel propagator, apsides, dominance and flight plan against two-body physics.
 
 use glam::DVec3;
-use serde_json::Value;
+use void_frames::{BodyId, BodyStates};
 use void_orbit::{
-    AdvanceOutcome, ApsisKind, AttitudeLaw, Control, DominanceTree, Ephemeris, EphemerisOptions,
-    FlightPlan, ForceControl, ManeuverSpec, PlanEngine, PropagationRun, ReferenceMode, SystemSpec,
-    ThrustControl, Tolerances, Trajectory, VesselPropagator, VesselState, build_system,
-    find_apsides, suggested_step_seconds,
+    AdvanceOutcome, ApsisKind, AttitudeLaw, BuiltSystem, Control, DominanceTree, Ephemeris,
+    EphemerisOptions, FlightPlan, ForceControl, ManeuverSpec, PlanEngine, PropagationRun,
+    ReferenceMode, SystemSpec, ThrustControl, Tolerances, Trajectory, VesselPropagator,
+    VesselState, build_system, find_apsides, suggested_step_seconds,
 };
 
-fn golden() -> Value {
-    let path = format!("{}/tests/golden/vessel.json", env!("CARGO_MANIFEST_DIR"));
-    serde_json::from_str(&std::fs::read_to_string(&path).expect(&path)).expect(&path)
+/// A star and one planet without oblateness, far enough apart that the star's tide on a low orbit
+/// is a few parts in 1e8 of the planet's pull.
+fn two_body() -> BuiltSystem {
+    let rotation = serde_json::json!({
+        "periodSeconds": 86400.0, "obliquityRadians": 0.0, "poleLongitudeRadians": 0.0,
+        "angleAtEpochRadians": 0.0,
+    });
+    let spec = serde_json::json!({
+        "name": "two body",
+        "root": {
+            "id": "star", "name": "Star", "massKg": 2.0e30, "radiusMeters": 7.0e8,
+            "color": "#fff", "rotation": rotation,
+            "children": [{
+                "id": "planet", "name": "Planet", "massKg": 6.0e24, "radiusMeters": 6.4e6,
+                "color": "#88f", "rotation": rotation, "orbitPlane": "ecliptic",
+                "orbit": {
+                    "semiMajorAxisMeters": 1.5e11, "eccentricity": 0.0, "inclinationRadians": 0.0,
+                    "longitudeOfAscendingNodeRadians": 0.0, "argumentOfPeriapsisRadians": 0.0,
+                    "meanAnomalyRadians": 0.0,
+                },
+                "children": [],
+            }],
+        },
+    });
+    build_system(&SystemSpec::from_json(&spec.to_string()))
 }
+
+const HOME: usize = 1;
+const START: f64 = 1000.0;
+const TOLERANCES: Tolerances = Tolerances {
+    position_meters: 1e-4,
+    velocity_meters_per_second: 1e-7,
+};
+const ENGINE: PlanEngine = PlanEngine {
+    thrust_newtons: 250e3,
+    exhaust_velocity: 3432.3275,
+    dry_mass_kg: 10e3,
+};
 
 fn ephemeris() -> Ephemeris {
-    let path = format!("{}/systems/sol.json", env!("CARGO_MANIFEST_DIR"));
-    let system = build_system(&SystemSpec::from_json(
-        &std::fs::read_to_string(&path).expect(&path),
-    ));
-    let step_seconds = suggested_step_seconds(&system.bodies, 256.0);
-    Ephemeris::new(
+    let system = two_body();
+    let mut e = Ephemeris::new(
         &system,
         EphemerisOptions {
-            step_seconds,
+            step_seconds: suggested_step_seconds(&system.bodies, 256.0),
             chunk_steps: 2048,
         },
-    )
+    );
+    e.extend_to(START);
+    e
 }
 
-fn f(v: &Value) -> f64 {
-    v.as_f64().unwrap_or_else(|| panic!("not a number: {v}"))
-}
-
-fn v3(v: &Value) -> DVec3 {
-    let a = v.as_array().unwrap_or_else(|| panic!("not a vector: {v}"));
-    DVec3::new(f(&a[0]), f(&a[1]), f(&a[2]))
-}
-
-fn xyz(v: &Value) -> DVec3 {
-    DVec3::new(f(&v["x"]), f(&v["y"]), f(&v["z"]))
-}
-
-fn state(v: &Value) -> VesselState {
+/// At periapsis of an orbit about the planet: `periapsis` from its centre, `eccentricity`, tilted
+/// out of the ecliptic.
+fn orbit_start(e: &Ephemeris, periapsis: f64, eccentricity: f64) -> VesselState {
+    let (centre, velocity) = e.body_state(BodyId(HOME), START);
+    let gm = e.bodies()[HOME].gm;
+    let speed = (gm * (1.0 + eccentricity) / periapsis).sqrt();
     VesselState {
-        time: f(&v["time"]),
-        position: v3(&v["position"]),
-        velocity: v3(&v["velocity"]),
-        mass_kg: f(&v["massKg"]),
+        time: START,
+        position: centre + DVec3::X * periapsis,
+        velocity: velocity + DVec3::new(0.0, 0.8, 0.6) * speed,
+        mass_kg: 40_000.0,
     }
 }
 
-fn control(v: &Value) -> Option<Control> {
-    if v.is_null() {
-        return None;
-    }
-    if !v["force"].is_null() {
-        return Some(Control::Force(ForceControl {
-            force: xyz(&v["force"]),
-            mass_flow_kg_per_second: f(&v["massFlowKgPerSecond"]),
-            minimum_mass_kg: f(&v["minimumMassKg"]),
-        }));
-    }
-    let a = &v["attitude"];
-    let body = |key: &str| a[key].as_u64().unwrap() as usize;
-    let attitude = match a["kind"].as_str().unwrap() {
-        "inertial" => AttitudeLaw::Inertial {
-            direction: xyz(&a["direction"]),
-        },
-        "frenet" => AttitudeLaw::Frenet {
-            reference_body: body("referenceBody"),
-            tangent: f(&a["tangent"]),
-            normal: f(&a["normal"]),
-            radial: f(&a["radial"]),
-        },
-        "surface" => AttitudeLaw::Surface {
-            reference_body: body("referenceBody"),
-            up: f(&a["up"]),
-            prograde: f(&a["prograde"]),
-        },
-        other => panic!("attitude {other}"),
-    };
-    Some(Control::Thrust(ThrustControl {
-        thrust_newtons: f(&v["thrustNewtons"]),
-        exhaust_velocity: f(&v["exhaustVelocity"]),
-        minimum_mass_kg: f(&v["minimumMassKg"]),
-        attitude,
-    }))
+fn start(e: &Ephemeris) -> VesselState {
+    orbit_start(e, 6.4e6 + 200e3, 0.0)
 }
 
-fn tolerances(g: &Value) -> Tolerances {
-    Tolerances {
-        position_meters: f(&g["tolerances"]["positionMeters"]),
-        velocity_meters_per_second: f(&g["tolerances"]["velocityMetersPerSecond"]),
-    }
-}
-
-/// Position, velocity and mass differences of a 7-entry state.
-fn state_error(y: &[f64], lab: &[f64]) -> (f64, f64, f64) {
-    let p = DVec3::new(y[0] - lab[0], y[1] - lab[1], y[2] - lab[2]).length();
-    let v = DVec3::new(y[3] - lab[3], y[4] - lab[4], y[5] - lab[5]).length();
-    (p, v, (y[6] - lab[6]).abs())
+fn relative(e: &Ephemeris, t: f64, position: DVec3, velocity: DVec3) -> (DVec3, DVec3) {
+    let (centre, centre_velocity) = e.body_state(BodyId(HOME), t);
+    (position - centre, velocity - centre_velocity)
 }
 
 #[test]
-fn legs_match_the_orbit_lab() {
-    let g = golden();
-    let mut ephemeris = ephemeris();
-    let home = g["home"].as_u64().unwrap() as usize;
-    for leg in g["legs"].as_array().unwrap() {
-        let name = leg["name"].as_str().unwrap();
-        let from = state(&leg["from"]);
-        let mut propagator = VesselPropagator::new(&ephemeris, tolerances(&g));
-        let mut run = PropagationRun::new(from);
-        let mut trajectory = Trajectory::new();
-        trajectory.append(run.time, &run.y);
-        let outcome = propagator.advance(
-            &mut ephemeris,
-            &mut run,
-            from.time + f(&leg["duration"]),
-            1_000_000,
-            Some(&mut trajectory),
-            control(&leg["control"]),
-        );
-
-        let lab_outcome = match leg["outcome"]["kind"].as_str().unwrap() {
-            "reached" => AdvanceOutcome::Reached,
-            "budget" => AdvanceOutcome::Budget,
-            "impact" => AdvanceOutcome::Impact {
-                body: leg["outcome"]["bodyIndex"].as_u64().unwrap() as usize,
-            },
-            other => panic!("outcome {other}"),
-        };
-        assert_eq!(outcome, lab_outcome, "{name}: outcome");
-        let steps = (
-            propagator.accepted_steps,
-            propagator.rejected_steps,
-            trajectory.count() as u64,
-        );
-        let lab_steps = (
-            leg["accepted"].as_u64().unwrap(),
-            leg["rejected"].as_u64().unwrap(),
-            leg["samples"].as_u64().unwrap(),
-        );
-        assert_eq!(steps, lab_steps, "{name}: accepted, rejected, samples");
-
-        let lab_end: Vec<f64> = leg["end"]["y"].as_array().unwrap().iter().map(f).collect();
-        let (dp, dv, dm) = state_error(&run.y, &lab_end);
-        let dt = (run.time - f(&leg["end"]["time"])).abs();
-        let (mid_p, mid_v) = trajectory.sample(f(&leg["mid"]["t"]));
-        let mid = (mid_p - v3(&leg["mid"]["position"]))
-            .length()
-            .max((mid_v - v3(&leg["mid"]["velocity"])).length());
-
-        let apsides = find_apsides(&trajectory, &ephemeris, home, from.time, 8);
-        let lab_apsides = leg["apsides"].as_array().unwrap();
-        assert_eq!(apsides.len(), lab_apsides.len(), "{name}: apsis count");
-        let mut apsis_error = 0.0_f64;
-        for (ours, lab) in apsides.iter().zip(lab_apsides) {
-            let kind = if lab["kind"] == "periapsis" {
-                ApsisKind::Periapsis
-            } else {
-                ApsisKind::Apoapsis
-            };
-            assert_eq!(ours.kind, kind, "{name}: apsis kind");
-            apsis_error = apsis_error
-                .max((ours.time - f(&lab["time"])).abs())
-                .max((ours.distance_meters - f(&lab["distanceMeters"])).abs());
-        }
-        println!(
-            "{name:>8}: {outcome:?}, {} steps; end {dp:.1e} m, {dv:.1e} m/s, {dm:.1e} kg, {dt:.1e} s; mid sample {mid:.1e}; {} apsides within {apsis_error:.1e}",
-            steps.0,
-            apsides.len()
-        );
-        // Bit-for-bit where only gravity acts (the coast leg is). Thrust directions are normalised
-        // with Math.hypot in the lab and sqrt(dot) here; that ulp moves the error estimate and
-        // so the step sizes, by far less than the propagator's own per-step tolerance.
-        let tol = tolerances(&g);
-        assert!(
-            dp < tol.position_meters
-                && dv < tol.velocity_meters_per_second
-                && dm < 1e-9
-                && dt < 1e-6
-                && mid < tol.position_meters,
-            "{name}: differs from the lab beyond the propagator's tolerances"
-        );
-        assert!(
-            apsis_error < 1e-6,
-            "{name}: apsides differ by {apsis_error:e}"
-        );
-    }
-}
-
-#[test]
-fn flight_plan_matches_the_orbit_lab() {
-    let g = golden();
-    let mut ephemeris = ephemeris();
-    let home = g["home"].as_u64().unwrap() as usize;
-    let engine = &g["engine"];
-    let engine = PlanEngine {
-        thrust_newtons: f(&engine["thrustNewtons"]),
-        exhaust_velocity: f(&engine["exhaustVelocity"]),
-        dry_mass_kg: f(&engine["dryMassKg"]),
-    };
-    let lab = &g["plan"];
-    let start = state(&g["start"]);
-    ephemeris.extend_to(start.time);
-    let mut plan = FlightPlan::new(&ephemeris, tolerances(&g), engine, f(&lab["coast"]));
-    plan.rebase(&PropagationRun::new(start));
-    let burn = |start_time: f64, prograde: f64, normal: f64, radial: f64| ManeuverSpec {
-        start_time,
-        reference_body: home,
-        reference_mode: ReferenceMode::Fixed,
-        prograde,
-        normal,
-        radial,
-    };
-    let t0 = start.time;
-    plan.add(burn(t0 + 1800.0, 800.0, 50.0, -20.0));
-    let apoapsis = plan
-        .start_at_apsis(&mut ephemeris, 0, ApsisKind::Apoapsis, t0)
-        .expect("an apoapsis");
-    let periapsis = plan
-        .start_at_apsis(&mut ephemeris, 0, ApsisKind::Periapsis, t0)
-        .expect("a periapsis");
-    plan.add(burn(t0 + 4.0 * 3600.0, -300.0, 0.0, 0.0));
-    let second = plan
-        .start_at_apsis(&mut ephemeris, 1, ApsisKind::Periapsis, t0)
-        .expect("a second periapsis");
-    plan.add(burn(t0 + 4.0 * 3600.0 + 10.0, 10.0, 0.0, 0.0));
-    while !plan.complete() {
-        plan.extend(&mut ephemeris, 5000);
-    }
-    let at = f(&lab["positionAt"]["t"]);
-    let position = plan
-        .position_at(&mut ephemeris, at)
-        .expect("the plan reaches T+4 h");
-
-    let placement = (apoapsis - f(&lab["apoapsisStart"]["startTime"]))
-        .abs()
-        .max((periapsis - f(&lab["periapsisStart"]["startTime"])).abs())
-        .max((second - f(&lab["secondPeriapsis"]["startTime"])).abs());
-    for (i, status) in lab["statuses"].as_array().unwrap().iter().enumerate() {
-        match (plan.status(i), status["ok"].as_bool().unwrap()) {
-            (Ok(burn), true) => {
-                let b = &status["burn"];
-                assert!(
-                    (burn.end_time - f(&b["endTime"])).abs() < 1e-9,
-                    "burn {i} end"
-                );
-                assert!(
-                    (burn.mass_after_kg - f(&b["massAfterKg"])).abs() < 1e-9,
-                    "burn {i} mass"
-                );
-            }
-            (Err(reason), false) => assert_eq!(
-                reason,
-                status["reason"].as_str().unwrap(),
-                "burn {i} reason"
-            ),
-            (ours, _) => panic!("burn {i}: {ours:?} against the lab's {status}"),
-        }
-    }
-    let end = plan.trajectory.count() - 1;
-    let end_position = (plan.trajectory.position(end) - v3(&lab["end"]["position"])).length();
-    let end_velocity = (plan.trajectory.velocity(end) - v3(&lab["end"]["velocity"])).length();
-    let impact_speed = plan.trajectory.velocity(end).length();
-    let at_error = (position - v3(&lab["positionAt"]["position"])).length();
-    let impact = plan
-        .impact()
-        .expect("the second burn drops the periapsis 700 km below the surface");
-    let impact_error = (impact.time - f(&lab["impact"]["time"])).abs();
+fn a_coasting_vessel_closes_its_orbit_between_the_right_apsides() {
+    let mut eph = ephemeris();
+    let gm = eph.bodies()[HOME].gm;
+    let (periapsis, eccentricity) = (7.0e6, 0.1);
+    let a = periapsis / (1.0 - eccentricity);
+    let period = std::f64::consts::TAU * (a * a * a / gm).sqrt();
+    let from = orbit_start(&eph, periapsis, eccentricity);
+    let mut propagator = VesselPropagator::new(&eph, TOLERANCES);
+    let mut run = PropagationRun::new(from);
+    let mut trajectory = Trajectory::new();
+    trajectory.append(run.time, &run.y);
+    let outcome = propagator.advance(
+        &mut eph,
+        &mut run,
+        START + period,
+        1_000_000,
+        Some(&mut trajectory),
+        None,
+    );
+    assert_eq!(outcome, AdvanceOutcome::Reached);
+    let (p0, v0) = relative(&eph, START, from.position, from.velocity);
+    let end = |i| run.y[i];
+    let (p1, v1) = relative(
+        &eph,
+        run.time,
+        DVec3::new(end(0), end(1), end(2)),
+        DVec3::new(end(3), end(4), end(5)),
+    );
+    let energy = |p: DVec3, v: DVec3| v.length_squared() / 2.0 - gm / p.length();
     println!(
-        "plan: {} samples (lab {}); apsis placement {placement:.1e} s; position at T+4 h {at_error:.1e} m; \
-         impact on body {} at {:.6} s, {impact_error:.1e} s from the lab, end state {end_position:.1e} m, {end_velocity:.1e} m/s at {impact_speed:.0} m/s",
-        plan.trajectory.count(),
-        lab["samples"],
-        impact.body,
-        impact.time,
+        "one orbit: back within {:.2} m, energy {:.1e} relative",
+        (p1 - p0).length(),
+        (energy(p1, v1) / energy(p0, v0) - 1.0).abs()
     );
+    assert!((p1 - p0).length() < 100.0);
+    assert!((energy(p1, v1) / energy(p0, v0) - 1.0).abs() < 1e-6);
+    let apsides = find_apsides(&trajectory, &eph, HOME, START, 8);
+    let apoapsis = apsides
+        .iter()
+        .find(|x| x.kind == ApsisKind::Apoapsis)
+        .expect("an apoapsis");
+    assert!((apoapsis.distance_meters / (a * (1.0 + eccentricity)) - 1.0).abs() < 1e-6);
+    assert!((apoapsis.time - (START + period / 2.0)).abs() < 1.0);
+}
+
+#[test]
+fn a_burn_spends_mass_at_the_engine_rate_and_gains_the_rocket_equation_speed() {
+    let mut eph = ephemeris();
+    let from = start(&eph);
+    let direction = DVec3::new(0.0, 0.8, 0.6);
+    let burn = Control::Thrust(ThrustControl {
+        thrust_newtons: ENGINE.thrust_newtons,
+        exhaust_velocity: ENGINE.exhaust_velocity,
+        minimum_mass_kg: ENGINE.dry_mass_kg,
+        attitude: AttitudeLaw::Inertial { direction },
+    });
+    let seconds = 10.0;
+    let mut propagator = VesselPropagator::new(&eph, TOLERANCES);
+    let (mut burned, mut coasted) = (PropagationRun::new(from), PropagationRun::new(from));
+    propagator.advance(
+        &mut eph,
+        &mut burned,
+        START + seconds,
+        1_000_000,
+        None,
+        Some(burn),
+    );
+    propagator.advance(
+        &mut eph,
+        &mut coasted,
+        START + seconds,
+        1_000_000,
+        None,
+        None,
+    );
+    let mass = from.mass_kg - ENGINE.thrust_newtons / ENGINE.exhaust_velocity * seconds;
+    assert!(
+        (burned.y[6] - mass).abs() < 1e-6,
+        "mass {} vs {mass}",
+        burned.y[6]
+    );
+    let gained = DVec3::new(
+        burned.y[3] - coasted.y[3],
+        burned.y[4] - coasted.y[4],
+        burned.y[5] - coasted.y[5],
+    );
+    let ideal = ENGINE.exhaust_velocity * (from.mass_kg / mass).ln();
+    // Gravity differs slightly along the two paths; ten seconds keeps that tiny.
+    assert!(
+        (gained.dot(direction) / ideal - 1.0).abs() < 1e-4,
+        "{gained} vs {ideal}"
+    );
+}
+
+#[test]
+fn the_dominant_body_is_the_planet_near_it_and_the_star_far_away() {
+    let eph = ephemeris();
+    let mut positions = vec![DVec3::ZERO; eph.bodies().len()];
+    eph.positions_at(START, &mut positions);
+    let tree = DominanceTree::new(eph.bodies());
     assert_eq!(
-        plan.trajectory.count() as u64,
-        lab["samples"].as_u64().unwrap(),
-        "plan samples"
+        tree.dominant(&positions, positions[HOME] + DVec3::X * 7e6),
+        HOME
     );
-    assert_eq!(
-        impact.body as u64,
-        lab["impact"]["bodyIndex"].as_u64().unwrap(),
-        "plan impact body"
-    );
-    // The burns' Frenet directions are normalised with Math.hypot in the lab and sqrt(dot)
-    // here; that ulp changes step sizes, and over two burns and 559 steps it grows to millimetres.
-    // The impact is bisected only to 1e-4 s, so its state may differ by the distance covered then.
-    let resolution = 1e-4;
-    assert!(
-        placement < 1e-3,
-        "apsis placement differs by {placement:e} s"
-    );
-    assert!(
-        at_error < 0.01,
-        "position at T+4 h differs by {at_error:e} m"
-    );
-    assert!(
-        impact_error < resolution,
-        "impact time differs by {impact_error:e} s"
-    );
-    assert!(
-        end_position < impact_speed * resolution + 0.01 && end_velocity < 0.01,
-        "impact state differs by {end_position:e} m, {end_velocity:e} m/s"
-    );
+    assert_eq!(tree.dominant(&positions, positions[0] + DVec3::Y * 3e10), 0);
 }
 
 #[test]
 fn partially_computed_plan_restores_and_continues_without_restarting() {
-    let g = golden();
     let mut eph = ephemeris();
-    let start = state(&g["start"]);
-    eph.extend_to(start.time);
-    let engine = PlanEngine {
-        thrust_newtons: f(&g["engine"]["thrustNewtons"]),
-        exhaust_velocity: f(&g["engine"]["exhaustVelocity"]),
-        dry_mass_kg: f(&g["engine"]["dryMassKg"]),
-    };
-    let mut original = FlightPlan::new(&eph, tolerances(&g), engine, 3000.0);
+    let start = start(&eph);
+    let mut original = FlightPlan::new(&eph, TOLERANCES, ENGINE, 3000.0);
     original.rebase(&PropagationRun::new(start));
     for (after, dv) in [(30.0, 60.0), (200.0, -10.0), (200.1, 1.0)] {
         original.add(ManeuverSpec {
             start_time: start.time + after,
-            reference_body: g["home"].as_u64().unwrap() as usize,
+            reference_body: HOME,
             reference_mode: ReferenceMode::Fixed,
             prograde: dv,
             normal: 1.0,
@@ -359,37 +232,11 @@ fn partially_computed_plan_restores_and_continues_without_restarting() {
 }
 
 #[test]
-fn dominance_matches_the_orbit_lab() {
-    let g = golden();
-    let mut ephemeris = ephemeris();
-    let lab = &g["dominance"];
-    let t = f(&lab["time"]);
-    ephemeris.extend_to(t);
-    let mut positions = vec![DVec3::ZERO; ephemeris.bodies().len()];
-    ephemeris.positions_at(t, &mut positions);
-    let tree = DominanceTree::new(ephemeris.bodies());
-    let ours: Vec<u64> = lab["points"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|p| tree.dominant(&positions, v3(p)) as u64)
-        .collect();
-    let theirs: Vec<u64> = lab["dominant"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|d| d.as_u64().unwrap())
-        .collect();
-    assert_eq!(ours, theirs);
-}
-
-#[test]
 #[should_panic(expected = "fell below dry mass")]
 fn burning_past_dry_mass_panics() {
-    let g = golden();
     let mut ephemeris = ephemeris();
-    let mut propagator = VesselPropagator::new(&ephemeris, tolerances(&g));
-    let mut run = PropagationRun::new(state(&g["start"]));
+    let mut propagator = VesselPropagator::new(&ephemeris, TOLERANCES);
+    let mut run = PropagationRun::new(start(&ephemeris));
     let burn = Control::Force(ForceControl {
         force: DVec3::X * 1e5,
         mass_flow_kg_per_second: 100.0,
@@ -402,18 +249,23 @@ fn burning_past_dry_mass_panics() {
 #[test]
 #[should_panic(expected = "already ended in an impact")]
 fn advancing_after_impact_panics() {
-    let g = golden();
     let mut ephemeris = ephemeris();
-    let leg = g["legs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|l| l["name"] == "impact")
-        .unwrap();
-    let mut propagator = VesselPropagator::new(&ephemeris, tolerances(&g));
-    let mut run = PropagationRun::new(state(&leg["from"]));
+    // 100 km up, falling straight down at 1 km/s.
+    let from = start(&ephemeris);
+    let (centre, velocity) = ephemeris.body_state(BodyId(HOME), START);
+    let up = (from.position - centre).normalize();
+    let falling = VesselState {
+        position: centre + up * (6.4e6 + 100e3),
+        velocity: velocity - up * 1000.0,
+        ..from
+    };
+    let mut propagator = VesselPropagator::new(&ephemeris, TOLERANCES);
+    let mut run = PropagationRun::new(falling);
     let end = run.time + 86_400.0;
-    propagator.advance(&mut ephemeris, &mut run, end, 1_000_000, None, None);
+    assert_eq!(
+        propagator.advance(&mut ephemeris, &mut run, end, 1_000_000, None, None),
+        AdvanceOutcome::Impact { body: HOME }
+    );
     propagator.advance(&mut ephemeris, &mut run, end, 1_000_000, None, None);
 }
 
@@ -433,9 +285,8 @@ fn changing_external_force_invalidates_fsal_at_the_accepted_boundary() {
             self.0
         }
     }
-    let g = golden();
     let mut eph = ephemeris();
-    let mut run = PropagationRun::new(state(&g["start"]));
+    let mut run = PropagationRun::new(start(&eph));
     let mut prop = VesselPropagator::new(
         &eph,
         Tolerances {

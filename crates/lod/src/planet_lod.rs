@@ -70,7 +70,7 @@ pub struct LodCamera {
     pub distance_scale: f64,
     /// The camera splits no tile at or beyond this level; observers may still.
     pub max_level: u32,
-    /// Viewport height over 2 f64::tan(vertical fov / 2): pixels per meter at one meter of distance.
+    /// Viewport height over 2 tan(vertical fov / 2): pixels per meter at one meter of distance.
     pub focal_pixels: f64,
     /// An observer splits a tile only while the children's cells would still be at least this
     /// many pixels at the tile's nearest point to the camera.

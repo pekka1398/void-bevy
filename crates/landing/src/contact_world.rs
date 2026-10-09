@@ -1215,8 +1215,7 @@ impl<F: ContactFrame> ContactWorld<F> {
             let rounding = 1e-6 * (t.length() + start.length()) + 1e-9;
             let free = !constrained.contains(&handle)
                 && v.is_some_and(|v| same32(v, body.linvel()))
-                && (moved - exact).length()
-                    <= rounding;
+                && (moved - exact).length() <= rounding;
             let solver_delta = match v {
                 Some(v) if !free => DVec3::new(after.x - v.x, after.y - v.y, after.z - v.z),
                 _ => DVec3::ZERO,

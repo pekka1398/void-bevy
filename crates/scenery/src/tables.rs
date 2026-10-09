@@ -125,7 +125,7 @@ pub fn build_multiple_scattering_table(
                         let scattering =
                             p.rayleigh_scattering[c] * d.rayleigh + p.mie_scattering * d.mie;
                         let step = f64::exp(-e[c] * dt);
-                        // Integral of f64::exp(-extinction * s) over this step. In vacuum its
+                        // Integral of exp(-extinction * s) over this step. In vacuum its
                         // exact limit is dt; the quotient would otherwise evaluate 0/0.
                         let absorbed = if e[c] == 0.0 { dt } else { (1.0 - step) / e[c] };
                         second[c] +=

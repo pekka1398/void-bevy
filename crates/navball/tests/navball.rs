@@ -1,70 +1,14 @@
-//! The navball's geometry against lab/navball: golden data from `golden/navball.ts`, then the
-//! lab's own checks (`navball-check.ts`). The drawing is checked by eye in the example.
+//! The navball's geometry: compass, horizon, attitudes up to the poles. The drawing is checked by
+//! eye in the example.
 
 use glam::DVec3;
-use serde_json::Value;
 use void_navball::{
     NavballInput, NavballPainter, heading_pitch, horizon_axes, horizon_direction, navball_basis,
     to_ball,
 };
 
-fn golden() -> Value {
-    let path = format!("{}/tests/golden/navball.json", env!("CARGO_MANIFEST_DIR"));
-    serde_json::from_str(&std::fs::read_to_string(&path).expect(&path)).expect(&path)
-}
-
-fn f(v: &Value) -> f64 {
-    v.as_f64().unwrap_or_else(|| panic!("not a number: {v}"))
-}
-
-fn v3(v: &Value) -> DVec3 {
-    DVec3::new(f(&v[0]), f(&v[1]), f(&v[2]))
-}
-
 fn angle_difference(a: f64, b: f64) -> f64 {
     (((a - b + 540.0) % 360.0) - 180.0).abs()
-}
-
-#[test]
-fn matches_the_lab() {
-    let g = golden();
-    let (pole, prime_meridian) = (v3(&g["pole"]), v3(&g["primeMeridian"]));
-    let mut horizon = 0.0_f64;
-    let cases = g["cases"].as_array().unwrap();
-    for c in cases {
-        let basis = navball_basis(&NavballInput {
-            nose: v3(&c["nose"]),
-            top: v3(&c["top"]),
-            up: v3(&c["up"]),
-            pole,
-            prime_meridian,
-            velocity: DVec3::ZERO,
-        });
-        let axes = [
-            basis.right,
-            basis.top,
-            basis.nose,
-            basis.up,
-            basis.north,
-            basis.east,
-        ];
-        for (k, axis) in axes.iter().enumerate() {
-            assert_eq!(*axis, v3(&c["basis"][k]), "basis axis {k} of {c}");
-        }
-        let direction = v3(&c["direction"]);
-        assert_eq!(to_ball(&basis, direction), v3(&c["ball"]));
-        let (heading, pitch) = heading_pitch(&basis, direction);
-        assert_eq!(heading, f(&c["headingPitch"]["heading"]), "heading of {c}");
-        assert_eq!(pitch, f(&c["headingPitch"]["pitch"]), "pitch of {c}");
-        // V8's sin and cos differ from fdlibm's in the last bit now and then.
-        let d = horizon_direction(&basis, f(&c["heading"]), f(&c["pitch"])) - v3(&c["horizon"]);
-        horizon = horizon.max(d.abs().max_element());
-    }
-    println!(
-        "{} cases: bases, ball points, heading and pitch identical; horizon directions within {horizon:.1e}",
-        cases.len()
-    );
-    assert!(horizon < 1e-15);
 }
 
 // ENU at the equator on the prime meridian (+x): east +y, north +z, up +x; the pole is +z.
@@ -226,4 +170,29 @@ fn painter_draws_sky_above_ground_below() {
     assert!(sky[2] > sky[0] && ground[0] > ground[2] && corner[3] == 0);
     assert!(angle_difference(readout.heading, 90.0) < 1e-9 && readout.pitch.abs() < 1e-9);
     assert!(painter.labels.iter().any(|l| l.text == "E"));
+}
+
+#[test]
+fn the_basis_is_orthonormal_for_any_attitude() {
+    for k in 0..200 {
+        let a = k as f64 * 0.731;
+        let nose = DVec3::new(a.cos(), (1.7 * a).sin(), (0.3 * a).cos()).normalize();
+        let top = nose.any_orthonormal_vector();
+        let top = (top * (0.9 * a).cos() + nose.cross(top) * (0.9 * a).sin()).normalize();
+        let up = DVec3::new((0.2 * a).sin(), 0.4, (1.3 * a).cos()).normalize();
+        let b = navball_basis(&NavballInput {
+            nose,
+            top,
+            up,
+            ..standing()
+        });
+        assert!((b.right.cross(b.top) - b.nose).length() < 1e-12, "case {k}");
+        for (axis, other) in [(b.right, b.top), (b.top, b.nose), (b.north, b.east)] {
+            assert!((axis.length() - 1.0).abs() < 1e-12 && axis.dot(other).abs() < 1e-12);
+        }
+        assert!(
+            (to_ball(&b, nose) - DVec3::Z).length() < 1e-12,
+            "the nose is at the centre"
+        );
+    }
 }

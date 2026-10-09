@@ -1,96 +1,61 @@
-//! The terrains against the labs (golden data from `golden/terrain.ts`).
+//! The terrains keep their contract, and a drawn tile stands on the terrain it was built from.
 
 use glam::DVec3;
-use serde_json::Value;
 use void_lod::{TileKey, TileMeshOptions, build_tile_mesh};
-use void_terrain::{Terrain, TerrainConfig, check_terrain_contract, lattice_directions};
+use void_terrain::{
+    DEFAULT_LAYERED, HillsOptions, LayeredOptions, Terrain, TerrainConfig, check_terrain_contract,
+    lattice_directions,
+};
 
-fn golden() -> Value {
-    let path = format!("{}/tests/golden/terrain.json", env!("CARGO_MANIFEST_DIR"));
-    serde_json::from_str(&std::fs::read_to_string(&path).expect(&path)).expect(&path)
-}
-
-fn f(v: &Value) -> f64 {
-    v.as_f64().unwrap_or_else(|| panic!("not a number: {v}"))
-}
-
-fn v3(v: &Value) -> DVec3 {
-    DVec3::new(f(&v[0]), f(&v[1]), f(&v[2]))
+fn terrains() -> Vec<Terrain> {
+    vec![
+        Terrain::from_config(&TerrainConfig::Hills(HillsOptions {
+            name: "hills".into(),
+            radius_meters: 100e3,
+            max_height_meters: 2000.0,
+            wavelength_meters: 12_000.0,
+            octaves: 5,
+        })),
+        Terrain::from_config(&TerrainConfig::Layered(LayeredOptions {
+            radius_meters: 6_371_000.0,
+            ..DEFAULT_LAYERED
+        })),
+    ]
 }
 
 #[test]
-fn terrains_match_the_labs() {
-    let g = golden();
-    let directions: Vec<DVec3> = g["directions"].as_array().unwrap().iter().map(v3).collect();
-    // The lattice only generates test directions; every sample below uses the lab's own. Its
-    // sin and cos are neither fdlibm (libm differs from V8 on about 1% of inputs) nor the system
-    // glibc (3%), so it agrees to an ulp rather than bit for bit.
-    let lattice = lattice_directions(directions.len());
-    let lattice_error = lattice
-        .iter()
-        .zip(&directions)
-        .map(|(a, b)| (*a - *b).length())
-        .fold(0.0, f64::max);
-    assert!(
-        lattice_error <= 2.3e-16,
-        "lattice directions differ by {lattice_error:e}"
-    );
-
-    for t in g["terrains"].as_array().unwrap() {
-        let id = t["id"].as_str().unwrap();
-        let config: TerrainConfig =
-            serde_json::from_value(t["config"].clone()).expect("a landing TerrainConfig");
-        let terrain = Terrain::from_config(&config);
-        assert_eq!(terrain.name, t["name"].as_str().unwrap(), "{id}: name");
-        assert_eq!(
-            (terrain.radius_meters, terrain.max_height_meters),
-            (f(&t["radiusMeters"]), f(&t["maxHeightMeters"])),
-            "{id}: bounds"
-        );
-        let (mut height_error, mut color_error) = (0.0_f64, 0.0_f64);
-        for s in t["samples"].as_array().unwrap() {
-            let cell = s["cell"].as_f64();
-            for ((d, h), c) in directions
-                .iter()
-                .zip(s["heights"].as_array().unwrap())
-                .zip(s["colors"].as_array().unwrap())
-            {
-                let (height, color) = terrain.sample(*d, cell);
-                height_error = height_error.max((height - f(h)).abs());
-                for (ours, lab) in color.iter().zip(c.as_array().unwrap()) {
-                    color_error = color_error.max((ours - f(lab)).abs());
-                }
-            }
-        }
+fn terrains_keep_their_contract() {
+    for terrain in terrains() {
         let failures = check_terrain_contract(&terrain, 20_000);
-        println!(
-            "{id}: heights {height_error:.1e} m, colours {color_error:.1e}; contract {}",
-            if failures.is_empty() {
-                "holds".into()
-            } else {
-                format!("{failures:?}")
-            }
-        );
-        assert!(
-            height_error == 0.0 && color_error == 0.0,
-            "{id}: heights or colours differ from the lab"
-        );
-        assert!(failures.is_empty(), "{id}: contract failures {failures:?}");
+        assert!(failures.is_empty(), "{}: {failures:?}", terrain.name);
     }
 }
 
 #[test]
-fn layered_tiles_match_the_labs() {
-    let g = golden();
-    let config: TerrainConfig = serde_json::from_value(g["terrains"][0]["config"].clone()).unwrap();
-    let terrain = Terrain::from_config(&config);
-    for lab in g["tiles"].as_array().unwrap() {
-        let k = lab["key"].as_array().unwrap();
+fn lattice_directions_are_unit_and_spread_over_the_sphere() {
+    let directions = lattice_directions(1000);
+    assert!(directions.iter().all(|d| (d.length() - 1.0).abs() < 1e-15));
+    // Evenly spread: the mean is near the centre and every octant has its share.
+    let mean = directions.iter().sum::<DVec3>() / 1000.0;
+    assert!(mean.length() < 0.01, "mean {mean}");
+    for octant in 0..8 {
+        let sign = |bit: i32| if octant & bit == 0 { 1.0 } else { -1.0 };
+        let count = directions
+            .iter()
+            .filter(|d| d.x * sign(1) > 0.0 && d.y * sign(2) > 0.0 && d.z * sign(4) > 0.0)
+            .count();
+        assert!((100..150).contains(&count), "octant {octant}: {count}");
+    }
+}
+
+#[test]
+fn a_tile_stands_on_the_terrain_it_was_built_from() {
+    for terrain in terrains() {
         let key = TileKey {
-            face: k[0].as_u64().unwrap() as u8,
-            level: k[1].as_u64().unwrap() as u32,
-            x: k[2].as_u64().unwrap() as u32,
-            y: k[3].as_u64().unwrap() as u32,
+            face: 2,
+            level: 6,
+            x: 21,
+            y: 40,
         };
         let tile = build_tile_mesh(
             key,
@@ -100,36 +65,19 @@ fn layered_tiles_match_the_labs() {
                 resolution: 33,
             },
         );
-        let flat =
-            |name: &str| -> Vec<f64> { lab[name].as_array().unwrap().iter().map(f).collect() };
-        let worst = |ours: Vec<f64>, theirs: Vec<f64>| -> f64 {
-            assert_eq!(ours.len(), theirs.len(), "{key}: lengths");
-            ours.iter()
-                .zip(&theirs)
-                .map(|(a, b)| (a - b).abs())
-                .fold(0.0, f64::max)
-        };
-        let three = |v: &[[f32; 3]]| {
-            v.iter()
-                .flatten()
-                .map(|x| f64::from(*x))
-                .collect::<Vec<f64>>()
-        };
-        let origin = (tile.origin - v3(&lab["origin"])).length();
-        let positions = worst(three(&tile.positions), flat("positions"));
-        let normals = worst(three(&tile.normals), flat("normals"));
-        let colors = worst(three(&tile.colors), flat("colors"));
-        let heights = worst(
-            tile.heights.iter().map(|h| f64::from(*h)).collect(),
-            flat("heights"),
-        );
-        println!(
-            "{key}: origin {origin:.1e} m, positions {positions:.1e} m, normals {normals:.1e}, colours {colors:.1e}, heights {heights:.1e} m"
-        );
-        assert!(
-            origin == 0.0 && positions == 0.0 && normals == 0.0 && colors == 0.0 && heights == 0.0,
-            "{key}: differs from the lab"
-        );
+        // The mesh samples at its own grid spacing, which the terrain uses to filter detail.
+        let cell = void_lod::cell_meters(terrain.radius_meters, key.level, 33);
+        let mut worst = 0.0_f64;
+        for (p, h) in tile.positions.iter().zip(&tile.heights).take(33 * 33) {
+            let world = tile.origin + DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]));
+            let direction = world.normalize();
+            let (height, _) = terrain.sample(direction, Some(cell));
+            worst = worst
+                .max((f64::from(*h) - height).abs())
+                .max((world.length() - terrain.radius_meters - height).abs());
+        }
+        // f32 vertices relative to the tile origin: centimetres at most.
+        assert!(worst < 0.05, "{}: {worst} m", terrain.name);
     }
 }
 

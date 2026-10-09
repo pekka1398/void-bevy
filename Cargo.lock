@@ -5562,7 +5562,6 @@ dependencies = [
  "glam 0.32.1",
  "rapier3d",
  "serde",
- "serde_json",
  "void-environment",
  "void-frames",
  "void-lod",
@@ -5610,7 +5609,6 @@ name = "void-navball"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "serde_json",
 ]
 
 [[package]]
@@ -5628,7 +5626,6 @@ name = "void-rotation"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "serde_json",
 ]
 
 [[package]]
@@ -5686,7 +5683,6 @@ name = "void-view"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "serde_json",
  "void-frames",
  "void-landing",
  "void-lod",
