@@ -98,6 +98,24 @@ impl AtmosphereProfile {
     }
 }
 
+/// A weather field or an unbroken aerosol deck; never infer morphology from the body name.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CloudMorphology {
+    EarthWeather,
+    ContinuousDeck,
+}
+
+/// Authored appearance of a continuous deck. No planet palette is implicit in its transport.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CloudDeckAppearance {
+    pub absorber_tint: [f64; 3],
+    pub latitude_frequency: f64,
+    pub band_contrast: f64,
+    pub warp: f64,
+    pub texture_scale: [f64; 3],
+}
+
 /// Height above the body's cloud datum. Noise recipe is currently shared, not Earth heights.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -106,6 +124,9 @@ pub struct CloudProfile {
     pub top_meters: f64,
     pub extinction_per_meter: f64,
     pub coverage: f64,
+    pub morphology: CloudMorphology,
+    pub single_scattering_albedo: [f64; 3],
+    pub deck: Option<CloudDeckAppearance>,
 }
 impl CloudProfile {
     pub fn earth() -> Self {
@@ -114,9 +135,71 @@ impl CloudProfile {
             top_meters: 8000.0,
             extinction_per_meter: 0.0011,
             coverage: 0.62,
+            morphology: CloudMorphology::EarthWeather,
+            single_scattering_albedo: [0.99; 3],
+            deck: None,
         }
     }
+    pub fn vesper() -> Self {
+        Self {
+            bottom_meters: 48000.0,
+            top_meters: 70000.0,
+            extinction_per_meter: 0.003,
+            coverage: 1.0,
+            morphology: CloudMorphology::ContinuousDeck,
+            single_scattering_albedo: [0.999, 0.998, 0.995],
+            deck: Some(CloudDeckAppearance {
+                absorber_tint: [0.94, 0.88, 0.76],
+                latitude_frequency: 11.0,
+                band_contrast: 0.04,
+                warp: 0.55,
+                texture_scale: [2.0, 2.0, 7.0],
+            }),
+        }
+    }
+    /// The deck's integrated density moment (smooth tapers and mean structure).
+    pub fn vertical_optical_depth(&self) -> f64 {
+        assert_eq!(self.morphology, CloudMorphology::ContinuousDeck);
+        (self.top_meters - self.bottom_meters)
+            * self.extinction_per_meter
+            * 0.9
+            * (0.75 + 0.15 * 0.5)
+            * crate::clouds::deck_column_integral(0.0)
+    }
     pub fn validate(&self) {
+        assert_eq!(
+            self.deck.is_some(),
+            self.morphology == CloudMorphology::ContinuousDeck,
+            "cloud morphology/appearance mismatch"
+        );
+        if let Some(deck) = &self.deck {
+            assert!(
+                deck.absorber_tint
+                    .iter()
+                    .all(|v| v.is_finite() && (0.0..=1.0).contains(v)),
+                "invalid deck tint"
+            );
+            assert!(
+                deck.latitude_frequency.is_finite()
+                    && deck.latitude_frequency > 0.0
+                    && deck.band_contrast.is_finite()
+                    && (0.0..=0.5).contains(&deck.band_contrast)
+                    && deck.warp.is_finite()
+                    && deck.warp >= 0.0
+                    && deck.texture_scale.iter().all(|v| v.is_finite() && *v > 0.0),
+                "invalid deck texture"
+            );
+        }
+        assert!(
+            self.single_scattering_albedo
+                .iter()
+                .all(|v| v.is_finite() && *v > 0.0 && *v <= 1.0),
+            "invalid cloud albedo"
+        );
+        assert!(
+            self.morphology != CloudMorphology::ContinuousDeck || self.coverage == 1.0,
+            "continuous cloud deck requires full coverage"
+        );
         assert!(
             self.bottom_meters.is_finite()
                 && self.bottom_meters >= 0.0
@@ -253,6 +336,36 @@ mod tests {
             },
         ];
         assert_eq!(ordered_volumes(&volumes), [0, 1]);
+    }
+    #[test]
+    fn continuous_deck_is_explicit_and_optically_thick() {
+        let p = CloudProfile::vesper();
+        p.validate();
+        assert!(p.vertical_optical_depth() > 40.0);
+        assert_eq!(
+            serde_json::from_str::<CloudProfile>(&serde_json::to_string(&p).unwrap()).unwrap(),
+            p
+        );
+        let mut invalid = p;
+        invalid.coverage = 0.99;
+        assert!(std::panic::catch_unwind(|| invalid.validate()).is_err());
+    }
+    #[test]
+    fn continuous_deck_palette_is_authored_and_no_earth_appearance_is_inferred() {
+        let mut p = CloudProfile::vesper();
+        let deck = p.deck.as_mut().unwrap();
+        deck.absorber_tint = [1.0; 3];
+        deck.band_contrast = 0.0;
+        deck.latitude_frequency = 3.0;
+        deck.texture_scale = [1.0, 2.0, 3.0];
+        p.validate();
+        assert_eq!(
+            serde_json::from_str::<CloudProfile>(&serde_json::to_string(&p).unwrap()).unwrap(),
+            p
+        );
+        p.deck = None;
+        assert!(std::panic::catch_unwind(|| p.validate()).is_err());
+        assert!(CloudProfile::earth().deck.is_none());
     }
     #[test]
     fn custom_profile_round_trip_and_non_earth_parameters() {

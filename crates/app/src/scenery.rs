@@ -113,6 +113,7 @@ pub struct GroundUniforms {
     /// Ares province centre and chord width, supplied by its terrain options.
     pub ares_rise: Vec4,
     pub ares_canyon: Vec4,
+    pub continuous_cloud: Vec4,
 }
 
 impl GroundUniforms {
@@ -137,6 +138,7 @@ impl GroundUniforms {
             impact_ray_params: [Vec4::ZERO; 32],
             ares_rise: Vec4::ZERO,
             ares_canyon: Vec4::ZERO,
+            continuous_cloud: Vec4::ZERO,
             planet_center: Vec3::ZERO,
             sun_illuminance: 1.0,
             sun_direction: Vec3::X,

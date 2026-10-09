@@ -139,6 +139,23 @@ pub fn build_scenes(
             air.cloud_top = clouds.top_meters as f32;
             air.cloud_extinction = clouds.extinction_per_meter as f32;
             air.coverage = clouds.coverage as f32;
+            if let Some(deck) = &clouds.deck {
+                air.cloud_deck_bands = Vec4::new(
+                    deck.latitude_frequency as f32,
+                    deck.band_contrast as f32,
+                    deck.warp as f32,
+                    0.0,
+                );
+                air.cloud_deck_tint =
+                    Vec3::from_array(deck.absorber_tint.map(|v| v as f32)).extend(0.0);
+                air.cloud_deck_scale =
+                    Vec3::from_array(deck.texture_scale.map(|v| v as f32)).extend(0.0);
+            }
+            air.cloud_morphology = match clouds.morphology {
+                void_scenery::atmosphere_scene::CloudMorphology::EarthWeather => 0.0,
+                void_scenery::atmosphere_scene::CloudMorphology::ContinuousDeck => 1.0,
+            };
+            air.cloud_albedo = Vec3::from_array(clouds.single_scattering_albedo.map(|v| v as f32));
         }
         air.exposure = 1.0;
         air.tone_mapping = crate::air::ToneMapping::None as u8 as f32;
@@ -164,6 +181,22 @@ pub fn build_scenes(
             d.visual.rock_height_meters,
             d.visual.snow_height_meters,
         );
+        if let Some(clouds) = &d.visual.cloud_profile
+            && clouds.morphology == void_scenery::atmosphere_scene::CloudMorphology::ContinuousDeck
+        {
+            let tau = clouds.vertical_optical_depth();
+            let transmission = void_scenery::clouds::deck_diffuse_transmission(
+                tau,
+                clouds.single_scattering_albedo,
+            )
+            .map(|v| v as f32);
+            uniforms.continuous_cloud = Vec4::new(
+                transmission[0],
+                transmission[1],
+                transmission[2],
+                tau as f32,
+            );
+        }
         uniforms.regolith = match d.visual.surface {
             void_scenery::solar::SurfaceRecipe::Regolith => 1.0,
             void_scenery::solar::SurfaceRecipe::MartianRegolith => 2.0,

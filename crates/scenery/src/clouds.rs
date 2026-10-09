@@ -339,3 +339,90 @@ pub fn cloud_shell_intervals(
         .filter(|(a, b)| b > a)
         .collect()
 }
+
+/// Smooth vertical density shape shared with ContinuousDeck in air.wgsl.
+pub fn deck_vertical_profile(h: f64) -> f64 {
+    assert!(h.is_finite(), "nonfinite cloud height");
+    cloud_smooth(0.0, 0.08, h) * (1.0 - cloud_smooth(0.80, 1.0, h))
+}
+/// Exact integral of deck_vertical_profile from normalized height h to the cloud top.
+/// Keeping this primitive paired with density avoids discontinuities at either taper.
+pub fn deck_column_integral(h: f64) -> f64 {
+    assert!(h.is_finite(), "nonfinite cloud height");
+    if h <= 0.0 {
+        return 0.86;
+    }
+    if h >= 1.0 {
+        return 0.0;
+    }
+    if h < 0.08 {
+        let t = h / 0.08;
+        0.86 - 0.08 * (t.powi(3) - 0.5 * t.powi(4))
+    } else if h < 0.80 {
+        0.90 - h
+    } else {
+        let t = (1.0 - h) / 0.20;
+        0.20 * (t.powi(3) - 0.5 * t.powi(4))
+    }
+}
+/// Approximate diffuse radiance attenuation through overlying vertical cloud optical depth.
+/// Unlike direct-beam Beer-Lambert attenuation, this includes forward multiple scattering.
+pub fn deck_diffuse_transmission(tau: f64, albedo: [f64; 3]) -> [f64; 3] {
+    assert!(tau.is_finite() && tau >= 0.0);
+    assert!(
+        albedo
+            .iter()
+            .all(|a| a.is_finite() && *a > 0.0 && *a <= 1.0)
+    );
+    albedo.map(|a| (-((1.0 - a) * 0.3).sqrt() * tau).exp() / (1.0 + 0.05 * tau))
+}
+
+#[cfg(test)]
+mod deck_transport_tests {
+    use super::*;
+    #[test]
+    fn nonfinite_deck_height_is_rejected() {
+        for h in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(std::panic::catch_unwind(|| deck_vertical_profile(h)).is_err());
+            assert!(std::panic::catch_unwind(|| deck_column_integral(h)).is_err());
+        }
+    }
+    #[test]
+    fn column_matches_density_integral_and_has_no_interface_step() {
+        let samples = 100000;
+        let dt = 1.0 / samples as f64;
+        let integrated: f64 = (0..samples)
+            .map(|i| deck_vertical_profile((i as f64 + 0.5) * dt) * dt)
+            .sum();
+        assert!((integrated - deck_column_integral(0.0)).abs() < 1e-10);
+        for h in [
+            -0.01, 0.0, 0.0001, 0.04, 0.07999, 0.08, 0.5, 0.8, 0.80001, 0.95, 0.9999, 1.0, 1.01,
+        ] {
+            let derivative =
+                (deck_column_integral(h - 1e-6) - deck_column_integral(h + 1e-6)) / 2e-6;
+            assert!(
+                (derivative - deck_vertical_profile(h)).abs() < 1e-7,
+                "h={h}"
+            );
+        }
+    }
+    #[test]
+    fn optically_thick_interior_has_continuous_diffuse_light_without_thinning() {
+        let albedo = [0.999, 0.998, 0.995];
+        let mut previous =
+            deck_diffuse_transmission(66.0 * 0.7425 * deck_column_integral(-0.01), albedo);
+        for i in 0..=10200 {
+            let h = -0.01 + i as f64 / 10000.0;
+            let tau = 66.0 * 0.7425 * deck_column_integral(h);
+            let light = deck_diffuse_transmission(tau, albedo);
+            for c in 0..3 {
+                assert!(light[c] >= previous[c] - 1e-12);
+                assert!((light[c] - previous[c]).abs() < 0.001);
+                assert!(light[c] > 0.05);
+            }
+            previous = light;
+        }
+        assert!(66.0 * 0.7425 * deck_column_integral(0.0) > 40.0);
+        assert_eq!(previous, [1.0; 3]);
+    }
+}

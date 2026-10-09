@@ -1,5 +1,8 @@
 # 主遊戲 Ares：火星觀感候選
 
+> 2026-10-09 整合更新：使用者已授權合入 master 並移除 Mars／Venus worktree。以下候選版本與驗證紀錄保留為歷史；現行整合版為 model30／world5，整合結果見 [status](status.md)。驗收程式須由主線重新編譯，不沿用分支 binary。
+
+
 2026-10-09，`work/mars-scenery`，基線 `74aec6b`。分支候選已建立與驗證；root已親審diff／接口／GUI及獨立核對Ares四項、solar六項與同binary journal/save，沒有待修項。未合併、未 push、尚待人類驗收。範圍、研究及接口見 [spec](specs/mars-scenery.md)。
 
 ## 可執行入口

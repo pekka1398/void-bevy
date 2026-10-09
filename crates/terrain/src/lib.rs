@@ -8,6 +8,7 @@ mod hills;
 mod impact;
 mod layered;
 pub mod noise;
+mod volcanic;
 
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,7 @@ pub use cratered::{Cratered, CrateredOptions};
 pub use hills::{Hills, HillsOptions};
 pub use impact::{Basin, ImpactOptions, ImpactTerrain, RayedImpact};
 pub use layered::{DEFAULT_LAYERED, Layered, LayeredOptions, MAX_HEIGHT, SEA_LEVEL};
+pub use volcanic::{Volcanic, VolcanicOptions};
 
 /// Plain data that builds a terrain, as landing's `TerrainConfig` (the same JSON):
 /// `{"kind": "hills", "options": {...}}` or `{"kind": "layered", "options": {...}}`.
@@ -29,6 +31,7 @@ pub enum TerrainConfig {
     Cratered(CrateredOptions),
     Impact(ImpactOptions),
     Ares(AresOptions),
+    Volcanic(VolcanicOptions),
     Layered(LayeredOptions),
 }
 
@@ -40,7 +43,8 @@ impl TerrainConfig {
             TerrainConfig::Hills(_)
             | TerrainConfig::Cratered(_)
             | TerrainConfig::Impact(_)
-            | TerrainConfig::Ares(_) => None,
+            | TerrainConfig::Ares(_)
+            | TerrainConfig::Volcanic(_) => None,
             TerrainConfig::Layered(_) => Some(SEA_LEVEL),
         }
     }
@@ -52,6 +56,7 @@ enum Kind {
     Cratered(Cratered),
     Impact(ImpactTerrain),
     Ares(Box<AresTerrain>),
+    Volcanic(Volcanic),
     Layered(Layered),
 }
 
@@ -81,6 +86,13 @@ impl Terrain {
                 radius_meters: o.impact.radius_meters,
                 max_height_meters: o.max_height_meters,
                 kind: Kind::Ares(Box::new(AresTerrain::new(o))),
+            },
+            TerrainConfig::Volcanic(o) => Self {
+                config: config.clone(),
+                name: o.name.clone(),
+                radius_meters: o.radius_meters,
+                max_height_meters: o.max_height_meters,
+                kind: Kind::Volcanic(Volcanic::new(o)),
             },
             TerrainConfig::Impact(o) => Self {
                 config: config.clone(),
@@ -119,6 +131,7 @@ impl Terrain {
     pub fn sample(&self, direction: DVec3, cell_meters: Option<f64>) -> (f64, [f64; 3]) {
         match &self.kind {
             Kind::Ares(c) => c.sample(direction, cell_meters.unwrap_or(0.25)),
+            Kind::Volcanic(c) => c.sample(direction, cell_meters.unwrap_or(0.25)),
             Kind::Cratered(c) => c.sample(direction),
             Kind::Impact(c) => c.sample(direction, cell_meters.unwrap_or(0.25)),
             Kind::Hills(h) => {

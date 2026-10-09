@@ -1,8 +1,14 @@
 # 目前狀態
 
-## Ares 分支候選（2026-10-09，尚未合併／人類驗收）
+## Ares／Vesper 已合入 master（2026-10-09）
 
-`work/mars-scenery` 已將程序火星式低地／高地、盆地、盾狀火山、有限峽谷、極冠與薄塵光學接到主遊戲；f64地形與碰撞共用，未加入Mars物理大氣。分支model29／world4／FleetCheckpoint12／Craft3。root已完成源碼／接口／GUI與獨立錄放審查，無待修項。針對性測試、lint、主renderer多尺度GUI及T+1.166667s錄放／存讀核對通過；不是master整合結果，也不是人類美術驗收。入口、binary hash、限制及證據見[main-mars-scenery.md](main-mars-scenery.md)。
+使用者明確授權合併 Mars／Venus 並移除兩個 worktree。Mars `4a482f4`、Venus `eb17fe6` 已整合；保留兩邊程序地形、光學、普通地面 fixture 與主 camera 入口，三種 surface fixture 互斥。共同 GroundUniforms 與 WGSL 欄位順序一致；Vesper 厚雲漫射修正與 Ares 材質／薄塵參數同時保留。
+
+整合版 model30／world5／FleetCheckpoint12／Craft3。兩個分支曾各自使用 model29，但模擬地形規則不同，因此整合版明確拒絕舊 model29 journal／checkpoint，不自動修補。分支既有 headless／agent GUI／root 審查證據見 [Mars](main-mars-scenery.md) 與 [Venus](main-venus-scenery.md)，僅適用於各自記錄版本；本次合併授權不擴寫為新增人類 GUI 驗收。未 push。
+
+兩個 worktree 的 ignored lab-log、acceptance binaries 與 Venus 未提交 NOTE.md／patch 已保存到 `/home/pekka/Desktop/void-bevy-worktree-backups/{mars,venus}/`；主線原有未提交 NOTE.md 保留，不混入提交。
+
+整合工作區（Mars merge 後、Venus merge 提交前）針對性 headless 驗證：terrain 的 Ares／Volcanic 測試、scenery lib、fleet-flight solar_scenery、app lib 全部通過；包含雙行星取樣／碰撞、checkpoint、地面 fixture 與 renderer ownership。四個受影響 crate 的 lib/tests Clippy `-D warnings`、fmt 與 staged diff check 通過。沒有跑全 workspace 或新的 GUI 驗收。主程式 `cargo build -p void-app -j 2` 通過，Mars／Venus 驗收入口的 binary 均更新為這次主線 build。
 
 ## 四功能與水修正已合入 master（2026-10-08）
 

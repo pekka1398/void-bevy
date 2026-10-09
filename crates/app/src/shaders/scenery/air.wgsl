@@ -58,6 +58,11 @@ struct Air {
     cloud_bottom: f32,
     cloud_top: f32,
     cloud_extinction: f32,
+    cloud_morphology: f32,
+    cloud_albedo: vec3<f32>,
+    cloud_deck_bands: vec4<f32>,
+    cloud_deck_tint: vec4<f32>,
+    cloud_deck_scale: vec4<f32>,
 }
 
 @group(0) @binding(0) var scene_texture: texture_2d<f32>;
@@ -102,12 +107,50 @@ fn cloud_height(position: vec3<f32>) -> f32 {
     return delta / (sqrt(max(big_r * big_r + delta, 1.0)) + big_r);
 }
 
+// Continuous-deck column primitive; paired with the exact density taper below.
+fn deck_column_integral(h: f32) -> f32 {
+    if h <= 0.0 { return 0.86; }
+    if h >= 1.0 { return 0.0; }
+    if h < 0.08 {
+        let t=h/0.08;
+        return 0.86-0.08*(t*t*t-0.5*t*t*t*t);
+    }
+    if h < 0.8 { return 0.9-h; }
+    let t=(1.0-h)/0.2;
+    return 0.2*(t*t*t-0.5*t*t*t*t);
+}
+fn deck_density_scale(position: vec3<f32>, footprint: f32) -> f32 {
+    let up=normalize(position-air.planet_center);
+    let latitude=asin(clamp(up.z,-1.0,1.0));
+    let longitude=atan2(up.y,up.x);
+    let broad=sin(latitude*air.cloud_deck_bands.x+sin(longitude*2.0)*cos(latitude)*air.cloud_deck_bands.z);
+    // Anchor the field at the shell base so its vertical integral is exact, not another density model.
+    let height=cloud_height(position)-air.sea_level;
+    let column=position-up*(height-air.cloud_bottom);
+    let q=(column+air.macro_origin)/(SHAPE_PERIOD*16.0);
+    let small=textureSampleLevel(shape_texture,noise_sampler,q,
+        log2(max(footprint/(SHAPE_PERIOD*16.0/SHAPE_SIZE),1.0))).b;
+    return (0.9+air.cloud_deck_bands.y*1.375*broad)*(0.75+small*0.15);
+}
+fn deck_diffuse_transmission(position: vec3<f32>, footprint: f32) -> vec3<f32> {
+    let h=(cloud_height(position)-air.sea_level-air.cloud_bottom)/(air.cloud_top-air.cloud_bottom);
+    let tau=(air.cloud_top-air.cloud_bottom)*air.cloud_extinction
+        * deck_density_scale(position,footprint)*deck_column_integral(h);
+    return exp(-sqrt((vec3(1.0)-air.cloud_albedo)*0.3)*tau)/(1.0+0.05*tau);
+}
+
 fn cloud_density(position: vec3<f32>, footprint: f32) -> f32 {
     let height = cloud_height(position) - air.sea_level;
     if !(height > air.cloud_bottom && height < air.cloud_top) {
         return 0.0;
     }
     let up = normalize(position - air.planet_center);
+    if air.cloud_morphology > 0.5 {
+        // Unbroken deck. Density never opens Earth-style holes into the volcanic surface.
+        let h = (height-air.cloud_bottom)/(air.cloud_top-air.cloud_bottom);
+        return smoothstep(0.0, 0.08, h)*(1.0-smoothstep(0.80, 1.0, h))
+            * deck_density_scale(position,footprint);
+    }
     let uv = vec2(
         atan2(up.y, up.x) / (2.0 * PI) + (0.5 + 0.5 / WEATHER_WIDTH),
         (asin(clamp(up.z, -1.0, 1.0)) / PI + 0.5) * ((WEATHER_HEIGHT - 1.0) / WEATHER_HEIGHT) + 0.5 / WEATHER_HEIGHT,
@@ -189,7 +232,27 @@ fn cloud_source(position: vec3<f32>, rd: vec3<f32>, footprint: f32) -> vec3<f32>
         // phase lobe points away from the camera.
         + exp(optical * -0.3) * 0.02;
     let sky = sky_irradiance(irradiance_table, table_sampler, shape(), r, sun_mu) * air.enabled / PI;
-    return (to_sun * sunlight + sky * 0.5 * exp(optical * -0.35) + vec3(2e-5)) * air.sun_illuminance * 0.99;
+    if air.cloud_morphology > 0.5 {
+        // Diffuse tail for a nearly conservative, optically thick deck. Finite-order Earth
+        // cumulus approximation alone loses most reflected energy in a 40+ optical-depth slab.
+        let absorption = sqrt(vec3(1.0)-air.cloud_albedo);
+        let reflectance = (vec3(1.0)-absorption)/(vec3(1.0)+absorption);
+        let latitude = asin(clamp(up.z, -1.0, 1.0));
+        let longitude = atan2(up.y, up.x);
+        let warp = sin(longitude*2.0)*cos(latitude)*air.cloud_deck_bands.z;
+        let q = up*air.cloud_deck_scale.xyz + vec3(0.0, 0.0, warp*0.12);
+        let wisps = textureSampleLevel(shape_texture, noise_sampler, q, 0.0).r;
+        let markings = (1.0-air.cloud_deck_bands.y) + air.cloud_deck_bands.y*sin(latitude*air.cloud_deck_bands.x+warp+wisps*0.8);
+        // Weak visible absorber contrast. This intentionally does not reproduce the dark UV bands.
+        let tint = mix(air.cloud_deck_tint.xyz, vec3(1.0), smoothstep(0.1,0.8,wisps));
+        let daylight = smoothstep(-0.12,0.12,sun_mu)*max(sun_mu,0.08);
+        let diffuse = reflectance * (0.6/PI) * daylight
+            * deck_diffuse_transmission(position,footprint) * markings * tint;
+        // Diffuse photons have traversed the overlying cloud, not the direct ray to the sun.
+        // Multiplying this field by direct-beam transmittance would extinguish it a second time.
+        return (to_sun*sunlight*air.cloud_albedo + diffuse + sky*0.5*exp(-optical*0.35)) * air.sun_illuminance;
+    }
+    return (to_sun * sunlight + sky * 0.5 * exp(optical * -0.35) + vec3(2e-5)) * air.sun_illuminance * air.cloud_albedo;
 }
 
 // ---------------------------------------------------------------- the pass
@@ -329,6 +392,11 @@ fn transport(ray: Ray) -> Medium {
             var source = (scattering * sun_transmittance(transmittance_table, table_sampler, shape(), r, sun_mu)
                 + all_scattering * multiple_scattering(multiple_table, table_sampler, shape(), r, sun_mu) * air.multiple_enabled)
                 * air.sun_illuminance * air.enabled;
+            // One continuous diffuse illumination field below, inside and above the deck.
+            // Its column depth uses the same datum, taper and anchored density as cloud_density.
+            if air.cloud_morphology > 0.5 {
+                source *= deck_diffuse_transmission(position,max(t/air.focal_pixels,1.0));
+            }
             if in_cloud {
                 let footprint = max(dt, t / air.focal_pixels) * 2.0;
                 let sigma = cloud_density(position, footprint) * air.cloud_extinction;
