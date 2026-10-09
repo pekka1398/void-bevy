@@ -1,6 +1,8 @@
 //! Coast prediction and the encounter range gate, as `lab/landing/src/vessel/CoastPrediction.ts`
 //! and `EncounterPhysics.ts`.
 
+use void_frames::State;
+
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -12,7 +14,7 @@ use void_orbit::{
 };
 use void_terrain::Terrain;
 
-use crate::planet_frame::{FrameState, PlanetFrame};
+use crate::planet_frame::PlanetFrame;
 
 #[derive(Clone, Debug)]
 pub struct CoastPrediction {
@@ -39,7 +41,7 @@ pub fn predict_coast(
     terrain: &Terrain,
     tolerances: Tolerances,
     time: f64,
-    state: FrameState,
+    state: State,
     mass_kg: f64,
     horizon_seconds: f64,
 ) -> CoastPrediction {
@@ -83,7 +85,7 @@ pub fn predict_coast(
         let now = frame.to_body_fixed(
             ephemeris,
             run.time,
-            FrameState {
+            State {
                 position: s.position,
                 velocity: s.velocity,
             },
@@ -169,9 +171,9 @@ impl EncounterPhysicsGate {
     pub fn update(
         &mut self,
         first_id: &str,
-        first: FrameState,
+        first: State,
         second_id: &str,
-        second: FrameState,
+        second: State,
         lookahead_seconds: f64,
     ) -> EncounterPairState {
         assert!(

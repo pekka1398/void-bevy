@@ -441,7 +441,7 @@ impl Action {
                 angular_velocity,
             } => Outcome::Spawned(sim.fleet.launch(
                 craft,
-                void_landing::FrameState {
+                void_frames::State {
                     position: *position,
                     velocity: *velocity,
                 },
@@ -471,7 +471,7 @@ impl Action {
             } => Outcome::Spawned(sim.launch_flight_at(
                 body,
                 craft,
-                void_landing::FrameState {
+                void_frames::State {
                     position: *position,
                     velocity: *velocity,
                 },

@@ -454,9 +454,9 @@ impl WorldScenery {
                 let terrain = sim.terrains[&index].clone();
                 b.field = TileField::new(
                     void_landing::landing_lod_options(
-                &terrain,
-                &void_fleet_flight::world::ground_tiles(&terrain),
-            ),
+                        &terrain,
+                        &void_fleet_flight::world::ground_tiles(&terrain),
+                    ),
                     Some(std::sync::Arc::new(Appearance {
                         terrain,
                         color: b.color,

@@ -1,5 +1,5 @@
 use glam::DVec3;
-use void_landing::FrameState;
+use void_frames::State;
 use void_vessels::{AirDynamics, Fleet, FleetOptions};
 fn make(mode: AirDynamics, sea: bool, air: bool, height: f64) -> (Fleet, String) {
     make_with_ground(mode, sea, air, height, false)
@@ -42,7 +42,7 @@ fn make_with_ground(
     );
     let id = fleet.launch(
         &craft,
-        FrameState {
+        State {
             position: state.position,
             velocity: state.velocity,
         },
@@ -100,7 +100,7 @@ fn wet_scene_does_not_change_remote_dry_scene_cadence_and_restores_at_boundary()
     craft.parts[0].definition_id = "aero-stabilizer-pod".into();
     let remote = mixed.launch(
         &craft,
-        FrameState {
+        State {
             position: -source.position,
             velocity: -source.velocity,
         },
@@ -118,7 +118,7 @@ fn wet_scene_does_not_change_remote_dry_scene_cadence_and_restores_at_boundary()
     );
     let reference_id = reference.launch(
         &craft,
-        FrameState {
+        State {
             position: -source.position,
             velocity: -source.velocity,
         },

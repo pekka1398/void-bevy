@@ -4,7 +4,8 @@ use void_assembly::{ResourceId, rendezvous_pod};
 use void_fleet_flight::session::{
     Action, FlightSession, InitialWorld, Outcome, Recording, world_mark,
 };
-use void_landing::{FrameState, PlanetFrame, earth_size};
+use void_frames::State;
+use void_landing::{PlanetFrame, earth_size};
 use void_vessels::{AirDynamics, RcsControl, VesselMode, flat_site};
 
 fn advance(s: &mut FlightSession, seconds: f64) {
@@ -36,7 +37,7 @@ fn full_air_rcs_docking_checkpoint_and_durable_journal_preserve_live_state() {
     let state = PlanetFrame::new(&sim.fleet.ephemeris, sim.home).to_inertial(
         &sim.fleet.ephemeris,
         0.,
-        FrameState {
+        State {
             position: DVec3::X * (planet.terrain.radius_meters + 5000.),
             velocity: DVec3::Y * 80.,
         },

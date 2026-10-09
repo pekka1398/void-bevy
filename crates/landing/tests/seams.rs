@@ -6,9 +6,10 @@
 //! passes next time is worse than no sweep at all, so nothing here draws from the clock.
 
 use std::sync::Arc;
+use void_frames::State;
 
 use glam::DVec3;
-use void_landing::{ContactFrame, FrameState, PlanetFrame, pebble};
+use void_landing::{ContactFrame, PlanetFrame, pebble};
 use void_orbit::{
     BodySpec, EllipticElements, Ephemeris, EphemerisOptions, GravityField, OrbitPlane,
     PropagationRun, RotationSpec, SpinSpec, SystemSpec, Tolerances, VesselPropagator, VesselState,
@@ -139,13 +140,13 @@ fn aurelia() -> Env {
 
 /// A body-fixed state somewhere over the planet: any latitude, from the deck to well past orbit,
 /// moving in any direction at anything from a walk to escape speed.
-fn sample(rng: &mut Rng, frame: &PlanetFrame) -> (f64, FrameState) {
+fn sample(rng: &mut Rng, frame: &PlanetFrame) -> (f64, State) {
     let d = rng.direction();
     let altitude = rng.log_range(1.0, 500e3);
     let speed = rng.log_range(1.0, 2.0 * (frame.body.gm / frame.body.radius_meters).sqrt());
     (
         rng.range(0.0, 5000.0),
-        FrameState {
+        State {
             position: d * (frame.body.radius_meters + altitude),
             velocity: rng.direction() * speed,
         },
@@ -224,7 +225,7 @@ fn frame_transforms_round_trip_from_anywhere() {
                 .to_inertial(
                     &env.ephemeris,
                     t,
-                    FrameState {
+                    State {
                         position: s.position,
                         velocity: DVec3::ZERO,
                     },
@@ -304,7 +305,7 @@ fn the_rotating_frame_equations_follow_the_inertial_ones_from_anywhere() {
             let reference = env.frame.to_body_fixed(
                 &env.ephemeris,
                 t0 + arc,
-                FrameState {
+                State {
                     position: s.position,
                     velocity: s.velocity,
                 },
@@ -412,7 +413,7 @@ fn moving_the_floating_origin_never_moves_the_craft() {
                 restitution: 0.2,
                 lock_rotations: false,
             },
-            FrameState {
+            State {
                 position: at,
                 velocity: rng.direction() * rng.range(0.0, 20.0),
             },

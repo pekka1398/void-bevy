@@ -14,7 +14,7 @@ use void_frames::{
 };
 use void_landing::{
     BodyShape, ContactBodySpec, ContactFrame, ContactWorld, ContactWorldOptions,
-    EncounterPhysicsGate, EncounterRanges, FrameState, Piece, PieceMass, PlanetFrame, SimpleShape,
+    EncounterPhysicsGate, EncounterRanges, Piece, PieceMass, PlanetFrame, SimpleShape,
 };
 pub use void_modules::rcs::RcsControl;
 use void_modules::{Conditions, has_atmosphere, vessel_air_at};
@@ -105,8 +105,8 @@ pub struct VesselSnapshot {
     pub part_ids: Vec<String>,
 }
 impl VesselSnapshot {
-    fn state(&self) -> FrameState {
-        FrameState {
+    fn state(&self) -> State {
+        State {
             position: self.position,
             velocity: self.velocity,
         }
@@ -367,14 +367,14 @@ fn vec32(v: DVec3) -> rapier3d::math::Vector {
 fn quat64(q: rapier3d::math::Rotation) -> DQuat {
     DQuat::from_xyzw(q.x as f64, q.y as f64, q.z as f64, q.w as f64).normalize()
 }
-fn state_of(s: FrameState) -> State {
+fn state_of(s: State) -> State {
     State {
         position: s.position,
         velocity: s.velocity,
     }
 }
-fn frame_state(s: State) -> FrameState {
-    FrameState {
+fn frame_state(s: State) -> State {
+    State {
         position: s.position,
         velocity: s.velocity,
     }
@@ -983,7 +983,7 @@ impl Fleet {
     pub fn launch(
         &mut self,
         craft: &Craft,
-        state: FrameState,
+        state: State,
         rotation: DQuat,
         angular_velocity: DVec3,
     ) -> String {
@@ -1212,7 +1212,7 @@ impl Fleet {
         self.frames.surface[self.grounds[g].spec.body_index]
     }
     /// Inertial state to a ground's body-fixed coordinates.
-    fn body_fixed(&self, g: usize, state: FrameState) -> FrameState {
+    fn body_fixed(&self, g: usize, state: State) -> State {
         let s = self
             .frames()
             .transform(self.frames.origin, self.surface(g))
@@ -1224,21 +1224,21 @@ impl Fleet {
             .transform(self.scenes[&s].contact, self.frames.origin)
             .rotation()
     }
-    fn to_inertial(&self, s: u64, state: FrameState) -> FrameState {
+    fn to_inertial(&self, s: u64, state: State) -> State {
         frame_state(
             self.frames()
                 .transform(self.scenes[&s].contact, self.frames.origin)
                 .apply_state(state_of(state)),
         )
     }
-    fn scene_local(&self, s: u64, state: FrameState) -> FrameState {
+    fn scene_local(&self, s: u64, state: State) -> State {
         frame_state(
             self.frames()
                 .transform(self.frames.origin, self.scenes[&s].contact)
                 .apply_state(state_of(state)),
         )
     }
-    fn scene_centre(&self, v: &Vessel) -> FrameState {
+    fn scene_centre(&self, v: &Vessel) -> State {
         let Owner::Scene { scene, body, push } = v.owner else {
             panic!("expected scene")
         };
@@ -1372,7 +1372,7 @@ impl Fleet {
                 origin: self
                     .to_inertial(
                         id,
-                        FrameState {
+                        State {
                             position: s.world.origin,
                             velocity: DVec3::ZERO,
                         },
@@ -1384,7 +1384,7 @@ impl Fleet {
             })
             .collect()
     }
-    pub fn relative(&self, id: &str, to: &str) -> FrameState {
+    pub fn relative(&self, id: &str, to: &str) -> State {
         let a = self.vessel(id);
         let b = self.vessel(to);
         if let (Owner::Scene { scene: sa, .. }, Owner::Scene { scene: sb, .. }) =
@@ -1395,7 +1395,7 @@ impl Fleet {
             let y = self.scene_centre(b);
             let d = x.position - y.position;
             let q = self.axes(*sa);
-            return FrameState {
+            return State {
                 position: q * d,
                 velocity: q
                     * (x.velocity - y.velocity + self.scenes[sa].world.frame.spin().cross(d)),
@@ -1411,7 +1411,7 @@ impl Fleet {
             });
         let d = x.position - self.centre_of_mass_local(to);
         let rotation = self.snapshot(to).rotation;
-        FrameState {
+        State {
             position: rotation * d,
             velocity: rotation * x.velocity
                 + self.snapshot(to).angular_velocity.cross(rotation * d),
@@ -1463,7 +1463,7 @@ impl Fleet {
                     position: self
                         .to_inertial(
                             id,
-                            FrameState {
+                            State {
                                 position: t.origin,
                                 velocity: DVec3::ZERO,
                             },
@@ -1498,7 +1498,7 @@ impl Fleet {
                 let position = self
                     .to_inertial(
                         scene,
-                        FrameState {
+                        State {
                             position: world.position(body),
                             velocity: DVec3::ZERO,
                         },
@@ -1534,7 +1534,7 @@ impl Fleet {
         scene
     }
     fn new_scene_local(&mut self, ground: Option<usize>, ids: &[String]) -> u64 {
-        let mut c = FrameState {
+        let mut c = State {
             position: DVec3::ZERO,
             velocity: DVec3::ZERO,
         };
@@ -1750,7 +1750,7 @@ impl Fleet {
         &mut self,
         v: &mut Vessel,
         scene: u64,
-        local: FrameState,
+        local: State,
         q: DQuat,
         w: DVec3,
         push: DVec3,
@@ -1995,7 +1995,7 @@ impl Fleet {
     pub fn clearance(&self, id: &str, body: usize) -> f64 {
         self.clearance_over(self.vessel(id), self.ground_index(body))
     }
-    pub fn body_fixed_state(&self, id: &str, body: usize) -> FrameState {
+    pub fn body_fixed_state(&self, id: &str, body: usize) -> State {
         let g = self.ground_index(body);
         let v = self.vessel(id);
         if matches!(v.owner,Owner::Scene { scene,.. } if self.scenes[&scene].ground==Some(g)) {
@@ -2229,7 +2229,7 @@ impl Fleet {
                 .collect();
             let c = self.recentre(&members);
             let offset = q * c;
-            let local = FrameState {
+            let local = State {
                 position: state.position + offset,
                 velocity: state.velocity + w.cross(offset),
             };
@@ -2535,7 +2535,7 @@ impl Fleet {
         self.add_scene_body(
             &mut joined,
             scene,
-            FrameState {
+            State {
                 position: c,
                 velocity,
             },

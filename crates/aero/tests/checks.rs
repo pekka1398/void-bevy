@@ -22,7 +22,13 @@ struct Plane {
     elements: Vec<AeroElement>,
 }
 
-fn wing(area: f64, aspect_ratio: f64, control: ControlSurface, sign: f64, incidence: f64) -> WingAero {
+fn wing(
+    area: f64,
+    aspect_ratio: f64,
+    control: ControlSurface,
+    sign: f64,
+    incidence: f64,
+) -> WingAero {
     WingAero {
         chord: DVec3::Z,
         normal: if control == ControlSurface::Rudder {
@@ -360,9 +366,24 @@ fn shield_disk_hides_the_pod_going_forward_and_not_backward() {
     };
     let pod = DVec3::ZERO;
     // The air comes from ahead (+z) when flying forward, from behind when flying backward.
-    assert!(shielded(pod, DVec3::Z, std::slice::from_ref(&shield), "pod"));
-    assert!(!shielded(pod, -DVec3::Z, std::slice::from_ref(&shield), "pod"));
-    assert!(!shielded(pod, DVec3::Z, std::slice::from_ref(&shield), "shield"));
+    assert!(shielded(
+        pod,
+        DVec3::Z,
+        std::slice::from_ref(&shield),
+        "pod"
+    ));
+    assert!(!shielded(
+        pod,
+        -DVec3::Z,
+        std::slice::from_ref(&shield),
+        "pod"
+    ));
+    assert!(!shielded(
+        pod,
+        DVec3::Z,
+        std::slice::from_ref(&shield),
+        "shield"
+    ));
     assert!(!shielded(DVec3::ZERO, DVec3::Z, &[], "pod"));
 }
 

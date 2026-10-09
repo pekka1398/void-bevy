@@ -1,6 +1,7 @@
 use glam::{DQuat, DVec3};
 use void_assembly::{ModuleState, ResourceId, reentry_capsule};
-use void_landing::{FrameState, PlanetFrame, earth_size, planet_environment, planet_ephemeris};
+use void_frames::State;
+use void_landing::{PlanetFrame, earth_size, planet_environment, planet_ephemeris};
 use void_vessels::{Fleet, FleetOptions, VesselMode};
 fn scene(bubble: bool) -> Fleet {
     scene_at(bubble, 55000.0)
@@ -9,7 +10,7 @@ fn scene_at(bubble: bool, altitude: f64) -> Fleet {
     let p = earth_size();
     let (e, home) = planet_ephemeris(&p);
     let env = planet_environment(&p, &e, home, true);
-    let local = FrameState {
+    let local = State {
         position: DVec3::X * (p.terrain.radius_meters + altitude),
         velocity: DVec3::new(-500., 6000., 0.),
     };
@@ -35,7 +36,7 @@ fn scene_at(bubble: bool, altitude: f64) -> Fleet {
     if bubble {
         f.launch(
             &reentry_capsule(),
-            FrameState {
+            State {
                 position: state.position + DVec3::Z * 100.,
                 ..state
             },

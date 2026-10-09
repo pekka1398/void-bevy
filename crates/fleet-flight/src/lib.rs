@@ -7,7 +7,8 @@ pub mod warp;
 pub mod world;
 use glam::DVec3;
 use void_assembly::Craft;
-use void_landing::{CoastPrediction, FrameState, LandingPlanet, PlanetFrame, predict_coast};
+use void_frames::State;
+use void_landing::{CoastPrediction, LandingPlanet, PlanetFrame, predict_coast};
 use void_vessels::{Fleet, FleetOptions, VesselControl, VesselMode};
 
 pub struct FleetFlight {
@@ -127,7 +128,7 @@ impl FleetFlight {
         id
     }
     /// Explicit body-local flight fixture. It is a journaled initial state, never a transfer claim.
-    pub fn launch_flight_at(&mut self, body_id: &str, craft: &Craft, local: FrameState) -> String {
+    pub fn launch_flight_at(&mut self, body_id: &str, craft: &Craft, local: State) -> String {
         assert!(
             local.position.is_finite()
                 && local.position.length_squared() > 0.0
@@ -148,7 +149,7 @@ impl FleetFlight {
         let id = self.fleet.launch_in_system(
             craft,
             self.fleet.ephemeris.system_of(body),
-            FrameState {
+            State {
                 position: state.position,
                 velocity: state.velocity,
             },
@@ -231,7 +232,7 @@ impl FleetFlight {
         let frame = PlanetFrame::new(&self.fleet.ephemeris, body_index);
         let body = &frame.body;
         let r = body.radius_meters + 400_000.0;
-        let local = FrameState {
+        let local = State {
             position: DVec3::X * r + offset,
             velocity: DVec3::Y * ((body.gm / r).sqrt() - frame.omega * r),
         };
@@ -243,7 +244,7 @@ impl FleetFlight {
             position: local.position,
             velocity: local.velocity,
         });
-        let state = FrameState {
+        let state = State {
             position: state.position,
             velocity: state.velocity,
         };
@@ -259,7 +260,7 @@ impl FleetFlight {
         id
     }
     /// An origin-frame state in a body's surface (body-fixed) frame.
-    pub fn body_fixed(&self, body: usize, inertial: FrameState) -> FrameState {
+    pub fn body_fixed(&self, body: usize, inertial: State) -> State {
         let s = self
             .fleet
             .frames()
@@ -268,7 +269,7 @@ impl FleetFlight {
                 position: inertial.position,
                 velocity: inertial.velocity,
             });
-        FrameState {
+        State {
             position: s.position,
             velocity: s.velocity,
         }

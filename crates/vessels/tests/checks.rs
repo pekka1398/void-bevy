@@ -2,6 +2,8 @@
 //! Rapier here is native and the lab's is WASM, so contact-driven numbers are not bit for bit; the
 //! thresholds are the lab's and the printed details are for comparing with its output.
 
+use void_frames::State;
+
 use glam::{DQuat, DVec3};
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -9,8 +11,8 @@ use std::sync::Arc;
 use void_assembly::{Craft, demo_craft};
 use void_frames::{BodyId, BodyStates};
 use void_landing::{
-    ContactWorldOptions, FrameState, LandingPlanet, PlanetFrame, aurelia, level_for_tile_size,
-    pebble, planet_ephemeris,
+    ContactWorldOptions, LandingPlanet, PlanetFrame, aurelia, level_for_tile_size, pebble,
+    planet_ephemeris,
 };
 use void_orbit::{AdvanceOutcome, EphemerisSource, PropagationRun, VesselPropagator, VesselState};
 use void_vessels::*;
@@ -32,12 +34,12 @@ fn sol_fleet() -> (Fleet, usize) {
 
 /// A 400 km circular orbit in the ecliptic plane about Aurelia, offset in radial / along-track /
 /// normal axes (m) with a velocity change in the same axes (m/s).
-fn leo(e: &dyn EphemerisSource, aurelia: usize, offset: DVec3, dv: DVec3) -> FrameState {
+fn leo(e: &dyn EphemerisSource, aurelia: usize, offset: DVec3, dv: DVec3) -> State {
     let (c, v) = e.body_state(BodyId(aurelia), 0.0);
     let body = &e.bodies()[aurelia];
     let r = body.radius_meters + 400_000.0;
     let speed = (body.gm / r).sqrt();
-    FrameState {
+    State {
         position: c + DVec3::X * r + offset,
         velocity: v + DVec3::Y * speed + dv,
     }
@@ -49,7 +51,7 @@ struct Reference {
     run: PropagationRun,
 }
 impl Reference {
-    fn new(e: &dyn EphemerisSource, s: FrameState, t0: f64) -> Self {
+    fn new(e: &dyn EphemerisSource, s: State, t0: f64) -> Self {
         Self {
             propagator: VesselPropagator::new(e, FleetOptions::default().tolerances),
             run: PropagationRun::new(VesselState {
@@ -60,21 +62,21 @@ impl Reference {
             }),
         }
     }
-    fn at(&mut self, e: &mut dyn EphemerisSource, t: f64) -> FrameState {
+    fn at(&mut self, e: &mut dyn EphemerisSource, t: f64) -> State {
         let outcome = self
             .propagator
             .advance(e, &mut self.run, t, 1_000_000, None, None);
         assert_eq!(outcome, AdvanceOutcome::Reached, "reference");
         let s = self.run.state();
-        FrameState {
+        State {
             position: s.position,
             velocity: s.velocity,
         }
     }
 }
 
-fn state(s: &VesselSnapshot) -> FrameState {
-    FrameState {
+fn state(s: &VesselSnapshot) -> State {
+    State {
         position: s.position,
         velocity: s.velocity,
     }
@@ -329,7 +331,7 @@ fn contact_between_vessels_in_free_fall() {
     let gap = (after[0].position - after[1].position).length();
     let closing = (after[1].velocity - after[0].velocity).length();
     let dv = (momentum(&after) / mass_of(&after) - momentum(&before) / mass_of(&before)).length();
-    let centre0 = FrameState {
+    let centre0 = State {
         position: before.iter().map(|s| s.position * s.mass_kg).sum::<DVec3>() / mass_of(&before),
         velocity: momentum(&before) / mass_of(&before),
     };
@@ -860,7 +862,7 @@ fn landed_vessels_share_ground_scenes() {
     let start = frame.to_inertial(
         &fleet.ephemeris,
         fleet.time(),
-        FrameState {
+        State {
             position: drop_at * (r + g + 1000.0),
             velocity: DVec3::ZERO,
         },

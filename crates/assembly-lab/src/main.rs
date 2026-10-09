@@ -441,14 +441,37 @@ fn setup(
             button(p, "Load JSON", Action::Load);
             button(p, "Export JSON (new file)", Action::Save);
         });
-    commands.spawn((Node { position_type:PositionType::Absolute,right:px(0),top:px(0),bottom:px(0),width:px(282),padding:px(14).all(),flex_direction:FlexDirection::Column,..default() },BackgroundColor(Color::srgb(0.055,0.085,0.115))))
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: px(0),
+                top: px(0),
+                bottom: px(0),
+                width: px(282),
+                padding: px(14).all(),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.055, 0.085, 0.115)),
+        ))
         .with_children(|p| {
-            label(p,"SELECTED PART",14.0); p.spawn((Text::new(""),font(13.0),Inspector));
-            button(p,"Fuel -10% capacity",Action::Fuel(-0.1)); button(p,"Fuel +10% capacity",Action::Fuel(0.1));
-            button(p,"Stage -1 (below 0 = unset)",Action::StageEdit(-1)); button(p,"Stage +1",Action::StageEdit(1)); button(p,"Remove selected subtree",Action::Delete);
-            label(p,"STAGING / LOW TO HIGH",12.0); p.spawn((Text::new(""),font(12.0),StageList));
-            button(p,"F / frame craft",Action::Fit); button(p,"C / center of mass",Action::Com);
-            label(p,"Click a hull to select.\nDrag left: orbit\nDrag right: pan\nWheel: zoom",12.0);
+            label(p, "SELECTED PART", 14.0);
+            p.spawn((Text::new(""), font(13.0), Inspector));
+            button(p, "Fuel -10% capacity", Action::Fuel(-0.1));
+            button(p, "Fuel +10% capacity", Action::Fuel(0.1));
+            button(p, "Stage -1 (below 0 = unset)", Action::StageEdit(-1));
+            button(p, "Stage +1", Action::StageEdit(1));
+            button(p, "Remove selected subtree", Action::Delete);
+            label(p, "STAGING / LOW TO HIGH", 12.0);
+            p.spawn((Text::new(""), font(12.0), StageList));
+            button(p, "F / frame craft", Action::Fit);
+            button(p, "C / center of mass", Action::Com);
+            label(
+                p,
+                "Click a hull to select.\nDrag left: orbit\nDrag right: pan\nWheel: zoom",
+                12.0,
+            );
         });
 }
 fn buttons(
@@ -636,20 +659,9 @@ fn draw(
     mut parts: Query<(&PartMesh, &mut Transform), (Without<MainCamera>, Without<Com>)>,
     mut com: Query<
         (&mut Transform, &mut Visibility),
-        (
-            With<Com>,
-            Without<PartMesh>,
-            Without<MainCamera>,
-        ),
+        (With<Com>, Without<PartMesh>, Without<MainCamera>),
     >,
-    mut camera: Single<
-        &mut Transform,
-        (
-            With<MainCamera>,
-            Without<PartMesh>,
-            Without<Com>,
-        ),
-    >,
+    mut camera: Single<&mut Transform, (With<MainCamera>, Without<PartMesh>, Without<Com>)>,
     mut texts: Query<(
         &mut Text,
         Option<&Hud>,

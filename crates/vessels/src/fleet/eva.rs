@@ -1,6 +1,7 @@
 //! Crew transfer and dynamic EVA in the existing PartGraph and contact owners.
 use super::*;
 use void_assembly::{CrewRecord, EvaControl, ModuleState, ResourceId, SeatDefinition};
+use void_frames::State;
 #[derive(Clone, Debug)]
 pub struct CrewSeat {
     pub part: String,
@@ -95,7 +96,7 @@ impl Fleet {
         }
         Ok(())
     }
-    fn rebuild_crew_owner(&mut self, id: &str, state: FrameState, q: DQuat, w: DVec3) {
+    fn rebuild_crew_owner(&mut self, id: &str, state: State, q: DQuat, w: DVec3) {
         let mut v = self.vessels.remove(id).expect("crew transaction vessel");
         let scene = match v.owner {
             Owner::Scene { scene, .. } => Some(scene),
@@ -166,7 +167,7 @@ impl Fleet {
             let inv = self.axes(scene).conjugate();
             let local = self.scene_local(
                 scene,
-                FrameState {
+                State {
                     position: hatch,
                     velocity: old.velocity,
                 },
@@ -224,7 +225,7 @@ impl Fleet {
         self.recentre(&self.vessel(&vessel).members.clone());
         let actor = self.launch(
             &craft,
-            FrameState {
+            State {
                 position: hatch,
                 velocity: eva_v,
             },
@@ -262,7 +263,7 @@ impl Fleet {
         self.sas.remove(&vessel);
         self.rebuild_crew_owner(
             &vessel,
-            FrameState {
+            State {
                 position: old.position + mother_offset,
                 velocity: mother_v,
             },
@@ -388,7 +389,7 @@ impl Fleet {
         self.sas.remove(&carrier);
         self.rebuild_crew_owner(
             &carrier,
-            FrameState {
+            State {
                 position: sb.position + centre_offset,
                 velocity,
             },

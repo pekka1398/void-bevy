@@ -293,7 +293,7 @@ fn a_local_chute_feels_air_when_its_com_is_above_the_ceiling() {
     let state = frame.to_inertial(
         &e,
         10.0,
-        void_landing::FrameState {
+        void_frames::State {
             position: DVec3::X * (p.terrain.radius_meters + 120500.0),
             velocity: DVec3::Y * 1000.0,
         },

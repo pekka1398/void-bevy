@@ -217,7 +217,7 @@ fn flight_traverses_between_two_bodies_by_time_integration() {
     let id = sim.launch_flight_at(
         "pebble",
         &initial.craft,
-        void_landing::FrameState {
+        void_frames::State {
             position: to_moon * 600.0,
             velocity: to_moon * 10.0,
         },

@@ -58,7 +58,7 @@ pub fn scene(scenario: Setup) -> Scene {
     let r = planet.terrain.radius_meters + 400_000.0;
     let (centre, velocity) = ephemeris.body_state(BodyId(body_index), 0.0);
     let gm = ephemeris.bodies()[body_index].gm;
-    let initial = |offset: DVec3, dv: DVec3| void_landing::FrameState {
+    let initial = |offset: DVec3, dv: DVec3| void_frames::State {
         position: centre + DVec3::X * r + offset,
         velocity: velocity + DVec3::Y * (gm / r).sqrt() + dv,
     };

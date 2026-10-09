@@ -2,11 +2,11 @@ mod common;
 use common::{Scene, Setup, scene};
 use glam::{DMat3, DQuat, DVec3};
 use void_assembly::demo_craft;
-use void_landing::FrameState;
+use void_frames::State;
 use void_orbit::{AdvanceOutcome, VesselPropagator};
 use void_vessels::*;
-fn state(s: &VesselSnapshot) -> FrameState {
-    FrameState {
+fn state(s: &VesselSnapshot) -> State {
+    State {
         position: s.position,
         velocity: s.velocity,
     }
@@ -175,7 +175,7 @@ fn orbit_and_bubble_burn_use_same_propellant_and_thrust() {
     let mut orbit = scene(Setup::Separate);
     let initial = orbit.fleet.snapshot("v1");
     let mut bubble = scene(Setup::Separate);
-    let companion = FrameState {
+    let companion = State {
         position: initial.position + DVec3::X * 300.0,
         velocity: initial.velocity,
     };
@@ -273,7 +273,7 @@ fn fuel_recentring_keeps_live_parts_and_nodes_on_the_physics_owner() {
             let a = s.fleet.snapshot("v1");
             s.fleet.launch(
                 &pod_tank("nearby"),
-                FrameState {
+                State {
                     position: a.position + DVec3::X * 300.0,
                     velocity: a.velocity,
                 },
@@ -470,7 +470,7 @@ fn ground_launch_coasts_back_into_contact_and_rails_catches_descent() {
     let initial = frame.to_inertial(
         &s.fleet.ephemeris,
         s.fleet.time(),
-        FrameState {
+        State {
             position: d * (r + s.planet.terrain.height(d) + 1000.0),
             velocity: DVec3::ZERO,
         },

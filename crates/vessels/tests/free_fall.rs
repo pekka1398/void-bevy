@@ -2,7 +2,8 @@ mod common;
 use common::{Setup, scene};
 use glam::DVec3;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use void_landing::{ContactFrame, ContactWorld, ContactWorldOptions, FrameState, pebble};
+use void_frames::State;
+use void_landing::{ContactFrame, ContactWorld, ContactWorldOptions, pebble};
 use void_orbit::{AdvanceOutcome, PropagationRun, VesselPropagator, VesselState};
 use void_vessels::FreeFallFrame;
 
@@ -15,7 +16,7 @@ fn free_fall_frame_rejects_terrain() {
         &scene.fleet.ephemeris,
         scene.fleet.options.tolerances,
         0.0,
-        FrameState {
+        State {
             position: initial.position,
             velocity: initial.velocity,
         },
@@ -42,7 +43,7 @@ fn free_fall_frame_rejects_terrain() {
 fn lazy_origin_and_conversions_follow_independent_coast() {
     let mut scene = scene(Setup::Coast);
     let initial = scene.fleet.snapshot("v1");
-    let anchor = FrameState {
+    let anchor = State {
         position: initial.position,
         velocity: initial.velocity,
     };
@@ -57,7 +58,7 @@ fn lazy_origin_and_conversions_follow_independent_coast() {
     });
     assert_eq!(frame.origin_time(), 0.0);
     for time in [1.0, 10.0, 100.0] {
-        let local = FrameState {
+        let local = State {
             position: DVec3::new(100.0, 20.0, -5.0),
             velocity: DVec3::new(1.0, -2.0, 3.0),
         };

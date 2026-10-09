@@ -3,7 +3,8 @@ mod common;
 use common::{Setup, scene};
 use glam::{DQuat, DVec3};
 use void_assembly::{ResourceId, add_part, rendezvous_pod};
-use void_landing::{FrameState, PlanetFrame, earth_size, planet_environment, planet_ephemeris};
+use void_frames::State;
+use void_landing::{PlanetFrame, earth_size, planet_environment, planet_ephemeris};
 use void_vessels::{AirDynamics, Fleet, FleetOptions, RcsControl, VesselMode};
 
 fn fixture(air: bool) -> Fleet {
@@ -13,7 +14,7 @@ fn fixture(air: bool) -> Fleet {
     let state = PlanetFrame::new(&e, home).to_inertial(
         &e,
         0.,
-        FrameState {
+        State {
             position: DVec3::X * (p.terrain.radius_meters + 5000.),
             velocity: DVec3::Y * 80.,
         },
@@ -60,7 +61,7 @@ fn full_air_rcs_trials_are_pure_and_each_owner_spends_only_accepted_time() {
             let s = f.snapshot("v1");
             f.launch(
                 &rendezvous_pod(),
-                FrameState {
+                State {
                     position: s.position + DVec3::Z * 100.,
                     velocity: s.velocity,
                 },
@@ -130,7 +131,7 @@ fn combined_mode_rcs_and_air_have_independent_rails_gates_across_owner_handoffs(
         // A departing neighbor creates and then leaves the same rendezvous bubble.
         f.launch(
             &rendezvous_pod(),
-            FrameState {
+            State {
                 position: s.position + DVec3::Z * 100.,
                 velocity: s.velocity + DVec3::Z * 3000.,
             },

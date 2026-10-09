@@ -14,7 +14,7 @@ pub use contact_world::{
     ContactWorldCheckpoint, ContactWorldOptions, ExtraAcceleration, Piece, PieceMass, SimpleShape,
     TileCollider, surface_indices,
 };
-pub use planet_frame::{ContactFrame, FrameState, PlanetFrame, upright_at};
+pub use planet_frame::{ContactFrame, PlanetFrame, upright_at};
 pub use planets::{
     LandingPlanet, aurelia, aurelia_fast, earth_size, landing_lod_options, level_for_tile_size,
     moon_size, pebble, planet_by_id, planet_environment, planet_ephemeris,

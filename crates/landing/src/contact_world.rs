@@ -16,6 +16,8 @@
 //!   or joints keep Rapier's angular solution. Frame torque and prescribed torque are applied before
 //!   solving, so constraints see them.
 
+use void_frames::State;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,7 +32,7 @@ use void_orbit::EphemerisSource;
 use void_rotation::{Mat3, fictitious_torque, rotation_step};
 use void_terrain::Terrain;
 
-use crate::planet_frame::{ContactFrame, FrameState};
+use crate::planet_frame::ContactFrame;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ContactWorldOptions {
@@ -289,7 +291,7 @@ pub struct ContactRayHit {
 /// Extra acceleration (thrust) for a body, called once per step with its state. Leapfrog kicks
 /// cover the half steps on both sides of a step, so this must return the average over the step
 /// just ended and the step starting; a jump (engine on or off) then lands on the step boundary.
-pub type ExtraAcceleration<'a> = &'a mut dyn FnMut(RigidBodyHandle, FrameState) -> DVec3;
+pub type ExtraAcceleration<'a> = &'a mut dyn FnMut(RigidBodyHandle, State) -> DVec3;
 
 impl<F: ContactFrame> ContactWorld<F> {
     pub fn new(
@@ -441,7 +443,7 @@ impl<F: ContactFrame> ContactWorld<F> {
         &mut self,
         ephemeris: &dyn EphemerisSource,
         spec: &ContactBodySpec,
-        state: FrameState,
+        state: State,
         rotation: DQuat,
         extra_before: DVec3,
     ) -> RigidBodyHandle {
@@ -575,13 +577,13 @@ impl<F: ContactFrame> ContactWorld<F> {
         ephemeris: &dyn EphemerisSource,
         handle: RigidBodyHandle,
         extra: DVec3,
-    ) -> FrameState {
+    ) -> State {
         let record = self.record(handle);
         let position = record.position;
         let body = &self.world.bodies[handle];
         let u = v64(body.linvel());
         if body.is_sleeping() {
-            return FrameState {
+            return State {
                 position,
                 velocity: u,
             };
@@ -596,7 +598,7 @@ impl<F: ContactFrame> ContactWorld<F> {
             u.y + (a.y * dt) / 2.0,
             u.z + (a.z * dt) / 2.0,
         ));
-        FrameState {
+        State {
             position,
             velocity: DVec3::new(
                 u.x + (a.x * dt + d.x) / 2.0,

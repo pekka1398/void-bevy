@@ -2,8 +2,9 @@
 
 use glam::DVec3;
 use serde_json::Value;
+use void_frames::State;
 use void_frames::{BodyId, BodyStates, Spin};
-use void_landing::{ContactFrame, FrameState, PlanetFrame};
+use void_landing::{ContactFrame, PlanetFrame};
 use void_orbit::{Ephemeris, EphemerisOptions, SystemSpec, build_system};
 
 fn f(v: &Value) -> f64 {
@@ -16,13 +17,7 @@ fn v3(v: &Value) -> DVec3 {
 
 /// The lab's body-fixed to barycentric conversion with the lab's own spin angle,
 /// `angle_at_epoch + 2π t / period`, which rounds once t passes a turn.
-fn lab_to_inertial(
-    spin: &Spin,
-    omega: f64,
-    centre: (DVec3, DVec3),
-    t: f64,
-    local: FrameState,
-) -> FrameState {
+fn lab_to_inertial(spin: &Spin, omega: f64, centre: (DVec3, DVec3), t: f64, local: State) -> State {
     let [node, quadrature, pole] = spin.equatorial_basis();
     let angle = spin.angle_at_epoch_radians + 2.0 * std::f64::consts::PI * t / spin.period_seconds;
     let (s, c) = (angle.sin(), angle.cos());
@@ -41,13 +36,13 @@ fn lab_to_inertial(
         local.velocity.y + omega * r.x,
         local.velocity.z,
     );
-    FrameState {
+    State {
         position: centre.0 + turn(r),
         velocity: centre.1 + turn(v),
     }
 }
 
-fn relative_error(a: FrameState, b: FrameState) -> f64 {
+fn relative_error(a: State, b: State) -> f64 {
     ((a.position - b.position).length() / a.position.length())
         .max((a.velocity - b.velocity).length() / a.velocity.length())
 }
@@ -91,13 +86,13 @@ fn planet_frame_matches_the_landing_lab() {
         let spin = frame.body.rotation;
         for c in cases {
             let t = f(&c["t"]);
-            let local = FrameState {
+            let local = State {
                 position: v3(&c["position"]),
                 velocity: v3(&c["velocity"]),
             };
             let inertial = frame.to_inertial(&ephemeris, t, local);
             let lab = &c["inertial"];
-            let lab = FrameState {
+            let lab = State {
                 position: v3(&lab["position"]),
                 velocity: v3(&lab["velocity"]),
             };

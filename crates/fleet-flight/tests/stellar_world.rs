@@ -2,6 +2,7 @@ use void_fleet_flight::{
     session::{FlightSession, InitialWorld},
     world::stellar_neighborhood,
 };
+use void_frames::State;
 use void_frames::{FrameSource, SystemId};
 
 #[test]
@@ -89,7 +90,6 @@ fn stellar_checkpoint_refuses_missing_state_or_conflicting_world_bound() {
 #[test]
 fn fleet_keeps_remote_orbit_ships_in_their_own_system_without_flattening() {
     use glam::{DQuat, DVec3};
-    use void_landing::FrameState;
     let planet = void_landing::aurelia();
     let mut initial = InitialWorld::new(
         &planet,
@@ -106,7 +106,7 @@ fn fleet_keeps_remote_orbit_ships_in_their_own_system_without_flattening() {
         .ephemeris
         .body_in_system(void_frames::BodyId(body), 0.0);
     let radius = sim.fleet.ephemeris.bodies()[body].radius_meters + 400_000.0;
-    let state = FrameState {
+    let state = State {
         position: p + DVec3::X * radius,
         velocity: v + DVec3::Y * (sim.fleet.ephemeris.bodies()[body].gm / radius).sqrt(),
     };
@@ -120,7 +120,7 @@ fn fleet_keeps_remote_orbit_ships_in_their_own_system_without_flattening() {
     let b = sim.fleet.launch_in_system(
         &void_vessels::pod_tank("Beryl B · acceptance fixture"),
         SystemId(1),
-        FrameState {
+        State {
             position: state.position + DVec3::new(0.03, 100.0, 0.0),
             velocity: state.velocity,
         },
@@ -405,7 +405,7 @@ fn aircraft_air_data_is_local_in_remote_system_and_journal_keeps_exact_part_pose
         let id = sim.fleet.launch_in_system(
             &void_assembly::aircraft(),
             system,
-            void_landing::FrameState {
+            void_frames::State {
                 position: p + radial,
                 velocity: v + spin.cross(radial) + DVec3::Z * 100.0,
             },

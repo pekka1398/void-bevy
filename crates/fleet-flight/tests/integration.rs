@@ -1,7 +1,8 @@
 use glam::{DQuat, DVec3};
 use void_assembly::{Craft, demo_craft, export_craft, import_craft};
 use void_fleet_flight::FleetFlight;
-use void_landing::{FrameState, PlanetFrame, earth_size};
+use void_frames::State;
+use void_landing::{PlanetFrame, earth_size};
 use void_vessels::{SasPhase, VesselControl, VesselMode, flat_site, pod_tank};
 
 fn make(craft: &Craft, air: bool) -> FleetFlight {
@@ -16,7 +17,7 @@ fn airborne(sim: &mut FleetFlight, craft: &Craft, height: f64, speed: f64, offse
     let state = frame.to_inertial(
         &sim.fleet.ephemeris,
         sim.fleet.time(),
-        FrameState {
+        State {
             position: DVec3::new(r, offset, 0.0),
             velocity: DVec3::Y * speed,
         },
@@ -173,7 +174,7 @@ fn air_coast_differential(step_seconds: f64) -> (f64, f64) {
         frame.to_body_fixed(
             &sim.fleet.ephemeris,
             sim.fleet.time(),
-            FrameState {
+            State {
                 position: snapshot.position,
                 velocity: snapshot.velocity,
             },

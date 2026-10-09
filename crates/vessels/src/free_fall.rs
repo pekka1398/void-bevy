@@ -1,6 +1,7 @@
 use glam::DVec3;
 use std::cell::RefCell;
-use void_landing::{ContactFrame, FrameState};
+use void_frames::State;
+use void_landing::ContactFrame;
 use void_orbit::{
     AdvanceOutcome, CelestialBody, EphemerisSource, PropagationRun, Tolerances, VesselPropagator,
     VesselState,
@@ -18,7 +19,7 @@ impl FreeFallFrame {
         ephemeris: &dyn EphemerisSource,
         tolerances: Tolerances,
         time: f64,
-        anchor: FrameState,
+        anchor: State,
     ) -> Self {
         let state = VesselState {
             time,
@@ -49,7 +50,7 @@ impl FreeFallFrame {
     }
     /// Query a current or future origin, propagating it on demand as in the TS lab.
     /// The mutable ephemeris is explicit because propagation extends its history.
-    pub fn origin_at(&mut self, ephemeris: &mut dyn EphemerisSource, time: f64) -> FrameState {
+    pub fn origin_at(&mut self, ephemeris: &mut dyn EphemerisSource, time: f64) -> State {
         self.advance_origin(ephemeris, time);
         self.origin(time)
     }
@@ -57,8 +58,8 @@ impl FreeFallFrame {
         &mut self,
         ephemeris: &mut dyn EphemerisSource,
         time: f64,
-        local: FrameState,
-    ) -> FrameState {
+        local: State,
+    ) -> State {
         self.origin_at(ephemeris, time);
         self.to_inertial(time, local)
     }
@@ -66,8 +67,8 @@ impl FreeFallFrame {
         &mut self,
         ephemeris: &mut dyn EphemerisSource,
         time: f64,
-        inertial: FrameState,
-    ) -> FrameState {
+        inertial: State,
+    ) -> State {
         self.origin_at(ephemeris, time);
         self.from_inertial(time, inertial)
     }
@@ -87,7 +88,7 @@ impl FreeFallFrame {
             "free fall origin propagation failed"
         );
     }
-    pub fn origin(&self, time: f64) -> FrameState {
+    pub fn origin(&self, time: f64) -> State {
         let s = if time == self.run.time {
             self.run.state()
         } else {
@@ -97,21 +98,21 @@ impl FreeFallFrame {
             );
             self.previous
         };
-        FrameState {
+        State {
             position: s.position,
             velocity: s.velocity,
         }
     }
-    pub fn to_inertial(&self, time: f64, local: FrameState) -> FrameState {
+    pub fn to_inertial(&self, time: f64, local: State) -> State {
         let o = self.origin(time);
-        FrameState {
+        State {
             position: o.position + local.position,
             velocity: o.velocity + local.velocity,
         }
     }
-    pub fn from_inertial(&self, time: f64, inertial: FrameState) -> FrameState {
+    pub fn from_inertial(&self, time: f64, inertial: State) -> State {
         let o = self.origin(time);
-        FrameState {
+        State {
             position: inertial.position - o.position,
             velocity: inertial.velocity - o.velocity,
         }
