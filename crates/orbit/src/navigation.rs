@@ -102,6 +102,30 @@ fn axes(
     let normal = r.cross(v).normalize();
     Ok(DMat3::from_cols(tangent, normal, tangent.cross(normal)))
 }
+/// Convert an impulsive velocity target to a finite Frenet-burn seed. Normal
+/// and radial thrust stay perpendicular to velocity and do no work; their
+/// Cartesian impulse components cannot be used as finite-burn delta-v directly.
+fn finite_frenet_seed(speed: f64, impulse: DVec3) -> Option<DVec3> {
+    let desired = impulse + DVec3::X * speed;
+    let final_speed = desired.length();
+    if speed <= 0. || final_speed <= 0. {
+        return None;
+    }
+    let transverse = desired.y.hypot(desired.z);
+    if transverse == 0. {
+        return (desired.x > 0.).then_some(DVec3::X * (final_speed - speed));
+    }
+    let angle = transverse.atan2(desired.x);
+    let prograde = final_speed - speed;
+    let ratio = prograde / speed;
+    let mean_speed = if ratio == 0. {
+        speed
+    } else {
+        prograde / ratio.ln_1p()
+    };
+    let scale = angle * mean_speed / transverse;
+    Some(DVec3::new(prograde, desired.y * scale, desired.z * scale))
+}
 fn spec(time: f64, reference: usize, dv: DVec3) -> ManeuverSpec {
     ManeuverSpec {
         start_time: time,
@@ -386,8 +410,8 @@ pub fn solve_navigation(
     for window in 0..=8 {
         let base = req.earliest_departure
             + (req.latest_departure - req.earliest_departure) * window as f64 / 8.0;
-        for phase in 0..8 {
-            let t = base + parking_period * phase as f64 / 8.0;
+        for phase in 0..32 {
+            let t = base + parking_period * phase as f64 / 32.0;
             if t <= req.latest_departure {
                 departure_times.push(t);
             }
@@ -398,14 +422,13 @@ pub fn solve_navigation(
     let mut departure_run = anchor.restarted();
     let mut departure_propagator = VesselPropagator::new(ep, tol);
     for t in departure_times {
-        match departure_propagator.advance(
-            ep,
-            &mut departure_run,
-            t,
-            WINDOW_COAST_BUDGET,
-            None,
-            None,
-        ) {
+        // The budget belongs to the entire parking-window sweep, not each sample.
+        let remaining = WINDOW_COAST_BUDGET.saturating_sub(departure_propagator.accepted_steps);
+        if remaining == 0 {
+            last_error = NavigationError::PredictionBudget;
+            break;
+        }
+        match departure_propagator.advance(ep, &mut departure_run, t, remaining, None, None) {
             AdvanceOutcome::Reached => {}
             AdvanceOutcome::Budget => {
                 last_error = NavigationError::PredictionBudget;
@@ -483,7 +506,12 @@ pub fn solve_navigation(
                 } else {
                     v + cv - state.velocity
                 };
-                let dv = basis.transpose() * inertial;
+                let Some(dv) = finite_frenet_seed(
+                    (state.velocity - rv).length(),
+                    basis.transpose() * inertial,
+                ) else {
+                    continue;
+                };
                 let maxdv = engine.exhaust_velocity * (state.mass_kg / engine.dry_mass_kg).ln();
                 if dv.length() > maxdv {
                     last_error = NavigationError::InsufficientFuel;
@@ -500,12 +528,46 @@ pub fn solve_navigation(
         }
     }
     guesses.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let mut best: Option<NavigationSolution> = None;
-    for (_, mut m, arrival, alt, departure_state) in guesses.into_iter().take(10) {
-        let trial_anchor = PropagationRun::new(departure_state);
+
+    // Keep distinct flight durations in the refinement set: sorting solely by
+    // delta-v otherwise spends all trials on near-identical long-flight seeds.
+    let mut batches: [Vec<_>; 5] = std::array::from_fn(|_| Vec::new());
+    for guess in guesses {
+        let span = req.max_flight_seconds - req.min_flight_seconds;
+        let bin = if span > 0. {
+            (((guess.2 - guess.1.start_time - req.min_flight_seconds) / span * 4.).round() as usize)
+                .min(4)
+        } else {
+            0
+        };
+        let distinct =
+            batches[bin]
+                .iter()
+                .all(|old: &(f64, ManeuverSpec, f64, f64, VesselState)| {
+                    (old.1.start_time - guess.1.start_time).abs() >= parking_period / 16.
+                });
+        if distinct {
+            batches[bin].push(guess);
+        }
+    }
+    let mut candidates = Vec::new();
+    for rank in 0..10 {
+        for batch in &batches {
+            if let Some(candidate) = batch.get(rank) {
+                candidates.push(*candidate);
+            }
+        }
+    }
+    let mut feasible = Vec::new();
+    let mut nearest_miss: Option<NavigationSolution> = None;
+    for (_, mut m, arrival, alt, _departure_state) in candidates.into_iter().take(10) {
+        // Refine the actual plan from its original anchor. Re-starting a burn at
+        // a separately partitioned parking coast can select a different encounter
+        // near a small body's SOI, even when both integrations meet tolerance.
+        let trial_anchor = anchor;
         for _ in 0..5 {
             let end = arrival + 0.05 * (arrival - m.start_time);
-            let plan = match verify(ep, &trial_anchor, engine, tol, m, end) {
+            let plan = match verify(ep, trial_anchor, engine, tol, m, end) {
                 Ok(p) => p,
                 Err(e) => {
                     last_error = e;
@@ -513,18 +575,20 @@ pub fn solve_navigation(
                 }
             };
             let s = solution(ep, &plan, req.target_body, m, false);
+
+            if nearest_miss
+                .as_ref()
+                .is_none_or(|old| s.closest_distance_m < old.closest_distance_m)
+            {
+                nearest_miss = Some(s.clone());
+            }
             let soi = ep.bodies()[req.target_body]
                 .sphere_of_influence_meters
                 .ok_or_else(|| {
                     NavigationError::NoSolution("target has no defined sphere of influence".into())
                 })?;
-            if s.closest_distance_m <= soi
-                && s.periapsis_altitude_m >= 0.0
-                && best
-                    .as_ref()
-                    .is_none_or(|b| s.closest_distance_m < b.closest_distance_m)
-            {
-                best = Some(s);
+            if s.closest_distance_m <= soi && s.periapsis_altitude_m >= 0.0 {
+                feasible.push(s);
             }
             let (r, v) = relative(ep, &plan.trajectory, req.target_body, arrival);
             let Some(normal) = r.cross(v).try_normalize() else {
@@ -553,7 +617,7 @@ pub fn solve_navigation(
                 d[j] += epsilon;
                 match verify(
                     ep,
-                    &trial_anchor,
+                    trial_anchor,
                     engine,
                     tol,
                     spec(m.start_time, m.reference_body, d),
@@ -579,32 +643,64 @@ pub fn solve_navigation(
             }
             let correction = matrix.inverse() * residual;
             let capped = correction.clamp_length_max(components.length().max(100.0) * 0.5);
-            m = spec(m.start_time, m.reference_body, components - capped);
+            // Finite burns can make the impulsive seed strongly nonlinear. A full
+            // Newton step may hit the departure body or worsen the miss. Accept
+            // only a measured residual reduction along the same numerical model.
+            let mut improved = None;
+            for scale in [1.0, 0.5, 0.25, 0.125, 0.0625] {
+                let trial = spec(m.start_time, m.reference_body, components - capped * scale);
+                if let Ok(p) = verify(ep, trial_anchor, engine, tol, trial, end) {
+                    let trial_residual =
+                        relative(ep, &p.trajectory, req.target_body, arrival).0 - offset;
+                    if trial_residual.length_squared() < residual.length_squared() {
+                        improved = Some(trial);
+                        break;
+                    }
+                }
+            }
+            let Some(next) = improved else {
+                break;
+            };
+            m = next;
         }
     }
-    let best = best.ok_or(last_error)?;
-    // The coarse window sweep and trial starts partition the pre-burn coast differently.
-    // Recompute the chosen schedule from the ORIGINAL anchor before publishing metrics;
-    // the user's ordinary flight plan must predict precisely the same schedule.
-    let full = verify_budget(
-        ep,
-        anchor,
-        engine,
-        tol,
-        best.maneuver,
-        best.verified_until,
-        WINDOW_COAST_BUDGET,
-    )?;
-    let verified = solution(ep, &full, req.target_body, best.maneuver, false);
-    let soi = ep.bodies()[req.target_body]
-        .sphere_of_influence_meters
-        .expect("candidate target has an SOI");
-    if verified.closest_distance_m > soi {
-        return Err(NavigationError::NoSolution(
-            "full finite-burn prediction misses the target sphere of influence".into(),
-        ));
+    if feasible.is_empty() {
+        return Err(nearest_miss.map_or(last_error, |s|
+            NavigationError::NoSolution(format!(
+                "No verified encounter in this window: closest candidate {:.0} km from target centre (altitude {:.0} km). Try a different departure window or more available delta-v.",
+                s.closest_distance_m / 1000., s.periapsis_altitude_m / 1000.
+            ))));
     }
-    Ok(verified)
+    feasible.sort_by(|a, b| a.closest_distance_m.total_cmp(&b.closest_distance_m));
+    // Trial anchors partition the parking coast differently. Check candidates
+    // against the original anchor before choosing one, rather than throwing away
+    // the whole search when the closest trial fails this final consistency check.
+    for candidate in feasible.into_iter().take(10) {
+        match verify_budget(
+            ep,
+            anchor,
+            engine,
+            tol,
+            candidate.maneuver,
+            candidate.verified_until,
+            WINDOW_COAST_BUDGET,
+        ) {
+            Ok(full) => {
+                let verified = solution(ep, &full, req.target_body, candidate.maneuver, false);
+                let soi = ep.bodies()[req.target_body]
+                    .sphere_of_influence_meters
+                    .expect("candidate target has an SOI");
+                if verified.closest_distance_m <= soi && verified.periapsis_altitude_m >= 0. {
+                    return Ok(verified);
+                }
+                last_error = NavigationError::NoSolution(
+                    "full finite-burn prediction misses the target sphere of influence".into(),
+                );
+            }
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
 }
 
 fn capture(

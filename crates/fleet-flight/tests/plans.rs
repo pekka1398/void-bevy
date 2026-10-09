@@ -207,3 +207,149 @@ fn navigation_appends_after_existing_burn_without_spending_fuel_and_roundtrips()
     let replay = FlightSession::from_recording(session.recording()).with_recording();
     assert_eq!(world_mark(session.sim()), world_mark(replay.sim()));
 }
+
+#[test]
+fn background_navigation_commits_only_plan_and_replays_without_search() {
+    use void_fleet_flight::navigation_job::NavigationJob;
+    use void_orbit::{NavigationOperation, NavigationRequest};
+    let mut session = fixture();
+    let id = session.sim().selected.clone();
+    let before = world_mark(session.sim());
+    let job = NavigationJob {
+        checkpoint: FlightCheckpoint::capture(session.sim(), session.recording_initial().clone()),
+        request: NavigationRequest {
+            operation: NavigationOperation::Capture,
+            reference_body: session.sim().home,
+            target_body: session.sim().home,
+            earliest_departure: 30.,
+            latest_departure: 30.,
+            min_flight_seconds: 60.,
+            max_flight_seconds: 12000.,
+            periapsis_altitude_m: 100000.,
+        },
+    };
+    let result = job.solve().unwrap();
+    assert_eq!(world_mark(session.sim()), before);
+    let baseline = FlightCheckpoint::capture(session.sim(), session.recording_initial().clone());
+    assert_eq!(
+        session.execute(Action::AcceptNavigation {
+            result: Box::new(result.clone())
+        }),
+        Outcome::Applied
+    );
+    assert!(!session.sim().plans[&id].executing);
+    assert!(session.sim().plans[&id].plan.complete());
+    assert_eq!(world_mark(session.sim())["ships"], before["ships"]);
+    assert!(matches!(
+        session.execute(Action::AcceptNavigation {
+            result: Box::new(result.clone())
+        }),
+        Outcome::Refused(_)
+    ));
+    let replay = FlightSession::from_recording(session.recording());
+    assert_eq!(world_mark(session.sim()), world_mark(replay.sim()));
+    let saved = FlightCheckpoint::capture(session.sim(), session.recording_initial().clone());
+    let restored = saved.restore();
+    assert_eq!(world_mark(session.sim()), world_mark(&restored));
+    for action in [
+        Action::Select {
+            vessel: "v1".into(),
+        },
+        Action::Control {
+            throttle: 0.2,
+            turn: DVec3::ZERO,
+        },
+        Action::Advance {
+            seconds: 0.1,
+            rails: false,
+        },
+    ] {
+        let mut changed = FlightSession::from_checkpoint(baseline.clone());
+        changed.execute(action);
+        let before_refusal = world_mark(changed.sim());
+        assert!(matches!(
+            changed.execute(Action::AcceptNavigation {
+                result: Box::new(result.clone())
+            }),
+            Outcome::Refused(_)
+        ));
+        assert_eq!(before_refusal, world_mark(changed.sim()));
+    }
+    let mut edited = session.sim().plans[&id].plan.maneuver(0);
+    edited.prograde += 1.;
+    assert_eq!(
+        session.execute(Action::EditManeuver {
+            index: 0,
+            spec: edited
+        }),
+        Outcome::Applied
+    );
+    assert!(
+        !session.sim().plans[&id]
+            .message
+            .contains("predicted closest")
+    );
+    assert!(session.sim().plans[&id].message.contains("no longer valid"));
+    let replay = FlightSession::from_recording(session.recording());
+    assert_eq!(world_mark(session.sim()), world_mark(replay.sim()));
+}
+
+#[test]
+#[ignore = "expanded main-game departure witness; run explicitly"]
+fn expanded_main_upper_stage_departure_witness() {
+    use void_orbit::{NavigationOperation, NavigationRequest};
+    let planet = void_landing::aurelia();
+    let craft = void_assembly::rcs_flight_rocket();
+    let mut initial = InitialWorld::new(&planet, &craft, flat_site(&planet), false);
+    initial.world = void_fleet_flight::world::expanded_solar_scenery(&planet);
+    let mut session = FlightSession::new(initial);
+    let Outcome::Spawned(id) = session.execute(Action::LaunchOrbit {
+        craft,
+        offset: DVec3::ZERO,
+    }) else {
+        panic!("launch");
+    };
+    session.execute(Action::Select { vessel: id.clone() });
+    for _ in 0..2 {
+        session.execute(Action::Stage);
+    }
+    session.execute(Action::View {
+        command: void_fleet_flight::presentation::ViewCommand::Configure { main_camera: true },
+    });
+    session.execute(Action::EndFrame {
+        paused: true,
+        rate: 0,
+    });
+    if let Ok(path) = std::env::var("VOID_NAVIGATION_SAVE_FIXTURE") {
+        session.save_checkpoint(path);
+    }
+    let engine = session.sim().plan_engine(&id).unwrap();
+    eprintln!(
+        "upper-stage engine {engine:?}; mass {}",
+        session.sim().fleet.snapshot(&id).mass_kg
+    );
+    let target_name = "selene";
+    let target = session
+        .sim()
+        .fleet
+        .ephemeris
+        .bodies()
+        .iter()
+        .position(|b| b.id == target_name)
+        .unwrap();
+    let home = session.sim().home;
+    let request = NavigationRequest {
+        operation: NavigationOperation::Departure,
+        reference_body: home,
+        target_body: target,
+        earliest_departure: 30.,
+        latest_departure: 5600.,
+        min_flight_seconds: 60.,
+        max_flight_seconds: 13.5 * 86400.,
+        periapsis_altitude_m: 100000.,
+    };
+    let outcome = session.execute(Action::GenerateNavigation { request });
+    eprintln!("expanded {target_name}: {outcome:?}");
+    assert_eq!(outcome, Outcome::Applied);
+    assert!(!session.sim().plans[&id].executing);
+}

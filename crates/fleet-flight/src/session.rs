@@ -15,7 +15,7 @@ pub mod durable;
 
 pub const FORMAT_VERSION: u32 = 1;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 33;
+pub const MODEL_VERSION: u32 = 34;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -128,6 +128,9 @@ pub enum Action {
     },
     Sas {
         enabled: bool,
+    },
+    AcceptNavigation {
+        result: Box<crate::navigation_job::NavigationResult>,
     },
     GenerateNavigation {
         request: void_orbit::NavigationRequest,
@@ -388,6 +391,10 @@ impl Action {
                     Err(reason) => Outcome::Refused(reason),
                 }
             }
+            Self::AcceptNavigation { result } => match sim.accept_navigation(result) {
+                Ok(()) => Outcome::Applied,
+                Err(reason) => Outcome::Refused(reason),
+            },
             Self::GenerateNavigation { request } => {
                 match sim.generate_navigation(&sim.selected.clone(), request) {
                     Ok(()) => Outcome::Applied,
@@ -723,6 +730,14 @@ impl FlightSession {
     /// Read-only trial query for the navigation UI; no authoritative command is committed.
     pub fn navigation_reference(&mut self, id: &str) -> Result<usize, String> {
         self.sim.navigation_reference(id)
+    }
+    /// Observation-only cache preparation, bounded by 32 ordinary ephemeris samples.
+    pub fn prepare_navigation_preview(&mut self, until: f64) -> bool {
+        assert!(until.is_finite(), "invalid navigation preview horizon");
+        let ep = &mut self.sim.fleet.ephemeris;
+        let next = until.min(ep.end_time() + 32. * ep.step_seconds());
+        ep.extend_to(next);
+        ep.end_time() >= until
     }
     /// Read-only observation prevents callers from bypassing the command journal.
     pub fn sim(&self) -> &FleetFlight {

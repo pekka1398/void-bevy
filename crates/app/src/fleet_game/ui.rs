@@ -12,6 +12,7 @@ pub(super) enum Readout {
     Orbit,
     Maneuver,
     Navigation,
+    NavigationStatus,
     Status,
     ViewDiagnostics,
 }
@@ -58,6 +59,7 @@ pub(super) enum Click {
     NavigationFocus,
     NavigationSetting(u8),
     GenerateNavigation(u8),
+    CancelNavigation,
     Field(Field),
     Toggle(Toggle),
 }
@@ -78,10 +80,22 @@ pub(super) struct UiState {
     draft: String,
     dev: bool,
     help: bool,
+    navigation_status: String,
+    navigation_label: String,
+    navigation_worker: Option<navigation_worker::Worker>,
+    navigation_result: Option<void_fleet_flight::navigation_job::NavigationResult>,
     navigation_target: Option<usize>,
     navigation_wait: usize,
     navigation_flight: usize,
     navigation_altitude: usize,
+}
+impl UiState {
+    pub(super) fn initial(sim: &void_fleet_flight::FleetFlight) -> Self {
+        Self {
+            navigation_target: argument("--navigation-target").map(|id| sim.world.body_index(&id)),
+            ..default()
+        }
+    }
 }
 const INK: Color = Color::srgb(0.81, 0.84, 0.89);
 const BG: Color = Color::srgba(0.031, 0.039, 0.063, 0.82);
@@ -418,6 +432,7 @@ pub(super) fn spawn(
     button(commands, settings, "Pe >", Click::NavigationSetting(2));
     let operations = row(commands, maneuver);
     button(commands, operations, "Depart", Click::GenerateNavigation(0));
+    button(commands, operations, "Cancel", Click::CancelNavigation);
     button(
         commands,
         operations,
@@ -430,6 +445,7 @@ pub(super) fn spawn(
         "Capture",
         Click::GenerateNavigation(2),
     );
+    readout(commands, maneuver, Readout::NavigationStatus, 10.);
     text(commands, maneuver, "MANEUVER", 11.);
     readout(commands, maneuver, Readout::Maneuver, 11.);
     for (field, label) in [
@@ -584,6 +600,7 @@ pub(super) fn interactions(
     mut lab: NonSendMut<Lab>,
     mut nodes: Query<(&mut Node, Option<&Dev>, Option<&Help>)>,
 ) {
+    poll_navigation(&mut lab, &mut state);
     let queued = pending
         .as_mut()
         .map_or(Vec::new(), |p| std::mem::take(&mut p.0));
@@ -685,7 +702,15 @@ pub(super) fn interactions(
                 _ => unreachable!(),
             },
             Click::GenerateNavigation(operation) => {
-                generate_navigation(&mut lab, &state, *operation)
+                generate_navigation(&mut lab, &mut state, *operation)
+            }
+            Click::CancelNavigation => {
+                if state.navigation_worker.take().is_some()
+                    | state.navigation_result.take().is_some()
+                {
+                    lab.notice = "Navigation cancelled; existing plan unchanged".into();
+                    state.navigation_status = lab.notice.clone();
+                }
             }
             Click::PlotSecondary => {
                 let mut keys = ButtonInput::default();
@@ -986,15 +1011,44 @@ pub(super) fn refresh(
                 map * 100.,
                 plotting_description(sim)
             ),
+            Readout::NavigationStatus => state.navigation_status.clone(),
             Readout::Navigation => {
                 let target = state
                     .navigation_target
-                    .map_or("none", |i| f.ephemeris.bodies()[i].name.as_str());
+                    .and_then(|i| f.ephemeris.bodies().get(i))
+                    .map_or("none / select again", |body| body.name.as_str());
                 format!(
-                    "Target: {target}\nMax wait {:.0}d · max flight {:.0}d\nTarget Pe {:.0}km",
-                    navigation_wait(&state),
-                    navigation_flight(&state),
-                    navigation_altitude(&state)
+                    "Target: {target}\nMax wait {:.2}d{} · max flight {:.1}d{}\nTarget Pe {:.0}km{}",
+                    navigation_wait(&state, sim),
+                    if state.navigation_wait == 0 {
+                        " auto"
+                    } else {
+                        ""
+                    },
+                    navigation_flight(&state, sim),
+                    if state.navigation_flight == 0 {
+                        " auto"
+                    } else {
+                        ""
+                    },
+                    navigation_altitude(&state),
+                    state.navigation_worker.as_ref().map_or_else(
+                        || state.navigation_result.as_ref().map_or(
+                            String::new(),
+                            |result| format!(
+                                "\nPreparing preview {:.0}% · Cancel to stop",
+                                ((f.ephemeris.end_time() - f.time())
+                                    / (result.prediction_until - f.time())
+                                    * 100.)
+                                    .clamp(0., 100.)
+                            )
+                        ),
+                        |worker| format!(
+                            "\nSearching {:.0}s / {}s · Cancel to stop",
+                            worker.started.elapsed().as_secs_f64(),
+                            navigation_worker::LIMIT_SECONDS
+                        )
+                    )
                 )
             }
             Readout::Maneuver => plan_description(&lab)
@@ -1488,27 +1542,121 @@ pub(super) fn apply_font(
     }
 }
 
-fn navigation_wait(state: &UiState) -> f64 {
-    [30., 0., 1., 365., 1825.][state.navigation_wait]
+fn navigation_wait(state: &UiState, sim: &void_fleet_flight::FleetFlight) -> f64 {
+    if state.navigation_wait != 0 {
+        return [0., 0., 1., 30., 365.][state.navigation_wait];
+    }
+    // One local orbit samples departure phase without integrating months of parking
+    // coast by default. Longer window searches remain an explicit setting.
+    let reference = sim.navigation_body(&sim.selected);
+    let local = sim.fleet.body_fixed_state(&sim.selected, reference);
+    let gm = sim.fleet.ephemeris.bodies()[reference].gm;
+    (std::f64::consts::TAU * (local.position.length().powi(3) / gm).sqrt()) / 86400.
 }
-fn navigation_flight(state: &UiState) -> f64 {
-    [7., 1., 30., 180., 730., 3650.][state.navigation_flight]
+fn navigation_flight(state: &UiState, sim: &void_fleet_flight::FleetFlight) -> f64 {
+    if state.navigation_flight != 0 {
+        return [0., 1., 7., 30., 180., 730.][state.navigation_flight];
+    }
+    let Some(target) = state.navigation_target else {
+        return 7.;
+    };
+    let bodies = sim.fleet.ephemeris.bodies();
+    let Some(body) = bodies.get(target) else {
+        return 7.;
+    };
+    // A target's half-period supplies the scale for a moon transfer. For sibling
+    // planets use the mean orbital size (period^(2/3)) to estimate twice the
+    // Hohmann flight time; this is a search setting, never a predicted encounter.
+    let reference = sim.navigation_body(&sim.selected);
+    let target_period = body.orbit_period_seconds.unwrap_or(7. * 86400.);
+    let reference_body = &bodies[reference];
+    let seconds = if body.parent_index == reference_body.parent_index {
+        reference_body
+            .orbit_period_seconds
+            .map_or(target_period, |period| {
+                ((period.powf(2. / 3.) + target_period.powf(2. / 3.)) / 2.).powf(1.5)
+            })
+    } else {
+        target_period * 0.5
+    };
+    (seconds / 86400.).max(1.)
 }
 fn navigation_altitude(state: &UiState) -> f64 {
     [100., 1., 10., 1000., 10000.][state.navigation_altitude]
 }
-fn generate_navigation(lab: &mut Lab, state: &UiState, operation: u8) {
+fn poll_navigation(lab: &mut Lab, state: &mut UiState) {
+    if let Some(worker) = state.navigation_worker.as_mut()
+        && let Some(result) = worker.poll()
+    {
+        state.navigation_worker = None;
+        match result {
+            Ok(result) => state.navigation_result = Some(result),
+            Err(reason) => {
+                lab.notice = reason;
+                state.navigation_status = format!("{}: {}", state.navigation_label, lab.notice);
+            }
+        }
+    }
+    if let Some(result) = state.navigation_result.as_ref() {
+        if void_fleet_flight::navigation_job::baseline(lab.session.sim()) != result.baseline {
+            state.navigation_result = None;
+            lab.notice =
+                "Navigation result expired: vessel, controls or plan changed; generate again"
+                    .into();
+            state.navigation_status = format!("{}: {}", state.navigation_label, lab.notice);
+            return;
+        }
+        if !lab
+            .session
+            .prepare_navigation_preview(result.prediction_until)
+        {
+            return;
+        }
+        let result = state.navigation_result.take().unwrap();
+        match lab.session.execute(Action::AcceptNavigation {
+            result: Box::new(result),
+        }) {
+            Outcome::Applied => {
+                lab.notice =
+                    "Navigation node generated; inspect prediction before execution".into();
+                lab.prediction = None;
+            }
+            Outcome::Refused(reason) => lab.notice = reason,
+            other => panic!("unexpected navigation outcome {other:?}"),
+        }
+        state.navigation_status = format!("{}: {}", state.navigation_label, lab.notice);
+    }
+}
+fn generate_navigation(lab: &mut Lab, state: &mut UiState, operation: u8) {
+    if state.navigation_worker.is_some() || state.navigation_result.is_some() {
+        lab.notice =
+            "Navigation is already searching; Cancel before starting another search".into();
+        state.navigation_status = lab.notice.clone();
+        return;
+    }
     use void_orbit::{NavigationOperation, NavigationRequest};
     let Some(target_body) = state.navigation_target else {
         lab.notice = "Choose a navigation target".into();
+        state.navigation_status = lab.notice.clone();
         return;
     };
     let sim = lab.session.sim();
     if sim.fleet.ephemeris.bodies().get(target_body).is_none() {
         lab.notice = "Navigation target no longer exists; select a target again".into();
+        state.navigation_status = lab.notice.clone();
         return;
     }
     let id = sim.selected.clone();
+    if let Err(reason) = sim.plan_engine(&id) {
+        lab.notice = reason;
+        state.navigation_status = lab.notice.clone();
+        return;
+    }
+    state.navigation_label = format!(
+        "{} to {}",
+        ["Departure", "Correction", "Capture"][operation as usize],
+        sim.fleet.ephemeris.bodies()[target_body].name
+    );
     let now = sim.fleet.time();
     let earliest = sim
         .plans
@@ -1516,13 +1664,8 @@ fn generate_navigation(lab: &mut Lab, state: &UiState, operation: u8) {
         .and_then(|p| p.plan.burns().last())
         .map_or(now, |b| now.max(b.end_time))
         + 30.;
-    let reference_body = match lab.session.navigation_reference(&id) {
-        Ok(body) => body,
-        Err(reason) => {
-            lab.notice = reason;
-            return;
-        }
-    };
+    // The exact tail reference is resolved inside the worker, including existing burns.
+    let reference_body = sim.navigation_body(&id);
     let request = NavigationRequest {
         operation: match operation {
             0 => NavigationOperation::Departure,
@@ -1533,24 +1676,62 @@ fn generate_navigation(lab: &mut Lab, state: &UiState, operation: u8) {
         target_body,
         reference_body,
         earliest_departure: earliest,
-        latest_departure: earliest + navigation_wait(state) * 86400.,
+        latest_departure: earliest + navigation_wait(state, sim) * 86400.,
         min_flight_seconds: 60.,
-        max_flight_seconds: navigation_flight(state) * 86400.,
+        max_flight_seconds: navigation_flight(state, sim) * 86400.,
         periapsis_altitude_m: navigation_altitude(state) * 1000.,
     };
-    match lab.session.execute(Action::GenerateNavigation { request }) {
-        Outcome::Applied => {
-            lab.notice = "Navigation node generated; inspect prediction before execution".into();
-            lab.prediction = None;
+    lab.paused = true;
+    lab.session.execute(Action::EndFrame {
+        paused: true,
+        rate: lab.rate,
+    });
+    let checkpoint = void_fleet_flight::checkpoint::FlightCheckpoint::capture(
+        lab.session.sim(),
+        lab.session.recording_initial().clone(),
+    );
+    match navigation_worker::Worker::start(void_fleet_flight::navigation_job::NavigationJob {
+        checkpoint,
+        request,
+    }) {
+        Ok(worker) => {
+            state.navigation_worker = Some(worker);
+            state.navigation_status = format!("{}: searching", state.navigation_label);
+            lab.notice =
+                "Navigation searching in background; simulation paused. Cancel stops the search."
+                    .into();
         }
-        Outcome::Refused(reason) => lab.notice = reason,
-        other => panic!("unexpected navigation outcome {other:?}"),
+        Err(reason) => {
+            lab.notice = reason;
+            state.navigation_status = lab.notice.clone();
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn navigation_defaults_follow_target_scale_without_long_parking_wait() {
+        let app = super::super::tests::initialized_scene(true);
+        let lab = app.world().non_send::<Lab>();
+        let sim = lab.session.sim();
+        let bodies = sim.fleet.ephemeris.bodies();
+        let mut state = UiState {
+            navigation_target: Some(bodies.iter().position(|b| b.id == "vesper").unwrap()),
+            ..default()
+        };
+        let planetary = navigation_flight(&state, sim);
+        assert!(planetary > 100. && planetary < 730.);
+        assert!(navigation_wait(&state, sim) < 1.);
+        state.navigation_target = Some(bodies.iter().position(|b| b.id == "selene").unwrap());
+        let lunar = navigation_flight(&state, sim);
+        assert!(lunar > 1. && lunar < planetary);
+        state.navigation_flight = 2;
+        assert_eq!(navigation_flight(&state, sim), 7.);
+        state.navigation_wait = 3;
+        assert_eq!(navigation_wait(&state, sim), 30.);
+    }
     #[test]
     fn released_quick_pointer_click_is_queued_and_applied_once() {
         let mut app = super::super::tests::initialized_scene(true);

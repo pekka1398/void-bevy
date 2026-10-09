@@ -4,6 +4,122 @@ Worktree: `/home/pekka/Desktop/void-bevy-navigation`; branch `work/orbit-navigat
 Base: expanded bodies `3dcfa94`, not merged to master. Specification:
 `docs/specs/orbit-navigation-and-plotting.md`.
 
+## Start the repaired acceptance build
+
+```sh
+/home/pekka/Desktop/void-bevy-navigation/tools/navigation-acceptance.sh
+```
+
+With no arguments this opens a paused, authored Aurelia 400 km orbital fixture:
+original main-game rocket with its booster detached, upper-stage engine staged,
+full remaining upper-stage fuel, and Selene already selected. Click **Depart**.
+There is no need to press O or Space. Generating a node never ignites the engine;
+inspect its predicted trajectory and metrics before B / Execute. Cancel stops an
+active search or preview preparation. P resumes time. This is a declared starting
+fixture, not a completed launch or transfer.
+
+Passing explicit arguments keeps the usual game CLI, for example
+`tools/navigation-acceptance.sh --load <checkpoint> --navigation-target vesper`.
+The unchanged full stack has less currently usable maneuver delta-v than the
+separated upper stage; stage indication is relevant to navigation refusals.
+
+To recreate the model-34 starting fixture from source:
+
+```sh
+VOID_NAVIGATION_SAVE_FIXTURE="$PWD/lab-log/navigation/departure-ready.json" \
+  cargo test -p void-fleet-flight --test plans \
+  expanded_main_upper_stage_departure_witness -j 1 -- --ignored
+```
+
+## Repair of the unresponsive Depart action (2026-10-10)
+
+The previous delivery did not cover the user's Depart interaction. It must not
+be treated as accepted: the request, reference query and complete finite-burn
+prediction ran synchronously on the render thread.
+
+The repaired UI owns one headless worker process using a direct world snapshot.
+It displays elapsed search time, supports actual cancellation and imposes a
+120-second wall-time limit. Worker exit and UI resource teardown reap the exact
+owned child. Success returns a verified plan, never a replacement live world.
+The app prepares the necessary future ephemeris in slices of 32 samples per frame
+before publishing, so finishing the search cannot trigger another long synchronous
+integration in the renderer. Preview preparation is also cancellable.
+
+The acceptance command rechecks the physical baseline, selected vessel and plans.
+Camera/pause/plot presentation changes are allowed; changed fuel, control, time,
+vessels or plans reject the stale result. `AcceptNavigation` records the exact
+plan and baseline. Replay builds the normal ephemeris and commits that result,
+without re-running the navigation search. Pending jobs are transient and never
+silently resumed from a save. Model 34 is intentionally incompatible with model
+33 saves/journals; no automatic conversion is provided.
+
+Default wait is one local orbit; longer windows remain explicit options. Default
+flight range derives from target orbital scale, rather than using seven days for
+every planet. The displayed auto settings can be overridden. Navigation outcomes
+remain in the navigation panel even when a camera action changes the general
+status notice. Manual plan edits explicitly clear the old generated navigation
+metrics rather than presenting them as predictions of the edited plan.
+
+The solver now converts impulsive Lambert velocities into a finite Frenet-thrust
+seed: transverse thrust rotates velocity without performing work, so raw Cartesian
+impulse components were not valid continuous-burn components. Search samples
+32 parking phases, distributes refinements across flight durations, and accepts
+Newton updates only when a numerical trial reduces the arrival residual. Every
+refinement uses the original plan anchor. The parking sweep shares its existing
+total step budget instead of restarting that budget at each sample. No integration
+tolerance, physical model or fuel limit was relaxed. Failed convergence reports a
+predicted miss instead of mislabeling every failure as insufficient fuel.
+
+## Repair verification
+
+Verified working tree: `work/orbit-navigation`, based on `60d97e4`, with the
+repair recorded in this delivery. All builds/tests used `-j 1` under dedicated
+systemd scopes (MemoryHigh 3G / MemoryMax 5G), with GUI stopped during compilation.
+No full workspace suite was run. Shared-target orbit tests were explicitly
+recompiled from this worktree; an initial stale zero-test executable was not
+counted as evidence.
+
+- `cargo test -p void-orbit --lib navigation -j 1`: eight pass; the old optional
+  15-body real-scale witness remains excluded from this command.
+- `cargo test -p void-fleet-flight --test plans -j 1 -- --include-ignored`:
+  seven pass, including the new expanded 58-body main upper-stage departure,
+  append/fuel preservation, stale result refusal, direct checkpoint, replay and
+  clearing metrics after manual edits. The real main-game witness takes about
+  five seconds and uses the fleet's original tolerances.
+- `cargo test -p void-app --lib navigation -j 1`: default target-scale settings,
+  cancellation/timeout child reaping and existing frame/crossing edit replay pass.
+- Scoped orbit/fleet/app lib/tests Clippy with `-D warnings`, `cargo fmt --all
+  --check`, and main-game binary build pass. Final fleet tests and Clippy were
+  repeated after the manual-edit metric fix.
+- TigerVNC actual main-game input: Aurelia → Vesper search stays responsive while
+  the camera moves; Cancel stops its exact child. This initial full-stack case
+  completes with an explicit fuel refusal, not a claimed transfer. No-solution
+  output is not evidence that all departure windows or other craft are impossible.
+- TigerVNC staged upper-stage Aurelia → Selene: Depart generates a 4653.3 m/s
+  node at T+4881.7 s; numerical closest altitude 267.4 km at T+876800.2 s.
+  `delivery-depart-result.png` shows the path while paused and all 1470 kg fuel.
+  Save/load succeeds. `delivery-gui.json` was replayed on that build; its manual
+  edit precedes the final metric-clearing adjustment and is historical evidence.
+- Loading that unchanged departure plan and requesting Capture appends node 2:
+  872.2 m/s at T+876791.7 s, predicted altitude 262.0 km, bound orbit verified.
+  `delivery-moon-capture.png` records responsive incremental preview preparation;
+  `delivery-moon-capture-result.png` and `delivery-capture-save.json` contain the
+  two nodes, full live fuel and `executing=false`. Final delivery binary replays
+  `delivery-capture.json`: T+0.000000 s, three vessels, selected v2. This validates
+  planning and publication; the full flight has not been flown in this GUI run.
+
+The final binary was also started through the no-argument acceptance script:
+`final-default-entry.png` shows the paused, staged Selene setup;
+`final-default-result.png` shows the same successful departure after clicking
+Depart; `final-edit-invalidates.png` confirms manual editing clears the old
+navigation metrics. Those GUI checks were closed after inspection; the script
+is ready to launch on the user's desktop.
+
+Artifacts above are under ignored `lab-log/navigation/`. The branch-local binary
+is checksum-checked by `tools/navigation-acceptance.sh`; the model-34 starting
+checkpoint is separate from the generated two-node review checkpoint. Human
+acceptance is not inferred from these checks. Nothing was merged or pushed.
+
 ## Controls
 
 The ORBIT panel selects System / Inertial / Surface / Pair. Centre > selects the
@@ -45,10 +161,10 @@ can explicitly fail for fuel, collision, prediction budget, missing approach or
 unsupported geometry. Solver quality/performance and long-term bound-orbit
 stability are not guaranteed by a successful short prediction.
 
-Model version 33 rejects older model saves and recordings explicitly. This
+Current model version 34 rejects older model saves and recordings explicitly. This
 work introduces no automatic conversion of existing save data.
 
-## Verification record
+## Original model-33 verification record (historical)
 
 Implementation remains in progress. Targeted core/view/fleet and app integration
 tests, app clippy and the app build passed on implementation commit `260dc15`.

@@ -1,4 +1,5 @@
 //! Shared Fleet flight scene used by the independent integration lab and the main game.
+mod navigation_worker;
 mod ui;
 use crate::{
     flight::game_planet_by_id,
@@ -794,9 +795,13 @@ fn argument(name: &str) -> Option<String> {
         .map(|i| args.get(i + 1).expect("argument needs a value").clone())
 }
 pub fn run(main_game: bool) {
+    if let Some(directory) = argument("--navigation-worker") {
+        navigation_worker::run(&directory);
+        return;
+    }
     if std::env::args().any(|a| a == "--help") {
         println!(
-            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--cinder-site basin|rim|ejecta; --ares-site plains|canyon|volcano: paused main-game surface fixture; --ares-overview: recorded main-camera overview\n--vesper-site plains|shield|upland: paused Vesper volcanic ground fixture\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--stellar-fixture: declared remote ground/orbit starting ships for acceptance\n--splashdown: paused ocean capsule; --water-speed m/s --water-tilt degrees --water-entry-angle degrees; R repeat, Shift+R next\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
+            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--cinder-site basin|rim|ejecta; --ares-site plains|canyon|volcano: paused main-game surface fixture; --ares-overview: recorded main-camera overview\n--vesper-site plains|shield|upland: paused Vesper volcanic ground fixture\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--stellar-fixture: declared remote ground/orbit starting ships for acceptance\n--splashdown: paused ocean capsule; --water-speed m/s --water-tilt degrees --water-entry-angle degrees; R repeat, Shift+R next\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--navigation-target <body id>: initial navigation target\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
         );
         return;
     }
@@ -1646,8 +1651,9 @@ fn setup(
             fonts.as_mut().expect("main game font assets"),
             f64::from(window.scale_factor()),
         );
+        commands.insert_resource(ui::UiState::initial(lab.session.sim()));
     } else {
-        commands.insert_resource(ui::UiState::default());
+        commands.insert_resource(ui::UiState::initial(lab.session.sim()));
         commands.spawn((
             Hud,
             Text::new(""),

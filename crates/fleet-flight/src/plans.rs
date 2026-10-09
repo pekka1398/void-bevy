@@ -27,6 +27,61 @@ pub struct SavedVesselPlan {
     message: String,
 }
 impl FleetFlight {
+    pub(crate) fn install_navigation_plan(&mut self, id: &str, saved: SavedVesselPlan) {
+        assert!(
+            !saved.executing,
+            "navigation result must not ignite engines"
+        );
+        let precise = self.fleet.precise_snapshot(id);
+        let expected_source = self
+            .plans
+            .get(id)
+            .map_or((precise.system, precise.anchor), |p| (p.system, p.origin));
+        assert_eq!(
+            (saved.system, saved.origin),
+            expected_source,
+            "navigation result changed coordinate source"
+        );
+        let view = self.plan_view(id);
+        let source = view.as_deref().unwrap_or(self.fleet.ephemeris.as_ref());
+        let plan = FlightPlan::from_checkpoint(source, saved.plan);
+        let previous_count = self.plans.get(id).map_or(0, |p| p.plan.count());
+        assert_eq!(
+            plan.count(),
+            previous_count + 1,
+            "navigation result must append one node"
+        );
+        assert_eq!(
+            saved.selected, previous_count,
+            "navigation result must select appended node"
+        );
+        if let Some(previous) = self.plans.get(id) {
+            for i in 0..previous_count {
+                assert_eq!(
+                    plan.maneuver(i),
+                    previous.plan.maneuver(i),
+                    "navigation result changed existing maneuver"
+                );
+            }
+        }
+        assert!(
+            plan.complete() && plan.impact().is_none(),
+            "unverified navigation result"
+        );
+        assert!(saved.selected < plan.count(), "missing navigation node");
+        self.cancel_maneuver_warp("navigation node generated");
+        self.plans.insert(
+            id.into(),
+            VesselPlan {
+                system: saved.system,
+                origin: saved.origin,
+                plan,
+                selected: saved.selected,
+                executing: false,
+                message: saved.message,
+            },
+        );
+    }
     pub fn plan_checkpoints(&self) -> BTreeMap<String, SavedVesselPlan> {
         self.plans
             .iter()
@@ -129,6 +184,7 @@ impl FleetFlight {
         if let Some(p) = self.plans.get_mut(id) {
             p.plan.set_engine(engine);
             p.plan.rebase(&state);
+            p.message = "Plan changed; previous navigation metrics are no longer valid".into();
         } else {
             self.plans.insert(
                 id.into(),

@@ -1,19 +1,25 @@
 # 目前狀態
 
-## Orbit 導航／參照系／AN-DN 分支待人類驗收（2026-10-09）
+## Orbit 導航修正分支（2026-10-10）
 
-`work/orbit-navigation` 的 `260dc15`、`43dfb62` 基於擴充天體分支
-`3dcfa94`，尚未合入 master，也未 push。核心提供分階段出發／修正／捕獲
-節點求解；主遊戲接四種參照系、數值 AN／DN、點選定位與暫停計畫預覽。
-計畫及 coast 依自己的來源系統／split 原點繪製，生成不點火、不耗真實燃料。
-Model 33 明確拒絕舊 model 資料，save schema 沒有自動轉換。
+`work/orbit-navigation` 基於擴充天體 `3dcfa94`，目前仍在
+`/home/pekka/Desktop/void-bevy-navigation`，未合併 master、未 push。
+核心提供分階段出發／修正／捕獲；主遊戲已接四種參照系、AN／DN、
+點選定位及暫停計畫預覽。來源系統與 split 原點各自保留。
 
-受影響 core／view／fleet／app 的針對性測試、lint、建置及 agent GUI核對
-已有證據；實際 GUI journal 在最終程式重播通過，T+38.483333 s，兩艘船，
-選取 v2。没有執行全 workspace suite。正常桌面已開啟暫停驗收場景，
-人類遊玩結果尚未收到，不將 agent 截圖算成人類驗收。具體檢查範圍、
-限制與操作見 [orbit-navigation](orbit-navigation.md) 及
-[spec](specs/orbit-navigation-and-plotting.md)。
+原 `60d97e4` 交付的人類操作暴露 Depart 同步求解卡死，不能算驗收通過。
+本輪補齊可取消背景求解、120 秒搜尋時限、分幀星曆預覽、結果過期核對、
+持續顯示結果與依目標尺度設定窗口。核心改正瞬間 Lambert Δv 與有限
+Frenet 推力的初值語義，直接從原 anchor 檢查完整計畫；未放寬精度／燃料
+門檻。生成不點火、不耗真實燃料。手動改計畫會清除過期導航數值。
+`AcceptNavigation` 錄下實際計畫供重播；model 34，不轉換 model 33 資料。
+
+針對性核心／Fleet／app 測試、lint、建置及 GUI 出發／捕獲已有本輪證據，
+不宣稱完整旅程已執行或所有出發窗口都有解。驗收入口直接載入暫停、
+原裝上面級就緒的 400 km 軌道場景，目標 Selene，按 Depart 即可開始。
+人類驗收尚未通過；agent 截圖不代替使用者操作。詳見
+[orbit-navigation](orbit-navigation.md) 及 [spec](specs/orbit-navigation-and-plotting.md)。
+未跑全 workspace suite。
 
 
 ## 主遊戲原生 UI 已合入 master（2026-10-09）
