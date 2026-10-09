@@ -3945,6 +3945,55 @@ mod tests {
     }
 
     #[test]
+    fn map_focus_label_uses_current_camera_before_transform_propagation() {
+        use bevy::camera::{CameraProjection, RenderTargetInfo};
+        let mut app = initialized_scene(true);
+        {
+            let world = app.world_mut();
+            let mut query =
+                world.query_filtered::<(&mut Camera, &mut GlobalTransform), With<LabCamera>>();
+            let (mut camera, mut stale) = query.single_mut(world).unwrap();
+            camera.computed.target_info = Some(RenderTargetInfo {
+                physical_size: UVec2::new(1280, 720),
+                scale_factor: 1.0,
+            });
+            camera.computed.clip_from_view = PerspectiveProjection {
+                aspect_ratio: 1280.0 / 720.0,
+                ..default()
+            }
+            .get_clip_from_view();
+            *stale = GlobalTransform::from(Transform::from_rotation(Quat::from_rotation_y(1.5)));
+        }
+        {
+            let mut lab = app.world_mut().non_send_mut::<Lab>();
+            let body = lab.session.sim().world.body_index("sol");
+            let radius = lab.session.sim().fleet.ephemeris.bodies()[body].radius_meters;
+            lab.session.execute(Action::View {
+                command: ViewCommand::BodyPreset {
+                    body,
+                    direction: DVec3::new(1.0, 0.3, 0.4).normalize(),
+                    distance: radius * 3.5,
+                },
+            });
+        }
+        app.update();
+        let world = app.world_mut();
+        let mut query = world.query::<(&crate::map::MapMarker, &Node, &Visibility)>();
+        let (_, node, visibility) = query
+            .iter(world)
+            .find(|(marker, ..)| marker.kind == void_view::LabelKind::Star)
+            .unwrap();
+        assert_eq!(*visibility, Visibility::Inherited);
+        let Val::Px(left) = node.left else {
+            panic!("focus label was not positioned")
+        };
+        assert!(
+            (left - 637.0).abs() < 0.05,
+            "focused star moved off center: {left}"
+        );
+    }
+
+    #[test]
     fn integration_scene_initializes_and_draws_without_a_window_or_renderer() {
         let _ = initialized_scene(false);
     }
@@ -4554,7 +4603,7 @@ fn update_scenery(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn draw_map(
     mut lab: NonSendMut<Lab>,
-    camera: Single<(&Camera, &GlobalTransform), With<LabCamera>>,
+    camera: Single<(&Camera, &Transform, Has<ChildOf>), With<LabCamera>>,
     mut markers: Query<(
         &crate::map::MapMarker,
         &mut Node,
@@ -4664,10 +4713,14 @@ fn draw_map(
         lab.session.sim().presentation.focus_body,
         &lab.plot_path.apsides,
     );
-    let (camera, transform) = *camera;
+    let (camera, transform, parented) = *camera;
+    assert!(!parented, "map camera must remain a root entity");
+    // draw updated this root camera in Update; propagated GlobalTransform still belongs
+    // to the previous frame until PostUpdate. Project labels with the rendered pose.
+    let current_camera = GlobalTransform::from(*transform);
     crate::map::place_map_labels(
         camera,
-        transform,
+        &current_camera,
         &mut markers,
         &mut texts,
         &wanted,

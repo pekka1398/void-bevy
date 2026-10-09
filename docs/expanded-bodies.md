@@ -50,3 +50,11 @@ Triton 焦點畫面、O fixture 與短時間運行已檢查（HUD 參考 Triton�
 估算逐體標記。形狀、顏色為程序近似，Titan 大氣、彗尾／噴氣尚未建模。
 Phobos 的既有導航 SOI 小於半徑，HUD 預設導航仍可能選 Ares；明確焦點可選 Phobos。
 這批尚未收錄所有已知小衛星。N 體效能與木星／土星系長期穩定性留待後續。
+
+## 標籤小修正
+
+Sol／恆星 22 px、八大行星 18 px、衛星與小天體 11 px；遮擋及圓點對齊依文字高度更新。
+主遊戲 `draw_map` 使用 `draw` 當幀更新的 root camera Transform，避免 Update 中讀到
+尚未在 PostUpdate 傳播的上一幀 GlobalTransform，造成拖曳時標籤與場景錯開。
+當幀焦點投影與既有拖曳／縮放錄放兩項針對性測試、app scoped Clippy 通過；
+沒有修改模擬模型版本或添加標籤延遲平滑。執行檔依原驗收入口更新。
