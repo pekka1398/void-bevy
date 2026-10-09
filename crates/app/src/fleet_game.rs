@@ -3101,7 +3101,10 @@ fn draw(
             } else {
                 stellar.neighbors[system - 1].placement.id.as_str()
             };
-            format!(" · {name} system · stellar distances in light years")
+            format!(
+                " · {name} system · stellar distances in light years · rails chunk ≤{:.0}s",
+                f.rails_coast_chunk_seconds()
+            )
         })
         .unwrap_or_default();
     **hud = Text::new(format!(

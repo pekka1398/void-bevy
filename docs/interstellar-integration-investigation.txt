@@ -1,0 +1,114 @@
+Interstellar integration investigation, 2026-10-09
+Branch: work/interstellar-integration; base master 95c0581.
+Delivery is saved as a branch commit (see git log); not merged or pushed.
+Current branch compatibility: model33 / FleetCheckpoint13 / world5 / Craft3.
+The model32 measurements below are the first investigation stage, not the
+current branch's compatibility or coast policy.
+
+Scope: long-duration integration first. Full relativistic dynamics, proper time,
+light propagation and near-light-speed observer visuals are requested follow-up
+work. A common coordinate-time reference does not replace vessel proper time.
+
+Confirmed bug: Fleet ground-band time used a subtractive quadratic root. At
+2 light-years with a declared 1,000,000 m/s coast, floating-point cancellation
+returned zero and the existing lower bound forced 1 ms outer iterations.
+Stable equivalent root preserves the safety bound. Model 32 rejects model 31
+checkpoints/journals because accepted step sequences may differ. World schema,
+FleetCheckpoint and craft schemas are unchanged. No save migration.
+
+Reproduction (from this worktree, cargo uses -j 2):
+cargo run -p void-fleet-flight --example stellar_coast_cost -j 2 -- 1
+cargo run -p void-fleet-flight --example stellar_coast_cost -j 2 -- 3600
+cargo run -p void-fleet-flight --example stellar_coast_cost -j 2 -- 31557600 world
+
+Headless dev-profile measurements on this machine (not GUI acceptance):
+Before fix: 1 simulated second cost 1.06-1.14 wall seconds for all chunk choices.
+After fix, 3600 simulated seconds:
+  chunk 1 s:    3.605743 wall s; reference
+  chunk 10 s:   0.392842 wall s; dp 0 m, dv 1.16e-10 m/s
+  chunk 100 s:  0.041324 wall s; dp 1.19e-7 m, dv 1.05e-9 m/s
+  chunk 1000 s: 0.005445 wall s; dp 5.96e-7 m, dv 9.44e-10 m/s
+All reached the target; all extended the coupled world by 6 steps.
+Celestial-only year: 53175 steps, 593.4619055851842 s step, 4.544257 wall s.
+This measures cost, not yearly ephemeris accuracy. The 3600 s fixture is a
+declared initial state, not a launch-to-arrival interstellar journey.
+
+Production chunk defaults remain unchanged. Enlarged chunks in this example
+are experiments, not validated policy for atmosphere entry or rendezvous.
+
+Validation of the resulting uncommitted model32 workspace:
+  vessels numerical regressions: 3 passed
+  vessels fleet integration: 19 passed
+  fleet-flight checkpoint: 9 passed
+  fleet-flight stellar_world: 13 passed
+  vessels/fleet-flight lib/tests and benchmark Clippy -D warnings: passed
+  workspace formatting and diff whitespace checks: passed
+No full workspace tests, Bevy build or GUI/human acceptance were performed.
+
+Next seams to investigate:
+1. Atmosphere-aware coast chunk selection and its thermal entry lookahead.
+2. Ground-band bounds use rotating-frame total speed; distant tangential
+   coordinate velocity can overconstrain chunks even after cancellation fix.
+3. Encounter prediction over long chunks must account for curved relative
+   trajectories, not rely solely on a short-window linear prediction.
+4. World extension budget currently panics after 100000 steps; long requests
+   need explicit bounded progress without skipped simulation time.
+5. Active engines prohibit rails; sustained acceleration needs its own
+   accepted fuel/mass/attitude integration policy.
+
+Stage 2: guarded distant coast integrated into the ordinary Fleet runtime
+
+FleetOptions now requires distant_coast_chunk_seconds (default 1000 seconds).
+No serde defaults repair older checkpoints: FleetCheckpoint12 and flight
+model32/31 checkpoints or journals are explicitly incompatible. Model33 and
+FleetCheckpoint13 preserve the existing world5 and Craft3 data formats.
+
+Long segments require all vessels in Orbit and clear of rails blockers. A
+closed half-distance domain bounds each body's and vessel's GM/J2 acceleration;
+whole-interval displacement spheres guard all body/vessel and vessel/vessel
+pairs. These include hull radii, terrain maximum height, sea level, atmosphere
+ceiling and ground bands. Relative states use split frame-tree subtraction.
+Short near-field policy and the existing ground-band/encounter checks remain.
+No body or gravity source is omitted and no simulated time is skipped.
+
+Limitations: sleeping ground scenes or any near-field craft keep the entire
+Fleet on short chunks. The mathematical acceleration bound assumes the current
+Newtonian model; EphemerisSource has no formal interpolation error-bound
+interface for arbitrary custom sources. Existing conservative body-fixed
+ground-band speed still applies and can additionally shorten a selected chunk.
+Active propulsion on long warp and bounded-progress world-extension requests
+remain separate work. Relativity is not implemented by this change.
+
+Cost measurement, model33 production policy, declared 2-ly cruise-only fleet:
+  31557600 simulated seconds reached; selected chunk 1000 s;
+  71.667943 wall seconds; celestial steps 53175, step 593.4619055851842 s.
+This uses demo_craft/ForceOnly, measures cost, and has no yearly short-step
+reference. It is not a yearly numerical-accuracy or complete-transfer claim.
+It includes all three systems and all authored bodies. Initial position and
+speed are acceptance data, not the result of normal rocket acceleration.
+
+Final headless validation (model33 pre-commit working tree, identical code):
+  vessels lib 13, fleet 19, thermal 2, aero_wrenches 9: passed
+  fleet-flight checkpoint 9, stellar_world 13, thermal 1, warp 3: passed
+  distant_coast 2: passed with the main RCS flight rocket and ForceAndTorque;
+    full marks match after a one-day save, another day's continuation and replay;
+    1-hour position/velocity agree with a 1-second-chunk reference within
+    1e-5 m / 1e-8 m/s, without loosening any existing golden thresholds.
+  core lib/tests/examples and main-app lib Clippy -D warnings: passed
+  main-app lib cargo check: passed; source paths explicitly resolved to this
+    interstellar worktree while reusing the main target's engine dependency cache.
+  No new main-game executable build, GUI or human acceptance; no full workspace
+    tests. Main target's executable was not replaced by this investigation.
+
+Main-game acceptance:
+  scripts/run-interstellar-coast.sh
+This builds the current worktree, creates and verifies a unique paused cruise
+checkpoint, loads it in the normal main game and records into the same unique
+directory. DEV (`) shows the current rails chunk upper limit. P resumes, comma
+and period change warp; F6/F7 save/load, F8 finishes recording. In this fixture,
+all craft start far away; the normal rocket, fuel and staging remain available.
+For the already generated checkpoint, from this worktree:
+  cargo run -p void-app -j 2 -- --load target/interstellar-review/cruise.world.json
+
+Human review still needs to check controls, camera/map, observable time advance
+and pause/save/load in the main window. Headless replay is separate evidence.
