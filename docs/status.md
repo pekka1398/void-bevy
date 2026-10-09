@@ -1,3 +1,13 @@
+## N 體效能探索（未合併）
+
+`work/nbody-profiling` 以 navigation `60d97e4` 的 58 天體為基底。預設 f64 AVX2
+或 scalar local，原配對／累加順序、步長、Hermite、Kahan 不變；原 scalar 保留量測。
+58 體一天星曆約快 12%，實際月球導航的四次完整解一致；長區間同步星曆延伸／
+記憶體仍是主要待處理問題。獨立任務 workers 與 f32 精度已量測，未接 GPU 或平行導航。
+Orbit 39 + 額外 real-scale witness 1、Fleet 指定 7 通過；逐位元 backends oracle、
+scoped Clippy 通過。未跑 app GUI／人類驗收／全 workspace，未合併或 push。
+詳見 [N 體報告](nbody-performance.md)。
+
 # 目前狀態
 
 ## Orbit 導航／參照系／AN-DN 分支待人類驗收（2026-10-09）

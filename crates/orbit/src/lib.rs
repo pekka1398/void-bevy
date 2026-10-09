@@ -10,6 +10,8 @@ pub mod gravity;
 mod hermite;
 mod kepler;
 mod navigation;
+#[cfg(target_arch = "x86_64")]
+mod nbody_simd;
 mod nodes;
 mod propagator;
 mod reference_frames;
@@ -20,7 +22,8 @@ mod trajectory;
 pub use apsides::{Apsis, ApsisKind, DominanceTree, find_apsides};
 pub use dopri5::Dopri5;
 pub use ephemeris::{
-    Ephemeris, EphemerisOptions, EphemerisSource, suggested_step_seconds, yoshida8_sequence,
+    AccelerationBackend, Ephemeris, EphemerisOptions, EphemerisProfile, EphemerisSource,
+    suggested_step_seconds, yoshida8_sequence,
 };
 pub use flight_plan::{
     BurnSchedule, FlightPlan, FlightPlanCheckpoint, ManeuverSpec, ManeuverStatus, PlanEngine,

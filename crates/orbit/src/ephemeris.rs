@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Instant};
 
 use glam::DVec3;
 use void_frames::{BodyId, BodyStates, FrameId, FrameSource, SplitPosition, SystemId};
@@ -55,11 +55,33 @@ pub fn suggested_step_seconds(bodies: &[CelestialBody], steps_per_orbit: f64) ->
     tightest / steps_per_orbit
 }
 
+/// Measured force kernels with identical pair and accumulation order.
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+pub enum AccelerationBackend {
+    #[default]
+    Auto,
+    ScalarReference,
+    ScalarLocal,
+    Avx2,
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+pub struct EphemerisProfile {
+    pub steps: u64,
+    pub acceleration_calls: u64,
+    pub extend_seconds: f64,
+    pub acceleration_seconds: f64,
+    pub sample_seconds: f64,
+}
+
 /// Massive-body trajectories integrated as one N-body problem and queryable at any covered time
 /// by quintic Hermite interpolation of (x, v, a) samples. Queries outside the covered interval
 /// panic: callers must extend first.
 pub struct Ephemeris {
     bodies: Vec<CelestialBody>,
+    backend: AccelerationBackend,
+    simd_q: Vec<f64>,
+    profile: Option<EphemerisProfile>,
     step_seconds: f64,
     epoch_seconds: f64,
     chunk_steps: usize,
@@ -82,6 +104,17 @@ fn flatten(vectors: &[DVec3]) -> Vec<f64> {
 }
 
 impl Ephemeris {
+    fn resolve_backend(backend: AccelerationBackend) -> AccelerationBackend {
+        if matches!(backend, AccelerationBackend::Auto) {
+            #[cfg(target_arch = "x86_64")]
+            if std::is_x86_feature_detected!("avx2") {
+                return AccelerationBackend::Avx2;
+            }
+            return AccelerationBackend::ScalarLocal;
+        }
+        backend
+    }
+
     pub fn new(system: &BuiltSystem, options: EphemerisOptions) -> Self {
         assert!(
             options.step_seconds > 0.0 && options.step_seconds.is_finite(),
@@ -100,6 +133,9 @@ impl Ephemeris {
         );
         let mut ephemeris = Self {
             bodies: system.bodies.clone(),
+            backend: Self::resolve_backend(AccelerationBackend::default()),
+            simd_q: vec![0.0; n * 3],
+            profile: None,
             step_seconds: options.step_seconds,
             epoch_seconds: 0.0,
             chunk_steps: options.chunk_steps,
@@ -116,6 +152,29 @@ impl Ephemeris {
         ephemeris.compute_accelerations();
         ephemeris.store_sample(0);
         ephemeris
+    }
+
+    /// Reset and enable fine timing; instrumentation adds overhead.
+    pub fn enable_profiling(&mut self) {
+        self.profile = Some(EphemerisProfile::default());
+    }
+    pub fn profile(&self) -> Option<EphemerisProfile> {
+        self.profile
+    }
+
+    /// Select a measured kernel. AVX2 explicitly rejects unsupported hardware.
+    pub fn set_acceleration_backend(&mut self, backend: AccelerationBackend) {
+        let backend = Self::resolve_backend(backend);
+        if matches!(backend, AccelerationBackend::Avx2) {
+            #[cfg(target_arch = "x86_64")]
+            assert!(
+                std::is_x86_feature_detected!("avx2"),
+                "ephemeris AVX2 unavailable"
+            );
+            #[cfg(not(target_arch = "x86_64"))]
+            panic!("ephemeris AVX2 unavailable on this architecture");
+        }
+        self.backend = backend;
     }
 
     pub fn bodies(&self) -> &[CelestialBody] {
@@ -142,10 +201,20 @@ impl Ephemeris {
     /// Integrate forward until the covered interval contains t.
     pub fn extend_to(&mut self, t: f64) {
         assert!(t.is_finite(), "ephemeris extend to {t}");
+        let start = self.profile.map(|_| Instant::now());
         while self.end_time() < t {
             self.step();
             self.last_step += 1;
+            let sample_start = self.profile.map(|_| Instant::now());
             self.store_sample(self.last_step);
+            if let Some(start) = sample_start {
+                let p = self.profile.as_mut().unwrap();
+                p.steps += 1;
+                p.sample_seconds += start.elapsed().as_secs_f64();
+            }
+        }
+        if let Some(start) = start {
+            self.profile.as_mut().unwrap().extend_seconds += start.elapsed().as_secs_f64();
         }
     }
 
@@ -258,6 +327,62 @@ impl Ephemeris {
     }
 
     fn compute_accelerations(&mut self) {
+        let start = self.profile.map(|_| Instant::now());
+        self.compute_accelerations_inner();
+        if let Some(start) = start {
+            let p = self.profile.as_mut().unwrap();
+            p.acceleration_calls += 1;
+            p.acceleration_seconds += start.elapsed().as_secs_f64();
+        }
+    }
+
+    fn compute_accelerations_inner(&mut self) {
+        #[cfg(target_arch = "x86_64")]
+        if matches!(self.backend, AccelerationBackend::Avx2) {
+            // SAFETY: set_acceleration_backend checks CPU support; array sizes are established by new.
+            let n = self.gm.len();
+            for i in 0..n {
+                for c in 0..3 {
+                    self.simd_q[c * n + i] = self.q[3 * i + c];
+                }
+            }
+            unsafe {
+                crate::nbody_simd::accelerations(&self.simd_q, &self.gm, &mut self.a);
+            }
+            return;
+        }
+        if matches!(self.backend, AccelerationBackend::ScalarLocal) {
+            let (q, out, gm) = (&self.q, &mut self.a, &self.gm);
+            out.fill(0.0);
+            for i in 0..gm.len() {
+                let (xi, yi, zi) = (q[3 * i], q[3 * i + 1], q[3 * i + 2]);
+                let (mut ax, mut ay, mut az) = (out[3 * i], out[3 * i + 1], out[3 * i + 2]);
+                for j in i + 1..gm.len() {
+                    let dx = q[3 * j] - xi;
+                    let dy = q[3 * j + 1] - yi;
+                    let dz = q[3 * j + 2] - zi;
+                    let r2 = dx * dx + dy * dy + dz * dz;
+                    assert!(
+                        r2 > 0.0,
+                        "ephemeris: bodies {} and {} coincide",
+                        self.bodies[i].id,
+                        self.bodies[j].id
+                    );
+                    let inv = 1.0 / (r2 * r2.sqrt());
+                    let (si, sj) = (gm[j] * inv, gm[i] * inv);
+                    ax += dx * si;
+                    ay += dy * si;
+                    az += dz * si;
+                    out[3 * j] -= dx * sj;
+                    out[3 * j + 1] -= dy * sj;
+                    out[3 * j + 2] -= dz * sj;
+                }
+                out[3 * i] = ax;
+                out[3 * i + 1] = ay;
+                out[3 * i + 2] = az;
+            }
+            return;
+        }
         let (q, out, gm) = (&self.q, &mut self.a, &self.gm);
         out.fill(0.0);
         for i in 0..gm.len() {
