@@ -1,5 +1,9 @@
 # 目前狀態
 
+## Ares 分支候選（2026-10-09，尚未合併／人類驗收）
+
+`work/mars-scenery` 已將程序火星式低地／高地、盆地、盾狀火山、有限峽谷、極冠與薄塵光學接到主遊戲；f64地形與碰撞共用，未加入Mars物理大氣。分支model29／world4／FleetCheckpoint12／Craft3。root已完成源碼／接口／GUI與獨立錄放審查，無待修項。針對性測試、lint、主renderer多尺度GUI及T+1.166667s錄放／存讀核對通過；不是master整合結果，也不是人類美術驗收。入口、binary hash、限制及證據見[main-mars-scenery.md](main-mars-scenery.md)。
+
 ## 四功能與水修正已合入 master（2026-10-08）
 
 使用者驗收水的減速、斜入水及漂浮後，明確授權合併；master由183b9ba

@@ -400,6 +400,23 @@ fn cinder_fixture(initial: &mut InitialWorld, site: &str) {
     initial.launch_site = direction;
 }
 
+fn ares_fixture(initial: &mut InitialWorld, site: &str) {
+    let Some(void_terrain::TerrainConfig::Ares(options)) = &initial.world.bodies["ares"].terrain
+    else {
+        panic!("Ares fixture needs Ares terrain");
+    };
+    initial.launch_body = "ares".into();
+    initial.launch_site = match site {
+        "plains" => DVec3::new(-0.3, 0.7, 0.65).normalize(),
+        "canyon" => {
+            let (center, _, across) = options.canyon_frame();
+            (center - across * 21_000.0 / options.impact.radius_meters).normalize()
+        }
+        "volcano" => DVec3::from_array(options.volcanoes[0].direction),
+        _ => panic!("--ares-site must be plains/canyon/volcano"),
+    };
+}
+
 fn scenery_description(sim: &void_fleet_flight::FleetFlight) -> String {
     let id = &sim.fleet.ephemeris.bodies()[sim.observation_body()].id;
     match sim.world.bodies.get(id) {
@@ -409,6 +426,7 @@ fn scenery_description(sim: &void_fleet_flight::FleetFlight) -> String {
             match d.visual.surface {
                 void_scenery::solar::SurfaceRecipe::SolidSurface => "solid LOD",
                 void_scenery::solar::SurfaceRecipe::Regolith => "regolith LOD",
+                void_scenery::solar::SurfaceRecipe::MartianRegolith => "Ares dry volcanic LOD",
                 void_scenery::solar::SurfaceRecipe::GasEnvelope { .. } => "gas visual",
                 void_scenery::solar::SurfaceRecipe::EmissiveStar { .. } => "emissive star",
             },
@@ -737,7 +755,7 @@ fn argument(name: &str) -> Option<String> {
 pub fn run(main_game: bool) {
     if std::env::args().any(|a| a == "--help") {
         println!(
-            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--cinder-site basin|rim|ejecta: paused main-game surface fixture\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--stellar-fixture: declared remote ground/orbit starting ships for acceptance\n--splashdown: paused ocean capsule; --water-speed m/s --water-tilt degrees --water-entry-angle degrees; R repeat, Shift+R next\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
+            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--cinder-site basin|rim|ejecta; --ares-site plains|canyon|volcano: paused main-game surface fixture; --ares-overview: recorded main-camera overview\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--stellar-fixture: declared remote ground/orbit starting ships for acceptance\n--splashdown: paused ocean capsule; --water-speed m/s --water-tilt degrees --water-entry-angle degrees; R repeat, Shift+R next\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
         );
         return;
     }
@@ -868,7 +886,11 @@ pub fn run(main_game: bool) {
     let air =
         planet.planet.air_density_scale.is_some() && !std::env::args().any(|a| a == "--vacuum");
     let replay_path = argument("--replay");
-    if argument("--cinder-site").is_some() {
+    if argument("--cinder-site").is_some() || argument("--ares-site").is_some() {
+        assert!(
+            !(argument("--cinder-site").is_some() && argument("--ares-site").is_some()),
+            "planet fixtures are mutually exclusive"
+        );
         assert!(
             argument("--world").is_none()
                 && argument("--load").is_none()
@@ -885,7 +907,7 @@ pub fn run(main_game: bool) {
                         | "--stellar-fixture"
                         | "--splashdown"
                 )),
-            "--cinder-site cannot override world/load/replay/planet/terrain or other fixtures"
+            "planet site cannot override world/load/replay/planet/terrain or other fixtures"
         );
     }
     assert!(
@@ -949,6 +971,10 @@ pub fn run(main_game: bool) {
                 assert!(main_game, "Cinder fixture is a main-game entry");
                 cinder_fixture(&mut initial, &site);
             }
+            if let Some(site) = argument("--ares-site") {
+                assert!(main_game, "Ares fixture is a main-game entry");
+                ares_fixture(&mut initial, &site);
+            }
             FlightSession::new(stellar_fixture_initial(if main_game {
                 initial.with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque)
             } else {
@@ -977,7 +1003,10 @@ pub fn run(main_game: bool) {
         !lab.rendezvous || (argument("--load").is_none() && replay_path.is_none()),
         "--rendezvous cannot be combined with --load or --replay"
     );
-    lab.paused = !main_game || argument("--load").is_some() || argument("--cinder-site").is_some();
+    lab.paused = !main_game
+        || argument("--load").is_some()
+        || argument("--cinder-site").is_some()
+        || argument("--ares-site").is_some();
     if argument("--load").is_none() && replay_path.is_none() {
         lab.session.execute(Action::View {
             command: ViewCommand::Configure {
@@ -1080,6 +1109,29 @@ pub fn run(main_game: bool) {
         );
     } else {
         assert!(argument("--view").is_none(), "--view requires --body");
+    }
+    if std::env::args().any(|a| a == "--ares-overview") {
+        let site = argument("--ares-site").expect("--ares-overview requires --ares-site");
+        assert!(
+            argument("--body").is_none(),
+            "Ares overview cannot override a body view"
+        );
+        let distance: f64 = match site.as_str() {
+            "canyon" => 650_000.0,
+            "volcano" => 700_000.0,
+            "plains" => 200_000.0,
+            _ => unreachable!(),
+        };
+        for command in [
+            ViewCommand::Focus { body: None },
+            ViewCommand::Drag { x: 0.0, y: 350.0 },
+            ViewCommand::Zoom {
+                pixels: -(distance / 40.0).ln() / 0.002,
+            },
+        ] {
+            lab.session.execute(Action::View { command });
+        }
+        lab.notice = format!("Ares {site} overview; Home returns to the ground craft");
     }
     if let Some(value) = argument("--exposure") {
         assert!(
@@ -4474,5 +4526,44 @@ mod mercury_fixture_tests {
         }
         assert!((sites[0] - sites[1]).length() > 0.1);
         assert!((sites[1] - sites[2]).length() > 0.1);
+    }
+}
+
+#[cfg(test)]
+mod ares_fixture_tests {
+    use super::*;
+    #[test]
+    fn ground_sites_use_ordinary_world_and_owner() {
+        let planet = void_landing::aurelia();
+        let craft = void_vessels::pod_tank("Ares fixture witness");
+        for site in ["plains", "canyon", "volcano"] {
+            let mut initial = InitialWorld::new(&planet, &craft, DVec3::X, true);
+            initial.world = void_fleet_flight::world::solar_scenery(&planet);
+            ares_fixture(&mut initial, site);
+            let sim = initial.build();
+            assert_eq!(sim.fleet.ephemeris.bodies()[sim.home].id, "ares");
+            assert_eq!(
+                sim.planet.terrain.config(),
+                sim.terrains[&sim.home].config()
+            );
+            assert!(sim.planet.terrain.height(initial.launch_site) > 0.0);
+            let sun = sim
+                .fleet
+                .frames()
+                .transform(
+                    sim.fleet.body_frames(initial.world.body_index("sol")).0,
+                    sim.fleet.body_frames(sim.home).1,
+                )
+                .apply_point(DVec3::ZERO)
+                .normalize();
+            eprintln!(
+                "Ares {site}: body-fixed sun {sun}, site cosine {}",
+                sun.dot(initial.launch_site)
+            );
+            assert!(
+                sun.dot(initial.launch_site) > 0.15,
+                "{site} must begin in useful daylight: {sun}"
+            );
+        }
     }
 }

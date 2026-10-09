@@ -164,11 +164,31 @@ pub fn build_scenes(
             d.visual.rock_height_meters,
             d.visual.snow_height_meters,
         );
-        uniforms.regolith = f32::from(u8::from(matches!(
-            d.visual.surface,
-            void_scenery::solar::SurfaceRecipe::Regolith
-        )));
-        if let void_terrain::TerrainConfig::Impact(options) = terrain.config() {
+        uniforms.regolith = match d.visual.surface {
+            void_scenery::solar::SurfaceRecipe::Regolith => 1.0,
+            void_scenery::solar::SurfaceRecipe::MartianRegolith => 2.0,
+            _ => 0.0,
+        };
+        if let void_terrain::TerrainConfig::Ares(o) = terrain.config() {
+            uniforms.ares_canyon = Vec4::new(
+                o.canyon_direction[0] as f32,
+                o.canyon_direction[1] as f32,
+                o.canyon_direction[2] as f32,
+                0.0,
+            );
+            uniforms.ares_rise = Vec4::new(
+                o.rise_direction[0] as f32,
+                o.rise_direction[1] as f32,
+                o.rise_direction[2] as f32,
+                o.rise_width as f32,
+            );
+        }
+        let impact = match terrain.config() {
+            void_terrain::TerrainConfig::Impact(options) => Some(options),
+            void_terrain::TerrainConfig::Ares(options) => Some(&options.impact),
+            _ => None,
+        };
+        if let Some(options) = impact {
             uniforms.impact_seed = options.seed;
             uniforms.impact_density = options.crater_density as f32;
             uniforms.plains_fraction = options.plains_fraction as f32;
@@ -177,7 +197,10 @@ pub fn build_scenes(
             uniforms.impact_mature =
                 color(options.mature_color, options.rayed_impacts.len() as f32);
             uniforms.impact_plain_color = color(options.plains_color, 0.0);
-            uniforms.impact_fresh = color(options.fresh_color, 1.0);
+            uniforms.impact_fresh = color(
+                options.fresh_color,
+                if uniforms.regolith > 1.5 { 0.0 } else { 1.0 },
+            );
             for (i, ray) in options.rayed_impacts.iter().enumerate() {
                 uniforms.impact_rays[i] = color(
                     ray.direction,
@@ -261,7 +284,9 @@ fn spawn_far(
                 let d = DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2])).normalize();
                 if let Some(descriptor) = descriptor {
                     match &descriptor.visual.surface {
-                        SurfaceRecipe::SolidSurface | SurfaceRecipe::Regolith => {
+                        SurfaceRecipe::SolidSurface
+                        | SurfaceRecipe::Regolith
+                        | SurfaceRecipe::MartianRegolith => {
                             let terrain = &sim.terrains[&body.index];
                             let (h, c) = terrain.sample(d, None);
                             *p = (d * (1.0 + h / body.radius_meters)).as_vec3().to_array();

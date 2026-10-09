@@ -2,6 +2,7 @@
 //! `SurfaceContract.ts`) with scenery's layered planet and landing's hills. The same `Terrain`
 //! builds drawn tiles and collision tiles, so what is drawn is what is collided with.
 
+mod ares;
 mod cratered;
 mod hills;
 mod impact;
@@ -13,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use void_lod::{SurfaceSample, SurfaceSampler};
 use void_math::hypot;
 
+pub use ares::{AresOptions, AresTerrain, ShieldVolcano};
 pub use cratered::{Cratered, CrateredOptions};
 pub use hills::{Hills, HillsOptions};
 pub use impact::{Basin, ImpactOptions, ImpactTerrain, RayedImpact};
@@ -26,6 +28,7 @@ pub enum TerrainConfig {
     Hills(HillsOptions),
     Cratered(CrateredOptions),
     Impact(ImpactOptions),
+    Ares(AresOptions),
     Layered(LayeredOptions),
 }
 
@@ -34,7 +37,10 @@ impl TerrainConfig {
     /// continents and basins are split at `SEA_LEVEL`; hills have no sea.
     pub fn sea_level_meters(&self) -> Option<f64> {
         match self {
-            TerrainConfig::Hills(_) | TerrainConfig::Cratered(_) | TerrainConfig::Impact(_) => None,
+            TerrainConfig::Hills(_)
+            | TerrainConfig::Cratered(_)
+            | TerrainConfig::Impact(_)
+            | TerrainConfig::Ares(_) => None,
             TerrainConfig::Layered(_) => Some(SEA_LEVEL),
         }
     }
@@ -45,6 +51,7 @@ enum Kind {
     Hills(Hills),
     Cratered(Cratered),
     Impact(ImpactTerrain),
+    Ares(Box<AresTerrain>),
     Layered(Layered),
 }
 
@@ -68,6 +75,13 @@ impl Terrain {
     }
     pub fn from_config(config: &TerrainConfig) -> Self {
         match config {
+            TerrainConfig::Ares(o) => Self {
+                config: config.clone(),
+                name: o.impact.name.clone(),
+                radius_meters: o.impact.radius_meters,
+                max_height_meters: o.max_height_meters,
+                kind: Kind::Ares(Box::new(AresTerrain::new(o))),
+            },
             TerrainConfig::Impact(o) => Self {
                 config: config.clone(),
                 name: o.name.clone(),
@@ -104,6 +118,7 @@ impl Terrain {
     /// size; point queries pass None for full detail. Anything but a unit direction panics.
     pub fn sample(&self, direction: DVec3, cell_meters: Option<f64>) -> (f64, [f64; 3]) {
         match &self.kind {
+            Kind::Ares(c) => c.sample(direction, cell_meters.unwrap_or(0.25)),
             Kind::Cratered(c) => c.sample(direction),
             Kind::Impact(c) => c.sample(direction, cell_meters.unwrap_or(0.25)),
             Kind::Hills(h) => {

@@ -45,6 +45,8 @@ struct Ground {
     impact_fresh: vec4<f32>,
     impact_rays: array<vec4<f32>,32>,
     impact_ray_params: array<vec4<f32>,32>,
+    ares_rise: vec4<f32>,
+    ares_canyon: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> ground: Ground;
@@ -123,6 +125,32 @@ fn periodic_value_noise(p: vec3<f32>, period: f32) -> f32 {
     let x01 = mix(hash_corner(cell, vec3(0.0, 0.0, 1.0), period), hash_corner(cell, vec3(1.0, 0.0, 1.0), period), u.x);
     let x11 = mix(hash_corner(cell, vec3(0.0, 1.0, 1.0), period), hash_corner(cell, vec3(1.0, 1.0, 1.0), period), u.x);
     return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
+}
+
+// AresOptions::canyon_mask: same authored centre, stable chart, branch widths and erosion.
+// This only attenuates unresolved Impact normals; the actual canyon remains mesh geometry.
+fn ares_canyon_mask(d:vec3<f32>)->f32 {
+    let center=ground.ares_canyon.xyz;
+    var reference=vec3(0.,0.,1.);
+    if abs(center.z)>=0.9 { reference=vec3(1.,0.,0.); }
+    let along=normalize(cross(center,reference));
+    let across=cross(center,along);
+    let delta=(d-center)*ground.bottom_radius;
+    let x=dot(delta,along)/1250000.; let y=dot(delta,across);
+    if dot(d,center)<=0.85 || abs(x)>=1. {return 0.;}
+    let end=pow(max(1.-x*x,0.),2.);
+    let curve=70000.*(x*x-0.3)+16000.*sin(x*6.);
+    let width=45000.*(0.5+0.5*end);
+    let edge=impact_noise(d,ground.bottom_radius/35000.,37.)*6500.+impact_noise(d,ground.bottom_radius/9000.,11.)*1800.;
+    var canyon=0.;
+    for(var i=0;i<2;i++) {
+        let offset=select(0.,80000.*(x+0.45),i==1);
+        let scale=select(1.,0.6,i==1);
+        let q=abs(y-curve-offset+edge)/width;
+        let floor=1.-smoothstep(0.55,0.85,q); let bench=1.-smoothstep(0.85,1.35,q);
+        canyon=max(canyon,(0.78*floor+0.22*bench)*end*scale);
+    }
+    return canyon;
 }
 
 @fragment
@@ -205,7 +233,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         }
         let pixel = max(length(dpdx(up)),length(dpdy(up)))*ground.bottom_radius;
         let impacts = impact_detail(up,ground.bottom_radius,in.cell,max(pixel,0.25),ground.impact_seed,ground.impact_density,plain);
-        n=normalize(n-impacts.slope);
+        var impact_strength=1.0;
+        if ground.regolith>1.5 {
+            let high=1.0-smoothstep(-0.12,0.24,up.z+0.16*impact_noise(up,4.2,19.0)+0.06*impact_noise(up,13.0,31.0));
+            let distance=length(up-ground.ares_rise.xyz)/ground.ares_rise.w;
+            let rise=pow(max(1.0-distance*distance,0.0),2.0);
+            impact_strength=(1.0-max(1.0-high*0.92,rise*0.94)*0.94)*(1.0-ares_canyon_mask(up)*0.94);
+        }
+        n=normalize(n-impacts.slope*impact_strength);
         let eye = normalize(-body_position);
         let mu0 = max(dot(n, sun), 0.0);
         let mu = max(dot(n, eye), 0.0);
@@ -225,7 +260,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             albedo=mix(base.xyz,ground.impact_fresh.xyz*base.w,fresh*0.7)*(1.0-impacts.dark);
         }
         let regolith = albedo * (1.0 + detail * 0.62 + (grain-0.5)*0.12*(1.0-smoothstep(0.3,1.0,footprint)));
-        return vec4(regolith * (sunlight * particulate * opposition * lit + vec3(2e-5)) / PI, 1.0);
+        var diffuse_sky=vec3(2e-5);
+        if ground.regolith>1.5 {
+            diffuse_sky=sky_light*(dot(n,up)*0.5+0.5);
+        }
+        return vec4(regolith * (sunlight * particulate * opposition * lit + diffuse_sky) / PI, 1.0);
     }
     // A tilted surface sees part of the sky: (1 + N·up) / 2 of it.
     let land = mottled * (sunlight * max(dot(normal, sun), 0.0) + sky_light * (dot(normal, up) * 0.5 + 0.5)) / PI;

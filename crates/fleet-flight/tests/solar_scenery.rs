@@ -193,3 +193,24 @@ fn cinder_has_explicit_impact_recipe_and_rejects_previous_model() {
     invalid.bodies.get_mut("cinder").unwrap().air_density_scale = Some(1.0);
     assert!(std::panic::catch_unwind(|| invalid.build()).is_err());
 }
+
+#[test]
+fn ares_recipe_checkpoint_and_previous_model_rejection() {
+    use void_scenery::solar::SurfaceRecipe;
+    use void_terrain::TerrainConfig;
+    let initial = initial();
+    let body = &initial.world.bodies["ares"];
+    assert!(matches!(body.terrain, Some(TerrainConfig::Ares(_))));
+    assert_eq!(body.visual.surface, SurfaceRecipe::MartianRegolith);
+    assert!(body.visual.atmosphere && !body.visual.clouds && !body.visual.ocean);
+    let sim = initial.build();
+    let checkpoint = void_fleet_flight::checkpoint::FlightCheckpoint::capture(&sim, initial);
+    let mut encoded = serde_json::to_value(&checkpoint).unwrap();
+    let restored: void_fleet_flight::checkpoint::FlightCheckpoint =
+        serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(world_mark(&sim), world_mark(&restored.restore()));
+    encoded["model_version"] = serde_json::json!(28);
+    let previous: void_fleet_flight::checkpoint::FlightCheckpoint =
+        serde_json::from_value(encoded).unwrap();
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| previous.restore())).is_err());
+}

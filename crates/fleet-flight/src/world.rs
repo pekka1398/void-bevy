@@ -256,12 +256,24 @@ impl WorldDescription {
                     "regolith recipe requires an airless dry body"
                 );
             }
+            if matches!(
+                description.visual.surface,
+                void_scenery::solar::SurfaceRecipe::MartianRegolith
+            ) {
+                assert!(
+                    matches!(description.terrain, Some(TerrainConfig::Ares(_)))
+                        && !description.visual.ocean
+                        && description.sea_level_meters.is_none(),
+                    "Martian regolith requires dry Ares terrain"
+                );
+            }
             if let Some(rings) = &description.visual.rings {
                 rings.validate();
             }
             match description.visual.surface {
                 void_scenery::solar::SurfaceRecipe::SolidSurface
-                | void_scenery::solar::SurfaceRecipe::Regolith => {
+                | void_scenery::solar::SurfaceRecipe::Regolith
+                | void_scenery::solar::SurfaceRecipe::MartianRegolith => {
                     assert!(description.terrain.is_some(), "solid recipe needs terrain")
                 }
                 _ => assert!(
@@ -335,7 +347,9 @@ impl WorldDescription {
                             && h.wavelength_meters.is_finite(),
                         "world: non-finite terrain"
                     ),
-                    TerrainConfig::Cratered(_) | TerrainConfig::Impact(_) => {} // constructor validates every parameter
+                    TerrainConfig::Cratered(_)
+                    | TerrainConfig::Impact(_)
+                    | TerrainConfig::Ares(_) => {} // constructor validates every parameter
                     TerrainConfig::Layered(l) => {
                         assert!(l.radius_meters.is_finite(), "world: non-finite terrain")
                     }
@@ -627,7 +641,13 @@ pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
                     body.radius_meters,
                 )))
             }
-            "selene" | "ares" | "vesper" => {
+            "ares" => {
+                visual.surface = SurfaceRecipe::MartianRegolith;
+                Some(TerrainConfig::Ares(void_terrain::AresOptions::ares(
+                    body.radius_meters,
+                )))
+            }
+            "selene" | "vesper" => {
                 let (height, count, size, roughness, seed, low, high) = match id {
                     "selene" => (
                         8500.0,
@@ -637,15 +657,6 @@ pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
                         19,
                         [0.07, 0.075, 0.08],
                         [0.56, 0.55, 0.52],
-                    ),
-                    "ares" => (
-                        14000.0,
-                        48,
-                        0.20,
-                        1.0,
-                        47,
-                        [0.13, 0.035, 0.014],
-                        [0.65, 0.25, 0.09],
                     ),
                     "vesper" => (
                         9000.0,
@@ -713,11 +724,13 @@ pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
                 rayleigh_scattering: if venus {
                     [18e-6, 15e-6, 8e-6]
                 } else {
-                    [0.5e-6, 0.3e-6, 0.15e-6]
+                    // Effective dust colour in the existing RGB scattering profile, not a
+                    // molecular CO2 Rayleigh fit. Clear, dusty air; no global dust storm.
+                    [12e-6, 6.5e-6, 3.4e-6]
                 },
                 rayleigh_scale_height: if venus { 16000.0 } else { 11000.0 },
-                mie_scattering: if venus { 12e-6 } else { 0.4e-6 },
-                mie_extinction: if venus { 15e-6 } else { 0.5e-6 },
+                mie_scattering: if venus { 12e-6 } else { 3e-6 },
+                mie_extinction: if venus { 15e-6 } else { 4.5e-6 },
                 mie_scale_height: if venus { 18000.0 } else { 8000.0 },
                 mie_anisotropy: 0.7,
                 ozone_absorption: [0.0; 3],
