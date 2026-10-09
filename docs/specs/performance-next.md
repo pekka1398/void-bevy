@@ -2,7 +2,7 @@
 
 2026-10-10；task4 延續。這是後續實作規格，**不是已完成清單**。
 共用流程／架構遵守 AGENTS.md。依據 `nbody-experiments.md`、LOD 分支的
-`lod-hardware-review.md`；各分支尚未合入 master，不以單分支數字推論整合 FPS。
+`lod-review.md`（最終成果 `f2fcaea`）；各分支尚未合入 master，不以單分支數字推論整合 FPS。
 
 ## 採用順序
 
@@ -14,7 +14,7 @@
 3. 在同一個實際遊戲場景量 LOD 與導航競爭後，再選導航 worker 數。
    2／4 workers 為候選，Auto 暫不改多執行緒。禁止每個 candidate 再開一組
    積分 workers，禁止把所有硬體 threads 同時分給 LOD 和導航。
-4. 候選驗證平行化、共享只讀星曆是再下一步；GPU packing 是獨立渲染交付。
+4. 候選驗證平行化、共享只讀星曆是再下一步；GPU packing 已在 LOD 分支接入主遊戲作 opt-in，完整 pipeline 未有穩定收益。
    IAS15 是模型版本研究，不混入上述保留行為的優化。
 
 ## 導航背景工作接口與 ownership
@@ -47,8 +47,8 @@ command／結果內容與 hash，保存 anchor 和版本；replay 不依賴 work
 
 ## 記憶體與取消
 
-58 體目前約 105.24 秒一個 sample、每 body 的 q/v 48 bytes，僅 sample payload
-每天約 2.3 MB（還有 chunk 配置）；37 天實際 retained 約 128 MB。
+58 體目前約 105.24 秒一個 sample、每 body 的 q/v/a 共72 bytes，僅 sample payload
+每天約 3.43 MB（還有 chunk 配置）；37 天實際 retained 約 128 MB。
 多年區間不能無界預配置，也不能把每份候選複製一整份星曆。
 
 初版建議全導航 scratch 上限 256 MiB、同時一個 job；此為待實測的產品預算，
@@ -72,9 +72,10 @@ step/bytes budgets 決定可重現的拒絕；wall deadline 只作使用者取�
 
 LOD：保留 CPU f64 sampler、碰撞契約與已驗證的 render-only／U16 優化。
 增加 workers 要量冷啟動、快速低空、跨天體切換、導航同時運作的 p50/p95/p99。
-GPU packing 只有直接寫 renderer-owned buffer、正確串接 extraction／allocation／
-render ordering 才值得接；readback 再造 Mesh 不能算同一收益。要測取消、卸載、
-過期 tile 和強 handle 釋放，不能以固定視角截圖代替動態驗收。
+LOD 最終分支已實作直接寫 renderer-owned slabs、render-thread ordering、批次 dispatch，
+並測過動態相機與快速天體切換的 ownership；GPU kernel 更快但整體主幀沒有穩定改善，
+因此保留 opt-in。後續重點是接縫 asset churn 及與導航的資源競爭，不能把已完成接線
+重列為待實作，也不能以這些 headless 場景代替人類驗收。
 
 58 體 GPU f64 probe 已輸 CPU，暫不投入 production physics GPU；不把結論泛化到大 N。
 IAS15 保留研究：對多個獨立收斂參考、長期 parent-relative phase、dense output、
@@ -92,3 +93,12 @@ burn／impact／AN-DN 事件與 replay 做 time/error Pareto；30 天 h/8 vs h/1
   cancel latency、RSS、scratch peak、LOD settle；這些是驗收目標，非已達成數字。
 - 人類實際操作確認介面持續回應、取消有效、軌跡與機動正確後才算遊玩驗收。
   每輪只跑受影響 crate／接縫測試；整合後另安排組合場景，不自動跑全 workspace。
+
+
+## Principia 調查後補充（2026-10-10）
+
+詳細方法、固定原始碼來源與 VOID 差異見 [Principia 方法調查](../principia-methods-review.md)。
+先分離天體插值／船積分／繪圖誤差；保留天體固定步與船自適應解耦。星際還須處理
+Fleet 外層短 chunk 限制。生命週期分 active leases、精確 checkpoint、可重建 coast
+與不可重建外力段；多項式壓縮、歷史降採樣、存檔壓縮各自驗證。
+256 MiB 仍是待實測預算，不能以少算 acceleration 的舊估值定案。

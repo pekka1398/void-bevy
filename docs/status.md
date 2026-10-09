@@ -1,3 +1,11 @@
+## Principia 方法調查（2026-10-10，文件交付）
+
+核對現有 `vendor/Principia`：`0feb271b` shallow clone 的受追蹤來源完整、乾淨，
+不需補 clone 才能研究。已審天體/船積分分工、連續星曆、降採樣、checkpoints／
+reanimation、背景預測與視角誤差繪圖，並對照 VOID Fleet／multiscale 主遊戲接線。
+詳見 [方法調查與實作 gate](principia-methods-review.md)。本次未移植程式或改模型。
+修正上一版方案的 q/v/a 記憶體估值，以及 LOD GPU packing 已完成 opt-in 接線的狀態。
+
 ## N 體效能探索（未合併，2026-10-10 收尾）
 
 `work/nbody-profiling` 基於 navigation `60d97e4`。預設使用 f64 AVX2 target rows
