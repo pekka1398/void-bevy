@@ -1,3 +1,33 @@
+
+1. 作單獨的lod planet 之前已經做好了地球 並且看起來還不錯 再來要繼續作其他行星
+2. 先作水星
+3. 之前作地球時已經有一套lod系統 海洋 大氣 地形 biome 上色 ...等等 我希望你不要真的完全從零開始搞一個水星 現有系統能複用的就盡情複用 但也不是說一定要全部用 比如說海洋大氣 水星可能用不到 但lod肯定用的到 那就用...地形噪聲跟生成還有群系可能要重新寫個新的也沒關係 ...等等這樣 
+4. config 向真實天體對齊 外觀 大致上也是大致朝真實天體對齊 不過....總之就盡力而為吧
+5. 一樣 一開始就直接作在主遊戲裡 當然實際上相當於是 用更精美的天體替換掉目前主遊戲內的那個佔位符 這種感覺
+
+
+
+
+
+cargo run -p void-app
+
+1. 行星 天體 星環 小行星帶  美術
+2. orbit 自動導航 切換參照系 積分穩定性 an dn maneuver逐個功能調適
+3. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # VOID 專案方向與需求
 
 整理日期：2026-10-05；本輪範圍補記：2026-10-08。這份文件保存想做的遊戲、架構方向與待討論事項。工作規則見 [AGENTS.md](AGENTS.md)，實際進度見 [docs/status.md](docs/status.md)。以下清單不代表已實作或本輪承諾，也不代表固定優先順序。
@@ -57,6 +87,17 @@ VOID 希望能從零件組船、發射、軌道飛行與交會，逐步延伸到
 - 遠期想法：黑洞、warp drive、特殊宇宙／相對論天空，以及「Rain World in space」。
 
 這些只記錄想法。具體採用方式、範圍與順序應在相應任務開始前說明，不能因列在清單中就自動開工。
+
+## 渲染改進建議（Venus 合併時的評估，2026-10-09）
+
+原記於 Venus worktree 未提交的 NOTE.md，清理 worktree 備份時移入。內容是當時對 master 渲染的評估，實作前需重新核對現行程式碼。
+
+1. 雲的效能架構（最重要）：雲是全解析度、每 pixel 最多 48 步，每個雲內樣本再算 5 步太陽方向光學深度（每步 6 次 `cloud_density`），沒有 jitter 和時間累積。參考 EVE v5（C#，MIT）：降採樣深度 → PlaceCloudRays 分散每幀光線 → Reconstruct 時間重投影 → Composite 回全解析度。金星 ContinuousDeck（48–70 km 連續雲）從軌道看每個 pixel 都進雲；先用 `--render-benchmark` 量 Vesper 軌道視角成本。
+2. 火星天空光譜：`air.wgsl` 的 `mie_scattering`／`mie_extinction` 是純量 f32，只有 Rayleigh 是 vec3。火星紅褐天空與日落藍色光暈（Pathfinder PIA00917）來自帶波長依賴、強前向散射的塵粒 Mie，灰階 Mie 做不出。需把 Mie 改成 vec3，CPU 建表共用同一份參數。
+3. 雲影與雲的移動：`ground.wgsl` 沒有取樣雲。參考 EVE 的 CloudShadow／ScreenSpaceCloudShadow，把已在 GPU 上的天氣圖沿太陽方向投影到地面。
+4. 地形陰影：目前沒有像素級地形投影陰影，峽谷和盾狀火山在低太陽角最需要。參考 Scatterer 的 long-distance screen-space shadows（深度圖 raymarch）。
+5. 海洋：從 4 道正弦波改為 FFT（Tessendorf）加 Bruneton 2010 slope variance；海面目前反射 `sky_light / π` 平均值，加 sky-view LUT（Hillaire 2020）反射實際天空顏色。
+6. 近地表細節：三平面貼圖細節與地表散布物（石頭、植被），對應上方植被與 biome。
 
 ## 本次整理時的決定與待續事項
 
