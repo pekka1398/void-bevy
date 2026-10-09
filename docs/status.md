@@ -1,3 +1,7 @@
+# LOD 相同anchor寫入第六輪（2026-10-09）
+
+維持逐幀f64相對座標计算，只跳過位元完全相同的f32 Transform寫入。static每update1512次write降為0，動態／GPU11,148tile位元、pixel／checkpoint一致；app45 tests與scoped lint/build通過。沒有宣稱穩定FPS提升，未merge/push；詳見[第六輪報告](lod-anchor-review.md)。
+
 # LOD render thread 對照第五輪（2026-10-09）
 
 新增benchmark pipeline／statistics控制，核對原主遊戲已使用的render thread。相同動態序列serial main interval約18ms、pipe約11ms；pipe下GPU packing未顯示穩定整體優勢，8 workers只明顯改善接受延遲。十組成功配置pixel／checkpoint一致，pipe GPU verify11,038tiles全位元通過，app44與scoped lint/build通過。記錄完全無queries的pinned Bevy numeric mapping失敗，改為初始化明確拒絕不相容的render profiling。未merge/push；詳見[第五輪報告](lod-pipeline-review.md)。

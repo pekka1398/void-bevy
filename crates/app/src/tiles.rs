@@ -40,6 +40,25 @@ pub fn anchor(position: DVec3, camera: DVec3) -> Transform {
     Transform::from_translation((position - camera).as_vec3())
 }
 
+fn update_anchor(transform: &mut Mut<'_, Transform>, next: Transform, always: bool) -> bool {
+    assert!(
+        next.translation.is_finite() && next.rotation.is_finite() && next.scale.is_finite(),
+        "terrain anchor must remain finite after camera-relative f64 subtraction"
+    );
+    let current: &Transform = transform;
+    let identical = current.translation.to_array().map(f32::to_bits)
+        == next.translation.to_array().map(f32::to_bits)
+        && current.rotation.to_array().map(f32::to_bits)
+            == next.rotation.to_array().map(f32::to_bits)
+        && current.scale.to_array().map(f32::to_bits) == next.scale.to_array().map(f32::to_bits);
+    if always || !identical {
+        **transform = next;
+        true
+    } else {
+        false
+    }
+}
+
 /// A level's colour: hue around the wheel, so neighbouring levels differ.
 pub fn level_color(level: u32) -> [f32; 3] {
     let c: Srgba = Color::hsl((level as f32 * 47.0) % 360.0, 0.55, 0.55).into();
@@ -52,6 +71,7 @@ pub struct TileProfile {
     pub traversal_ms: f64,
     pub balance_ms: f64,
     pub balance_cache_hits: usize,
+    pub anchor_updates: usize,
     pub eviction_ms: f64,
     pub finish_ms: f64,
     pub schedule_ms: f64,
@@ -93,6 +113,7 @@ pub struct TileField<M: Material = StandardMaterial> {
     indices: Indices,
     mesh_asset_usage: RenderAssetUsages,
     gpu_packing: bool,
+    always_update_anchors: bool,
     material: Handle<M>,
     render: Vec<u64>,
     pub last_requests: usize,
@@ -163,6 +184,7 @@ impl<M: Material> TileField<M> {
             indices,
             mesh_asset_usage,
             gpu_packing: crate::gpu_lod::enabled(),
+            always_update_anchors: std::env::args().any(|arg| arg == "--lod-always-update-anchors"),
             material,
             owned_meshes: HashMap::new(),
             render: Vec::new(),
@@ -273,6 +295,7 @@ impl<M: Material> TileField<M> {
         for (name, count) in [
             ("lod_visited", p.visited),
             ("lod_balance_cache_hits", p.balance_cache_hits),
+            ("lod_anchor_updates", p.anchor_updates),
             ("lod_scheduled", p.scheduled),
             ("lod_completed", p.completed),
             ("lod_mesh_created", p.created),
@@ -493,7 +516,12 @@ impl<M: Material> TileField<M> {
             let data = node.data.as_ref().expect("a selected tile has a mesh");
             if let Some((entity, _)) = self.drawn.get(&code) {
                 if let Ok(mut transform) = tiles.get_mut(*entity) {
-                    *transform = anchor(data.origin, eye);
+                    let updated = update_anchor(
+                        &mut transform,
+                        anchor(data.origin, eye),
+                        self.always_update_anchors,
+                    );
+                    self.profile.anchor_updates += usize::from(self.profiling && updated);
                 }
                 continue;
             }
@@ -666,6 +694,72 @@ fn tile_mesh_for_upload(
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+
+    #[test]
+    fn unchanged_anchors_skip_ecs_changes_but_preserve_signed_zero_and_baseline_writes() {
+        let mut world = World::new();
+        let entity = world.spawn(Transform::default()).id();
+        world.clear_trackers();
+        {
+            let mut e = world.entity_mut(entity);
+            let mut transform = e.get_mut::<Transform>().unwrap();
+            assert!(!update_anchor(&mut transform, Transform::default(), false));
+        }
+        assert_eq!(
+            world
+                .query_filtered::<Entity, Changed<Transform>>()
+                .iter(&world)
+                .count(),
+            0
+        );
+        let next = Transform::from_translation(Vec3::new(-0.0, 0.0, 0.0));
+        {
+            let mut e = world.entity_mut(entity);
+            let mut transform = e.get_mut::<Transform>().unwrap();
+            assert!(update_anchor(&mut transform, next, false));
+        }
+        assert_eq!(
+            world
+                .get::<Transform>(entity)
+                .unwrap()
+                .translation
+                .x
+                .to_bits(),
+            (-0.0_f32).to_bits()
+        );
+        assert_eq!(
+            world
+                .query_filtered::<Entity, Changed<Transform>>()
+                .iter(&world)
+                .count(),
+            1
+        );
+        world.clear_trackers();
+        {
+            let mut e = world.entity_mut(entity);
+            let mut transform = e.get_mut::<Transform>().unwrap();
+            assert!(!update_anchor(&mut transform, next, false));
+        }
+        assert_eq!(
+            world
+                .query_filtered::<Entity, Changed<Transform>>()
+                .iter(&world)
+                .count(),
+            0
+        );
+        {
+            let mut e = world.entity_mut(entity);
+            let mut transform = e.get_mut::<Transform>().unwrap();
+            assert!(update_anchor(&mut transform, next, true));
+        }
+        assert_eq!(
+            world
+                .query_filtered::<Entity, Changed<Transform>>()
+                .iter(&world)
+                .count(),
+            1
+        );
+    }
     #[test]
     fn render_only_u16_mesh_preserves_vertices_topology_and_cached_bounds() {
         for n in [33, 65] {
