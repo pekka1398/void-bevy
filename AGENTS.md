@@ -36,3 +36,4 @@
 - Rust golden 使用已存資料，不依賴 Node／舊 TS 執行。不得放寬既有門檻掩蓋差異；native／WASM 差異需核對行為。Pebble 靜止傾角的既有 ignored 已結案，見 `docs/vessels.md`。
 - 編譯預設 `-j 2`。多 agent 的昂貴 Bevy 連結／GUI 檢查由主 agent 協調；各 worktree 應備好可直接執行的驗收程式。共用 target 時核對本地 crate 的分支來源，不盲信快取。
 - GUI 操作用 TigerVNC，不用 xdotool。**禁止使用 pgrep／pkill 的字串比對**；先取得並確認進程 PID，只以數字 PID 處理進程。
+不是大功能或是新feature  只是修一些問題或是作些小改動 的話就別搞subagent跟worktree 自己判斷好 

@@ -176,7 +176,7 @@ impl<M: Material> TileField<M> {
         }
     }
 
-    /// Select for a view and start the most urgent builds, two per core.
+    /// Select for a view and keep at most two background mesh builds in flight.
     pub fn select(&mut self, view: &LodView) {
         let LodSelection {
             render,
@@ -188,7 +188,7 @@ impl<M: Material> TileField<M> {
         self.last_requests = requests.len();
         self.render = render;
         requests.sort_by(|a, b| b.priority.total_cmp(&a.priority));
-        let slots = std::thread::available_parallelism().map_or(4, |n| n.get()) * 2;
+        let slots = 2;
         let options = TileMeshOptions {
             radius_meters: self.lod.options.radius_meters,
             resolution: self.lod.options.resolution,

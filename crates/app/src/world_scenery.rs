@@ -58,16 +58,100 @@ pub struct WorldScenery {
     observer: Option<DVec3>,
     rotation: DQuat,
 }
-pub fn build_scenes(
+/// CPU-only inputs copied before handing preparation to one background worker.
+pub struct SceneryPreparationInput {
+    signature: serde_json::Value,
+    params: Vec<(usize, void_scenery::AtmosphereParams)>,
+}
+pub struct PreparedScenery {
+    signature: serde_json::Value,
+    weather: Vec<u8>,
+    shape: Vec<u8>,
+    detail: Vec<u8>,
+    tables: HashMap<usize, PreparedTables>,
+}
+struct PreparedTables {
+    params: void_scenery::AtmosphereParams,
+    trans: Vec<f32>,
+    multiple: Vec<f32>,
+    irradiance: Vec<f32>,
+}
+impl SceneryPreparationInput {
+    pub fn new(sim: &FleetFlight) -> Self {
+        let params = sim
+            .world
+            .bodies
+            .iter()
+            .map(|(id, d)| {
+                let body = sim.world.body_index(id);
+                let radius = sim.fleet.ephemeris.bodies()[body].radius_meters + d.air_datum_meters;
+                let params = if let Some(profile) = &d.visual.scattering {
+                    profile.parameters(radius)
+                } else {
+                    let mut p = void_scenery::earth_like_atmosphere(radius);
+                    p.rayleigh_scattering = [0.; 3];
+                    p.ozone_absorption = [0.; 3];
+                    p.mie_scattering = 0.;
+                    p.mie_extinction = 0.;
+                    p
+                };
+                (body, params)
+            })
+            .collect();
+        Self {
+            signature: serde_json::to_value(&sim.world).unwrap(),
+            params,
+        }
+    }
+    pub fn prepare(self) -> PreparedScenery {
+        use void_scenery::{atmosphere::*, clouds::*, tables::*};
+        let weather = build_cloud_weather(2);
+        let shape = build_cloud_noise(SHAPE_SIZE, false);
+        let detail = build_cloud_noise(DETAIL_SIZE, true);
+        let tables = self
+            .params
+            .into_iter()
+            .map(|(body, params)| {
+                let trans = build_transmittance_table(&params);
+                let multiple = build_multiple_scattering_table(&params, &trans, 64, 20);
+                let irradiance = build_irradiance_table(&params, &trans, &multiple, 128, 24);
+                (
+                    body,
+                    PreparedTables {
+                        params,
+                        trans,
+                        multiple,
+                        irradiance,
+                    },
+                )
+            })
+            .collect();
+        PreparedScenery {
+            signature: self.signature,
+            weather,
+            shape,
+            detail,
+            tables,
+        }
+    }
+}
+
+fn build_scenes(
     commands: &mut Commands,
     sim: &void_fleet_flight::FleetFlight,
     grounds: &mut Assets<GroundMaterial>,
     images: &mut Assets<Image>,
+    mut prepared: PreparedScenery,
 ) -> BuiltScenes {
     use void_scenery::atmosphere::*;
     use void_scenery::clouds::*;
     use void_scenery::tables::*;
     let world = sim.world.clone();
+    assert_eq!(
+        prepared.signature,
+        serde_json::to_value(&world).unwrap(),
+        "prepared scenery belongs to a different world"
+    );
     let before = images
         .iter()
         .map(|(id, _)| id)
@@ -76,36 +160,24 @@ pub fn build_scenes(
     let mut atmospheres = HashMap::new();
     // Shared deterministic noise assets; per-body coverage/optics remain independent.
     let weather = images.add(crate::air::weather_image(
-        build_cloud_weather(2),
+        prepared.weather,
         WEATHER_WIDTH,
         WEATHER_HEIGHT,
     ));
-    let shape = images.add(crate::air::noise_volume_image(
-        build_cloud_noise(SHAPE_SIZE, false),
-        SHAPE_SIZE,
-    ));
-    let detail = images.add(crate::air::noise_volume_image(
-        build_cloud_noise(DETAIL_SIZE, true),
-        DETAIL_SIZE,
-    ));
+    let shape = images.add(crate::air::noise_volume_image(prepared.shape, SHAPE_SIZE));
+    let detail = images.add(crate::air::noise_volume_image(prepared.detail, DETAIL_SIZE));
     let mut resolve_textures = None;
     for (id, d) in &world.bodies {
         let body = world.body_index(id);
-        let radius = sim.fleet.ephemeris.bodies()[body].radius_meters + d.air_datum_meters;
-        let params = if let Some(profile) = &d.visual.scattering {
-            profile.parameters(radius)
-        } else {
-            // Explicit vacuum tables for mandatory ground/resolve bindings, never Earth air.
-            let mut p = void_scenery::earth_like_atmosphere(radius);
-            p.rayleigh_scattering = [0.0; 3];
-            p.ozone_absorption = [0.0; 3];
-            p.mie_scattering = 0.0;
-            p.mie_extinction = 0.0;
-            p
-        };
-        let trans = build_transmittance_table(&params);
-        let multiple = build_multiple_scattering_table(&params, &trans, 64, 20);
-        let irradiance = build_irradiance_table(&params, &trans, &multiple, 128, 24);
+        let PreparedTables {
+            params,
+            trans,
+            multiple,
+            irradiance,
+        } = prepared
+            .tables
+            .remove(&body)
+            .expect("missing prepared body tables");
         let trans = images.add(table_image(
             &trans,
             TRANSMITTANCE_WIDTH,
@@ -409,7 +481,27 @@ impl WorldScenery {
         meshes: &mut Assets<Mesh>,
         standard: &mut Assets<StandardMaterial>,
     ) -> Self {
-        let (bodies, atmospheres, owned) = build_scenes(commands, sim, grounds, images);
+        Self::new_prepared(
+            commands,
+            sim,
+            grounds,
+            images,
+            meshes,
+            standard,
+            SceneryPreparationInput::new(sim).prepare(),
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_prepared(
+        commands: &mut Commands,
+        sim: &FleetFlight,
+        grounds: &mut Assets<GroundMaterial>,
+        images: &mut Assets<Image>,
+        meshes: &mut Assets<Mesh>,
+        standard: &mut Assets<StandardMaterial>,
+        prepared: PreparedScenery,
+    ) -> Self {
+        let (bodies, atmospheres, owned) = build_scenes(commands, sim, grounds, images, prepared);
         spawn_far(commands, sim, meshes, standard);
         Self {
             bodies,

@@ -801,7 +801,7 @@ pub fn run(main_game: bool) {
     }
     if std::env::args().any(|a| a == "--help") {
         println!(
-            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--cinder-site basin|rim|ejecta; --ares-site plains|canyon|volcano: paused main-game surface fixture; --ares-overview: recorded main-camera overview\n--vesper-site plains|shield|upland: paused Vesper volcanic ground fixture\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--stellar-fixture: declared remote ground/orbit starting ships for acceptance\n--splashdown: paused ocean capsule; --water-speed m/s --water-tilt degrees --water-entry-angle degrees; R repeat, Shift+R next\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--navigation-target <body id>: initial navigation target\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
+            "VOID flight: --planet <id> --terrain <config> --craft <json> --vacuum\n--world <initial-world.json> | --body <id> --view near|orbit|far --exposure <0..100>\n--cinder-site basin|rim|ejecta; --ares-site plains|canyon|volcano: paused main-game surface fixture; --ares-overview: recorded main-camera overview\n--vesper-site plains|shield|upland: paused Vesper volcanic ground fixture\n--rover: four-wheel ground craft; W/S drive, A/D steer, Space brake, X parking brake\n--aircraft: modular jet on explicit near-flat atmospheric runway world\n--stellar-neighborhood: three fictional systems at real stellar separation\n--stellar-fixture: declared remote ground/orbit starting ships for acceptance\n--splashdown: paused ocean capsule; --water-speed m/s --water-tilt degrees --water-entry-angle degrees; R repeat, Shift+R next\n--reentry: paused shielded capsule at 110 km\n--rendezvous: paused opposed nose ports in orbit (requires port-equipped craft; incompatible with load/replay)\n--navigation-fixture: paused upper stage in the normal game world\n--export-navigation-fixture <file>: headless export (requires --navigation-fixture)\n--navigation-target <body id>: initial navigation target\n--record <journal> --replay <journal> --verify <journal> --save <checkpoint> --load <checkpoint>\nH RCS | Alt+W/S ±Z, D/A ±X, E/Q ±Y translation | WASD QE torque | T SAS reaction wheel\nF10 own port | F11 target port | F12 arm both | Enter dock | Backspace undock\nP pause | Tab vessel | Space stage | F6 save | F7 load | F8 finish recording\n1–4/G plot frames | J primary / Shift+J secondary | F1 body views | Home ship\nO orbit around observed body | Alt+F10/F11 exposure"
         );
         return;
     }
@@ -1165,6 +1165,32 @@ pub fn run(main_game: bool) {
     } else {
         assert!(argument("--view").is_none(), "--view requires --body");
     }
+    let navigation_start = std::env::args().any(|a| a == "--navigation-fixture");
+    if navigation_start {
+        assert!(
+            main_game
+                && argument("--load").is_none()
+                && lab.playback.is_none()
+                && argument("--world").is_none()
+                && argument("--craft").is_none()
+                && !lab.rendezvous
+                && !lab.reentry
+                && lab.water_review.is_none()
+                && !aircraft_mode
+                && surface_fixture_count == 0
+                && !std::env::args().any(|a| matches!(
+                    a.as_str(),
+                    "--rover" | "--stellar-fixture" | "--stellar-neighborhood"
+                )),
+            "navigation fixture requires the normal main-game world and authored rocket"
+        );
+        navigation_fixture(&mut lab);
+    }
+    if let Some(path) = argument("--export-navigation-fixture") {
+        assert!(navigation_start, "export requires --navigation-fixture");
+        lab.session.save_checkpoint(path);
+        return; // Headless: no Bevy window, renderer or GPU initialization.
+    }
     if std::env::args().any(|a| a == "--ares-overview") {
         let site = argument("--ares-site").expect("--ares-overview requires --ares-site");
         assert!(
@@ -1268,7 +1294,14 @@ pub fn run(main_game: bool) {
             benchmark.as_ref().map(|b| b.frames),
         ));
     }
+    // Leave capacity for desktop/input processing during startup and terrain work.
     let mut plugins = DefaultPlugins
+        .set(bevy::app::TaskPoolPlugin {
+            task_pool_options: bevy::app::TaskPoolOptions {
+                max_total_threads: 4,
+                ..default()
+            },
+        })
         .set(bevy::log::LogPlugin {
             custom_layer: crate::render_metrics::error_layer,
             fmt_layer: crate::render_metrics::quiet_draw_formatter,
@@ -1316,6 +1349,10 @@ pub fn run(main_game: bool) {
             .disable::<bevy::winit::WinitPlugin>()
             .disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>();
     }
+    app.insert_resource(bevy::winit::WinitSettings {
+        focused_mode: bounded_update_mode(30.),
+        unfocused_mode: bounded_update_mode(10.),
+    });
     app.add_plugins((plugins, WireframePlugin::default()))
         .insert_resource(ClearColor(if main_game {
             Color::BLACK
@@ -1328,7 +1365,7 @@ pub fn run(main_game: bool) {
             ..default()
         })
         .insert_non_send(lab)
-        .add_systems(Startup, (setup, setup_scenery).chain())
+        .add_systems(Startup, (setup, begin_scenery_preparation).chain())
         .add_systems(
             Update,
             (
@@ -1348,8 +1385,20 @@ pub fn run(main_game: bool) {
                 update_scenery,
                 capture_frame,
             )
-                .chain(),
+                .chain()
+                .run_if(scene_ready),
         );
+    app.add_systems(
+        Update,
+        (
+            poll_scenery_preparation,
+            setup_scenery
+                .run_if(resource_exists::<PreparedSceneryResource>)
+                .run_if(not(resource_exists::<SceneryInstalled>)),
+        )
+            .chain()
+            .before(begin_profile_frame),
+    );
     if main_game {
         app.add_plugins(crate::scenery::SceneryPlugin);
     }
@@ -1372,7 +1421,9 @@ pub fn run(main_game: bool) {
             ))
             .add_systems(
                 PostUpdate,
-                benchmark_tick.after(crate::render_metrics::collect),
+                benchmark_tick
+                    .after(crate::render_metrics::collect)
+                    .run_if(scene_ready),
             );
     }
     app.run();
@@ -1550,6 +1601,45 @@ fn water_fixture(lab: &mut Lab) {
         "Splashdown: {speed} m/s, body tilt {tilt}°, entry from vertical {entry}°. P start/pause; R repeat; Shift+R next case."
     );
 }
+fn bounded_update_mode(hz: f64) -> bevy::winit::UpdateMode {
+    bevy::winit::UpdateMode::Reactive {
+        wait: std::time::Duration::from_secs_f64(1. / hz),
+        react_to_device_events: false,
+        react_to_user_events: false,
+        react_to_window_events: false,
+    }
+}
+
+/// Keep the normal game's world, terrain, atmosphere and force model intact.
+/// Only the declared initial vessel state differs from a normal ground start.
+fn navigation_fixture(lab: &mut Lab) {
+    let body = lab.session.sim().planet.body_id.clone();
+    let Outcome::Spawned(vessel) = lab.session.execute(Action::LaunchOrbitAt {
+        body,
+        craft: lab.craft.clone(),
+        offset: DVec3::ZERO,
+    }) else {
+        panic!("navigation fixture: orbital launch rejected");
+    };
+    assert_eq!(
+        lab.session.execute(Action::Select { vessel }),
+        Outcome::Applied
+    );
+    for _ in 0..2 {
+        assert!(
+            matches!(lab.session.execute(Action::Stage), Outcome::Staged(_)),
+            "navigation fixture: authored staging failed"
+        );
+    }
+    lab.paused = true;
+    lab.rate = 0;
+    lab.session.execute(Action::EndFrame {
+        paused: true,
+        rate: 0,
+    });
+    lab.notice = "Navigation starting fixture: normal game world, staged upper stage in orbit; paused. Depart only generates a plan.".into();
+}
+
 fn new_lab(session: FlightSession, craft: Craft) -> Lab {
     let f = &session.sim().fleet;
     let orbits = void_view::MapOrbits::new(f.ephemeris.bodies());
@@ -3767,6 +3857,10 @@ mod tests {
             initial.world = void_fleet_flight::world::expanded_solar_scenery(&planet.planet);
         }
         let sim = FlightSession::new(initial).with_recording();
+        let prepared = PreparedSceneryResource(
+            main_game
+                .then(|| crate::world_scenery::SceneryPreparationInput::new(sim.sim()).prepare()),
+        );
         let mut lab = new_lab(sim, craft);
         lab.main_game = main_game;
         lab.session.execute(Action::View {
@@ -3784,6 +3878,7 @@ mod tests {
             .insert_resource(Assets::<crate::scenery::GroundMaterial>::default())
             .insert_resource(Assets::<crate::scenery::StarMaterial>::default())
             .insert_non_send(lab)
+            .insert_resource(prepared)
             .add_plugins(bevy::gizmos::GizmoPlugin)
             .add_systems(Startup, (setup, setup_scenery).chain())
             .add_systems(
@@ -4426,6 +4521,73 @@ mod tests {
 
 #[derive(Component)]
 struct Sky;
+#[derive(Resource)]
+struct PreparedSceneryResource(Option<crate::world_scenery::PreparedScenery>);
+#[derive(Resource)]
+struct SceneryInstalled;
+#[derive(Component)]
+struct SceneryLoadingLabel;
+#[derive(Resource)]
+struct SceneryPreparation {
+    task: bevy::tasks::Task<crate::world_scenery::PreparedScenery>,
+    started: std::time::Instant,
+}
+fn scene_ready(lab: NonSend<Lab>, ready: Option<Res<SceneryInstalled>>) -> bool {
+    !lab.main_game || ready.is_some()
+}
+fn begin_scenery_preparation(mut commands: Commands, lab: NonSend<Lab>) {
+    if !lab.main_game {
+        commands.insert_resource(SceneryInstalled);
+        return;
+    }
+    let input = crate::world_scenery::SceneryPreparationInput::new(lab.session.sim());
+    let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move { input.prepare() });
+    commands.insert_resource(SceneryPreparation {
+        task,
+        started: std::time::Instant::now(),
+    });
+    commands.spawn((
+        SceneryLoadingLabel,
+        Text::new("Preparing scenery…"),
+        TextFont {
+            font_size: FontSize::Px(20.),
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        BackgroundColor(Color::BLACK),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(80),
+            left: px(24),
+            padding: UiRect::all(px(16)),
+            ..default()
+        },
+        GlobalZIndex(1000),
+    ));
+}
+fn poll_scenery_preparation(
+    mut commands: Commands,
+    pending: Option<ResMut<SceneryPreparation>>,
+    mut labels: Query<(Entity, &mut Text), With<SceneryLoadingLabel>>,
+) {
+    let Some(mut pending) = pending else {
+        return;
+    };
+    for (_, mut text) in &mut labels {
+        text.0 = format!(
+            "Preparing scenery… {:.0}s",
+            pending.started.elapsed().as_secs_f64()
+        );
+    }
+    if let Some(prepared) = bevy::tasks::futures::check_ready(&mut pending.task) {
+        commands.insert_resource(PreparedSceneryResource(Some(prepared)));
+        commands.remove_resource::<SceneryPreparation>();
+        for (entity, _) in &labels {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn setup_scenery(
     mut commands: Commands,
@@ -4436,18 +4598,25 @@ fn setup_scenery(
     grounds: Option<ResMut<Assets<crate::scenery::GroundMaterial>>>,
     stars: Option<ResMut<Assets<crate::scenery::StarMaterial>>>,
     camera: Single<Entity, With<LabCamera>>,
+    mut prepared: ResMut<PreparedSceneryResource>,
 ) {
     if !lab.main_game {
         return;
     }
-    let world = crate::world_scenery::WorldScenery::new(
+    let world = crate::world_scenery::WorldScenery::new_prepared(
         &mut commands,
         lab.session.sim(),
         grounds.expect("world ground assets").into_inner(),
         &mut images,
         &mut meshes,
         &mut standard,
+        prepared
+            .0
+            .take()
+            .expect("scenery preparation already consumed"),
     );
+    commands.remove_resource::<PreparedSceneryResource>();
+    commands.insert_resource(SceneryInstalled);
     commands.insert_resource(Ground::World(Box::new(world)));
     let (positions, colors) = void_scenery::generate_stars(&void_scenery::DEFAULT_STARS);
     commands.spawn((

@@ -76,7 +76,7 @@ pub fn weather_direction(x: usize, y: usize) -> DVec3 {
 /// parallel on `threads` threads.
 pub fn build_cloud_weather(threads: usize) -> Vec<u8> {
     let mut data = vec![0u8; WEATHER_WIDTH * WEATHER_HEIGHT * 4];
-    let rows_per = WEATHER_HEIGHT.div_ceil(threads.max(1));
+    let rows_per = WEATHER_HEIGHT.div_ceil(threads.clamp(1, 2));
     std::thread::scope(|scope| {
         for (chunk, rows) in data.chunks_mut(rows_per * WEATHER_WIDTH * 4).enumerate() {
             scope.spawn(move || {
@@ -197,33 +197,44 @@ pub fn build_cloud_noise(size: usize, detail: bool) -> Vec<u8> {
     let mut data = vec![0u8; size * size * size * 4];
     let cells: i64 = if detail { 4 } else { 8 };
     let c = cells as f64;
+    assert!(size > 0, "cloud noise requires a non-empty volume");
+    // Bound startup work independently of volume depth. One OS thread per z
+    // slice used to create 64 competing workers on the main game's first frame.
+    let slices_per_worker = size.div_ceil(2);
     std::thread::scope(|scope| {
-        for (z, slab) in data.chunks_mut(size * size * 4).enumerate() {
+        for (worker, block) in data
+            .chunks_mut(slices_per_worker * size * size * 4)
+            .enumerate()
+        {
             scope.spawn(move || {
-                for y in 0..size {
-                    for x in 0..size {
-                        let s = size as f64;
-                        let (qx, qy, qz) = (
-                            (x as f64 + 0.5) / s,
-                            (y as f64 + 0.5) / s,
-                            (z as f64 + 0.5) / s,
-                        );
-                        let w = worley(qx * c, qy * c, qz * c, cells);
-                        let perlin = perlin_noise(qx * c, qy * c, qz * c, cells);
-                        let fine = value_noise(qx * c * 2.0, qy * c * 2.0, qz * c * 2.0, cells * 2);
-                        let i = (y * size + x) * 4;
-                        slab[i] = round_byte(
-                            clamp01(if detail {
-                                w
-                            } else {
-                                (0.65 * perlin + 0.35 * w - 0.25) / 0.5
-                            }) * 255.0,
-                        );
-                        slab[i + 1] = round_byte(fine * 255.0);
-                        // A separate smooth, low-frequency field organizes regional cloud banks.
-                        slab[i + 2] =
-                            round_byte(perlin_noise(qx * 2.0, qy * 2.0, qz * 2.0, 2) * 255.0);
-                        slab[i + 3] = 255;
+                for (slice, slab) in block.chunks_mut(size * size * 4).enumerate() {
+                    let z = worker * slices_per_worker + slice;
+                    for y in 0..size {
+                        for x in 0..size {
+                            let s = size as f64;
+                            let (qx, qy, qz) = (
+                                (x as f64 + 0.5) / s,
+                                (y as f64 + 0.5) / s,
+                                (z as f64 + 0.5) / s,
+                            );
+                            let w = worley(qx * c, qy * c, qz * c, cells);
+                            let perlin = perlin_noise(qx * c, qy * c, qz * c, cells);
+                            let fine =
+                                value_noise(qx * c * 2.0, qy * c * 2.0, qz * c * 2.0, cells * 2);
+                            let i = (y * size + x) * 4;
+                            slab[i] = round_byte(
+                                clamp01(if detail {
+                                    w
+                                } else {
+                                    (0.65 * perlin + 0.35 * w - 0.25) / 0.5
+                                }) * 255.0,
+                            );
+                            slab[i + 1] = round_byte(fine * 255.0);
+                            // A separate smooth, low-frequency field organizes regional cloud banks.
+                            slab[i + 2] =
+                                round_byte(perlin_noise(qx * 2.0, qy * 2.0, qz * 2.0, 2) * 255.0);
+                            slab[i + 3] = 255;
+                        }
                     }
                 }
             });
