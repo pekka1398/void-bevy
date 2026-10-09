@@ -1,5 +1,21 @@
 # 目前狀態
 
+## Orbit 導航／參照系／AN-DN 分支待人類驗收（2026-10-09）
+
+`work/orbit-navigation` 的 `260dc15`、`43dfb62` 基於擴充天體分支
+`3dcfa94`，尚未合入 master，也未 push。核心提供分階段出發／修正／捕獲
+節點求解；主遊戲接四種參照系、數值 AN／DN、點選定位與暫停計畫預覽。
+計畫及 coast 依自己的來源系統／split 原點繪製，生成不點火、不耗真實燃料。
+Model 33 明確拒絕舊 model 資料，save schema 沒有自動轉換。
+
+受影響 core／view／fleet／app 的針對性測試、lint、建置及 agent GUI核對
+已有證據；實際 GUI journal 在最終程式重播通過，T+38.483333 s，兩艘船，
+選取 v2。没有執行全 workspace suite。正常桌面已開啟暫停驗收場景，
+人類遊玩結果尚未收到，不將 agent 截圖算成人類驗收。具體檢查範圍、
+限制與操作見 [orbit-navigation](orbit-navigation.md) 及
+[spec](specs/orbit-navigation-and-plotting.md)。
+
+
 ## 主遊戲原生 UI 已合入 master（2026-10-09）
 
 `work/game-ui`／`void-bevy-ui` 以封存 `ref/void/src` 的 HUD 為參考，已接時間／warp、分級燃料條與Δv、油門、高度／速度、原導航球、軌道／機動、DEV及說明。使用現有 Action／ViewCommand；新增四種純視覺開關，model31／world5。根審查、針對性 headless、lint、build及已記錄的 agent GUI核對通過；使用者在正常桌面視窗確認初步外觀可接受，完整控制／載具 GUI驗收仍分範圍待續。使用者已明確授權合併；`work/game-ui` 的 `bd20325` 採入主線，未 push。詳見 [main-game-ui](main-game-ui.md) 與 [spec](specs/game-ui.md)。
