@@ -680,7 +680,7 @@ pub(super) fn interactions(
             }
             Click::NavigationSetting(which) => match which {
                 0 => state.navigation_wait = (state.navigation_wait + 1) % 5,
-                1 => state.navigation_flight = (state.navigation_flight + 1) % 5,
+                1 => state.navigation_flight = (state.navigation_flight + 1) % 6,
                 2 => state.navigation_altitude = (state.navigation_altitude + 1) % 5,
                 _ => unreachable!(),
             },
@@ -1492,7 +1492,7 @@ fn navigation_wait(state: &UiState) -> f64 {
     [30., 0., 1., 365., 1825.][state.navigation_wait]
 }
 fn navigation_flight(state: &UiState) -> f64 {
-    [7., 30., 180., 730., 3650.][state.navigation_flight]
+    [7., 1., 30., 180., 730., 3650.][state.navigation_flight]
 }
 fn navigation_altitude(state: &UiState) -> f64 {
     [100., 1., 10., 1000., 10000.][state.navigation_altitude]

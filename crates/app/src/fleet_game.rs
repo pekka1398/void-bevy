@@ -4609,6 +4609,40 @@ fn update_scenery(
     }
 }
 
+fn plotting_source(
+    fleet: &void_vessels::Fleet,
+    system: void_frames::SystemId,
+    offset: void_frames::SplitPosition,
+) -> Option<Box<dyn void_orbit::EphemerisSource>> {
+    let mut view = fleet.ephemeris.local_view(system);
+    if let Some(source) = &mut view {
+        source.set_physics_offset(offset);
+    } else {
+        assert_eq!(
+            system,
+            fleet.ephemeris.origin_system(),
+            "map source cannot change system without a local view"
+        );
+        assert_eq!(
+            offset,
+            fleet.ephemeris.physics_offset(),
+            "map source cannot change precision anchor without a local view"
+        );
+    }
+    view
+}
+fn plotting_focus(
+    source: &dyn void_orbit::EphemerisSource,
+    focus: void_frames::SplitPosition,
+    time: f64,
+) -> DVec3 {
+    let origin = source
+        .system_state(source.origin_system(), time)
+        .0
+        .compose(&source.physics_offset());
+    focus.relative(&origin)
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn draw_map(
     mut lab: NonSendMut<Lab>,
@@ -4627,29 +4661,34 @@ fn draw_map(
         return;
     }
     let view = lab.view.expect("main camera state");
-    let fleet = &lab.session.sim().fleet;
-    let home = lab.session.sim().observation_body();
+    let sim = lab.session.sim();
+    let fleet = &sim.fleet;
+    let home = sim.observation_body();
     let bodies = fleet.ephemeris.bodies();
+    let precise = fleet.precise_snapshot(&sim.selected);
+    let sample = sim.presentation.sample(sim);
+    let focus = fleet
+        .frames()
+        .to_galaxy(sample.focus_frame, sample.focus_local);
+    let base_view = plotting_source(fleet, precise.system, precise.anchor);
+    let base_source = base_view.as_deref().unwrap_or(fleet.ephemeris.as_ref());
     let mut positions = vec![DVec3::ZERO; bodies.len()];
     let mut velocities = positions.clone();
-    fleet
-        .ephemeris
-        .states_at(fleet.time(), &mut positions, Some(&mut velocities));
-    let ship = fleet.snapshot(&lab.session.sim().selected);
-    let reference = void_orbit::DominanceTree::new(bodies).dominant(&positions, ship.position);
+    base_source.states_at(fleet.time(), &mut positions, Some(&mut velocities));
+    let reference =
+        void_orbit::DominanceTree::new(bodies).dominant(&positions, precise.residual.position);
     let q = surface_axes(fleet, home);
     let frame = void_view::MapFrame {
         time: fleet.time(),
         positions: &positions,
         velocities: &velocities,
-        origin: lab.focus_position,
-        vessel: ship.position,
-        vessel_velocity: ship.velocity,
+        origin: plotting_focus(base_source, focus, fleet.time()),
+        vessel: precise.residual.position,
+        vessel_velocity: precise.residual.velocity,
         plotting: void_view::PlottingFrame {
-            kind: lab.session.sim().presentation.path_frame(),
+            kind: sim.presentation.path_frame(),
             reference,
         },
-        // Simulation time makes refresh cadence independent of replay rendering speed.
         wall_ms: fleet.time() * 1000.0,
     };
     let spec = lab.session.sim().presentation.plotting_frame;
@@ -4660,13 +4699,18 @@ fn draw_map(
         void_orbit::FrameSpec::Barycentric => reference,
     };
     if let Some(prediction) = &lab.prediction {
+        let prediction_view =
+            plotting_source(fleet, prediction.source_system, prediction.source_offset);
+        let source = prediction_view
+            .as_deref()
+            .unwrap_or(fleet.ephemeris.as_ref());
         lab.plot_path.update(
-            &fleet.ephemeris,
+            source,
             &prediction.trajectory,
             spec,
             lab.prediction_generation,
             fleet.time(),
-            frame.origin,
+            plotting_focus(source, focus, fleet.time()),
             apsis_reference,
         );
     } else {
@@ -4677,26 +4721,26 @@ fn draw_map(
         lab.plan_vessel = lab.session.sim().selected.clone();
     }
     if let Some(p) = lab.session.sim().plans.get(&lab.plan_vessel) {
+        let plan_view = plotting_source(fleet, p.system, p.origin);
+        let source = plan_view.as_deref().unwrap_or(fleet.ephemeris.as_ref());
         lab.plot_plan.update(
-            &fleet.ephemeris,
+            source,
             &p.plan.trajectory,
             spec,
             p.plan.generation,
             fleet.time(),
-            frame.origin,
+            plotting_focus(source, focus, fleet.time()),
             apsis_reference,
         );
     } else {
         lab.plot_plan = Default::default();
     }
-    let eye_inertial = fleet
-        .frames()
-        .transform(fleet.body_frames(home).1, fleet.origin_frame())
-        .apply_point(lab.eye);
-    let render = |v: DVec3| (q.conjugate() * (v + frame.origin - eye_inertial)).as_vec3();
+    // Paths are already relative to the precise focus. Remove the small camera
+    // offset before f32 conversion, without reconstructing a distant world position.
+    let render = |v: DVec3| (q.conjugate() * (v - sample.offset)).as_vec3();
     if view.map_weight > 0.0 {
         for (body, points) in bodies.iter().zip(lab.body_plots.update_in_system(
-            &fleet.ephemeris,
+            base_source,
             spec,
             fleet.vessel_system(&lab.session.sim().selected),
             fleet.time(),

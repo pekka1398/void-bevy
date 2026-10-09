@@ -127,7 +127,7 @@ fn surface_velocity_is_time_derivative_and_equator_is_nonrotating() {
 
 // A tilted plane precesses without changing the two bodies' separation. In-plane-only omega
 // therefore cannot supply the time derivative of z; this isolates that missing term.
-struct Precessing(Ephemeris);
+struct Precessing(Ephemeris, void_frames::SplitPosition);
 impl Precessing {
     fn pair(t: f64) -> (DVec3, DVec3) {
         let a = t * 0.1;
@@ -143,7 +143,13 @@ impl Precessing {
 }
 impl void_frames::BodyStates for Precessing {
     fn body_state(&self, body: void_frames::BodyId, t: f64) -> (DVec3, DVec3) {
-        self.body_in_system(body, t)
+        let (p, v) = self.body_in_system(body, t);
+        (
+            void_frames::SplitPosition::at(p)
+                .difference(&self.1)
+                .vector(),
+            v,
+        )
     }
 }
 impl void_frames::FrameSource for Precessing {
@@ -177,6 +183,9 @@ impl void_orbit::EphemerisSource for Precessing {
     fn origin_system(&self) -> SystemId {
         SystemId(0)
     }
+    fn physics_offset(&self) -> void_frames::SplitPosition {
+        self.1
+    }
     fn bodies(&self) -> &[void_orbit::CelestialBody] {
         self.0.bodies()
     }
@@ -201,7 +210,7 @@ impl void_orbit::EphemerisSource for Precessing {
     fn states_at(&self, t: f64, p: &mut [DVec3], v: Option<&mut [DVec3]>) {
         let mut v = v;
         for (i, p) in p.iter_mut().enumerate() {
-            let s = self.body_in_system(void_frames::BodyId(i), t);
+            let s = void_frames::BodyStates::body_state(self, void_frames::BodyId(i), t);
             *p = s.0;
             if let Some(ref mut v) = v {
                 v[i] = s.1;
@@ -221,7 +230,7 @@ impl void_orbit::EphemerisSource for Precessing {
 #[test]
 fn precessing_pair_velocity_matches_derivative_and_nodes_follow_moving_plane() {
     use void_frames::FrameSource;
-    let eph = Precessing(eph());
+    let eph = Precessing(eph(), void_frames::SplitPosition::ORIGIN);
     let spec = FrameSpec::TwoBodyRotating {
         primary: 0,
         secondary: 1,
@@ -294,7 +303,7 @@ fn precessing_pair_velocity_matches_derivative_and_nodes_follow_moving_plane() {
 
 #[test]
 fn barycentric_plot_uses_selected_system_not_global_or_physics_origin() {
-    let eph = Precessing(eph());
+    let eph = Precessing(eph(), void_frames::SplitPosition::ORIGIN);
     let evaluator = FrameEvaluator::new_in_system(&eph, FrameSpec::Barycentric, SystemId(1));
     let t = 10.0;
     let p = DVec3::new(1e15 + 100.0 * t + 42.0, 30.0, 10.0);
@@ -308,4 +317,54 @@ fn barycentric_plot_uses_selected_system_not_global_or_physics_origin() {
     );
     assert_eq!(state.position, DVec3::new(42.0, 30.0, 10.0));
     assert_eq!(state.velocity, DVec3::new(5.0, 0.0, 0.0));
+}
+
+#[test]
+fn plotting_source_offset_applied_once_to_position_and_nodes() {
+    let raw = Precessing(eph(), void_frames::SplitPosition::ORIGIN);
+    let offset = void_frames::SplitPosition::at(DVec3::new(4e6, -3e6, 2e6));
+    let shifted = Precessing(eph(), offset);
+    let spec = FrameSpec::TwoBodyRotating {
+        primary: 0,
+        secondary: 1,
+    };
+    let a = FrameEvaluator::new(&raw, spec);
+    let b = FrameEvaluator::new(&shifted, spec);
+    let p = DVec3::new(2e7, 1e7, 4e6);
+    let at = a.state_at(
+        &raw,
+        5.0,
+        State {
+            position: p,
+            velocity: DVec3::ZERO,
+        },
+    );
+    let bt = b.state_at(
+        &shifted,
+        5.0,
+        State {
+            position: p - offset.vector(),
+            velocity: DVec3::ZERO,
+        },
+    );
+    assert!((at.position - bt.position).length() < 1e-7);
+    assert!((at.velocity - bt.velocity).length() < 1e-7);
+    let mut ta = Trajectory::new();
+    let mut tb = Trajectory::new();
+    for i in 0..=200 {
+        let t = i as f64 / 10.0;
+        ta.append(t, &[p.x, p.y, p.z, 0.0, 0.0, 0.0]);
+        let q = p - offset.vector();
+        tb.append(t, &[q.x, q.y, q.z, 0.0, 0.0, 0.0]);
+    }
+    let na = find_nodes(&ta, &raw, spec, SystemId(0), 0.0, 16);
+    let nb = find_nodes(&tb, &shifted, spec, SystemId(0), 0.0, 16);
+    assert!(!na.is_empty());
+    assert_eq!(na.len(), nb.len());
+    for (a, b) in na.iter().zip(nb) {
+        assert_eq!(a.time, b.time);
+        assert_eq!(a.kind, b.kind);
+        assert!((a.in_frame - b.in_frame).length() < 1e-7);
+        assert!((a.normal_speed_mps - b.normal_speed_mps).abs() < 1e-7);
+    }
 }

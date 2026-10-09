@@ -1,6 +1,7 @@
 # Orbit 自動導航、繪圖參照系與 AN／DN
 
-討論定案：2026-10-09。狀態：已確認需求，尚未實作／驗收。
+討論定案：2026-10-09。狀態：功能已接線並通過 agent 驗證，待人類驗收；未合併。
+實作分支：`work/orbit-navigation`，worktree `/home/pekka/Desktop/void-bevy-navigation`；證據及驗收操作見該 worktree 的 `docs/orbit-navigation.md`。
 共用開發與架構規則依 repository 根目錄 `AGENTS.md`。
 
 ## 已確認的結論

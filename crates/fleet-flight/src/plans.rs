@@ -227,6 +227,18 @@ impl FleetFlight {
                 .coast_seconds()
                 .max(solution.verified_until - last_end),
         );
+        // Generate a reviewable trajectory even while the game is paused. The solver
+        // verified its trial; now verify the actual appended plan from the live anchor.
+        candidate.extend(source, 2_000_000);
+        if let Some(impact) = candidate.impact() {
+            return Err(format!(
+                "Appended navigation plan impacts body {} at T+{:.1}",
+                impact.body, impact.time
+            ));
+        }
+        if !candidate.complete() {
+            return Err("Appended navigation plan exhausted its prediction budget".into());
+        }
         let operation = match request.operation {
             void_orbit::NavigationOperation::Departure => "Departure",
             void_orbit::NavigationOperation::Correction => "Correction",

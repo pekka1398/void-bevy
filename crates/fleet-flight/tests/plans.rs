@@ -186,6 +186,12 @@ fn navigation_appends_after_existing_burn_without_spending_fuel_and_roundtrips()
     );
     assert!(!plan.executing);
     assert!(plan.message.contains("bound orbit verified"));
+    assert!(
+        plan.plan.complete(),
+        "generated plan must be reviewable without advancing live time"
+    );
+    assert!(plan.plan.trajectory.count() > 2);
+    assert!(plan.plan.computed_until() > plan.plan.burns().last().unwrap().end_time);
     assert_eq!(session.sim().fleet.snapshot(&id).mass_kg, mass);
     // Switching ships keeps the generated plan on its original owner.
     session.execute(Action::Select {

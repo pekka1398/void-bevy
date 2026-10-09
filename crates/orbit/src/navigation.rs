@@ -618,30 +618,55 @@ fn capture(
     let mut path = Trajectory::new();
     path.append(run.time, &run.y);
     let end = req.latest_departure + req.max_flight_seconds;
-    let outcome = VesselPropagator::new(ep, tol).advance(
-        ep,
-        &mut run,
-        end,
-        STEP_BUDGET,
-        Some(&mut path),
-        None,
-    );
-    if outcome == AdvanceOutcome::Budget {
-        return Err(NavigationError::PredictionBudget);
-    }
-    if path.last_time() <= req.earliest_departure {
-        return Err(NavigationError::CaptureUnavailable(
-            "no future approach before impact".into(),
-        ));
-    }
-    let (t, d, _) = closest(ep, &path, req.target_body, req.earliest_departure);
     let body = &ep.bodies()[req.target_body];
     let (gm, radius, soi) = (body.gm, body.radius_meters, body.sphere_of_influence_meters);
-    if t >= path.last_time() || soi.is_some_and(|s| d > s) || d <= radius {
-        return Err(NavigationError::CaptureUnavailable(
-            "no safe target periapsis is predicted inside its sphere of influence".into(),
-        ));
+    let mut propagator = VesselPropagator::new(ep, tol);
+    let mut selected = None;
+    while run.time < end && propagator.accepted_steps < STEP_BUDGET {
+        ep.extend_to(run.time);
+        let (bp, _) = ep.body_state(BodyId(req.target_body), run.time);
+        let distance = (run.state().position - bp).length();
+        // Search only a fraction of the local dynamical time at once. Nearby parking
+        // orbits expose their next periapsis promptly; distant approaches still use the
+        // requested horizon and the same total accepted-step budget.
+        let leg = (std::f64::consts::TAU * (distance.powi(3) / gm).sqrt() / 8.0)
+            .min((end - anchor.time) / 32.0)
+            .max(1.0);
+        let from = run.time.max(req.earliest_departure);
+        let left = (STEP_BUDGET - propagator.accepted_steps).min(5000);
+        let until = (run.time + leg).min(end);
+        let outcome = propagator.advance(ep, &mut run, until, left, Some(&mut path), None);
+        for apsis in crate::find_apsides(&path, ep, req.target_body, from, 32) {
+            if apsis.kind != crate::ApsisKind::Periapsis
+                || apsis.distance_meters <= radius
+                || soi.is_some_and(|s| apsis.distance_meters > s)
+            {
+                continue;
+            }
+            let (p, v) = relative(ep, &path, req.target_body, apsis.time);
+            let radial = p.normalize();
+            let Some(tangent) = (v - radial * v.dot(radial)).try_normalize() else {
+                continue;
+            };
+            let dv = (tangent * (gm / apsis.distance_meters).sqrt() - v).length();
+            let mass = anchor.state().mass_kg;
+            let duration =
+                mass * (1.0 - (-dv / engine.exhaust_velocity).exp()) * engine.exhaust_velocity
+                    / engine.thrust_newtons;
+            if apsis.time - duration * 0.5 >= req.earliest_departure {
+                selected = Some((apsis.time, apsis.distance_meters));
+                break;
+            }
+        }
+        if selected.is_some() || matches!(outcome, AdvanceOutcome::Impact { .. }) {
+            break;
+        }
     }
+    let (t,d)=match selected {
+        Some(a)=>a,
+        None if propagator.accepted_steps>=STEP_BUDGET=>return Err(NavigationError::PredictionBudget),
+        None=>return Err(NavigationError::CaptureUnavailable("no safe future target periapsis with enough time to centre the capture burn was predicted".into())),
+    };
     let (p, v) = path.sample(t);
     let (bp, bv) = ep.body_state(BodyId(req.target_body), t);
     let r = p - bp;
@@ -930,6 +955,49 @@ mod tests {
         let s = result.unwrap();
         assert!(s.closest_distance_m < ep.bodies()[target].sphere_of_influence_meters.unwrap());
         assert!(s.periapsis_altitude_m >= 0.);
+    }
+    #[test]
+    fn expanded_parking_capture_stops_at_first_safe_periapsis() {
+        let built = build_system(&crate::expanded_sol());
+        let mut ep = Ephemeris::new(
+            &built,
+            EphemerisOptions {
+                step_seconds: 10.,
+                chunk_steps: 1024,
+            },
+        );
+        ep.extend_to(10.);
+        let home = ep.bodies().iter().position(|b| b.id == "aurelia").unwrap();
+        let mut initial = anchor(&ep, home, ep.bodies()[home].radius_meters + 400000.).state();
+        initial.mass_kg = 40000.;
+        let from = PropagationRun::new(initial);
+        let req = NavigationRequest {
+            operation: NavigationOperation::Capture,
+            target_body: home,
+            reference_body: home,
+            earliest_departure: 38.2833333333,
+            latest_departure: 30. * 86400.,
+            min_flight_seconds: 100.,
+            max_flight_seconds: 7. * 86400.,
+            periapsis_altitude_m: 100000.,
+        };
+        let engine = PlanEngine {
+            thrust_newtons: 250000.,
+            exhaust_velocity: 350. * 9.80665,
+            dry_mass_kg: 10000.,
+        };
+        let tolerances = Tolerances {
+            position_meters: 1e-6,
+            velocity_meters_per_second: 1e-9,
+        };
+        let result = solve_navigation(&mut ep, &from, engine, tolerances, &req).unwrap();
+        assert!(result.captured);
+        assert!(result.maneuver.start_time < 12000.);
+        assert!(
+            result.verified_until < 18000.,
+            "capture should not integrate the unused 37-day search window"
+        );
+        assert_eq!(initial, from.state());
     }
     #[test]
     fn errors_are_explicit_for_fuel_and_no_approach() {

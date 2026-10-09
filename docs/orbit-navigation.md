@@ -50,8 +50,13 @@ work introduces no automatic conversion of existing save data.
 
 ## Verification record
 
-Implementation remains in progress. Targeted core/view/fleet tests have been
-run; final app lint/build, GUI inspection and requirement audit remain pending.
+Implementation remains in progress. Targeted core/view/fleet and app integration
+tests, app clippy and the app build passed on implementation commit `260dc15`.
+TigerVNC inspection confirmed frame controls, a visible AN marker and separated
+panels. It exposed a capture-search budget refusal in the expanded main game;
+that issue was corrected. A fresh GUI check also verifies immediate paused plan
+preview and appending without consuming live fuel. Final coordinate audit and scoped regressions passed. Human acceptance remains
+pending.
 Human acceptance has not occurred. Do not mark this document or its specification
 complete based only on the current tests.
 
@@ -94,3 +99,98 @@ candidate trials, and a final original-anchor prediction. Integration exhaustion
 is reported rather than switching to rails or an impulsive execution model.
 Neither witness establishes expanded-catalog performance or long-term orbital
 stability, and neither guarantees that the desired periapsis height is reached.
+
+### Root integration checks
+
+- `cargo test -p void-orbit --lib navigation::tests -j 2`: seven pass, real-scale witness excluded from this command (run separately above).
+- `cargo test -p void-orbit --test nodes -j 2`: five pass.
+- `cargo test -p void-fleet-flight --test plans -j 2`: five pass.
+- `cargo test -p void-app --lib navigation_ui_tests -j 2`: crossing placement, four frame controls, unchanged focus/vessel/fuel and journal replay pass.
+- `cargo test -p void-app --lib edited_maneuver_value_reaches_the_live_plan_and_replays -j 2`: existing edit path passes.
+- `cargo clippy -p void-app --lib --tests -j 2 -- -D warnings`: pass.
+- `cargo build -p void-app --bin void-app -j 2`: pass. Branch-local acceptance executable is checksum-verified by `tools/navigation-acceptance.sh`.
+- Agent GUI evidence: ignored `lab-log/navigation/final-pair.png`, `detached-capture.png`, `capture-result.png`; journal `gui-2.json` recorded a Capture rejection with no node and no fuel consumed. These screenshots do not constitute human acceptance.
+
+No full workspace suite was run. Master and other worktrees' existing uncommitted
+changes were not included. The navigation worktree's copied `AGENTS.md` preference
+remains unstaged; implementation and spec are committed separately.
+
+Capture GUI follow-up: a wide 7-day horizon in a tight parking orbit originally
+spent the entire 120,000-step search budget before inspecting any periapsis.
+Capture now advances the ordinary numerical coast in chunks tied to local
+orbital time, examines actual bracketed periapses, and stops at the first safe
+one that leaves sufficient lead time to centre its burn. Distant approaches
+retain the requested horizon and the same total search-step budget. Verification
+still covers approximately one resulting orbit; no rails/impulse substitute or
+larger capture search budget was introduced.
+
+`expanded_parking_capture_stops_at_first_safe_periapsis` exercises all 58 expanded
+bodies, Aurelia 400 km parking orbit and the fleet's actual 1e-6 m / 1e-9 m/s
+integration tolerances. Earliest departure T+38.283333 s, wait limit 30 days,
+flight limit 7 days, requested altitude 100 km; it verifies a capture node before
+T+12000 s and completed bound-orbit prediction before T+18000 s, preserving the
+source anchor. This uses the orbit fixture's engine, not a full demo-craft UI
+session. Scoped navigation tests now pass eight cases; scoped fleet `plans`
+passes five including append, unchanged mass, checkpoint and replay. Orbit
+lib/tests clippy remains clean. Main-game GUI recheck remains the root agent's
+separate evidence.
+
+### Final capture and paused preview followup
+
+The main 58-body demo-craft GUI successfully generated a Capture node at
+T+2805.54 s (11.1 m/s), without ignition or live fuel use. A later check loaded
+that plan, appended a second Capture node at T+5562.46 s (11.2 m/s), and displayed
+the orange appended trajectory while paused. Evidence:
+`lab-log/navigation/capture-fixed-result.png` and
+`lab-log/navigation/final-plan-preview-2.png`, with request/Applied commits in
+`lab-log/navigation/gui-final-3.json`. These are agent checks, not human approval.
+
+The appended FlightPlan is now fully predicted before it is committed, so its
+trajectory is reviewable even without advancing live time. The fleet plans test
+asserts completion, trajectory samples and coverage beyond the last burn, and
+retains unchanged-fuel, checkpoint and replay checks; all five tests pass. Final
+app clippy and build pass after this integration fix.
+
+A previous unrestricted build triggered systemd-oomd termination of the VS Code
+scope on 2026-10-09 19:25:20, alongside NVMe write timeouts. Subsequent build ran
+separately with -j 1 under a dedicated systemd scope (MemoryHigh 3G / MemoryMax
+5G); GUI review uses a separate service (MemoryHigh 2G / MemoryMax 3G), with no
+concurrent build. Do not treat the interrupted link as successful evidence; the
+subsequent build completed successfully.
+
+### Coordinate-source audit
+
+Coast predictions now retain source system and split physics offset. App plotting
+uses the matching source for coast, each vessel plan and the current scene; focus
+is subtracted as a split position, followed by the small camera offset before
+f32 conversion. FrameEvaluator applies the source offset once via the common
+frame tree. PlotPath/BodyPlots signatures include source system and offset.
+
+Memory-capped, single-worker checks pass: orbit nodes six cases; view plot three
+cases; new plot_offset case for path/node/body placement and cache invalidation
+when switching precision origins; orbit/view clippy; app clippy; app label
+regressions two cases. This supplements the earlier navigation, append, fuel,
+checkpoint and replay evidence. Coast source tags are transient prediction data;
+save schema remains unchanged and model version remains 33.
+
+| Requirement | Evidence |
+| --- | --- |
+| Departure, correction, capture, one node per operation | Eight core navigation cases, real Sol departure witnesses, main GUI capture/append journal |
+| Preserve existing plan, no live fuel or automatic ignition | Fleet plans tests and paused GUI full-fuel readouts |
+| Four plotting frames and unchanged physical state | View placement tests, core frame tests, app control/journal test and GUI pair selection |
+| Numerical AN/DN and moving reference planes | Nodes tests incl multiple crossings/coplanar/tangent/precession, visible main GUI AN |
+| Clickable crossing and finite-burn timing | App navigation_ui_tests, existing manual editing/replay regression |
+| Source system/precision anchor consistency | Offset/source tests, explicit coast metadata, current-camera label regression |
+| Reviewable paused plan, errors and metrics | Appended-plan prediction test, GUI orange preview and explicit earlier budget refusal/fix regression |
+| Runnable main game and human acceptance | Checksum acceptance script; agent GUI checked; human acceptance pending |
+
+Work is not merged or pushed. Human approval is not inferred from agent GUI tests.
+
+Final source build passes under the isolated, memory-capped single-worker scope.
+The two app label regressions pass after coordinate wiring changes. Actual GUI
+journal replay also passes with that binary:
+`void-app --verify lab-log/navigation/gui-final-3.json` reports T+38.483333 s,
+two vessels and selected v2. No full workspace suite or human acceptance is
+claimed. The ready-to-play checkpoint is
+`lab-log/navigation/acceptance-save.json` (paused, two retained/appended nodes,
+no automatic ignition), for explicit human review.

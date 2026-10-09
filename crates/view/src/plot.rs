@@ -7,9 +7,27 @@ use void_orbit::{
     to_frame,
 };
 
+#[derive(Clone, Copy, PartialEq)]
+struct SourceSignature {
+    spec: FrameSpec,
+    plotting_system: usize,
+    physics_system: usize,
+    offset: void_frames::SplitPosition,
+}
+impl SourceSignature {
+    fn new(eph: &dyn EphemerisSource, spec: FrameSpec, system: usize) -> Self {
+        Self {
+            spec,
+            plotting_system: system,
+            physics_system: eph.origin_system().0,
+            offset: eph.physics_offset(),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct PlotPath {
-    signature: Option<(FrameSpec, usize, u64, f64, f64)>,
+    signature: Option<(SourceSignature, u64, f64, f64)>,
     cache: Option<PathCache>,
     last_time: Option<f64>,
     pub points: Vec<DVec3>,
@@ -38,8 +56,7 @@ impl PlotPath {
         let end = trajectory.last_time();
         let dt = ((end - trajectory.first_time()) / 512.0).max(0.01);
         let signature = (
-            spec,
-            eph.system_of(reference).0,
+            SourceSignature::new(eph, spec, eph.system_of(reference).0),
             generation,
             trajectory.first_time(),
             end,
@@ -89,7 +106,7 @@ impl PlotPath {
 /// Frame-space body samples refreshed on simulation time, independent of rendering cadence.
 #[derive(Default)]
 pub struct BodyPlots {
-    signature: Option<(FrameSpec, usize, u64, usize)>,
+    signature: Option<(SourceSignature, u64, usize)>,
     samples: Vec<Vec<DVec3>>,
 }
 impl BodyPlots {
@@ -111,8 +128,7 @@ impl BodyPlots {
         origin: DVec3,
     ) -> Vec<Vec<DVec3>> {
         let signature = (
-            spec,
-            system.0,
+            SourceSignature::new(eph, spec, system.0),
             (now / 2.0).floor().to_bits(),
             eph.bodies().len(),
         );

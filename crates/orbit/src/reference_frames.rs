@@ -81,6 +81,14 @@ impl FrameEvaluator {
         let n = ephemeris.bodies().len();
         spec.assert_valid(n);
         let mut frames = SystemFrames::new(ephemeris);
+        // BodyStates and trajectory samples are relative to the source's physics offset,
+        // while FrameSource body centres remain relative to their unshifted system barycentre.
+        // Represent that offset once as a split tree node rather than flattening it into points.
+        if ephemeris.physics_offset() != void_frames::SplitPosition::ORIGIN {
+            frames.origin = frames
+                .tree
+                .add_split_fixed(frames.origin, ephemeris.physics_offset());
+        }
         let frame = match spec {
             FrameSpec::Barycentric => frames.systems[system.0],
             FrameSpec::BodyInertial { body } => frames.inertial[body],
