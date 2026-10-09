@@ -1,3 +1,7 @@
+# LOD 效能探索交付（2026-10-09）
+
+本分支的CPU／SIMD／storage／balance／anchor優化、workers、native render thread、GPU resident／batch dispatch與ownership量測已收斂。快速15-body切換CPU／GPUpixel和checkpoint一致，GPU4161tiles位元核對、pending清空；最後app45 tests通過。GPU kernel加速沒有轉成pipe整體優勢，仍opt-in；一般預設只採用有等價證據的低成本路徑。可直接執行`target/acceptance/void-app-lod-review-final`；完整決策、證據、限制與人類验收操作見[結論](lod-review.md)。未merge/push、未宣稱完成人類GUI驗收。
+
 # LOD GPU batch dispatch 第七輪（2026-10-09）
 
 每組storage windows共用job表、二維dispatch，把GPU pack p50約0.26–0.27ms降到0.035ms；但pipe main intervals沒有改善，仍opt-in。motion11,049與U32/bounds/15-body-cycle9,222tiles位元核對通過，pixel／checkpoint一致、allocation數不累積；app45及scoped lint/build通過。未merge/push；詳見[第七輪報告](lod-batch-review.md)。

@@ -1451,6 +1451,7 @@ struct RenderBenchmark {
     lifecycle_bodies: Vec<String>,
     lifecycle_next: usize,
     lifecycle_checks: Vec<serde_json::Value>,
+    rapid_cycle: bool,
     motion_updates: usize,
     motion_body: Option<String>,
 }
@@ -1507,6 +1508,7 @@ impl RenderBenchmark {
                 .unwrap_or_default(),
             lifecycle_next: 0,
             lifecycle_checks: Vec::new(),
+            rapid_cycle: std::env::args().any(|arg| arg == "--benchmark-rapid-cycle"),
             motion_updates,
             motion_body,
         }
@@ -1552,7 +1554,7 @@ fn benchmark_tick(
             && metrics.last_paths.contains("render/ui/elapsed_cpu");
         config.stable = if ready { config.stable + 1 } else { 0 };
         if config.updates >= config.settle && config.stable >= 5 {
-            if config.lifecycle_next < config.lifecycle_bodies.len() {
+            if !config.rapid_cycle && config.lifecycle_next < config.lifecycle_bodies.len() {
                 let id = config.lifecycle_bodies[config.lifecycle_next].clone();
                 let body = lab.session.sim().world.body_index(&id);
                 let Ground::World(world) = &*ground else {
@@ -1605,6 +1607,7 @@ fn benchmark_tick(
                 "world_checkpoint":std::path::PathBuf::from(argument("--render-benchmark").unwrap()).with_extension("world.json"),
                 "scene_source":if argument("--load").is_some() { "saved checkpoint" } else { "preset" },
                 "lifecycle_body_sequence":config.lifecycle_bodies,"lifecycle_checks":config.lifecycle_checks,
+                "rapid_cycle":config.rapid_cycle,
                 "lod_motion_updates":config.motion_updates,"lod_motion_body":config.motion_body,
                 "pipelined_rendering":std::env::args().any(|arg|arg == "--benchmark-pipelined"),
                 "pipeline_statistics_disabled_by_request":std::env::args().any(|arg|arg == "--benchmark-no-pipeline-statistics"),
@@ -1614,6 +1617,38 @@ fn benchmark_tick(
         }
     } else if config.phase == 1 {
         config.run_updates += 1;
+        if config.rapid_cycle {
+            assert!(
+                !config.lifecycle_bodies.is_empty() && config.motion_updates == 0,
+                "rapid cycle requires explicit cycle bodies and cannot combine camera motion"
+            );
+            if config.lifecycle_next < config.lifecycle_bodies.len()
+                && (config.run_updates - 1).is_multiple_of(3)
+            {
+                let id = config.lifecycle_bodies[config.lifecycle_next].clone();
+                let body = lab.session.sim().world.body_index(&id);
+                let Ground::World(world) = &*ground else {
+                    panic!("rapid cycle requires world scenery")
+                };
+                assert!(
+                    world.bodies.contains_key(&body),
+                    "rapid cycle requires a solid rendered body"
+                );
+                let radius = lab.session.sim().fleet.ephemeris.bodies()[body].radius_meters;
+                lab.session.execute(Action::View {
+                    command: ViewCommand::BodyPreset {
+                        body,
+                        direction: DVec3::new(-1.0, 0.2, 0.3).normalize(),
+                        distance: radius * 3.5,
+                    },
+                });
+                lab.session.execute(Action::EndFrame {
+                    paused: true,
+                    rate: 0,
+                });
+                config.lifecycle_next += 1;
+            }
+        }
         if config.run_updates <= config.motion_updates {
             let id = config.motion_body.as_ref().expect("motion body configured");
             let body = lab.session.sim().world.body_index(id);
@@ -1643,7 +1678,15 @@ fn benchmark_tick(
                 && gpu_shared
                     .as_ref()
                     .is_none_or(|shared| shared.pending() == 0));
-        if metrics.capture.frames() >= config.frames && motion_settled {
+        let cycle_settled = !config.rapid_cycle
+            || (config.lifecycle_next == config.lifecycle_bodies.len()
+                && config.run_updates > config.lifecycle_bodies.len() * 3 + config.settle
+                && building == 0
+                && requests == 0
+                && gpu_shared
+                    .as_ref()
+                    .is_none_or(|shared| shared.pending() == 0));
+        if metrics.capture.frames() >= config.frames && motion_settled && cycle_settled {
             config.phase = 2;
             tag.measure = false;
             if let Some((profile, path)) = lab.profile.take() {
