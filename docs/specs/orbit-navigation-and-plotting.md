@@ -1,5 +1,7 @@
 # Orbit 自動導航、繪圖參照系與 AN／DN
 
+> **2026-10-10 交付撤回：整機失去回應。** 使用者回報啟動後滑鼠／鍵盤完全無回應，需強制關機。`tools/navigation-acceptance.sh` 已停用；以下啟動步驟及先前 agent 驗證不代表此版本可安全使用。根因尚未確認，不重新啟動遊戲或以使用者桌面重現。
+
 討論定案：2026-10-09。2026-10-10 接手修正：原交付的 Depart 卡死已確認，背景求解、取消、有限燃燒初值與主遊戲出發回歸已補齊；本輪驗證記錄見 `docs/orbit-navigation.md`。人類驗收尚未通過；未合併。
 實作分支：`work/orbit-navigation`，worktree `/home/pekka/Desktop/void-bevy-navigation`；證據及驗收操作見該 worktree 的 `docs/orbit-navigation.md`。
 共用開發與架構規則依 repository 根目錄 `AGENTS.md`。

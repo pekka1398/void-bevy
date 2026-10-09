@@ -1,5 +1,7 @@
 # Orbit navigation implementation and acceptance
 
+> **2026-10-10 交付撤回：整機失去回應。** 使用者回報啟動後滑鼠／鍵盤完全無回應，需強制關機。`tools/navigation-acceptance.sh` 已停用；以下啟動步驟及先前 agent 驗證不代表此版本可安全使用。根因尚未確認，不重新啟動遊戲或以使用者桌面重現。
+
 Worktree: `/home/pekka/Desktop/void-bevy-navigation`; branch `work/orbit-navigation`.
 Base: expanded bodies `3dcfa94`, not merged to master. Specification:
 `docs/specs/orbit-navigation-and-plotting.md`.
@@ -310,3 +312,24 @@ two vessels and selected v2. No full workspace suite or human acceptance is
 claimed. The ready-to-play checkpoint is
 `lab-log/navigation/acceptance-save.json` (paused, two retained/appended nodes,
 no automatic ignition), for explicit human review.
+
+## Withdrawal evidence — 2026-10-10
+
+Delivery `b53ede9` is withdrawn following the user's full-desktop hard-lock report.
+Previous boot `0d6c1bed7de244a58c724971e6210bb2` ends at 01:14:09 CST; the
+next boot starts at 01:14:36. At 01:13:03, gdm-x-session reports SYN_DROPPED
+mouse input and debounce timers late by 1157/1171 ms. Kernel and systemd-oomd
+queries for 01:00–01:14 do not establish OOM or a GPU reset as the cause. Earlier
+in that boot, including 00:16:39 during agent GUI startup, NVRM reports
+NV_ERR_NO_MEMORY allocation failures. These earlier errors are a relevant missed
+validation signal, not proof of the later hard-lock cause. pstore was not readable
+with current permissions.
+
+Agent GUI runs had dedicated memory-capped systemd services and TigerVNC X11.
+The shipped script directly executed the game on the user's display, without
+those limits. This validation/delivery mismatch is confirmed; adding limits alone
+would not establish a fix for a potential graphics/driver lockup. No game, build,
+GPU query workload, driver change or reproduction was started during triage.
+The launcher now exits before checksum/file loading/process launch; shell syntax
+and the refusal exit code were checked. Underlying executable and snapshots are
+preserved for investigation, not approved for direct launch.

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Quarantined after a reported desktop-wide hard lock on 2026-10-10.
+echo "Navigation acceptance build withdrawn: reported full-system hard lock. Do not launch this build directly. Investigation pending." >&2
+exit 1
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_dir"
 binary="target/acceptance/void-app-navigation"
