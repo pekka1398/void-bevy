@@ -1,10 +1,31 @@
 use glam::DVec3;
 use void_assembly::{ModuleState, VehicleControl, aircraft};
-use void_fleet_flight::{
-    aircraft_acceptance_planet,
-    session::{Action, FlightSession, InitialWorld, Outcome},
-};
+use void_fleet_flight::session::{Action, FlightSession, InitialWorld, Outcome};
 use void_vessels::AirDynamics;
+
+/// A test-only spherical runway world with <1cm hills, so gear and takeoff checks do not
+/// depend on the shape of normal terrain.
+fn aircraft_acceptance_planet(
+    mut planet: void_landing::LandingPlanet,
+) -> void_landing::LandingPlanet {
+    assert!(
+        planet.air_density_scale.is_some(),
+        "aircraft acceptance requires an atmospheric planet"
+    );
+    planet.terrain_config = void_terrain::TerrainConfig::Hills(void_terrain::HillsOptions {
+        name: "Aircraft acceptance runway terrain".into(),
+        radius_meters: planet.terrain.radius_meters,
+        max_height_meters: 0.01,
+        wavelength_meters: 10_000.0,
+        octaves: 1,
+    });
+    planet.terrain =
+        std::sync::Arc::new(void_terrain::Terrain::from_config(&planet.terrain_config));
+    planet.air_datum = 0.0;
+    planet.sea_level = None;
+    planet.label.push_str(" | AIRCRAFT RUNWAY ACCEPTANCE");
+    planet
+}
 
 fn make() -> FlightSession {
     let planet = aircraft_acceptance_planet(void_landing::earth_size());

@@ -196,6 +196,15 @@ pub enum Action {
         seconds: f64,
         rails: bool,
     },
+    /// Declared starting state for the selected vessel (DEV place ship).
+    Place {
+        placement: crate::placement::Placement,
+    },
+    /// Selected vessel ahead of `target`'s nose, facing it.
+    PlaceNear {
+        target: String,
+        gap_meters: f64,
+    },
     Join {
         part_a: String,
         node_a: String,
@@ -506,6 +515,14 @@ impl Action {
                     Err(reason) => Outcome::Refused(reason),
                 }
             }
+            Self::Place { placement } => match sim.place(placement) {
+                Ok(()) => Outcome::Applied,
+                Err(reason) => Outcome::Refused(reason),
+            },
+            Self::PlaceNear { target, gap_meters } => match sim.place_near(target, *gap_meters) {
+                Ok(()) => Outcome::Applied,
+                Err(reason) => Outcome::Refused(reason),
+            },
             Self::Join {
                 part_a,
                 node_a,

@@ -610,6 +610,39 @@ fn unique_bodies<'de, D: serde::Deserializer<'de>>(
     deserializer.deserialize_map(Unique)
 }
 
+/// The main game's world: Aurelia with layered terrain and sea in the authored solar system,
+/// starting landed at the Aurelia launch site with full aerodynamic forces and torques.
+pub fn main_game(craft: &void_assembly::Craft) -> crate::session::InitialWorld {
+    let original = void_landing::aurelia();
+    let terrain_config = TerrainConfig::Layered(void_terrain::LayeredOptions {
+        radius_meters: original.terrain.radius_meters,
+        ..void_terrain::DEFAULT_LAYERED
+    });
+    let terrain = Arc::new(Terrain::from_config(&terrain_config));
+    // Dry lowland on the layered terrain.
+    let (latitude, longitude) = (0.3_f64, 0.5_f64);
+    let site = DVec3::new(
+        latitude.cos() * longitude.cos(),
+        latitude.cos() * longitude.sin(),
+        latitude.sin(),
+    );
+    assert!(
+        terrain.height(site) > void_terrain::SEA_LEVEL,
+        "main game: launch site is underwater"
+    );
+    let planet = LandingPlanet {
+        terrain_config,
+        terrain,
+        air_datum: void_terrain::SEA_LEVEL,
+        sea_level: Some(void_terrain::SEA_LEVEL),
+        ..original
+    };
+    let mut initial = crate::session::InitialWorld::new(&planet, craft, site, true)
+        .with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque);
+    initial.world = solar_scenery(&planet);
+    initial
+}
+
 /// Authored first-pass solar scenery used by the main-game Aurelia preset.
 /// Physical density is unchanged for Aurelia; other optical air is visual only.
 pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {

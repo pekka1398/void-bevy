@@ -1,5 +1,6 @@
 //! First integration boundary for assembly/Fleet flight. No Bevy and no fixed two-stage rocket.
 pub mod checkpoint;
+pub mod placement;
 pub mod plans;
 pub mod presentation;
 pub mod session;
@@ -337,28 +338,3 @@ impl FleetFlight {
         Ok(plan)
     }
 }
-
-/// Explicit aircraft acceptance terrain: a spherical runway world with <1cm hills.
-/// The authored recipe is persisted and used by both scenery and contact mesh builders.
-/// This is a declared test world, not a hidden replacement for normal terrain.
-pub fn aircraft_acceptance_planet(mut planet: LandingPlanet) -> LandingPlanet {
-    assert!(
-        planet.air_density_scale.is_some(),
-        "aircraft acceptance requires an atmospheric planet"
-    );
-    planet.terrain_config = void_terrain::TerrainConfig::Hills(void_terrain::HillsOptions {
-        name: "Aircraft acceptance runway terrain".into(),
-        radius_meters: planet.terrain.radius_meters,
-        max_height_meters: 0.01,
-        wavelength_meters: 10_000.0,
-        octaves: 1,
-    });
-    planet.terrain =
-        std::sync::Arc::new(void_terrain::Terrain::from_config(&planet.terrain_config));
-    planet.air_datum = 0.0;
-    planet.sea_level = None;
-    planet.label.push_str(" | AIRCRAFT RUNWAY ACCEPTANCE");
-    planet
-}
-
-pub mod water;

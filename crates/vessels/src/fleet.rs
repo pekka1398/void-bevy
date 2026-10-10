@@ -28,6 +28,7 @@ use void_terrain::Terrain;
 
 mod eva;
 mod guidance;
+mod placement;
 mod thermal;
 mod vehicles;
 pub use eva::CrewSeat;
@@ -1076,42 +1077,7 @@ impl Fleet {
         let lowest = c
             .parts
             .iter()
-            .map(|p| {
-                let ay = (p.pose.rotation * DVec3::Y).y;
-                let hull = if p.definition.box_size_meters.is_none() {
-                    // Keep unchanged Craft2 launch arithmetic, including its subtraction order.
-                    let radial = if p.definition.shape == Shape::Box {
-                        p.definition.radius
-                            * ((p.pose.rotation * DVec3::X).y.abs()
-                                + (p.pose.rotation * DVec3::Z).y.abs())
-                    } else {
-                        p.definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
-                    };
-                    p.pose.position.y - ay.abs() * p.definition.height / 2.0 - radial
-                } else {
-                    let extent = if p.definition.shape == Shape::Box {
-                        let h = part_box_size(p.definition) / 2.0;
-                        h.x * (p.pose.rotation * DVec3::X).y.abs()
-                            + h.y * ay.abs()
-                            + h.z * (p.pose.rotation * DVec3::Z).y.abs()
-                    } else {
-                        ay.abs() * p.definition.height / 2.0
-                            + p.definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
-                    };
-                    p.pose.position.y - extent
-                };
-                p.definition.modules.iter().fold(hull, |lowest, m| match m {
-                    Module::Wheel { parameters: d, .. } => {
-                        let hub = p.pose.position + p.pose.rotation * d.suspension_origin;
-                        let end = hub
-                            + p.pose.rotation
-                                * d.suspension_direction
-                                * (d.rest_length_meters + d.travel_meters);
-                        lowest.min(end.y - d.radius_meters)
-                    }
-                    _ => lowest,
-                })
-            })
+            .map(|p| part_lowest_y(p.definition, &p.pose))
             .fold(f64::INFINITY, f64::min);
         let g = &self.grounds[self.ground_index(body)];
         let r = g.frame.body.radius_meters + self.terrain(body).height(d) + cy - lowest + 0.05;
@@ -3748,3 +3714,37 @@ pub use checkpoint::FleetCheckpoint;
 #[path = "fleet/multiscale.rs"]
 mod multiscale;
 pub use multiscale::PreciseVesselSnapshot;
+
+/// Lowest point of a part, including wheel travel, along its parts frame's +Y axis.
+fn part_lowest_y(definition: &PartDefinition, pose: &PartPose) -> f64 {
+    let ay = (pose.rotation * DVec3::Y).y;
+    let hull = if definition.box_size_meters.is_none() {
+        // Keep unchanged Craft2 launch arithmetic, including its subtraction order.
+        let radial = if definition.shape == Shape::Box {
+            definition.radius
+                * ((pose.rotation * DVec3::X).y.abs() + (pose.rotation * DVec3::Z).y.abs())
+        } else {
+            definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
+        };
+        pose.position.y - ay.abs() * definition.height / 2.0 - radial
+    } else {
+        let extent = if definition.shape == Shape::Box {
+            let h = part_box_size(definition) / 2.0;
+            h.x * (pose.rotation * DVec3::X).y.abs()
+                + h.y * ay.abs()
+                + h.z * (pose.rotation * DVec3::Z).y.abs()
+        } else {
+            ay.abs() * definition.height / 2.0 + definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
+        };
+        pose.position.y - extent
+    };
+    definition.modules.iter().fold(hull, |lowest, m| match m {
+        Module::Wheel { parameters: d, .. } => {
+            let hub = pose.position + pose.rotation * d.suspension_origin;
+            let end = hub
+                + pose.rotation * d.suspension_direction * (d.rest_length_meters + d.travel_meters);
+            lowest.min(end.y - d.radius_meters)
+        }
+        _ => lowest,
+    })
+}
