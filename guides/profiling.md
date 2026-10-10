@@ -8,7 +8,7 @@
 | `--bench <報告>` | 固定的一組情境，每個情境同樣秒數，輸出文字報告 | 一般編譯就能跑 |
 | Tracy | 每個 Bevy system、render 階段、GPU pass、我們自己的 zone，逐幀 | 用 `--features profiling` 編譯（指令在下面 Tracy 一節） |
 
-下面的指令分兩種：標「agent」的是 agent 跑的，編譯、遊戲、測試一律放進 `void-agent.slice`、編譯用 `-j 2`（AGENTS.md 第 4 條、guides/computeruse.md）；標「使用者桌面」的是使用者自己在桌面上跑的。
+下面的指令分兩種：標「agent」的是 agent 跑的，照 `guides/build.md`：編譯經過 `tools/slice`、用 `-j 8`；遊戲和量測直接用 `systemd-run` 放進 `void-agent.slice`，量測整段拿著編譯鎖 `/tmp/void-build.lock`，免得別的編譯插進來；畫面在 `:7`（guides/computeruse.md）。標「使用者桌面」的是使用者自己在桌面上跑的。開發編譯的 Bevy 是共用函式庫，執行檔靠 rpath 找到它，直接執行 `target/.../void-app` 就好，不用設 `LD_LIBRARY_PATH`。
 
 ## 固定情境（`--bench`）
 
@@ -16,8 +16,9 @@
 
 ```bash
 # agent：在 :7 上跑（guides/computeruse.md），開了以後馬上把視窗拉到 1440×900
-systemd-run --user --scope --quiet --slice=void-agent.slice -- cargo build -j 2 -p void-app
-DISPLAY=:7 systemd-run --user --scope --quiet --slice=void-agent.slice -- \
+tools/slice cargo build -j 8 -p void-app
+DISPLAY=:7 flock /tmp/void-build.lock \
+  systemd-run --user --scope --quiet --slice=void-agent.slice -- \
   target/debug/void-app --bench <報告.txt>
 
 # 使用者桌面
@@ -35,19 +36,21 @@ cargo build -p void-app && target/debug/void-app --bench <報告.txt>
 
 ## Tracy
 
-Tracy 的版本要和 Bevy 用的 `tracy-client` 一致：Bevy 0.19.1 → `tracing-tracy 0.11.4` → `tracy-client 0.18.3` → `tracy-client-sys 0.27.0` → **Tracy v0.13.0**（protocol 76）。原始碼、建置腳本和編好的程式在 `ref/tracy/`（`bin/` 下有 `tracy-profiler`、`tracy-capture`、`tracy-csvexport`）。升級 Bevy 後，看 `tracy-client-sys` 的 `tracy/common/TracyVersion.hpp` 換對應的 Tracy，用 `ref/tracy/build.sh` 重編。
+Tracy 的版本要和 Bevy 用的 `tracy-client` 一致：Bevy 0.19.1 → `tracing-tracy 0.11.4` → `tracy-client 0.18.3` → `tracy-client-sys 0.27.0` → **Tracy v0.13.0**（protocol 76）。原始碼、建置腳本和編好的程式在主目錄的 `ref/tracy/`（`~/Desktop/void-bevy/ref/tracy`；`ref/` 不進 git，worktree 裡沒有，用這個路徑；`bin/` 下有 `tracy-profiler`、`tracy-capture`、`tracy-csvexport`）。升級 Bevy 後，看 `tracy-client-sys` 的 `tracy/common/TracyVersion.hpp` 換對應的 Tracy，用 `ref/tracy/build.sh` 重編。
+
+Tracy 版一定要 `--no-default-features`，Bevy 靜態連結：開著 `dev`（Bevy 是共用函式庫）時，Tracy 的 C 程式庫被連進 `libbevy_dylib.so` 裡、沒有匯出，我們自己的 `zone!` 連結不到（`undefined symbol: ___tracy_emit_zone_begin`），所以 `dev` 和 `profiling` 一起開會直接編譯失敗並說要加什麼。因此 Tracy 版每次改動都要重新連結整個 Bevy。它放在自己的 `--target-dir target/profiling`：Bevy 的 feature 和一般編譯不同，和 `target/debug` 共用的話兩邊每次都要重編整個 Bevy。第一次從零編約 6 分鐘。要量發行版就再加 `--release`。
 
 ```bash
 # 使用者桌面：開 GUI 看。先開 Tracy，再開遊戲，Tracy 會列出它，點 Connect
-cargo build -p void-app --features profiling --target-dir target/profiling
+cargo build -p void-app --no-default-features --features profiling --target-dir target/profiling
 ref/tracy/bin/tracy-profiler &
 TRACY_NO_SAMPLING=1 target/profiling/debug/void-app
 
 # agent：不開 GUI，錄下來再匯出（遊戲結束時 tracy-capture 自己存檔結束）
-systemd-run --user --scope --quiet --slice=void-agent.slice -- \
-  cargo build -j 2 -p void-app --features profiling --target-dir target/profiling
+tools/slice cargo build -j 8 -p void-app --no-default-features --features profiling --target-dir target/profiling
 systemd-run --user --scope --quiet --slice=void-agent.slice -- ref/tracy/bin/tracy-capture -o run.tracy -f &
-DISPLAY=:7 TRACY_NO_SAMPLING=1 systemd-run --user --scope --quiet --slice=void-agent.slice -- \
+DISPLAY=:7 TRACY_NO_SAMPLING=1 flock /tmp/void-build.lock \
+  systemd-run --user --scope --quiet --slice=void-agent.slice -- \
   target/profiling/debug/void-app --bench report.txt
 T=$'\t'   # zone 名稱裡有逗號，一律用 tab 分隔
 ref/tracy/bin/tracy-csvexport -s "$T" run.tracy > zones.tsv           # 每個 zone 的次數、總時間、平均

@@ -36,7 +36,8 @@ fontique = { version = "=0.9.0", default-features = false }
 [features]
 default = ["dev"]
 dev = ["bevy/dynamic_linking"]
-# Tracy: every Bevy system, render stage and GPU pass, plus our own zones. See guides/profiling.md.
+# Tracy: every Bevy system, render stage and GPU pass, plus our own zones. Needs static Bevy
+# (--no-default-features); see guides/profiling.md.
 profiling = ["bevy/trace_tracy", "void-diagnostics/tracy"]
 
 [dev-dependencies]
