@@ -810,7 +810,7 @@ fn dispatch(pilot: &mut Pilot, pointer_over_label: bool, key: KeyCode) {
     }
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn refresh(
     flight: NonSend<Flight>,
     notice: Res<Notice>,

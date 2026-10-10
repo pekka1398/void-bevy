@@ -5,9 +5,7 @@ use void_vessels::AirDynamics;
 
 /// A test-only spherical runway world with <1cm hills, so gear and takeoff checks do not
 /// depend on the shape of normal terrain.
-fn aircraft_acceptance_planet(
-    mut planet: void_landing::LandingPlanet,
-) -> void_landing::LandingPlanet {
+fn flat_runway_planet(mut planet: void_landing::LandingPlanet) -> void_landing::LandingPlanet {
     assert!(
         planet.air_density_scale.is_some(),
         "aircraft acceptance requires an atmospheric planet"
@@ -28,7 +26,7 @@ fn aircraft_acceptance_planet(
 }
 
 fn make() -> FlightSession {
-    let planet = aircraft_acceptance_planet(void_landing::earth_size());
+    let planet = flat_runway_planet(void_landing::earth_size());
     let site = DVec3::new(0.8, 0.55, 0.25).normalize();
     FlightSession::new(
         InitialWorld::new(&planet, &aircraft(), site, true)

@@ -26,19 +26,17 @@ fn main_game_verifies_recordings_without_a_window() {
     std::fs::create_dir_all(&directory).unwrap();
     let record = directory.join("recording.json");
     session.save(&record);
-    for (flag, path, message) in [("--verify", &record, "Verified Fleet session")] {
-        let output = Command::new(env!("CARGO_BIN_EXE_void-app"))
-            .arg(flag)
-            .arg(path)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(String::from_utf8_lossy(&output.stdout).contains(message));
-    }
+    let output = Command::new(env!("CARGO_BIN_EXE_void-app"))
+        .arg("--verify")
+        .arg(&record)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Verified Fleet session"));
     std::fs::remove_dir_all(directory).unwrap();
 }
 

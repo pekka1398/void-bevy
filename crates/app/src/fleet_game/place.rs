@@ -123,11 +123,16 @@ pub(super) fn click(pilot: &mut Pilot, draft: &mut PlaceDraft, click: PlaceClick
     match click {
         PlaceClick::BodyPrevious | PlaceClick::BodyNext => {
             let bodies = sim.fleet.ephemeris.bodies();
-            let i = bodies
-                .iter()
-                .position(|b| b.id == draft.body)
-                .expect("draft body is a world body");
             let n = bodies.len();
+            // A loaded save can bring another world, whose bodies the draft does not name.
+            let Some(i) = bodies.iter().position(|b| b.id == draft.body) else {
+                pilot.notice.0 = format!(
+                    "{} is not in this world; body set to {}",
+                    draft.body, bodies[0].name
+                );
+                draft.body = bodies[0].id.clone();
+                return;
+            };
             let next = if click == PlaceClick::BodyNext {
                 (i + 1) % n
             } else {
