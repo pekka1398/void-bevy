@@ -129,7 +129,6 @@ pub fn earth_size() -> LandingPlanet {
 }
 
 /// The Earth analogue inside the full Sol system, with terra's placeholder hills.
-
 pub fn aurelia() -> LandingPlanet {
     let system = SystemSpec::sol();
     let built = build_system(&system);
