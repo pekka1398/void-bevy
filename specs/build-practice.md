@@ -4,7 +4,9 @@
 
 - 編譯只用 `-j 2`，16 個執行緒大多閒著。當初這樣定是怕記憶體不夠、吃到 swap 卡死整台電腦，現在已經有 `void-agent.slice`（11G、不准用 swap）擋著。
 - 開關 feature、跑全部測試時要等很久，slice 的記憶體峰值會碰到約 11G。
-- `void-app` 執行檔有 857MB，`target/` 有 88G。
+- `void-app` 執行檔有 857MB。
+- `target/` 有 100G 以上（`debug/deps` 49G、`debug/incremental` 33G），裡面大多是過時的編譯結果，從來沒清過。硬碟已經用了 85%，只剩約 70G。
+- 多個 worktree 同時工作時，如果把 `target` symlink 到主目錄共用，依賴不用重編，但最後的執行檔（例如 `target/debug/void-app`）是同一個路徑，會互相蓋掉；同時編譯也要排隊等鎖。如果各用各的 target，每個都要從零編譯，硬碟也放不下好幾份。
 - 沒有人量過時間和記憶體花在哪裡，所以也不知道該怎麼改。
 
 ## 要做的
@@ -32,7 +34,10 @@
 - 工作區自己的 crate 也只留行號表（`debug = "line-tables-only"`）；
 - 連結器：確認現在用的是哪一個，再試 mold；
 - 檢查有沒有因為 feature 組合不同造成依賴重編（例如 `-p A` 和 `-p B` 各編一份 Bevy）；
-- 清理 `target/` 的方法（例如 `cargo sweep`）。
+- 清理 `target/` 的方法（例如 `cargo sweep`），量清理前後的大小，並確認清完之後不會讓下次編譯從零開始；
+- 多個 worktree 怎麼共用編譯結果：例如共用依賴、但各自的最終執行檔分開（`--target-dir`、sccache 等），比較硬碟用量和重編時間。
+
+**注意**：主目錄的 `target/` 有其他 worktree 透過 symlink 在用。量「完整編譯」時用自己的 target 目錄，不准清掉或改動主目錄的 `target/`。要清主目錄的 `target/` 時，先告訴我，確認當下沒有其他工作在用它。
 
 如果發現其他值得試的做法，加進 spec 再試。
 
@@ -44,8 +49,8 @@
 
 - 什麼情況用什麼指令：check、只測改到的 crate、全部測試；
 - `-j` 開多少，大概會用到多少記憶體；
-- 多個 agent 同時工作時怎麼排隊，例如共用 target 目錄時 cargo 會自己鎖住、要不要分開 target；
-- 怎麼清理 `target/`。
+- 多個 worktree、多個 agent 同時工作時，target 怎麼安排、編譯怎麼排隊；
+- 怎麼清理 `target/`、多久清一次。
 
 `guides/computeruse.md` 裡現在那段資源限制的說明搬到 `guides/build.md`，computeruse.md 只留一句指過去，同一件事只寫在一個地方。照 `guides/workflow.md` 的原則，只寫看程式碼看不出來、但一定要遵守的東西，內容要和實際量到的數字對得上。
 
