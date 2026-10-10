@@ -17,9 +17,8 @@ nohup Xvnc :7 -geometry 1440x900 -depth 24 -localhost -SecurityTypes None \
 nohup websockify --web /usr/share/novnc 127.0.0.1:6080 localhost:5907 > $S/ws.log 2>&1 &
 
 # 3. 遊戲，先用 tools/slice cargo build 編好，放進 void-agent.slice（不經過 tools/slice，免得整場拿著編譯鎖）；
-#    從 worktree 目錄啟動，存檔會寫到這裡的 saves/。Bevy 是共用函式庫，要指定 LD_LIBRARY_PATH
-cd <worktree> && DISPLAY=:7 LD_LIBRARY_PATH=$PWD/target/debug/deps:$(rustc --print target-libdir) \
-  nohup systemd-run --user --scope --quiet --slice=void-agent.slice -- \
+#    從 worktree 目錄啟動，存檔會寫到這裡的 saves/
+cd <worktree> && DISPLAY=:7 nohup systemd-run --user --scope --quiet --slice=void-agent.slice -- \
   target/debug/void-app > $S/game.log 2>&1 &
 
 # 4. 在使用者桌面開瀏覽器

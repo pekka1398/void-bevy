@@ -36,12 +36,7 @@ tools/slice cargo build -j 8 -p void-app
 
 開發編譯把 Bevy 編成共用函式庫（`void-app` 的 `dev` feature，預設開啟），改一行之後只重新連結約 44MB 的執行檔，不用再連結整個 Bevy。
 
-- `cargo run -p void-app` 直接可以跑。
-- 直接執行 `target/debug/void-app` 要先指定函式庫路徑，否則會報 `libbevy_dylib-*.so` 和 `libstd-*.so` 找不到：
-
-  ```bash
-  LD_LIBRARY_PATH=$PWD/target/debug/deps:$(rustc --print target-libdir) target/debug/void-app
-  ```
+- `cargo run -p void-app` 和直接執行 `target/debug/void-app` 都可以，不用設 `LD_LIBRARY_PATH`：執行檔靠 rpath（`crates/app/build.rs`）找到旁邊 `deps/` 裡的 Bevy 和 Rust 工具鏈裡的 libstd。所以執行檔要留在 target 裡跑，不能單獨複製到別處。
 
 - 發行版一定要關掉 `dev`，Bevy 靜態連結：
 
