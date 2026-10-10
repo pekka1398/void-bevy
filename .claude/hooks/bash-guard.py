@@ -9,7 +9,13 @@ import sys
 
 call = json.load(sys.stdin)
 tool = call.get("tool_input", {})
-cmd = tool.get("command", "")
+# Heredoc bodies are data (scripts, file contents), not commands.
+cmd = re.sub(
+    r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2\s*(?=\n|$)",
+    lambda m: m.group(0).split("\n", 1)[0],
+    tool.get("command", ""),
+    flags=re.S,
+)
 problems = []
 
 WRAPPERS = {
@@ -31,6 +37,9 @@ def commands(text):
                 break
         if words:
             yield words
+    # Scripts given to `bash -c` / `sh -c` are commands too.
+    for inner in re.finditer(r"\b(?:bash|sh)\s+-c\s+(['\"])(.*?)\1", text, flags=re.S):
+        yield from commands(inner.group(2))
 
 
 in_slice = re.search(r"tools/slice|--slice=void-agent\.slice|flock /tmp/void-build\.lock", cmd)
@@ -78,8 +87,9 @@ for words in commands(cmd):
         break
 
 # Rule 15: a program left running must not hold the tool's stdin/stdout/stderr.
-for line in cmd.split("\n"):
-    for amp in re.finditer(r"(?<![&>|<])&(?![&>])", line):
+unquoted = re.sub(r"'[^']*'|\"(?:\\.|[^\"\\])*\"", "''", cmd)
+for line in unquoted.split("\n"):
+    for amp in re.finditer(r"(?<![&>|<])&(?=\s|$)", line):
         before = line[: amp.start()]
         if re.search(r"<\s*/dev/null", before) and re.search(r">\s*\S", before) and "2>&1" in before:
             continue
