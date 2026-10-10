@@ -24,6 +24,8 @@ DISPLAY=:1 xdg-open "http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scal
 
 啟動後立刻用 `ps` 記下 Xvnc、websockify、void-app 的 PID，跟使用者說。結束時只用這些數字 PID `kill`。
 
+驗收結束就關掉遊戲、websockify、Xvnc（遊戲沒人看也會一直吃約 1 GB 記憶體和一個多核心）。使用者要接著看時才留著，並告訴他 PID。
+
 用 `ss -ltnp | grep -E "6080|5907"` 確認兩個埠都只在 `127.0.0.1` 上。
 
 ## 遊戲視窗
