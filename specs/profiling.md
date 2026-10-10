@@ -14,6 +14,7 @@
 ### 1. CPU：Bevy 內建的 tracing 接 Tracy
 
 - 用 Bevy 的 `trace_tracy` feature，在 `void-app` 開一個 cargo feature 控制。平常編譯不開，不影響效能。
+  - 實際：feature 叫 `profiling`。master 改成開發編譯 Bevy 是共用函式庫（`dev`）之後，Tracy 版要 `--no-default-features` 靜態連結 Bevy，否則我們自己的 zone 連結不到 Tracy；兩個一起開會編譯失敗並說要加什麼。
 - 開了以後每個 Bevy system、render 階段、每幀都有時間紀錄。另外在我們自己的熱點加 span，至少包括：
   - 模擬：`FlightSession::execute`、`advance_on_rails` 和裡面的各項檢查、船的推進、星曆延伸；
   - 地形：LOD 選擇、tile 生成；
