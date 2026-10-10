@@ -282,7 +282,8 @@ pub(super) fn spawn(
             ..base()
         },
     );
-    // Wide enough for "T+ 999d 23:59:59 · 100000× PAUSED"; the rate buttons never shift.
+    // Wide enough for "T+ 999d 23:59:59"; the rate buttons never shift. The highlighted rate and
+    // Pause buttons show the rest of the clock state.
     fixed_readout(
         commands,
         clock,
@@ -290,7 +291,7 @@ pub(super) fn spawn(
         14.,
         1,
         TextLayout::no_wrap(),
-        px(34. * 14. * GLYPH),
+        px(16. * 14. * GLYPH),
     );
     let rates = row(commands, clock);
     for (i, r) in RATES.iter().enumerate() {
@@ -723,24 +724,73 @@ fn spawn_place(commands: &mut Commands, body: Entity) {
     );
 }
 
-/// Why a control cannot be used right now. Such controls keep their place, are drawn greyed and
-/// a click only repeats the reason in the notice.
-fn unavailable(click: Click, flight: &Flight, draft: &place::PlaceDraft) -> Option<&'static str> {
-    match click {
-        Click::Dev | Click::Help => None,
-        _ if flight.playback.is_some() => Some("UI controls unavailable during playback"),
-        Click::Field(Field::Place(_)) => None,
-        Click::Field(_) => {
-            let sim = flight.session.sim();
-            sim.plans
-                .get(&sim.selected)
-                .is_none_or(|p| p.plan.count() == 0)
-                .then_some("Add a maneuver before editing values")
+/// What the controls can do this frame, worked out once and asked per control by `reason`.
+struct Usable {
+    playback: bool,
+    target: bool,
+    /// Why the selected vessel's plan cannot be changed, if it cannot.
+    edit: Option<String>,
+    count: usize,
+    selected: usize,
+    executing: bool,
+    warping: bool,
+}
+impl Usable {
+    fn new(flight: &Flight, draft: &place::PlaceDraft) -> Self {
+        let sim = flight.session.sim();
+        let id = &sim.selected;
+        let plan = sim.plans.get(id);
+        let executing = plan.is_some_and(|p| p.executing);
+        let edit = if sim.fleet.control_profile(id) != Some(void_assembly::ControlProfile::Flight) {
+            Some("Maneuver planning needs a flight vessel".into())
+        } else if executing {
+            Some("Abort the executing maneuver before editing".into())
+        } else {
+            sim.plan_engine(id).err()
+        };
+        Self {
+            playback: flight.playback.is_some(),
+            target: draft.target.is_some(),
+            edit,
+            count: plan.map_or(0, |p| p.plan.count()),
+            selected: plan.map_or(0, |p| p.selected),
+            executing,
+            warping: sim.maneuver_warp.active(),
         }
-        Click::Place(place::PlaceClick::ApplyNear) if draft.target.is_none() => {
-            Some("Place refused: choose a target vessel first")
+    }
+    /// Why `click` cannot be used right now. Such controls keep their place, are drawn greyed and
+    /// a click only repeats the reason in the notice.
+    fn reason(&self, click: Click) -> Option<String> {
+        let none = || Some("Add a maneuver first".to_string());
+        match click {
+            Click::Dev | Click::Help => None,
+            _ if self.playback => Some("UI controls unavailable during playback".into()),
+            Click::Place(place::PlaceClick::ApplyNear) if !self.target => {
+                Some("Place refused: choose a target vessel first".into())
+            }
+            Click::Field(Field::Place(_)) | Click::Place(_) => None,
+            Click::Key(KeyCode::KeyM) => self.edit.clone(),
+            Click::Field(_)
+            | Click::Key(
+                KeyCode::Delete | KeyCode::KeyV | KeyCode::KeyY | KeyCode::KeyU | KeyCode::KeyB,
+            ) => self
+                .edit
+                .clone()
+                .or_else(|| (self.count == 0).then(none).flatten()),
+            Click::Key(KeyCode::BracketLeft) if self.count == 0 => none(),
+            Click::Key(KeyCode::BracketLeft) if self.selected == 0 => {
+                Some("Already at the first maneuver".into())
+            }
+            Click::Key(KeyCode::BracketRight) if self.count == 0 => none(),
+            Click::Key(KeyCode::BracketRight) if self.selected + 1 >= self.count => {
+                Some("Already at the last maneuver".into())
+            }
+            Click::Key(KeyCode::KeyZ) if !self.warping && self.count == 0 => none(),
+            Click::Key(KeyCode::Escape) if !self.executing && !self.warping => {
+                Some("No maneuver is executing".into())
+            }
+            _ => None,
         }
-        _ => None,
     }
 }
 
@@ -775,9 +825,9 @@ pub(super) fn interactions(
     if keys.just_pressed(KeyCode::Backquote) && state.field.is_none() {
         state.dev = !state.dev;
     }
+    let usable = Usable::new(&pilot.flight, &draft);
     for (interaction, action, mut background) in &mut clicks {
-        let hovered = *interaction == Interaction::Hovered
-            && unavailable(*action, &pilot.flight, &draft).is_none();
+        let hovered = *interaction == Interaction::Hovered && usable.reason(*action).is_none();
         background.0 = if matches!(action, Click::Key(KeyCode::KeyK | KeyCode::KeyL)) && !hovered {
             Color::NONE
         } else if hovered {
@@ -790,8 +840,8 @@ pub(super) fn interactions(
         if !matches!(click, Click::Field(_)) {
             state.field = None;
         }
-        if let Some(reason) = unavailable(*click, &pilot.flight, &draft) {
-            pilot.notice.0 = reason.into();
+        if let Some(reason) = Usable::new(&pilot.flight, &draft).reason(*click) {
+            pilot.notice.0 = reason;
             continue;
         }
         match click {
@@ -1030,16 +1080,6 @@ pub(super) fn refresh(
     let whole = f.time().floor() as u64;
     let map = camera.view.map_or(0., |v| v.map_weight);
     for (kind, mut node) in &mut orbit {
-        if *kind == Readout::Maneuver {
-            node.display = if sim.plans.contains_key(id)
-                || (f.control_profile(id) == Some(void_assembly::ControlProfile::Flight)
-                    && sim.plan_engine(id).is_ok())
-            {
-                Display::Flex
-            } else {
-                Display::None
-            };
-        }
         if *kind == Readout::Orbit {
             node.display = if map > 0. {
                 Display::Flex
@@ -1051,7 +1091,7 @@ pub(super) fn refresh(
     for (kind, mut text) in &mut texts {
         text.0 = match kind {
             Readout::Clock => format!(
-                "T+ {}{:02}:{:02}:{:02} · {}× {}",
+                "T+ {}{:02}:{:02}:{:02}",
                 if whole >= 86400 {
                     format!("{}d ", whole / 86400)
                 } else {
@@ -1060,12 +1100,6 @@ pub(super) fn refresh(
                 whole / 3600 % 24,
                 whole / 60 % 60,
                 whole % 60,
-                RATES[if flight.playback.is_some() {
-                    view.rate
-                } else {
-                    flight.rate
-                }],
-                if flight.paused { "PAUSED" } else { "" }
             ),
             Readout::Stages => format!("STAGES · {:?} · {}", ship.mode, ship.name),
             Readout::Throttle => format!(
@@ -1106,11 +1140,14 @@ pub(super) fn refresh(
                 map * 100.
             ),
             Readout::Place => place::describe(&draft, sim),
-            Readout::Maneuver => plan_description(&flight.session)
-                .split("\nM add")
-                .next()
-                .unwrap()
-                .to_owned(),
+            Readout::Maneuver => match Usable::new(&flight, &draft).edit {
+                Some(reason) if !sim.plans.contains_key(id) => reason,
+                _ => plan_description(&flight.session)
+                    .split("\nM add")
+                    .next()
+                    .unwrap()
+                    .to_owned(),
+            },
             Readout::ViewDiagnostics => {
                 let sample = view.sample(sim);
                 let state = sample.view;
@@ -1444,6 +1481,7 @@ pub(super) fn indicators(
             pending.extend(c.iter());
         }
     }
+    let usable = Usable::new(&flight, &draft);
     // Button and generic colour queries are disjoint through Without<Button>.
     for (entity, click, mut bg) in &mut buttons {
         let active = match click {
@@ -1470,7 +1508,7 @@ pub(super) fn indicators(
         if active {
             bg.0 = Color::srgb(0.12, 0.35, 0.18);
         }
-        let usable = unavailable(*click, &flight, &draft).is_none();
+        let usable = usable.reason(*click).is_none();
         for child in children.get(entity).into_iter().flat_map(|c| c.iter()) {
             if let (Ok(caption), Ok((Some(mut color), _, _))) =
                 (captions.get(child), colors.get_mut(child))
