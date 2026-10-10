@@ -486,8 +486,6 @@ fn air_pass(
             });
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind_group, &[offset]);
-        #[cfg(feature = "render-metrics")]
-        bevy::log::trace!(target:"void_draw_submission", "draw: 0..3 0..1");
         pass.draw(0..3, 0..1);
         drop(pass);
         span.end(ctx.command_encoder());

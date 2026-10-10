@@ -733,7 +733,6 @@ dependencies = [
  "slotmap",
  "smallvec",
  "thiserror 2.0.21",
- "tracing",
  "variadics_please",
 ]
 

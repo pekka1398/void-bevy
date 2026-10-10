@@ -5,9 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
-[features]
-render-metrics = ["bevy/detailed_trace"]
-
 [dependencies]
 void-fleet-flight = { path = "../fleet-flight" }
 void-multiscale.workspace = true

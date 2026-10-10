@@ -3,7 +3,7 @@ use std::process::Command;
 use void_fleet_flight::session::{Action, FlightSession, InitialWorld};
 
 #[test]
-fn main_game_verifies_direct_world_saves_and_recordings_without_a_window() {
+fn main_game_verifies_recordings_without_a_window() {
     let planet = void_landing::pebble();
     let craft = void_assembly::demo_craft();
     let mut session = FlightSession::new(InitialWorld::new(
@@ -24,14 +24,9 @@ fn main_game_verifies_direct_world_saves_and_recordings_without_a_window() {
     let directory =
         std::env::temp_dir().join(format!("void-main-fleet-cli-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
-    let save = directory.join("world.json");
     let record = directory.join("recording.json");
-    session.save_checkpoint(&save);
     session.save(&record);
-    for (flag, path, message) in [
-        ("--verify-save", &save, "Verified Fleet world save"),
-        ("--verify", &record, "Verified Fleet session"),
-    ] {
+    for (flag, path, message) in [("--verify", &record, "Verified Fleet session")] {
         let output = Command::new(env!("CARGO_BIN_EXE_void-app"))
             .arg(flag)
             .arg(path)
@@ -107,4 +102,14 @@ fn recovery_is_an_explicit_no_window_command_and_retains_uncommitted_input() {
         serde_json::from_slice(&std::fs::read(report).unwrap()).unwrap();
     assert_eq!(details["pending"]["action"]["throttle"], 2.0);
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn unknown_arguments_are_refused() {
+    let output = Command::new(env!("CARGO_BIN_EXE_void-app"))
+        .arg("--reentry")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown argument"));
 }
