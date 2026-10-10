@@ -5,10 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
-[features]
-# Tracy: every Bevy system, render stage and GPU pass, plus our own zones. See guides/profiling.md.
-profiling = ["bevy/trace_tracy", "void-diagnostics/tracy"]
-
 [dependencies]
 void-fleet-flight = { path = "../fleet-flight" }
 void-multiscale.workspace = true
@@ -40,6 +36,8 @@ fontique = { version = "=0.9.0", default-features = false }
 [features]
 default = ["dev"]
 dev = ["bevy/dynamic_linking"]
+# Tracy: every Bevy system, render stage and GPU pass, plus our own zones. See guides/profiling.md.
+profiling = ["bevy/trace_tracy", "void-diagnostics/tracy"]
 
 [dev-dependencies]
 void-testkit.workspace = true
