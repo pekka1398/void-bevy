@@ -19,7 +19,7 @@ branch：`cleanup/test-fixtures`
      - `void-landing` 的假星球：pebble、Luna、Terra、丘陵版 Aurelia、`planet_by_id`、`planet_environment`、`planet_ephemeris`。沒人用的 `aurelia_fast` 直接刪掉。
      - `void-multiscale/fixtures.rs` 的假星系。`default_galaxy` 如果遊戲本身要用，就留在正式程式碼。
      - `void-assembly` 只給測試用的船：`crewed_flight_rocket`、`crew_rover`、`rendezvous_pod`。
-     - `void-vessels/sites.rs` 的 `flat_site`、`pod_tank`、`nearby_site`。
+     - `void-vessels/sites.rs` 的 `flat_site`、`pod_tank`。`nearby_site` 留著，遊戲按 N 生船時會用到。
    - 只有單一 crate 的測試在用的東西，放在那個 crate 的 `tests/` 裡，不進 testkit：
      - fleet-flight 的 `aurelia_selene`、`stellar_neighborhood`、`daylight_terrain_site`；
      - terrain 的 `sunlit_*`；
@@ -28,7 +28,7 @@ branch：`cleanup/test-fixtures`
 
 3. **只給測試用的 Action 和固定場景**
    - `Action` 裡只有測試在用的 `LaunchState`、`LaunchSplitState`、`LaunchFlightAt`、`LaunchGroundAt` 刪掉。
-   - 同時刪掉固定 400 km 軌道的 `launch_orbital`，以及只有它在用的 `LaunchOrbit`、`LaunchOrbitAt`。這兩個 Action 要先確認遊戲本身沒在用。
+   - 同時刪掉 `LaunchOrbit` 和 `launch_orbital`：它們固定在 home 星球。遊戲按 O 用的是 `LaunchOrbitAt`，所以 `LaunchOrbitAt` 留著。
    - 用到它們的測試，改成用遊戲本身的 `Place`／`PlaceNear` 設定船的狀態。有表達不了的情境就回報，不保留舊的 Action。
    - 錄影格式改了，所以 `FORMAT_VERSION` 要升。
 
