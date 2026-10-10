@@ -12,7 +12,7 @@ pub use camera::{
     BODY_MIN_RADII, FLIGHT_MAX_DISTANCE, FocusGeometry, FocusKind, MAP_FADE_RADII,
     MAP_MIN_DISTANCE, MAX_DISTANCE, MIN_ANGLE_FROM_UP, OrbitCamera, SURFACE_LOCK_RADII,
     UP_TURN_RADII, VESSEL_MIN_DISTANCE, ViewMode, ViewState, camera_spin, corotation_weight,
-    map_weight_for, perpendicular, rotate, slerp_unit, smoothstep, up_weight_for, view_state,
+    map_weight_for, perpendicular, slerp_unit, smoothstep, up_weight_for, view_state,
 };
 pub use conic::{ellipse_points, ellipse_points_in_time};
 pub use map::{

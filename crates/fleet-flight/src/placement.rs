@@ -78,7 +78,8 @@ pub enum SiteKind {
     Ocean,
 }
 
-fn unit_site(latitude_degrees: f64, longitude_degrees: f64) -> DVec3 {
+/// Unit direction of a latitude and longitude in the body-fixed frame (+Z north, +X at 0°).
+pub(crate) fn unit_site(latitude_degrees: f64, longitude_degrees: f64) -> DVec3 {
     let (la, lo) = (
         latitude_degrees.to_radians(),
         longitude_degrees.to_radians(),

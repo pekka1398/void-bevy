@@ -33,16 +33,15 @@ fn mating_points_and_normals_with_reversed_and_shuffled_parts() {
             let na = node(a.definition, &link.node_a).unwrap();
             let nb = node(b.definition, &link.node_b).unwrap();
             near(
-                (a.pose.position + rotate(a.pose.rotation, na.position)
+                (a.pose.position + a.pose.rotation * na.position
                     - b.pose.position
-                    - rotate(b.pose.rotation, nb.position))
-                .length(),
+                    - b.pose.rotation * nb.position)
+                    .length(),
                 0.0,
                 1e-12,
             );
             near(
-                (rotate(a.pose.rotation, na.direction) + rotate(b.pose.rotation, nb.direction))
-                    .length(),
+                (a.pose.rotation * na.direction + b.pose.rotation * nb.direction).length(),
                 0.0,
                 1e-12,
             );

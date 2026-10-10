@@ -2,7 +2,7 @@
 //! radiation, low-speed convection, Sutton–Graves stagnation heating at high Mach with a hot-wall
 //! correction, and an ablator spent as a finite latent-heat reserve.
 
-use crate::{Air, clamp, finite, positive, smooth, validate_air};
+use crate::{Air, finite, positive, smooth, validate_air};
 
 pub const STEFAN_BOLTZMANN: f64 = 5.670374419e-8;
 /// Sutton–Graves constant for Earth air, SI.
@@ -158,16 +158,13 @@ pub fn heat_load(spec: &ThermalSpec, state: &ThermalState, env: &HeatEnvironment
         0.0
     };
     let exposure = if env.exposed {
-        clamp(env.exposure, 0.0, 1.0)
+        env.exposure.clamp(0.0, 1.0)
     } else {
         0.0
     };
     let hot_wall = if speed > 0.0 {
-        clamp(
-            1.0 - 0.0_f64.max(state.skin_k - air.temperature_k) / (speed * speed / (2.0 * 1005.0)),
-            0.0,
-            1.0,
-        )
+        (1.0 - 0.0_f64.max(state.skin_k - air.temperature_k) / (speed * speed / (2.0 * 1005.0)))
+            .clamp(0.0, 1.0)
     } else {
         0.0
     };

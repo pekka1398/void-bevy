@@ -88,7 +88,7 @@ fn accepted_ablation_updates_both_owners_and_observation_is_pure() {
         );
         // A second accepted advance checks owner cache mass agrees with the new graph mass.
         f.advance(0.25);
-        assert!(f.inertia("v1").iter().all(|v| v.is_finite()));
+        assert!(f.inertia("v1").is_finite());
     }
 }
 

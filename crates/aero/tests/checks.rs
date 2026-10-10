@@ -205,7 +205,7 @@ fn vacuum_and_zero_airspeed_give_exact_zero_force() {
     let p = plane();
     let vacuum = Atmosphere::Vacuum.sample(0.0);
     let f = aerodynamic_forces(&p.elements, &FLIGHT_STATE, &vacuum, DVec3::ZERO, &NEUTRAL);
-    assert_eq!(length(f.force), 0.0);
+    assert_eq!(f.force.length(), 0.0);
     let still = aerodynamic_forces(
         &p.elements,
         &FLIGHT_STATE,
@@ -213,7 +213,7 @@ fn vacuum_and_zero_airspeed_give_exact_zero_force() {
         FLIGHT_STATE.velocity,
         &NEUTRAL,
     );
-    assert_eq!(length(still.force), 0.0);
+    assert_eq!(still.force.length(), 0.0);
 }
 
 #[test]
@@ -250,8 +250,8 @@ fn a_common_wind_and_vehicle_velocity_preserve_loads() {
         offset,
         &NEUTRAL,
     );
-    near(length(a.force - b.force), 0.0, 1e-8);
-    near(length(a.torque - b.torque), 0.0, 1e-8);
+    near((a.force - b.force).length(), 0.0, 1e-8);
+    near((a.torque - b.torque).length(), 0.0, 1e-8);
 }
 
 #[test]

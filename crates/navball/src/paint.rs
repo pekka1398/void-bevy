@@ -5,8 +5,8 @@
 use glam::DVec3;
 
 use crate::{
-    MARKER_MIN_SPEED, NavballInput, NavballReadout, dot, heading_pitch, horizon_direction, length,
-    navball_basis, scale, to_ball,
+    MARKER_MIN_SPEED, NavballInput, NavballReadout, heading_pitch, horizon_direction,
+    navball_basis, to_ball,
 };
 
 const SKY: [f64; 3] = [58.0, 128.0, 214.0];
@@ -71,11 +71,11 @@ impl NavballPainter {
         self.labels.clear();
         let radius = self.size as f64 / 2.0 / self.pixel_ratio - 1.0;
         self.grid(&basis, radius);
-        let speed = length(input.velocity);
+        let speed = input.velocity.length();
         if speed >= MARKER_MIN_SPEED {
-            let direction = scale(input.velocity, 1.0 / speed);
+            let direction = input.velocity * (1.0 / speed);
             self.marker(to_ball(&basis, direction), radius, false);
-            self.marker(to_ball(&basis, scale(direction, -1.0)), radius, true);
+            self.marker(to_ball(&basis, -direction), radius, true);
         }
         self.reticle(radius);
         self.stroke(&[Shape::Circle(DVec3::ZERO, radius)], 2.0, RIM);
@@ -99,9 +99,9 @@ impl NavballPainter {
         // The local vertical in screen axes: a pixel's height above the horizon is its ball point
         // along it.
         let (ux, uy, uz) = (
-            dot(basis.up, basis.right),
-            dot(basis.up, basis.top),
-            dot(basis.up, basis.nose),
+            basis.up.dot(basis.right),
+            basis.up.dot(basis.top),
+            basis.up.dot(basis.nose),
         );
         for py in 0..size {
             let sy = (half - py as f64 - 0.5) / r;

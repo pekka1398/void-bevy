@@ -22,7 +22,7 @@ use void_orbit::{
     AdvanceOutcome, AirSource, CelestialBody, Control, EphemerisSource, ForceControl,
     PropagationRun, SystemFrames, Tolerances, VesselPropagator, VesselState,
 };
-use void_rotation::{Mat3, rotation_step};
+use void_rotation::rotation_step;
 use void_sas::{SAS_TUNING, SasPhase, StabilityAssist};
 use void_terrain::Terrain;
 
@@ -353,9 +353,6 @@ impl FrameSource for Fleet {
             }
         }
     }
-}
-fn rows(a: DMat3) -> Mat3 {
-    a.transpose().to_cols_array()
 }
 fn vec64(v: rapier3d::math::Vector) -> DVec3 {
     DVec3::new(v.x as f64, v.y as f64, v.z as f64)
@@ -776,9 +773,9 @@ impl Fleet {
                 * self.part_mass(id)
         })
     }
-    pub fn inertia(&self, id: &str) -> Mat3 {
+    pub fn inertia(&self, id: &str) -> DMat3 {
         let v = self.vessel(id);
-        rows(self.inertia_of(&v.members, self.centre(&v.members)))
+        self.inertia_of(&v.members, self.centre(&v.members))
     }
     pub fn has_command(&self, id: &str) -> bool {
         self.commanded(self.vessel(id))
@@ -2531,7 +2528,7 @@ impl Fleet {
         }
         let pilot = self.controls[&v.id].turn;
         let ground = self.attitude_ground(v);
-        let inertia = rows(self.inertia_of(&v.members, self.centre(&v.members)));
+        let inertia = self.inertia_of(&v.members, self.centre(&v.members));
         let turn = if let Some(sas) = self.sas.get_mut(&v.id) {
             if sas.ground != ground {
                 sas.assist.set_enabled(true);
@@ -2587,7 +2584,7 @@ impl Fleet {
         } else {
             dt
         };
-        let inertia = rows(self.inertia_of(&v.members, self.centre(&v.members)));
+        let inertia = self.inertia_of(&v.members, self.centre(&v.members));
         let wheels = self.wheel_airborne_step(v, dt);
         let air = vessel_air_at(
             &self.environment,
@@ -3060,7 +3057,7 @@ impl Fleet {
                         unreachable!()
                     };
                     let torque = p.torque + self.steering(&v, *rotation, *angular_velocity, h);
-                    let inertia = rows(self.inertia_of(&v.members, DVec3::ZERO));
+                    let inertia = self.inertia_of(&v.members, DVec3::ZERO);
                     let Owner::Orbit {
                         rotation,
                         angular_velocity,
@@ -3192,7 +3189,7 @@ impl Fleet {
                 let steering = self.steering(&v, q, w, dt);
                 {
                     let initial = tau + air_torque + steering;
-                    let inertia = rows(self.inertia_of(&v.members, self.centre(&v.members)));
+                    let inertia = self.inertia_of(&v.members, self.centre(&v.members));
                     let (qm, wm) = rotation_step(q, w, &inertia, initial, spin, dt / 2.0);
                     let acceleration = frame_acceleration + now;
                     let middle = State {

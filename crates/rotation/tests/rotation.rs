@@ -1,22 +1,14 @@
 //! Physical checks of rigid-body rotation in a turning frame.
 
-use glam::{DQuat, DVec3};
-use void_rotation::{Mat3, fictitious_torque, free_rotation_step, inertia_in, rotation_step};
+use glam::{DMat3, DQuat, DVec3};
+use void_rotation::{fictitious_torque, free_rotation_step, inertia_in, rotation_step};
 
-const INERTIA: Mat3 = [3.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 9.0];
+const INERTIA: DMat3 = DMat3::from_diagonal(DVec3::new(3.0, 5.0, 9.0));
 const DT: f64 = 1.0 / 60.0;
-
-fn mul(m: &Mat3, v: DVec3) -> DVec3 {
-    DVec3::new(
-        m[0] * v.x + m[1] * v.y + m[2] * v.z,
-        m[3] * v.x + m[4] * v.y + m[5] * v.z,
-        m[6] * v.x + m[7] * v.y + m[8] * v.z,
-    )
-}
 
 /// The inertial angular momentum I (ω + Ω), in the frame's axes.
 fn momentum(q: DQuat, w: DVec3, spin: DVec3) -> DVec3 {
-    mul(&inertia_in(q, &INERTIA), w + spin)
+    inertia_in(q, &INERTIA) * (w + spin)
 }
 
 fn start() -> (DQuat, DVec3) {
@@ -30,12 +22,12 @@ fn start() -> (DQuat, DVec3) {
 fn a_free_tumble_keeps_its_angular_momentum_and_energy() {
     let (mut q, mut w) = start();
     let l0 = momentum(q, w, DVec3::ZERO);
-    let e0 = w.dot(mul(&inertia_in(q, &INERTIA), w)) / 2.0;
+    let e0 = w.dot(inertia_in(q, &INERTIA) * w) / 2.0;
     for _ in 0..36_000 {
         (q, w) = free_rotation_step(q, w, &INERTIA, DVec3::ZERO, DT);
     }
     let l = momentum(q, w, DVec3::ZERO);
-    let e = w.dot(mul(&inertia_in(q, &INERTIA), w)) / 2.0;
+    let e = w.dot(inertia_in(q, &INERTIA) * w) / 2.0;
     assert!((l - l0).length() < 1e-9 * l0.length(), "{l0} -> {l}");
     // Midpoint stepping keeps energy to second order, not exactly.
     assert!((e - e0).abs() < 1e-3 * e0, "energy {e0} -> {e}");
@@ -70,7 +62,7 @@ fn a_body_still_in_space_turns_against_the_frame() {
     assert!(q.dot(expected).abs() > 1.0 - 1e-12, "{q} vs {expected}");
     // The frame's own torque is exactly what holds it there against the engine's gyroscopic term.
     let world = inertia_in(q, &INERTIA);
-    let gyroscopic = -w.cross(mul(&world, w));
+    let gyroscopic = -w.cross(world * w);
     assert!((fictitious_torque(&world, w, spin) + gyroscopic).length() < 1e-18);
 }
 

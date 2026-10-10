@@ -152,7 +152,7 @@ fn capture_split_preserves_ids_pose_momentum_and_checkpoint_continuation() {
     let after = f.snapshot(&joined);
     assert!((after.velocity * after.mass_kg - momentum).length() < 0.01);
     let rot = DMat3::from_quat(after.rotation);
-    let inertia = DMat3::from_cols_array(&f.inertia(&joined)).transpose();
+    let inertia = f.inertia(&joined);
     let angular_after = rot * inertia * rot.transpose() * after.angular_velocity;
     assert!(
         (angular_after - angular_before).length() < 1e-3,

@@ -86,7 +86,7 @@ fn mass_of(list: &[VesselSnapshot]) -> f64 {
     list.iter().map(|s| s.mass_kg).sum()
 }
 fn inertia(fleet: &Fleet, id: &str) -> glam::DMat3 {
-    glam::DMat3::from_cols_array(&fleet.inertia(id)).transpose()
+    fleet.inertia(id)
 }
 
 /// Angular momentum of several vessels about their joint mass centre, inertial axes; states

@@ -2,7 +2,7 @@
 //! without a global height map. Cube faces own independent crater populations; overlapping face
 //! margins are evaluated on both sides, so neither height nor material has a cube-edge seam.
 mod cinder;
-use crate::noise::{perlin, smoothstep};
+use crate::noise::{bump, smoothstep, sphere_noise};
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
@@ -60,17 +60,6 @@ fn hash(mut n: u32) -> u32 {
 }
 fn random(n: u32) -> f64 {
     f64::from(hash(n) >> 8) / 16_777_216.0
-}
-fn bump(x: f64) -> f64 {
-    let t = (1.0 - x * x).max(0.0);
-    t * t
-}
-fn noise(d: DVec3, frequency: f64, seed: f64) -> f64 {
-    perlin(
-        d.x * frequency + seed,
-        d.y * frequency + 3.71,
-        d.z * frequency - 5.13,
-    )
 }
 fn basis(axis: usize) -> (DVec3, DVec3, DVec3) {
     match axis {
@@ -163,19 +152,19 @@ impl ImpactTerrain {
         let r = o.radius_meters;
         let seed = f64::from(o.seed % 10007) * 0.173;
         let resolved = |w: f64| smoothstep(1.5 * cell_meters, 3.0 * cell_meters, w);
-        let region = noise(d, 3.1, seed);
+        let region = sphere_noise(d, 3.1, seed);
         let warp = d + DVec3::new(
-            noise(d, 4.0, seed + 71.0),
-            noise(d, 4.0, seed + 19.0),
-            noise(d, 4.0, seed + 39.0),
+            sphere_noise(d, 4.0, seed + 71.0),
+            sphere_noise(d, 4.0, seed + 19.0),
+            sphere_noise(d, 4.0, seed + 39.0),
         ) * 0.07;
         let plains = smoothstep(
             0.5 - o.plains_fraction,
             0.68 - o.plains_fraction,
-            noise(warp, 5.3, seed + 31.0),
+            sphere_noise(warp, 5.3, seed + 31.0),
         );
         let mut plain = plains;
-        let mut h = o.datum_meters + 950.0 * region + 270.0 * noise(d, 11.0, seed + 10.0);
+        let mut h = o.datum_meters + 950.0 * region + 270.0 * sphere_noise(d, 11.0, seed + 10.0);
         // Broad ancient basins: broken concentric massifs, low floors, later flooded interiors.
         for b in &o.basins {
             let center = DVec3::from_array(b.direction);
@@ -183,7 +172,7 @@ impl ImpactTerrain {
             if x > 1.8 {
                 continue;
             }
-            let ragged = noise(d, r / b.radius_meters * 11.0, seed + 59.0);
+            let ragged = sphere_noise(d, r / b.radius_meters * 11.0, seed + 59.0);
             let q = x * (1.0 + 0.045 * ragged);
             let interior = 1.0 - smoothstep(0.68, 1.01, q);
             let wall = bump((q - 1.02) / 0.18);
@@ -203,7 +192,7 @@ impl ImpactTerrain {
             if fade == 0.0 {
                 break;
             }
-            h += noise(d, r / wavelength, seed + 93.0) * amplitude * fade;
+            h += sphere_noise(d, r / wavelength, seed + 93.0) * amplitude * fade;
             wavelength /= 3.0;
             amplitude *= 0.36;
         }
@@ -270,7 +259,7 @@ impl ImpactTerrain {
                         if fade == 0.0 {
                             continue;
                         }
-                        let rough = noise(d, r / radius * 5.0, f64::from(id % 101));
+                        let rough = sphere_noise(d, r / radius * 5.0, f64::from(id % 101));
                         let q = x * (1.0 + (0.025 + 0.10 * (1.0 - age)) * rough);
                         let rim_preservation = 1.0 - (1.0 - age) * 0.65 * (0.5 + 0.5 * rough);
                         let rim_width = 0.11 + 0.17 * (1.0 - age);
@@ -310,7 +299,7 @@ impl ImpactTerrain {
                 continue;
             }
             let seed = f64::from(c.ray_seed % 10007);
-            let q = x * (1.0 + 0.025 * noise(d, r / c.radius_meters * 7.0, seed));
+            let q = x * (1.0 + 0.025 * sphere_noise(d, r / c.radius_meters * 7.0, seed));
             let fade = resolved(c.radius_meters * 1.3);
             let bowl = 1.0 - smoothstep(0.68, 1.0, q);
             let rim = bump((q - 1.0) / 0.12);
@@ -327,13 +316,14 @@ impl ImpactTerrain {
             let b = center.cross(t);
             let azimuth = d.dot(b).atan2(d.dot(t));
             // Different non-harmonic lobes, with noisy edges and gaps; no tidy starburst spokes.
-            let angle =
-                azimuth + (0.07 + x * 0.005) * noise(d, 93.0, seed + 11.0) + 0.035 * x.ln_1p();
+            let angle = azimuth
+                + (0.07 + x * 0.005) * sphere_noise(d, 93.0, seed + 11.0)
+                + 0.035 * x.ln_1p();
             let lobes = (angle * 11.0 + seed).sin() * 0.48
                 + (angle * 19.0 - seed * 0.31).sin() * 0.32
                 + (angle * 31.0 + 1.7).sin() * 0.20;
             let streak = smoothstep(0.23, 0.67, lobes);
-            let breakup = 0.58 + 0.42 * noise(d, 137.0, seed + 3.0);
+            let breakup = 0.58 + 0.42 * sphere_noise(d, 137.0, seed + 3.0);
             let ray = streak * breakup * (1.0 - smoothstep(2.0, 15.0, x)) * smoothstep(0.9, 1.6, x)
                 / (1.0 + x * 0.12);
             let apron = bump((x - 1.18) / 1.3) * 0.37;
@@ -355,9 +345,9 @@ impl ImpactTerrain {
                 * (1.0 - smoothstep(width * 0.25, width * 3.0, across));
             h += o.scarp_height_meters * strength * bump(x) * step * resolved(width);
         }
-        let dark_unit = smoothstep(-0.18, 0.22, noise(warp, 7.2, seed + 177.0));
-        let mottling =
-            (0.78 + 0.26 * dark_unit) * (1.0 + 0.16 * region + 0.13 * noise(d, 37.0, seed + 117.0));
+        let dark_unit = smoothstep(-0.18, 0.22, sphere_noise(warp, 7.2, seed + 177.0));
+        let mottling = (0.78 + 0.26 * dark_unit)
+            * (1.0 + 0.16 * region + 0.13 * sphere_noise(d, 37.0, seed + 117.0));
         let color = std::array::from_fn(|i| {
             let base = o.mature_color[i] * (1.0 - plain * 0.65) + o.plains_color[i] * plain * 0.65;
             (base * (1.0 - fresh * 0.7) + o.fresh_color[i] * fresh * 0.7) * mottling * (1.0 - dark)

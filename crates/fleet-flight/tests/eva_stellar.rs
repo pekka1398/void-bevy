@@ -36,7 +36,7 @@ fn momentum(
         let ship = f.precise_snapshot(id).local;
         let rel = f.relative(id, carrier);
         let rotation = DMat3::from_quat(ship.rotation);
-        let inertia = DMat3::from_cols_array(&f.inertia(id)).transpose();
+        let inertia = f.inertia(id);
         sum + rotation * inertia * rotation.transpose() * ship.angular_velocity
             + (rel.position - centre).cross(rel.velocity - velocity) * ship.mass_kg
     });

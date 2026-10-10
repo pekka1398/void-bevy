@@ -244,7 +244,7 @@ fn four_tires_park_on_real_inclined_terrain_and_roll_when_brake_released() {
 
 fn carrier_and_rotor_momentum(sim: &FleetFlight, id: &str) -> DVec3 {
     let snapshot = sim.fleet.snapshot(id);
-    let inertia = glam::DMat3::from_cols_array(&sim.fleet.inertia(id)).transpose();
+    let inertia = sim.fleet.inertia(id);
     let mut rotor = DVec3::ZERO;
     for pid in snapshot.part_ids {
         let part = sim.fleet.parts().part(&pid);

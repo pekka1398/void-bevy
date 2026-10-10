@@ -27,7 +27,7 @@ use rapier3d::math::{Rotation, Vector};
 use rapier3d::prelude::*;
 use void_lod::{OrderedMap, TileMeshOptions, build_tile_indices, build_tile_mesh, tiles_around};
 use void_orbit::EphemerisSource;
-use void_rotation::{Mat3, fictitious_torque, rotation_step};
+use void_rotation::{fictitious_torque, rotation_step};
 use void_terrain::Terrain;
 
 use crate::planet_frame::ContactFrame;
@@ -160,11 +160,6 @@ fn same32(a: DVec3, b: Vector) -> bool {
     a.x as f32 == b.x && a.y as f32 == b.y && a.z as f32 == b.z
 }
 
-/// v turned by q.
-fn rotate(q: DQuat, v: DVec3) -> DVec3 {
-    q * v
-}
-
 fn normalise_rotation(q: DQuat) -> DQuat {
     let length = q.length();
     assert!(
@@ -174,63 +169,32 @@ fn normalise_rotation(q: DQuat) -> DQuat {
     DQuat::from_xyzw(q.x / length, q.y / length, q.z / length, q.w / length)
 }
 
-fn rotation_matrix(q: DQuat) -> [f64; 9] {
-    let (x, y, z, w) = (q.x, q.y, q.z, q.w);
-    [
-        1.0 - 2.0 * (y * y + z * z),
-        2.0 * (x * y - z * w),
-        2.0 * (x * z + y * w),
-        2.0 * (x * y + z * w),
-        1.0 - 2.0 * (x * x + z * z),
-        2.0 * (y * z - x * w),
-        2.0 * (x * z - y * w),
-        2.0 * (y * z + x * w),
-        1.0 - 2.0 * (x * x + y * y),
-    ]
-}
-
-/// M diag(d) Mᵀ.
-fn sandwich(m: &[f64; 9], d: [f64; 3]) -> Mat3 {
-    let mut out = [0.0; 9];
-    for i in 0..3 {
-        for j in 0..3 {
-            let mut sum = 0.0;
-            for k in 0..3 {
-                sum += m[i * 3 + k] * d[k] * m[j * 3 + k];
-            }
-            out[i * 3 + j] = sum;
-        }
-    }
-    out
+/// R diag(d) Rᵀ.
+fn sandwich(r: DQuat, d: DVec3) -> DMat3 {
+    let m = DMat3::from_quat(r);
+    m * DMat3::from_diagonal(d) * m.transpose()
 }
 
 /// The principal inertia and its frame, as the JS binding reports them.
-fn principal(body: &RigidBody) -> ([f64; 3], DQuat) {
+fn principal(body: &RigidBody) -> (DVec3, DQuat) {
     let props = &body.mass_properties().local_mprops;
     let p = props.principal_inertia();
     (
-        [f64::from(p.x), f64::from(p.y), f64::from(p.z)],
+        DVec3::new(f64::from(p.x), f64::from(p.y), f64::from(p.z)),
         q64(props.principal_inertia_local_frame),
     )
 }
 
 /// A body's inertia about its mass centre in the frame's axes: R P diag(principal) Pᵀ Rᵀ.
-fn world_inertia(body: &RigidBody) -> Mat3 {
+fn world_inertia(body: &RigidBody) -> DMat3 {
     let (p, f) = principal(body);
-    let q = q64(*body.rotation());
-    let r = DQuat::from_xyzw(
-        q.w * f.x + q.x * f.w + q.y * f.z - q.z * f.y,
-        q.w * f.y - q.x * f.z + q.y * f.w + q.z * f.x,
-        q.w * f.z + q.x * f.y - q.y * f.x + q.z * f.w,
-        q.w * f.w - q.x * f.x - q.y * f.y - q.z * f.z,
-    );
-    sandwich(&rotation_matrix(r), p)
+    sandwich(q64(*body.rotation()) * f, p)
 }
 
 /// A body's inertia about its mass centre in its own axes: P diag(principal) Pᵀ.
-fn local_inertia(body: &RigidBody) -> Mat3 {
+fn local_inertia(body: &RigidBody) -> DMat3 {
     let (p, f) = principal(body);
-    sandwich(&rotation_matrix(f), p)
+    sandwich(f, p)
 }
 
 fn volume(shape: &SimpleShape) -> f64 {
@@ -1028,7 +992,7 @@ impl<F: ContactFrame> ContactWorld<F> {
         let turning = spin != DVec3::ZERO;
         let mut kicked: HashMap<RigidBodyHandle, DVec3> = HashMap::new();
         let mut before: HashMap<RigidBodyHandle, (Vector, Rotation)> = HashMap::new();
-        let mut spinning: HashMap<RigidBodyHandle, (DQuat, DVec3, Mat3)> = HashMap::new();
+        let mut spinning: HashMap<RigidBodyHandle, (DQuat, DVec3, DMat3)> = HashMap::new();
         let mut constrained: Vec<RigidBodyHandle> = Vec::new();
         let handles: Vec<RigidBodyHandle> = self.body_handles().collect();
 
@@ -1106,7 +1070,7 @@ impl<F: ContactFrame> ContactWorld<F> {
             };
             spinning.insert(handle, (rotation, angular_velocity, local_inertia(body)));
             if let Some(torque) = record.torque {
-                let tau = rotate(rotation, torque);
+                let tau = rotation * torque;
                 self.world.bodies[handle].apply_torque_impulse(
                     v32(DVec3::new(tau.x * dt, tau.y * dt, tau.z * dt)),
                     false,
@@ -1137,8 +1101,8 @@ impl<F: ContactFrame> ContactWorld<F> {
             let t = v64(body.translation());
             // Rapier moves the mass centre by v dt and turns the body about it: origin += v dt + (R0 − R1) c.
             let c = v64(body.local_center_of_mass());
-            let r0 = rotate(q64(start_rotation), c);
-            let r1 = rotate(q64(*body.rotation()), c);
+            let r0 = q64(start_rotation) * c;
+            let r1 = q64(*body.rotation()) * c;
             let exact = DVec3::new(
                 after.x * dt + r0.x - r1.x,
                 after.y * dt + r0.y - r1.y,
@@ -1187,7 +1151,7 @@ impl<F: ContactFrame> ContactWorld<F> {
                     record.published,
                 ) = (normalise_rotation(q64(published)), angvel, published);
             }
-            let r2 = rotate(q64(*self.world.bodies[handle].rotation()), c);
+            let r2 = q64(*self.world.bodies[handle].rotation()) * c;
             let record = self.record_mut(handle);
             record.solver_delta = solver_delta;
             record.position = if free {

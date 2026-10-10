@@ -2,7 +2,7 @@
 //! Every relief band is sampled here for both collision and rendering. No global image map.
 use crate::{
     Basin, ImpactOptions, ImpactTerrain,
-    noise::{perlin, smoothstep},
+    noise::{bump, smoothstep, sphere_noise},
 };
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
@@ -38,7 +38,8 @@ impl AresOptions {
         if d.dot(center) > 0.85 && x.abs() < 1.0 {
             let curve = 70_000.0 * (x * x - 0.3) + 16_000.0 * (x * 6.0).sin();
             let width = 45_000.0 * (0.5 + 0.5 * bump(x));
-            let edge = noise(d, r / 35_000.0, 37.0) * 6500.0 + noise(d, r / 9000.0, 11.0) * 1800.0;
+            let edge = sphere_noise(d, r / 35_000.0, 37.0) * 6500.0
+                + sphere_noise(d, r / 9000.0, 11.0) * 1800.0;
             for (offset, scale) in [(0.0, 1.0), (80_000.0 * (x + 0.45), 0.60)] {
                 let q = (y - curve - offset + edge).abs() / width;
                 let floor = 1.0 - smoothstep(0.55, 0.85, q);
@@ -116,18 +117,12 @@ pub struct AresTerrain {
     options: AresOptions,
     impact: ImpactTerrain,
 }
-fn noise(d: DVec3, f: f64, offset: f64) -> f64 {
-    perlin(d.x * f + offset, d.y * f + 3.71, d.z * f - 5.13)
-}
-fn bump(x: f64) -> f64 {
-    (1.0 - x * x).max(0.0).powi(2)
-}
 /// Shared province mask. North is younger, smoother and lower; the boundary is a broken scarp.
 pub fn ares_highlands(d: DVec3) -> f64 {
     1.0 - smoothstep(
         -0.12,
         0.24,
-        d.z + 0.16 * noise(d, 4.2, 19.0) + 0.06 * noise(d, 13.0, 31.0),
+        d.z + 0.16 * sphere_noise(d, 4.2, 19.0) + 0.06 * sphere_noise(d, 13.0, 31.0),
     )
 }
 impl AresTerrain {
@@ -189,7 +184,7 @@ impl AresTerrain {
                 // A broad, low-angle shield with a broken basal scarp and nested summit caldera.
                 let shield = (1.0 - smoothstep(0.0, 1.1, x)).powf(1.7);
                 let apron = bump((x - 0.86) / 0.30) * 0.035;
-                let channels = noise(d, r / 35_000.0, 61.0) * 0.025 * x.min(1.0);
+                let channels = sphere_noise(d, r / 35_000.0, 61.0) * 0.025 * x.min(1.0);
                 h += v.height_meters * (shield + apron + channels * bump(x));
                 let caldera = 1.0 - smoothstep(0.80, 1.05, distance / v.caldera_radius_meters);
                 h -= v.caldera_depth_meters * caldera;
@@ -213,11 +208,15 @@ impl AresTerrain {
             if fade == 0.0 {
                 break;
             }
-            h += noise(d, r / wavelength, 83.0) * amplitude * fade;
+            h += sphere_noise(d, r / wavelength, 83.0) * amplitude * fade;
             wavelength /= 3.0;
             amplitude *= 0.40;
         }
-        let cap = smoothstep(0.972, 0.993, d.z.abs() + noise(d, 29.0, 73.0) * 0.007);
+        let cap = smoothstep(
+            0.972,
+            0.993,
+            d.z.abs() + sphere_noise(d, 29.0, 73.0) * 0.007,
+        );
         h += cap * 500.0;
         let color = ares_color(d, high, volcanic, canyon, cap, collapsed);
         assert!(
@@ -238,22 +237,22 @@ fn ares_color(
     // Dust mantles are coherent, domain-warped provinces; the underlying basalt is charcoal
     // brown, not blue (many published Mars views enhance blue or use false colour).
     let warp = d + DVec3::new(
-        noise(d, 4.0, 21.0),
-        noise(d, 4.0, 43.0),
-        noise(d, 4.0, 71.0),
+        sphere_noise(d, 4.0, 21.0),
+        sphere_noise(d, 4.0, 43.0),
+        sphere_noise(d, 4.0, 71.0),
     ) * 0.13;
     let dark = smoothstep(
         -0.04,
         0.24,
-        noise(warp, 2.2, 113.0)
+        sphere_noise(warp, 2.2, 113.0)
             + high * 0.18
-            + noise(warp, 9.3, 31.0) * 0.23
-            + noise(warp, 31.0, 51.0) * 0.10,
+            + sphere_noise(warp, 9.3, 31.0) * 0.23
+            + sphere_noise(warp, 31.0, 51.0) * 0.10,
     );
     let dust = [0.40, 0.205, 0.115];
     let basalt = [0.115, 0.078, 0.054];
     let dark = (dark * 0.86 + volcanic * 0.12 + canyon * 0.70 + collapsed * 0.25).min(1.0);
-    let mottle = 1.0 + noise(d, 47.0, 83.0) * 0.11 + noise(d, 157.0, 33.0) * 0.04;
+    let mottle = 1.0 + sphere_noise(d, 47.0, 83.0) * 0.11 + sphere_noise(d, 157.0, 33.0) * 0.04;
     std::array::from_fn(|i| {
         ((dust[i] * (1.0 - dark) + basalt[i] * dark) * mottle) * (1.0 - cap)
             + [0.70, 0.73, 0.73][i] * cap

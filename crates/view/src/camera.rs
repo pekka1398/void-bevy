@@ -4,7 +4,7 @@
 //! camera's up from the local vertical to the body's north and lets go of the ground's spin.
 //! Split view (KSP's two views): M switches between flight and map, each with its own zoom range.
 
-use glam::DVec3;
+use glam::{DQuat, DVec3};
 
 use crate::path_frame::PathFrameKind;
 
@@ -38,29 +38,13 @@ pub const BODY_MIN_RADII: f64 = 1.02;
 /// Farthest camera distance, metres: beyond the outermost planet.
 pub const MAX_DISTANCE: f64 = 2e13;
 
-fn length(v: DVec3) -> f64 {
-    v.length()
-}
-
 fn normalize(v: DVec3) -> DVec3 {
-    let l = length(v);
+    let l = v.length();
     assert!(
         l > 0.0 && l.is_finite(),
         "view: vector {v} has no direction"
     );
     DVec3::new(v.x / l, v.y / l, v.z / l)
-}
-
-fn dot(a: DVec3, b: DVec3) -> f64 {
-    a.x * b.x + a.y * b.y + a.z * b.z
-}
-
-fn cross(a: DVec3, b: DVec3) -> DVec3 {
-    DVec3::new(
-        a.y * b.z - a.z * b.y,
-        a.z * b.x - a.x * b.z,
-        a.x * b.y - a.y * b.x,
-    )
 }
 
 pub fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
@@ -111,41 +95,28 @@ pub fn corotation_weight(up_weight: f64, focus_altitude: f64, reference_radius: 
     (1.0 - up_weight) * (1.0 - high)
 }
 
-/// Rodrigues rotation of v about a unit axis.
-pub fn rotate(v: DVec3, axis: DVec3, angle: f64) -> DVec3 {
-    let (c, s) = (angle.cos(), angle.sin());
-    let k = dot(axis, v) * (1.0 - c);
-    let a = cross(axis, v);
-    DVec3::new(
-        v.x * c + a.x * s + axis.x * k,
-        v.y * c + a.y * s + axis.y * k,
-        v.z * c + a.z * s + axis.z * k,
-    )
-}
-
 /// A unit vector perpendicular to unit a.
 pub fn perpendicular(a: DVec3) -> DVec3 {
-    normalize(cross(a, if a.x.abs() < 0.9 { DVec3::X } else { DVec3::Y }))
+    normalize(a.cross(if a.x.abs() < 0.9 { DVec3::X } else { DVec3::Y }))
 }
 
 /// Turn unit a toward unit b by fraction s of the angle between them. Opposite vectors have no
 /// unique great circle; they turn about `perpendicular(a)`.
 pub fn slerp_unit(a: DVec3, b: DVec3, s: f64) -> DVec3 {
     assert!((0.0..=1.0).contains(&s), "slerp unit: s={s}");
-    let angle = f64::acos(dot(a, b).clamp(-1.0, 1.0));
+    let angle = f64::acos(a.dot(b).clamp(-1.0, 1.0));
     if angle == 0.0 {
         return a;
     }
-    let axis = cross(a, b);
-    rotate(
-        a,
-        if length(axis) > 1e-12 {
+    let axis = a.cross(b);
+    DQuat::from_axis_angle(
+        if axis.length() > 1e-12 {
             normalize(axis)
         } else {
             perpendicular(a)
         },
         angle * s,
-    )
+    ) * a
 }
 
 /// Camera orbiting its focus. The direction (focus to camera, unit) is kept in the inertial
@@ -161,7 +132,7 @@ pub struct OrbitCamera {
 impl OrbitCamera {
     pub fn new(direction: DVec3, distance: f64) -> Self {
         assert!(
-            (length(direction) - 1.0).abs() <= 1e-9,
+            (direction.length() - 1.0).abs() <= 1e-9,
             "orbit camera: direction not unit {direction}"
         );
         assert!(distance > 0.0, "orbit camera: distance {distance}");
@@ -174,14 +145,16 @@ impl OrbitCamera {
     /// Pointer drag in pixels; dragging down raises the camera.
     pub fn drag(&mut self, dx_pixels: f64, dy_pixels: f64, up: DVec3) {
         self.clamp_to_up(up);
-        self.direction = normalize(rotate(self.direction, up, -dx_pixels * RADIANS_PER_PIXEL));
+        self.direction =
+            normalize(DQuat::from_axis_angle(up, -dx_pixels * RADIANS_PER_PIXEL) * self.direction);
         // Elevation is set as an angle from up, clamped before turning, so a long drag stops at
         // the pole instead of wrapping over it.
-        let from_up = f64::acos(dot(up, self.direction).clamp(-1.0, 1.0));
+        let from_up = f64::acos(up.dot(self.direction).clamp(-1.0, 1.0));
         let target = (from_up - dy_pixels * RADIANS_PER_PIXEL)
             .clamp(MIN_ANGLE_FROM_UP, std::f64::consts::PI - MIN_ANGLE_FROM_UP);
         // Rotating up about (up × direction) turns it toward the direction.
-        self.direction = normalize(rotate(up, normalize(cross(up, self.direction)), target));
+        self.direction =
+            normalize(DQuat::from_axis_angle(normalize(up.cross(self.direction)), target) * up);
     }
 
     pub fn zoom(&mut self, factor: f64, min_distance: f64, max_distance: f64) {
@@ -199,25 +172,25 @@ impl OrbitCamera {
 
     /// Turn with a spinning body: angle about its unit spin axis.
     pub fn corotate(&mut self, axis: DVec3, angle: f64) {
-        self.direction = normalize(rotate(self.direction, axis, angle));
+        self.direction = normalize(DQuat::from_axis_angle(axis, angle) * self.direction);
     }
 
     /// Keep the direction at least `MIN_ANGLE_FROM_UP` away from up and down, keeping its
     /// azimuth.
     pub fn clamp_to_up(&mut self, up: DVec3) {
-        let angle = f64::acos(dot(up, self.direction).clamp(-1.0, 1.0));
+        let angle = f64::acos(up.dot(self.direction).clamp(-1.0, 1.0));
         let clamped = angle.clamp(MIN_ANGLE_FROM_UP, std::f64::consts::PI - MIN_ANGLE_FROM_UP);
         if clamped == angle {
             return;
         }
-        let side = cross(up, self.direction);
+        let side = up.cross(self.direction);
         // Rotating up about (up × direction) turns it toward the direction.
-        let axis = if length(side) > 1e-12 {
+        let axis = if side.length() > 1e-12 {
             normalize(side)
         } else {
             perpendicular(up)
         };
-        self.direction = normalize(rotate(up, axis, clamped));
+        self.direction = normalize(DQuat::from_axis_angle(axis, clamped) * up);
     }
 }
 

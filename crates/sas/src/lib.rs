@@ -17,9 +17,8 @@
 //! Attitudes and spin are in the frame the physics integrates in (the planet's body-fixed frame),
 //! so "holding" means holding still in that frame.
 
-use glam::{DQuat, DVec3};
+use glam::{DMat3, DQuat, DVec3};
 use serde::{Deserialize, Serialize};
-use void_rotation::{Mat3, matrix};
 
 /// Off: the pilot's command passes through. Pilot: a key is held; SAS stops spin on the other
 /// axes. Damping: keys released, SAS brings the spin down before it locks. Holding: SAS holds the
@@ -65,23 +64,6 @@ pub const SAS_TUNING: SasTuning = SasTuning {
     lock_rate: 0.002,
 };
 
-fn multiply(a: DQuat, b: DQuat) -> DQuat {
-    DQuat::from_xyzw(
-        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
-    )
-}
-
-fn mat_vec(m: &Mat3, v: DVec3) -> DVec3 {
-    DVec3::new(
-        m[0] * v.x + m[1] * v.y + m[2] * v.z,
-        m[3] * v.x + m[4] * v.y + m[5] * v.z,
-        m[6] * v.x + m[7] * v.y + m[8] * v.z,
-    )
-}
-
 /// The sign: zero (of either sign) and NaN come back unchanged.
 fn sign(v: f64) -> f64 {
     if v > 0.0 {
@@ -97,12 +79,9 @@ fn sign(v: f64) -> f64 {
 /// in the craft's local axes. conj(target) · current maps current local coordinates to target
 /// local ones; its axis is the same vector in both. The shorter way round is taken.
 pub fn attitude_error(target: DQuat, current: DQuat) -> DVec3 {
-    let mut r = multiply(
-        DQuat::from_xyzw(-target.x, -target.y, -target.z, target.w),
-        current,
-    );
+    let mut r = target.conjugate() * current;
     if r.w < 0.0 {
-        r = DQuat::from_xyzw(-r.x, -r.y, -r.z, -r.w);
+        r = -r;
     }
     let s = r.length();
     if s == 0.0 {
@@ -181,7 +160,7 @@ impl StabilityAssist {
         &mut self,
         rotation: DQuat,
         angular_velocity: DVec3,
-        inertia: &Mat3,
+        inertia: &DMat3,
         pilot: DVec3,
         dt: f64,
     ) -> DVec3 {
@@ -193,18 +172,14 @@ impl StabilityAssist {
         if self.phase == SasPhase::Off {
             return pilot;
         }
-        for (i, v) in inertia.iter().enumerate() {
+        for (i, v) in inertia.to_cols_array().iter().enumerate() {
             assert!(
                 v.is_finite() && (i % 4 != 0 || *v > 0.0),
                 "stability assist: inertia {inertia:?}"
             );
         }
-        let r = matrix(rotation);
-        // The spin in local axes: Rᵀ ω.
-        let w = mat_vec(
-            &[r[0], r[3], r[6], r[1], r[4], r[7], r[2], r[5], r[8]],
-            angular_velocity,
-        );
+        // The spin in local axes.
+        let w = rotation.conjugate() * angular_velocity;
         let held = pilot.to_array().map(|v| v != 0.0);
         let SasTuning {
             rate_seconds,
@@ -235,9 +210,9 @@ impl StabilityAssist {
                     -sign(e) * reach
                 };
                 desired = DVec3::new(
-                    spin(e.x, inertia[0]),
-                    spin(e.y, inertia[4]),
-                    spin(e.z, inertia[8]),
+                    spin(e.x, inertia.x_axis.x),
+                    spin(e.y, inertia.y_axis.y),
+                    spin(e.z, inertia.z_axis.z),
                 );
             }
         }
@@ -252,13 +227,7 @@ impl StabilityAssist {
             }
         });
         let alpha = DVec3::from_array(alpha);
-        let iw = mat_vec(inertia, w);
-        let ia = mat_vec(inertia, alpha);
-        let torque = DVec3::new(
-            ia.x + w.y * iw.z - w.z * iw.y,
-            ia.y + w.z * iw.x - w.x * iw.z,
-            ia.z + w.x * iw.y - w.y * iw.x,
-        );
+        let torque = *inertia * alpha + w.cross(*inertia * w);
         let out = [
             torque.x / self.max_torque,
             torque.y / self.max_torque,

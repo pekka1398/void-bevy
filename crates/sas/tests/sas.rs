@@ -3,8 +3,8 @@
 
 use std::f64::consts::{FRAC_1_SQRT_2, PI};
 
-use glam::{DQuat, DVec3};
-use void_rotation::{Mat3, matrix, rotation_step};
+use glam::{DMat3, DQuat, DVec3};
+use void_rotation::rotation_step;
 use void_sas::{SAS_TUNING, SasPhase, SasTuning, StabilityAssist, attitude_error};
 
 const DT: f64 = 1.0 / 60.0;
@@ -23,19 +23,14 @@ fn tilted() -> DQuat {
 }
 
 fn local(rotation: DQuat, w: DVec3) -> DVec3 {
-    let r = matrix(rotation);
-    DVec3::new(
-        r[0] * w.x + r[3] * w.y + r[6] * w.z,
-        r[1] * w.x + r[4] * w.y + r[7] * w.z,
-        r[2] * w.x + r[5] * w.y + r[8] * w.z,
-    )
+    rotation.conjugate() * w
 }
 
 /// A two-stage rocket's inertia (kg m², +y the long axis) as a stack and as the upper stage.
-fn inertias() -> (Mat3, Mat3) {
+fn inertias() -> (DMat3, DMat3) {
     (
-        [16000.0, 0.0, 0.0, 0.0, 6000.0, 0.0, 0.0, 0.0, 16000.0],
-        [1400.0, 0.0, 0.0, 0.0, 1000.0, 0.0, 0.0, 0.0, 1400.0],
+        DMat3::from_diagonal(DVec3::new(16000.0, 6000.0, 16000.0)),
+        DMat3::from_diagonal(DVec3::new(1400.0, 1000.0, 1400.0)),
     )
 }
 
@@ -44,12 +39,12 @@ struct Craft {
     rotation: DQuat,
     angular_velocity: DVec3,
     largest_command: f64,
-    inertia: Mat3,
+    inertia: DMat3,
     sas: StabilityAssist,
 }
 
 impl Craft {
-    fn new(inertia: Mat3) -> Self {
+    fn new(inertia: DMat3) -> Self {
         Self {
             rotation: tilted(),
             angular_velocity: DVec3::ZERO,
@@ -87,8 +82,8 @@ impl Craft {
     }
 }
 
-fn scaled(m: Mat3, k: f64) -> Mat3 {
-    m.map(|v| v * k)
+fn scaled(m: DMat3, k: f64) -> DMat3 {
+    m * k
 }
 
 #[test]
@@ -96,7 +91,12 @@ fn holds_against_a_kick() {
     let (stack, upper) = inertias();
     println!(
         "inertia (kg m², local diagonal): stack {:.0} / {:.0} / {:.0}, upper {:.0} / {:.0} / {:.0}",
-        stack[0], stack[4], stack[8], upper[0], upper[4], upper[8]
+        stack.x_axis.x,
+        stack.y_axis.y,
+        stack.z_axis.z,
+        upper.x_axis.x,
+        upper.y_axis.y,
+        upper.z_axis.z
     );
     for (label, inertia) in [
         ("full stack", stack),
@@ -159,13 +159,7 @@ fn pilot_input_release_and_new_lock() {
     craft.run(0.5, DVec3::ZERO, |_, _| {});
     let original = craft.sas.target().unwrap();
     // Off-axis drift while the pilot pitches: SAS must stop it on the free axes.
-    let r = matrix(craft.rotation);
-    let (y, z) = (0.05, 0.05);
-    craft.angular_velocity = DVec3::new(
-        r[1] * y + r[2] * z,
-        r[4] * y + r[5] * z,
-        r[7] * y + r[8] * z,
-    );
+    craft.angular_velocity = craft.rotation * DVec3::new(0.0, 0.05, 0.05);
     let mut pass_through = true;
     for _ in 0..60 {
         if craft.step(DVec3::X).x != 1.0 {
@@ -248,7 +242,7 @@ fn turned_on_while_spinning() {
 
 #[test]
 fn bad_input_panics() {
-    let stack: Mat3 = [9000.0, 0.0, 0.0, 0.0, 2000.0, 0.0, 0.0, 0.0, 9000.0];
+    let stack = DMat3::from_diagonal(DVec3::new(9000.0, 2000.0, 9000.0));
     let panics =
         |run: &dyn Fn()| std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)).is_err();
     let on = || {
@@ -281,7 +275,7 @@ fn bad_input_panics() {
             on().command(
                 tilted(),
                 DVec3::ZERO,
-                &[0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                &DMat3::from_diagonal(DVec3::new(0.0, 1.0, 1.0)),
                 DVec3::ZERO,
                 DT,
             );
@@ -290,7 +284,7 @@ fn bad_input_panics() {
             on().command(
                 tilted(),
                 DVec3::ZERO,
-                &[1.0, 0.0, 0.0, 0.0, f64::NAN, 0.0, 0.0, 0.0, 1.0],
+                &DMat3::from_diagonal(DVec3::new(1.0, f64::NAN, 1.0)),
                 DVec3::ZERO,
                 DT,
             );

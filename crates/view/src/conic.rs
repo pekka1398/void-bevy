@@ -4,29 +4,13 @@
 use glam::DVec3;
 use void_orbit::solve_kepler_elliptic;
 
-fn length(v: DVec3) -> f64 {
-    v.length()
-}
-
 fn normalize(v: DVec3) -> DVec3 {
-    let l = length(v);
+    let l = v.length();
     assert!(
         l > 0.0 && l.is_finite(),
         "conic: vector {v} has no direction"
     );
     DVec3::new(v.x / l, v.y / l, v.z / l)
-}
-
-fn dot(a: DVec3, b: DVec3) -> f64 {
-    a.x * b.x + a.y * b.y + a.z * b.z
-}
-
-fn cross(a: DVec3, b: DVec3) -> DVec3 {
-    DVec3::new(
-        a.y * b.z - a.z * b.y,
-        a.z * b.x - a.x * b.z,
-        a.x * b.y - a.y * b.x,
-    )
 }
 
 /// The orbit's shape: eccentricity vector, its length, angular momentum, and the in-plane axes
@@ -40,19 +24,19 @@ struct Shape {
 fn shape(name: &str, r: DVec3, v: DVec3, gm: f64, count: usize) -> (Shape, DVec3) {
     assert!(gm > 0.0, "{name}: gm={gm}");
     assert!(count >= 3, "{name}: count={count}");
-    let rl = length(r);
+    let rl = r.length();
     assert!(rl > 0.0, "{name}: zero relative position");
-    let v2 = dot(v, v);
-    let rv = dot(r, v);
-    let h = cross(r, v);
-    assert!(length(h) > 0.0, "{name}: radial motion has no orbit plane");
+    let v2 = v.dot(v);
+    let rv = r.dot(v);
+    let h = r.cross(v);
+    assert!(h.length() > 0.0, "{name}: radial motion has no orbit plane");
     let k = v2 - gm / rl;
     let e_vector = DVec3::new(
         (k * r.x - rv * v.x) / gm,
         (k * r.y - rv * v.y) / gm,
         (k * r.z - rv * v.z) / gm,
     );
-    let e = length(e_vector);
+    let e = e_vector.length();
     assert!(e < 1.0, "{name}: open orbit e={e}");
     // A circle has no periapsis; its points start at the current position instead.
     let p = if e > 1e-12 {
@@ -60,7 +44,7 @@ fn shape(name: &str, r: DVec3, v: DVec3, gm: f64, count: usize) -> (Shape, DVec3
     } else {
         normalize(r)
     };
-    let q = normalize(cross(h, p));
+    let q = normalize(h.cross(p));
     (Shape { e, p, q }, h)
 }
 
@@ -69,7 +53,7 @@ fn shape(name: &str, r: DVec3, v: DVec3, gm: f64, count: usize) -> (Shape, DVec3
 /// and panic.
 pub fn ellipse_points(position: DVec3, velocity: DVec3, gm: f64, count: usize) -> Vec<DVec3> {
     let (Shape { e, p, q }, h) = shape("ellipse points", position, velocity, gm, count);
-    let hl = length(h);
+    let hl = h.length();
     let semi_latus_rectum = hl * hl / gm;
     (0..count)
         .map(|i| {
@@ -91,12 +75,12 @@ pub fn ellipse_points_in_time(
     count: usize,
 ) -> (Vec<DVec3>, f64) {
     let (Shape { e, p, q }, _) = shape("ellipse points in time", position, velocity, gm, count);
-    let r = length(position);
-    let v2 = dot(velocity, velocity);
+    let r = position.length();
+    let v2 = velocity.dot(velocity);
     let a = -gm / (2.0 * (v2 / 2.0 - gm / r));
     let b = a * (1.0 - e * e).sqrt();
     // Eccentric and mean anomaly now, from the position in the orbit's own axes.
-    let e0 = f64::atan2(dot(position, q) / b, dot(position, p) / a + e);
+    let e0 = f64::atan2(position.dot(q) / b, position.dot(p) / a + e);
     let m0 = e0 - e * e0.sin();
     let period = 2.0 * std::f64::consts::PI * (a.powi(3) / gm).sqrt();
     let points = (0..count)

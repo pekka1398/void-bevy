@@ -17,26 +17,7 @@
 //! - A body at rest in the frame, ω = 0: it needs −Ω × IΩ to keep turning with the frame. On the
 //!   ground, contacts supply it.
 
-use glam::{DQuat, DVec3};
-
-/// Row-major 3 × 3.
-pub type Mat3 = [f64; 9];
-
-fn cross(a: DVec3, b: DVec3) -> DVec3 {
-    DVec3::new(
-        a.y * b.z - a.z * b.y,
-        a.z * b.x - a.x * b.z,
-        a.x * b.y - a.y * b.x,
-    )
-}
-
-fn mul(m: &Mat3, v: DVec3) -> DVec3 {
-    DVec3::new(
-        m[0] * v.x + m[1] * v.y + m[2] * v.z,
-        m[3] * v.x + m[4] * v.y + m[5] * v.z,
-        m[6] * v.x + m[7] * v.y + m[8] * v.z,
-    )
-}
+use glam::{DMat3, DQuat, DVec3};
 
 fn finite(v: DVec3, what: &str) {
     assert!(v.is_finite(), "rotating frame: {what} {v}");
@@ -45,23 +26,18 @@ fn finite(v: DVec3, what: &str) {
 /// The torque a frame turning at `frame_spin` adds to a rigid body with world inertia `inertia`
 /// turning at `angular_velocity` relative to it, all in the frame's axes:
 /// −[ ω × IΩ + Ω × Iω + Ω × IΩ − I (ω × Ω) ].
-pub fn fictitious_torque(inertia: &Mat3, angular_velocity: DVec3, frame_spin: DVec3) -> DVec3 {
+pub fn fictitious_torque(inertia: &DMat3, angular_velocity: DVec3, frame_spin: DVec3) -> DVec3 {
     finite(angular_velocity, "angular velocity");
     finite(frame_spin, "frame spin");
-    for (i, v) in inertia.iter().enumerate() {
+    for (i, v) in inertia.to_cols_array().iter().enumerate() {
         assert!(
             v.is_finite() && (i % 4 != 0 || *v > 0.0),
             "rotating frame: inertia {inertia:?}"
         );
     }
     let (w, o) = (angular_velocity, frame_spin);
-    let (io, iw) = (mul(inertia, o), mul(inertia, w));
-    let (a, b, c, d) = (
-        cross(w, io),
-        cross(o, iw),
-        cross(o, io),
-        mul(inertia, cross(w, o)),
-    );
+    let (io, iw) = (*inertia * o, *inertia * w);
+    let (a, b, c, d) = (w.cross(io), o.cross(iw), o.cross(io), *inertia * w.cross(o));
     DVec3::new(
         -(a.x + b.x + c.x - d.x),
         -(a.y + b.y + c.y - d.y),
@@ -69,74 +45,19 @@ pub fn fictitious_torque(inertia: &Mat3, angular_velocity: DVec3, frame_spin: DV
     )
 }
 
-fn solve(m: &Mat3, v: DVec3) -> DVec3 {
-    let [a, b, c, d, e, f, g, h, i] = *m;
-    let (big_a, big_b, big_c) = (e * i - f * h, -(d * i - f * g), d * h - e * g);
-    let det = a * big_a + b * big_b + c * big_c;
+fn solve(m: &DMat3, v: DVec3) -> DVec3 {
+    let det = m.determinant();
     assert!(
         det.abs() > 0.0 && det.is_finite(),
         "rotating frame: singular inertia {m:?}"
     );
-    mul(
-        &[
-            big_a / det,
-            -(b * i - c * h) / det,
-            (b * f - c * e) / det,
-            big_b / det,
-            (a * i - c * g) / det,
-            -(a * f - c * d) / det,
-            big_c / det,
-            -(a * h - b * g) / det,
-            (a * e - b * d) / det,
-        ],
-        v,
-    )
-}
-
-/// v turned by `angle` about the unit `axis` (Rodrigues).
-fn turn(v: DVec3, k: DVec3, angle: f64) -> DVec3 {
-    let (c, s) = (angle.cos(), angle.sin());
-    let kv = cross(k, v);
-    let kd = k.x * v.x + k.y * v.y + k.z * v.z;
-    DVec3::new(
-        v.x * c + kv.x * s + k.x * kd * (1.0 - c),
-        v.y * c + kv.y * s + k.y * kd * (1.0 - c),
-        v.z * c + kv.z * s + k.z * kd * (1.0 - c),
-    )
-}
-
-/// Rotation matrix of a unit quaternion, row-major.
-pub fn matrix(q: DQuat) -> Mat3 {
-    let (x, y, z, w) = (q.x, q.y, q.z, q.w);
-    [
-        1.0 - 2.0 * (y * y + z * z),
-        2.0 * (x * y - z * w),
-        2.0 * (x * z + y * w),
-        2.0 * (x * y + z * w),
-        1.0 - 2.0 * (x * x + z * z),
-        2.0 * (y * z - x * w),
-        2.0 * (x * z - y * w),
-        2.0 * (y * z + x * w),
-        1.0 - 2.0 * (x * x + y * y),
-    ]
+    m.inverse() * v
 }
 
 /// R I Rᵀ: a body-axes inertia turned into the frame by q.
-pub fn inertia_in(q: DQuat, inertia_local: &Mat3) -> Mat3 {
-    let r = matrix(q);
-    let mut out = [0.0; 9];
-    for i in 0..3 {
-        for j in 0..3 {
-            let mut s = 0.0;
-            for a in 0..3 {
-                for b in 0..3 {
-                    s += r[i * 3 + a] * inertia_local[a * 3 + b] * r[j * 3 + b];
-                }
-            }
-            out[i * 3 + j] = s;
-        }
-    }
-    out
+pub fn inertia_in(q: DQuat, inertia_local: &DMat3) -> DMat3 {
+    let r = DMat3::from_quat(q);
+    r * *inertia_local * r.transpose()
 }
 
 /// q turned by the rotation vector w dt (exact for a constant w).
@@ -147,15 +68,7 @@ fn advance(q: DQuat, w: DVec3, dt: f64) -> DQuat {
     }
     let half = rate * dt / 2.0;
     let s = half.sin() / rate;
-    let (dx, dy, dz, dw) = (w.x * s, w.y * s, w.z * s, half.cos());
-    let r = DQuat::from_xyzw(
-        dw * q.x + dx * q.w + dy * q.z - dz * q.y,
-        dw * q.y - dx * q.z + dy * q.w + dz * q.x,
-        dw * q.z + dx * q.y - dy * q.x + dz * q.w,
-        dw * q.w - dx * q.x - dy * q.y - dz * q.z,
-    );
-    let l = r.length();
-    DQuat::from_xyzw(r.x / l, r.y / l, r.z / l, r.w / l)
+    (DQuat::from_xyzw(w.x * s, w.y * s, w.z * s, half.cos()) * q).normalize()
 }
 
 /// One torque-free step of a rigid body in a frame turning at `frame_spin`, in f64, all in frame
@@ -169,31 +82,20 @@ fn advance(q: DQuat, w: DVec3, dt: f64) -> DQuat {
 pub fn free_rotation_step(
     rotation: DQuat,
     angular_velocity: DVec3,
-    inertia_local: &Mat3,
+    inertia_local: &DMat3,
     frame_spin: DVec3,
     dt: f64,
 ) -> (DQuat, DVec3) {
     finite(angular_velocity, "angular velocity");
     finite(frame_spin, "frame spin");
     assert!(dt > 0.0 && dt.is_finite(), "rotating frame: dt {dt}");
-    let l0 = mul(
-        &inertia_in(rotation, inertia_local),
-        angular_velocity + frame_spin,
-    );
+    let l0 = inertia_in(rotation, inertia_local) * (angular_velocity + frame_spin);
     let rate = frame_spin.length();
     let at = |t: f64| {
         if rate == 0.0 {
             l0
         } else {
-            turn(
-                l0,
-                DVec3::new(
-                    frame_spin.x / rate,
-                    frame_spin.y / rate,
-                    frame_spin.z / rate,
-                ),
-                -rate * t,
-            )
+            DQuat::from_axis_angle(frame_spin / rate, -rate * t) * l0
         }
     };
     let half = advance(rotation, angular_velocity, dt / 2.0);
@@ -209,16 +111,13 @@ pub fn free_rotation_step(
 pub fn rotation_step(
     rotation: DQuat,
     angular_velocity: DVec3,
-    inertia_local: &Mat3,
+    inertia_local: &DMat3,
     torque_local: DVec3,
     frame_spin: DVec3,
     dt: f64,
 ) -> (DQuat, DVec3) {
     finite(torque_local, "local torque");
-    let kick = |q: DQuat| {
-        let a = mul(&matrix(q), solve(inertia_local, torque_local));
-        DVec3::new(a.x * dt / 2.0, a.y * dt / 2.0, a.z * dt / 2.0)
-    };
+    let kick = |q: DQuat| q * solve(inertia_local, torque_local) * (dt / 2.0);
     let (q, w) = free_rotation_step(
         rotation,
         angular_velocity + kick(rotation),
@@ -236,7 +135,7 @@ pub fn rotation_step(
 pub fn rotation_step_with_rotor(
     rotation: DQuat,
     angular_velocity: DVec3,
-    inertia_local: &Mat3,
+    inertia_local: &DMat3,
     torque_local: DVec3,
     rotor_initial_local: DVec3,
     rotor_final_local: DVec3,
@@ -257,7 +156,7 @@ pub fn rotation_step_with_rotor(
             dt,
         );
     }
-    let inertia = glam::DMat3::from_cols_array(inertia_local).transpose();
+    let inertia = *inertia_local;
     let inverse = inertia.inverse();
     assert!(inverse.is_finite(), "singular rotor carrier inertia");
     let half_momentum = rotation

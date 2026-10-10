@@ -620,12 +620,7 @@ pub fn main_game(craft: &void_assembly::Craft) -> crate::session::InitialWorld {
     });
     let terrain = Arc::new(Terrain::from_config(&terrain_config));
     // Dry lowland on the layered terrain.
-    let (latitude, longitude) = (0.3_f64, 0.5_f64);
-    let site = DVec3::new(
-        latitude.cos() * longitude.cos(),
-        latitude.cos() * longitude.sin(),
-        latitude.sin(),
-    );
+    let site = crate::placement::unit_site(0.3_f64.to_degrees(), 0.5_f64.to_degrees());
     assert!(
         terrain.height(site) > void_terrain::SEA_LEVEL,
         "main game: launch site is underwater"

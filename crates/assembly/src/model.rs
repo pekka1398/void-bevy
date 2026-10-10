@@ -317,24 +317,17 @@ pub fn part_inertia_per_kg(part: &PartDefinition) -> DVec3 {
     let side = (3.0 * part.radius * part.radius + part.height * part.height) / 12.0;
     DVec3::new(side, part.radius * part.radius / 2.0, side)
 }
-/// v turned by the unit quaternion q.
-pub fn rotate(q: DQuat, v: DVec3) -> DVec3 {
-    q * v
-}
+/// Validate untrusted craft data and derive every part pose from its paired stack nodes.
+/// The shortest rotation taking `from` to `to`. Opposite directions turn half a turn about a fixed
+/// choice of perpendicular axis, so attached parts keep a stable orientation.
 fn align(from: DVec3, to: DVec3) -> DQuat {
-    let a = from / from.length();
-    let b = to / to.length();
+    let (a, b) = (from.normalize(), to.normalize());
     if a.dot(b) < -0.999999999 {
         let axis = a.cross(if a.x.abs() < 0.9 { DVec3::X } else { DVec3::Y });
-        let axis = axis / axis.length();
-        return DQuat::from_xyzw(axis.x, axis.y, axis.z, 0.0);
+        return DQuat::from_axis_angle(axis.normalize(), std::f64::consts::PI);
     }
-    let axis = a.cross(b);
-    let w = 1.0 + a.dot(b);
-    let norm = glam::DVec4::new(axis.x, axis.y, axis.z, w).length();
-    DQuat::from_xyzw(axis.x / norm, axis.y / norm, axis.z / norm, w / norm)
+    DQuat::from_rotation_arc(a, b)
 }
-/// Validate untrusted craft data and derive every part pose from its paired stack nodes.
 pub fn compile(craft: &Craft) -> ModelResult<CompiledCraft> {
     if !matches!(craft.version, 2 | 3) || craft.name.trim().is_empty() || craft.parts.is_empty() {
         return Err("Craft requires version 2 or 3, a name and at least one part".into());
@@ -442,19 +435,19 @@ pub fn compile(craft: &Craft) -> ModelResult<CompiledCraft> {
                 if a.pose.is_some() && a.twist_radians != 0.0 {
                     return Err("Surface pose and node twist are mutually exclusive".into());
                 }
-                let base = align(cn.direction, -rotate(parent.pose.rotation, pn.direction));
+                let base = align(cn.direction, -(parent.pose.rotation * pn.direction));
                 let rotation = if a.twist_radians == 0.0 {
                     base
                 } else {
                     DQuat::from_axis_angle(
-                        rotate(parent.pose.rotation, pn.direction).normalize(),
+                        (parent.pose.rotation * pn.direction).normalize(),
                         a.twist_radians,
                     ) * base
                 };
                 pose = PartPose {
                     rotation,
-                    position: parent.pose.position + rotate(parent.pose.rotation, pn.position)
-                        - rotate(rotation, cn.position),
+                    position: parent.pose.position + parent.pose.rotation * pn.position
+                        - rotation * cn.position,
                 };
                 if let Some(local) = a.pose {
                     if !local.position.is_finite()
@@ -555,7 +548,7 @@ impl CompiledCraft {
                         part_id: p.instance.id.clone(),
                         node: n,
                         pose: PartPose {
-                            position: p.pose.position + rotate(p.pose.rotation, n.position),
+                            position: p.pose.position + p.pose.rotation * n.position,
                             rotation: p.pose.rotation,
                         },
                     })

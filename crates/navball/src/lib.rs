@@ -58,31 +58,11 @@ pub struct NavballReadout {
     pub speed: f64,
 }
 
-fn dot(a: DVec3, b: DVec3) -> f64 {
-    a.x * b.x + a.y * b.y + a.z * b.z
-}
-
-fn cross(a: DVec3, b: DVec3) -> DVec3 {
-    DVec3::new(
-        a.y * b.z - a.z * b.y,
-        a.z * b.x - a.x * b.z,
-        a.x * b.y - a.y * b.x,
-    )
-}
-
-fn length(a: DVec3) -> f64 {
-    a.length()
-}
-
-fn scale(a: DVec3, k: f64) -> DVec3 {
-    DVec3::new(a.x * k, a.y * k, a.z * k)
-}
-
 fn require_unit(name: &str, v: DVec3) {
     assert!(
-        (length(v) - 1.0).abs() <= UNIT_TOLERANCE,
+        (v.length() - 1.0).abs() <= UNIT_TOLERANCE,
         "navball: {name} is not a unit vector (length {})",
-        length(v)
+        v.length()
     );
 }
 
@@ -96,27 +76,27 @@ pub fn horizon_axes(up: DVec3, pole: DVec3, prime_meridian: DVec3) -> (DVec3, DV
         require_unit(name, v);
     }
     assert!(
-        dot(pole, prime_meridian).abs() <= UNIT_TOLERANCE,
+        pole.dot(prime_meridian).abs() <= UNIT_TOLERANCE,
         "navball: prime meridian is not on the equator (dot with the pole {})",
-        dot(pole, prime_meridian)
+        pole.dot(prime_meridian)
     );
-    let east_raw = cross(pole, up);
-    let east_length = length(east_raw);
+    let east_raw = pole.cross(up);
+    let east_length = east_raw.length();
     if east_length < POLE_EPSILON {
         // At a pole up is along the pole, so the prime meridian already lies on the horizon.
-        return (prime_meridian, cross(prime_meridian, up));
+        return (prime_meridian, prime_meridian.cross(up));
     }
-    let east = scale(east_raw, 1.0 / east_length);
-    (cross(up, east), east)
+    let east = east_raw * (1.0 / east_length);
+    (up.cross(east), east)
 }
 
 pub fn navball_basis(input: &NavballInput) -> NavballBasis {
     require_unit("nose", input.nose);
     require_unit("top", input.top);
     assert!(
-        dot(input.nose, input.top).abs() <= UNIT_TOLERANCE,
+        input.nose.dot(input.top).abs() <= UNIT_TOLERANCE,
         "navball: nose and top are not perpendicular (dot {})",
-        dot(input.nose, input.top)
+        input.nose.dot(input.top)
     );
     let (north, east) = horizon_axes(input.up, input.pole, input.prime_meridian);
     NavballBasis {
@@ -124,7 +104,7 @@ pub fn navball_basis(input: &NavballInput) -> NavballBasis {
         // is on the right and 120 on the left; facing north, W is on the right. KSP shows the
         // opposite (E on the right when facing north). The game's yaw keys follow this same axis, so the ball and the keys agree with each other but both are
         // mirrored from KSP. Fixing it means changing this axis and the steering together.
-        right: cross(input.top, input.nose),
+        right: input.top.cross(input.nose),
         top: input.top,
         nose: input.nose,
         up: input.up,
@@ -137,9 +117,9 @@ pub fn navball_basis(input: &NavballInput) -> NavballBasis {
 /// disc.
 pub fn to_ball(basis: &NavballBasis, direction: DVec3) -> DVec3 {
     DVec3::new(
-        dot(direction, basis.right),
-        dot(direction, basis.top),
-        dot(direction, basis.nose),
+        direction.dot(basis.right),
+        direction.dot(basis.top),
+        direction.dot(basis.nose),
     )
 }
 
@@ -147,9 +127,9 @@ pub fn to_ball(basis: &NavballBasis, direction: DVec3) -> DVec3 {
 /// a direction.
 pub fn heading_pitch(basis: &NavballBasis, direction: DVec3) -> (f64, f64) {
     let (n, e, u) = (
-        dot(direction, basis.north),
-        dot(direction, basis.east),
-        dot(direction, basis.up),
+        direction.dot(basis.north),
+        direction.dot(basis.east),
+        direction.dot(basis.up),
     );
     let heading = f64::atan2(e, n) * 180.0 / std::f64::consts::PI;
     (

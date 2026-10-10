@@ -24,7 +24,7 @@ fn momentum(s: &FlightSession) -> (f64, DVec3, DVec3, DVec3) {
         let ship = f.snapshot(id);
         let rel = f.relative(id, &ids[0]);
         let r = DMat3::from_quat(ship.rotation);
-        let i = DMat3::from_cols_array(&f.inertia(id)).transpose();
+        let i = f.inertia(id);
         sum + r * i * r.transpose() * ship.angular_velocity
             + (rel.position - centre).cross(rel.velocity - velocity) * ship.mass_kg
     });

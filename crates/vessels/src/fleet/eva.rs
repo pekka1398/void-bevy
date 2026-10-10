@@ -142,7 +142,7 @@ impl Fleet {
             return Err("crew seat thermally failed".into());
         }
         let old = self.snapshot(&vessel);
-        let old_i = DMat3::from_cols_array(&self.inertia(&vessel)).transpose();
+        let old_i = self.inertia(&vessel);
         let r = DMat3::from_quat(old.rotation);
         let old_angular = r * old_i * r.transpose() * old.angular_velocity;
         let seat_pose = self.parts.part(part).pose;
@@ -252,12 +252,12 @@ impl Fleet {
             },
         );
         let ri = DMat3::from_quat(suit_q);
-        let suit_i = DMat3::from_cols_array(&self.inertia(&actor)).transpose();
+        let suit_i = self.inertia(&actor);
         let remaining = old_angular
             - ri * suit_i * ri.transpose() * old.angular_velocity
             - mother_offset.cross(mother_v - old.velocity) * mother_mass
             - offset.cross(eva_v - old.velocity) * eva_mass;
-        let mother_i = DMat3::from_cols_array(&self.inertia(&vessel)).transpose();
+        let mother_i = self.inertia(&vessel);
         let mother_w = (r * mother_i * r.transpose()).inverse() * remaining;
         self.cancel_guidance(&vessel, "crew exited");
         self.sas.remove(&vessel);
@@ -342,9 +342,9 @@ impl Fleet {
         let velocity = sb.velocity + relative_v * (sa.mass_kg / mass);
         let aoffset = d - centre_offset;
         let boffset = -centre_offset;
-        let ai = DMat3::from_cols_array(&self.inertia(actor)).transpose();
+        let ai = self.inertia(actor);
         let ar = DMat3::from_quat(sa.rotation);
-        let bi = DMat3::from_cols_array(&self.inertia(&carrier)).transpose();
+        let bi = self.inertia(&carrier);
         let br = DMat3::from_quat(sb.rotation);
         let angular = ar * ai * ar.transpose() * sa.angular_velocity
             + br * bi * br.transpose() * sb.angular_velocity
@@ -383,7 +383,7 @@ impl Fleet {
         self.guidance.remove(actor);
         self.gate.remove_vessel(actor);
         self.recentre(&self.vessel(&carrier).members.clone());
-        let new_i = DMat3::from_cols_array(&self.inertia(&carrier)).transpose();
+        let new_i = self.inertia(&carrier);
         let w = (br * new_i * br.transpose()).inverse() * angular;
         self.cancel_guidance(&carrier, "crew boarded");
         self.sas.remove(&carrier);

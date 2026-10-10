@@ -1,12 +1,11 @@
 //! Coupled trial attitude for the existing translational propagator. Geometry and module state
 //! are immutable until the leg is accepted. Torque is predicted at the midpoint (second order);
 //! every translation stage sees the attitude and angular velocity at its own stage time.
-use glam::{DQuat, DVec3};
+use glam::{DMat3, DQuat, DVec3};
 use std::sync::Arc;
 use void_frames::State;
 use void_modules::VesselAir;
 use void_orbit::{AirSource, EphemerisSource};
-use void_rotation::Mat3;
 
 pub(super) struct RigidFlightSource {
     pub air: Option<Arc<VesselAir>>,
@@ -15,7 +14,7 @@ pub(super) struct RigidFlightSource {
     pub start: f64,
     pub rotation: DQuat,
     pub angular_velocity: DVec3,
-    pub inertia: Mat3,
+    pub inertia: DMat3,
     pub torque_local: DVec3,
     pub force_local: DVec3,
     pub rotor_initial_local: DVec3,

@@ -1,11 +1,11 @@
 use glam::{DMat3, DQuat, DVec3};
-use void_rotation::{Mat3, rotation_step_with_rotor};
-fn momentum(q: DQuat, w: DVec3, i: &Mat3, rotor: DVec3) -> DVec3 {
-    q * (DMat3::from_cols_array(i).transpose() * (q.conjugate() * w) + rotor)
+use void_rotation::rotation_step_with_rotor;
+fn momentum(q: DQuat, w: DVec3, i: &DMat3, rotor: DVec3) -> DVec3 {
+    q * (*i * (q.conjugate() * w) + rotor)
 }
 #[test]
 fn motor_brake_and_steering_exchange_internal_momentum_with_carrier() {
-    let inertia = [50.0, 0.0, 0.0, 0.0, 80.0, 0.0, 0.0, 0.0, 100.0];
+    let inertia = DMat3::from_diagonal(DVec3::new(50.0, 80.0, 100.0));
     let (mut q, mut w, mut rotor) = (DQuat::IDENTITY, DVec3::ZERO, DVec3::ZERO);
     for next in [
         DVec3::X * 20.0,
@@ -24,7 +24,7 @@ fn motor_brake_and_steering_exchange_internal_momentum_with_carrier() {
 }
 #[test]
 fn spinning_internal_rotor_precesses_without_inventing_total_angular_momentum() {
-    let inertia = [50.0, 0.0, 0.0, 0.0, 80.0, 0.0, 0.0, 0.0, 100.0];
+    let inertia = DMat3::from_diagonal(DVec3::new(50.0, 80.0, 100.0));
     let rotor = DVec3::X * 80.0;
     let (mut q, mut w) = (DQuat::IDENTITY, DVec3::new(0.3, 0.4, 0.5));
     let before = momentum(q, w, &inertia, rotor);

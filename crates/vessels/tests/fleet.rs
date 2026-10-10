@@ -50,7 +50,7 @@ fn angular(f: &Fleet) -> DVec3 {
         / mass;
     ss.iter().zip(&rr).fold(DVec3::ZERO, |sum, (s, r)| {
         let rot = DMat3::from_quat(s.rotation);
-        let i = DMat3::from_cols_array(&f.inertia(&s.id)).transpose();
+        let i = f.inertia(&s.id);
         sum + rot * i * rot.transpose() * s.angular_velocity
             + (r.position - c).cross(r.velocity - v) * s.mass_kg
     })

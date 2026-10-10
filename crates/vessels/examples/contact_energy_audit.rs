@@ -47,8 +47,7 @@ fn main() {
             let q = axes.conjugate() * s.rotation;
             let w = axes.conjugate() * s.angular_velocity - frame.spin();
             let rot = DMat3::from_quat(q);
-            let inertia =
-                rot * DMat3::from_cols_array(&f.inertia(&id)).transpose() * rot.transpose();
+            let inertia = rot * f.inertia(&id) * rot.transpose();
             let kinetic =
                 0.5 * s.mass_kg * state.velocity.length_squared() + 0.5 * w.dot(inertia * w);
             let p = state.position;

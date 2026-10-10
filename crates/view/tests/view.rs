@@ -3,7 +3,7 @@
 
 use std::f64::consts::PI;
 
-use glam::DVec3;
+use glam::{DQuat, DVec3};
 use void_orbit::{
     Ephemeris, EphemerisOptions, SystemSpec, body_orientation, build_system, osculating_orbit,
     suggested_step_seconds,
@@ -11,7 +11,7 @@ use void_orbit::{
 use void_view::{
     FLIGHT_MAX_DISTANCE, FocusGeometry, FocusKind, MAP_MIN_DISTANCE, MIN_ANGLE_FROM_UP,
     OrbitCamera, PathCache, PathFrame, PathFrameKind, ViewMode, camera_spin, ellipse_points,
-    ellipse_points_in_time, frame_to_ecliptic, orbit_in_surface_frame, rotate, view_state,
+    ellipse_points_in_time, frame_to_ecliptic, orbit_in_surface_frame, view_state,
 };
 
 fn sol() -> (void_orbit::BuiltSystem, Ephemeris) {
@@ -44,7 +44,7 @@ fn north() -> DVec3 {
 
 /// A vessel 60 degrees from the pole: flight "up" and map "up" differ a lot.
 fn radial() -> DVec3 {
-    rotate(north(), north().cross(DVec3::X).normalize(), 60.0 * DEG).normalize()
+    (DQuat::from_axis_angle(north().cross(DVec3::X).normalize(), 60.0 * DEG) * north()).normalize()
 }
 
 fn vessel_at(altitude: f64) -> FocusGeometry {

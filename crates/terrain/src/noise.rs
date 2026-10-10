@@ -144,3 +144,17 @@ pub fn smoothstep(a: f64, b: f64, x: f64) -> f64 {
     let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
+
+/// Perlin noise at a unit direction scaled by `frequency`, the x input shifted by `offset`.
+pub(crate) fn sphere_noise(d: glam::DVec3, frequency: f64, offset: f64) -> f64 {
+    perlin(
+        d.x * frequency + offset,
+        d.y * frequency + 3.71,
+        d.z * frequency - 5.13,
+    )
+}
+
+/// (1 − x²)², zero outside [−1, 1].
+pub(crate) fn bump(x: f64) -> f64 {
+    (1.0 - x * x).max(0.0).powi(2)
+}

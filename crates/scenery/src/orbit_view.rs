@@ -11,7 +11,7 @@
 //! up when looking straight down; no pole singularity), a pan offset in metres, the distance from
 //! the centre and the tilt.
 
-use glam::DVec3;
+use glam::{DQuat, DVec3};
 
 #[derive(Clone, Debug)]
 pub struct OrbitView {
@@ -73,7 +73,7 @@ impl OrbitView {
     /// Right, up and backward (camera axes looking down −z) in body-fixed axes.
     pub fn basis(&self) -> (DVec3, DVec3, DVec3) {
         let Pose { forward, up, .. } = self.pose();
-        (normalize(cross(forward, up)), up, -forward)
+        (normalize(forward.cross(up)), up, -forward)
     }
 
     /// Left drag: translate in the view plane, `height` metres of travel per screen height at a 1:1 scale.
@@ -96,7 +96,7 @@ impl OrbitView {
             ],
         );
         let Pose { forward, up, .. } = self.pose();
-        let right = normalize(cross(forward, up));
+        let right = normalize(forward.cross(up));
         let meters = (height * 2.0 * f64::tan(fov_y_radians / 2.0)) / viewport_height_pixels;
         self.offset += right * (-dx_pixels * meters) + up * (dy_pixels * meters);
     }
@@ -109,19 +109,21 @@ impl OrbitView {
             &[horizontal_radians, vertical_radians],
         );
         let pole = DVec3::Z;
-        self.p = rotate(self.p, pole, horizontal_radians);
-        self.north = rotate(self.north, pole, horizontal_radians);
-        self.offset = rotate(self.offset, pole, horizontal_radians);
-        let right = normalize(cross(self.north, self.p));
-        self.p = normalize(rotate(self.p, right, vertical_radians));
-        self.north = normalize(rotate(self.north, right, vertical_radians));
-        self.offset = rotate(self.offset, right, vertical_radians);
+        let turn = DQuat::from_axis_angle(pole, horizontal_radians);
+        self.p = turn * self.p;
+        self.north = turn * self.north;
+        self.offset = turn * self.offset;
+        let right = normalize(self.north.cross(self.p));
+        let turn = DQuat::from_axis_angle(right, vertical_radians);
+        self.p = normalize(turn * self.p);
+        self.north = normalize(turn * self.north);
+        self.offset = turn * self.offset;
     }
 
     /// Shift + left drag: turn the heading about the local vertical and change the tilt.
     pub fn turn(&mut self, heading_radians: f64, tilt_radians: f64) {
         finite("turn", &[heading_radians, tilt_radians]);
-        let east = cross(self.north, self.p);
+        let east = self.north.cross(self.p);
         self.north =
             normalize(self.north * f64::cos(heading_radians) + east * f64::sin(heading_radians));
         self.tilt = clamp_tilt(self.tilt + tilt_radians);
@@ -149,7 +151,7 @@ impl OrbitView {
     ) {
         self.p = normalize(direction);
         let north = normalize(reject(DVec3::Z, self.p));
-        let east = cross(north, self.p);
+        let east = north.cross(self.p);
         self.north =
             normalize(north * f64::cos(heading_radians) + east * f64::sin(heading_radians));
         self.offset = DVec3::ZERO;
@@ -168,19 +170,6 @@ fn finite(at: &str, values: &[f64]) {
         values.iter().all(|v| v.is_finite()),
         "OrbitView.{at}: {values:?}"
     );
-}
-
-fn cross(a: DVec3, b: DVec3) -> DVec3 {
-    DVec3::new(
-        a.y * b.z - a.z * b.y,
-        a.z * b.x - a.x * b.z,
-        a.x * b.y - a.y * b.x,
-    )
-}
-
-fn rotate(value: DVec3, axis: DVec3, radians: f64) -> DVec3 {
-    let (c, s) = (f64::cos(radians), f64::sin(radians));
-    value * c + cross(axis, value) * s + axis * (axis.dot(value) * (1.0 - c))
 }
 
 fn normalize(a: DVec3) -> DVec3 {

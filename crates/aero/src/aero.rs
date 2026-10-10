@@ -3,10 +3,7 @@
 
 use glam::{DQuat, DVec3};
 
-use crate::{
-    Air, finite, finite_vec, inverse, length, positive, rotate, smooth, validate_air,
-    validate_rotation,
-};
+use crate::{Air, finite, finite_vec, positive, smooth, validate_air, validate_rotation};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BodyAero {
@@ -129,7 +126,7 @@ pub struct AeroForces {
 fn unit_vector(v: DVec3, label: &str) {
     finite_vec(v, label);
     assert!(
-        (length(v) - 1.0).abs() <= 1e-8,
+        (v.length() - 1.0).abs() <= 1e-8,
         "{label} must be a unit vector"
     );
 }
@@ -165,8 +162,8 @@ pub fn validate_shape(shape: &AeroShape) {
                 positive(value, key);
             }
             assert!(
-                (length(s.chord) - 1.0).abs() <= 1e-8
-                    && (length(s.normal) - 1.0).abs() <= 1e-8
+                (s.chord.length() - 1.0).abs() <= 1e-8
+                    && (s.normal.length() - 1.0).abs() <= 1e-8
                     && s.chord.dot(s.normal).abs() <= 1e-8,
                 "Wing axes must be orthonormal"
             );
@@ -247,7 +244,7 @@ pub fn aerodynamic_forces(
             "Invalid control surface command"
         );
     }
-    let base_speed = finite(length(state.velocity - wind), "airspeed");
+    let base_speed = finite((state.velocity - wind).length(), "airspeed");
     let q_pa = finite(
         0.5 * air.density * f64::powf(base_speed, 2.0),
         "dynamic pressure",
@@ -268,14 +265,14 @@ pub fn aerodynamic_forces(
         speed: base_speed,
         mach,
     };
-    let world_to_local = inverse(state.rotation);
+    let world_to_local = state.rotation.conjugate();
     for element in elements {
         finite_vec(element.point, "aerodynamic vector");
         validate_shape(&element.shape);
-        let arm = rotate(state.rotation, element.point);
+        let arm = state.rotation * element.point;
         let point = state.center + arm;
         let v = state.velocity + state.angular_velocity.cross(arm) - wind;
-        let speed = length(v);
+        let speed = v.length();
         let q_pa = 0.5 * air.density * speed * speed;
         let mach = if air.density > 0.0 {
             speed / air.sound_speed
@@ -285,13 +282,13 @@ pub fn aerodynamic_forces(
         let (mut local_force, mut local_moment) = (DVec3::ZERO, DVec3::ZERO);
         let (mut alpha_radians, mut stall, mut cl, mut cd) = (0.0, 0.0, 0.0, 0.0);
         if speed > 0.0 && air.density > 0.0 {
-            let local = rotate(world_to_local, v);
+            let local = world_to_local * v;
             let vhat = local * (1.0 / speed);
             match &element.shape {
                 AeroShape::Body(s) => {
                     let axial = local.dot(s.axis);
                     let side = local - s.axis * axial;
-                    let side_speed = length(side);
+                    let side_speed = side.length();
                     let reynolds = air.density * speed * s.length_meters
                         / positive(air.viscosity, "viscosity");
                     let cf = 0.074 / f64::powf(reynolds.max(1.0), 0.2);
@@ -313,7 +310,7 @@ pub fn aerodynamic_forces(
                 AeroShape::Wing(s) => {
                     let span = s.normal.cross(s.chord);
                     let section_velocity = local - span * local.dot(span);
-                    let section_speed = length(section_velocity);
+                    let section_speed = section_velocity.length();
                     local_force = vhat * (-q_pa * s.area * s.cd0);
                     cd = s.cd0;
                     if section_speed > 0.0 {
@@ -333,7 +330,7 @@ pub fn aerodynamic_forces(
                         let polar = wing_polar(s, alpha_radians, mach);
                         (cl, cd, stall) = (polar.cl, polar.cd, polar.stall);
                         let projected_normal = s.normal - vhat * s.normal.dot(vhat);
-                        let n = length(projected_normal);
+                        let n = projected_normal.length();
                         // Exactly normal incidence has no perpendicular lift direction;
                         // separated pressure drag remains.
                         let lift = if n > 1e-12 {
@@ -353,8 +350,8 @@ pub fn aerodynamic_forces(
                 }
             }
         }
-        let force = rotate(state.rotation, local_force);
-        let moment = rotate(state.rotation, local_moment);
+        let force = state.rotation * local_force;
+        let moment = state.rotation * local_moment;
         let drag = if speed > 0.0 {
             v * (force.dot(v) / (speed * speed))
         } else {
@@ -420,7 +417,7 @@ pub fn shielded(
             continue;
         }
         let hit = point + toward_incoming_air * t - shield.point;
-        if length(hit) < shield.radius_meters {
+        if hit.length() < shield.radius_meters {
             return true;
         }
     }
