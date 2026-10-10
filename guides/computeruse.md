@@ -10,16 +10,16 @@ agent 在獨立的虛擬螢幕 `:7` 上操作遊戲，使用者用瀏覽器看�
 S=<scratchpad 目錄>
 
 # 1. 虛擬螢幕，只開在本機
-nohup Xvnc :7 -geometry 1440x900 -depth 24 -localhost -SecurityTypes None \
-  -rfbport 5907 -AlwaysShared > $S/xvnc.log 2>&1 &
+setsid nohup Xvnc :7 -geometry 1440x900 -depth 24 -localhost -SecurityTypes None \
+  -rfbport 5907 -AlwaysShared > $S/xvnc.log 2>&1 < /dev/null &
 
 # 2. 瀏覽器用的轉接，一定要綁 127.0.0.1（VNC 沒密碼，綁到所有介面會讓區網的人連進來）
-nohup websockify --web /usr/share/novnc 127.0.0.1:6080 localhost:5907 > $S/ws.log 2>&1 &
+setsid nohup websockify --web /usr/share/novnc 127.0.0.1:6080 localhost:5907 > $S/ws.log 2>&1 < /dev/null &
 
 # 3. 遊戲，先用 tools/slice cargo build 編好，放進 void-agent.slice（不經過 tools/slice，免得整場拿著編譯鎖）；
 #    從 worktree 目錄啟動，存檔會寫到這裡的 saves/
-cd <worktree> && DISPLAY=:7 nohup systemd-run --user --scope --quiet --slice=void-agent.slice -- \
-  target/debug/void-app > $S/game.log 2>&1 &
+cd <worktree> && DISPLAY=:7 setsid nohup systemd-run --user --scope --quiet --slice=void-agent.slice -- \
+  target/debug/void-app > $S/game.log 2>&1 < /dev/null &
 
 # 4. 在使用者桌面開瀏覽器
 DISPLAY=:1 xdg-open "http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale"
