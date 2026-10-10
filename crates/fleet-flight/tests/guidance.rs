@@ -19,7 +19,7 @@ fn fixture() -> (FleetFlight, InitialWorld, String) {
     let initial = InitialWorld::new(&planet, &craft, site, false);
     let mut sim = FleetFlight::new(planet, &craft, site, false);
     // Keep the ground craft alive: its fixed-step scene must not round the orbital burn times.
-    let id = sim.launch_orbital(&craft, DVec3::ZERO);
+    let id = sim.launch_orbital_at(sim.home, &craft, DVec3::ZERO);
     sim.select(&id);
     sim.stage();
     assert_eq!(sim.mode(), VesselMode::Orbit);

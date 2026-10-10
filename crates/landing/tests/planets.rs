@@ -11,7 +11,7 @@ use void_lod::{
 use void_terrain::Terrain;
 use void_testkit::{pebble, planet_by_id};
 
-const PLANETS: [&str; 5] = ["pebble", "luna", "terra", "aurelia", "aurelia-fast"];
+const PLANETS: [&str; 4] = ["pebble", "luna", "terra", "aurelia"];
 
 fn contact(radius: f64) -> ContactWorldOptions {
     ContactWorldOptions {

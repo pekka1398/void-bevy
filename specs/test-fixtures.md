@@ -18,7 +18,7 @@ branch：`cleanup/test-fixtures`
    - 放進去的東西：
      - `void-landing` 的假星球（`LandingPlanet` 型別和 LOD 設定留在 landing）：pebble、Luna、Terra、丘陵版 Aurelia、`planet_by_id`、`planet_environment`、`planet_ephemeris`。沒人用的 `aurelia_fast` 直接刪掉。
      - `void-multiscale/fixtures.rs` 的假星系，包括 `default_galaxy`、`AU`、`YEAR`。遊戲本身有用到的 `LIGHT_YEAR` 留在 `void-multiscale`。
-     - `void-assembly` 只給測試用的船：`crewed_flight_rocket`、`crew_rover`、`rendezvous_pod`、`rover`、`reentry_capsule`，以及 rover 的資料檔。玩家用的船在根目錄 `crafts/`，不受影響。沒人讀的 `data/crewed-rocket.json` 刪掉。
+     - `void-assembly` 只給測試用的船：`crewed_flight_rocket`、`crew_rover`、`rendezvous_pod`、`rover`、`reentry_capsule`，以及 rover 的資料檔。玩家用的船在根目錄 `crafts/`，不受影響。沒人讀的 `data/crewed-rocket.json` 刪掉（`orbit/systems/binary.json` 有 orbit 的測試在執行時讀，留著）。
      - `void-vessels/sites.rs` 的 `flat_site`、`pod_tank`。`nearby_site` 留著，遊戲按 N 生船時會用到。
    - 只有單一 crate 的測試在用的東西，放在那個 crate 的 `tests/` 裡，不進 testkit：
      - fleet-flight 的 `aurelia_selene`、`stellar_neighborhood`、`daylight_terrain_site`，放在 `tests/common/mod.rs`。測試用的 Selene 改成直接拿主世界的那一份。

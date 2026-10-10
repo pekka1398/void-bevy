@@ -144,7 +144,11 @@ fn switching_vessel_resets_body_focus_and_plain_camera_replays() {
     view(&mut s, ViewCommand::Zoom { pixels: 40.0 });
     assert_eq!(s.sim().presentation.yaw, 0.4 - 20.0 * 0.006);
     assert_eq!(s.sim().presentation.pitch, 0.25 - 4.0 * 0.006);
-    let ship = s.execute(Action::LaunchOrbit {
+    let ship = s.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = s.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft: demo_craft(),
         offset: DVec3::ZERO,
     });

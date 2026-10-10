@@ -38,11 +38,19 @@ fn exercise(s: &mut FlightSession) {
         throttle: 0.0,
         turn: DVec3::ZERO,
     });
-    s.execute(Action::LaunchOrbit {
+    s.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = s.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft: demo_craft(),
         offset: DVec3::ZERO,
     });
-    s.execute(Action::LaunchOrbit {
+    s.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = s.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft: demo_craft(),
         offset: DVec3::Y * 30.0,
     });

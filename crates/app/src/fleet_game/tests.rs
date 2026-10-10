@@ -73,7 +73,12 @@ fn press(app: &mut App, keys: &[KeyCode]) {
 }
 fn launch_orbit(app: &mut App) -> String {
     let craft = app.world().non_send::<Flight>().craft.clone();
-    let Outcome::Spawned(id) = session(app).execute(Action::LaunchOrbit {
+    let body = {
+        let sim = sim(app);
+        sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+    };
+    let Outcome::Spawned(id) = session(app).execute(Action::LaunchOrbitAt {
+        body,
         craft,
         offset: DVec3::ZERO,
     }) else {

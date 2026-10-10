@@ -277,7 +277,11 @@ fn airborne_motor_steering_braking_and_gyro_conserve_total_momentum_and_continue
     ))
     .with_recording();
     advance(&mut session, 5.0);
-    let Outcome::Spawned(id) = session.execute(Action::LaunchOrbit {
+    let Outcome::Spawned(id) = session.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = session.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft: rover(),
         offset: DVec3::ZERO,
     }) else {

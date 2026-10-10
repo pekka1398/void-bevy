@@ -74,7 +74,11 @@ fn awake_ground_pending_fuel_and_sas_continue_exactly_after_direct_restore() {
 fn mixed_ground_orbit_and_bubble_owner_caches_survive_direct_restore() {
     let mut original = make(true);
     for offset in [DVec3::ZERO, DVec3::Y * 30.0, DVec3::Y * 10_000.0] {
-        original.execute(Action::LaunchOrbit {
+        original.execute(Action::LaunchOrbitAt {
+            body: {
+                let sim = original.sim();
+                sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+            },
             craft: demo_craft(),
             offset,
         });

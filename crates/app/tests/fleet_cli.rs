@@ -13,7 +13,11 @@ fn main_game_verifies_recordings_without_a_window() {
         false,
     ))
     .with_recording();
-    session.execute(Action::LaunchOrbit {
+    session.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = session.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft,
         offset: glam::DVec3::ZERO,
     });

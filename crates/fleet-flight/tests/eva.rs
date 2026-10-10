@@ -257,7 +257,11 @@ fn low_gravity_jump_is_a_real_ballistic_impulse() {
 #[test]
 fn orbital_backpack_uses_existing_finite_resource_and_checkpoint_journal() {
     let mut s = make();
-    let Outcome::Spawned(actor) = s.execute(Action::LaunchOrbit {
+    let Outcome::Spawned(actor) = s.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = s.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft: void_assembly::eva_suit(),
         offset: DVec3::ZERO,
     }) else {

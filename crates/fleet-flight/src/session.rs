@@ -14,7 +14,7 @@ use void_vessels::VesselControl;
 pub mod durable;
 
 /// Recording schema; bump when `Action` or the recording layout changes.
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
 pub const MODEL_VERSION: u32 = 32;
 
@@ -188,10 +188,6 @@ pub enum Action {
     LaunchGround {
         craft: Craft,
         site: DVec3,
-    },
-    LaunchOrbit {
-        craft: Craft,
-        offset: DVec3,
     },
     Advance {
         seconds: f64,
@@ -501,10 +497,6 @@ impl Action {
                 let id = sim.fleet.launch_landed(craft, sim.home, *site);
                 sim.fleet.advance(0.0);
                 Outcome::Spawned(id)
-            }
-            Self::LaunchOrbit { craft, offset } => {
-                assert!(offset.is_finite(), "session: non-finite orbital offset");
-                Outcome::Spawned(sim.launch_orbital(craft, *offset))
             }
             Self::Advance { seconds, rails } => {
                 assert!(
