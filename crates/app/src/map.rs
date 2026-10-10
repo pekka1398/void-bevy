@@ -8,10 +8,9 @@
 use bevy::prelude::*;
 use glam::DVec3;
 use void_orbit::CelestialBody;
-use void_view::{LabelKind, MapFrame, MapLabel, MapOrbits, MapPath, frame_to_ecliptic};
+use void_view::{LabelKind, MapLabel};
 
 pub const PATH_COLOR: &str = "#4fc8ff";
-pub const PLAN_COLOR: &str = "#ffca66";
 pub const VESSEL_COLOR: &str = "#7dffb0";
 const LABEL_HEIGHT: f32 = 13.0;
 
@@ -93,46 +92,6 @@ pub fn spawn_map_labels(commands: &mut Commands, bodies: &[CelestialBody]) {
         commands
             .entity(marker)
             .insert(MapMarker { kind, slot, text });
-    }
-}
-
-/// Bodies' orbits and the given paths, at opacity `alpha`.
-pub fn draw_map_lines(
-    gizmos: &mut Gizmos,
-    bodies: &[CelestialBody],
-    orbits: &MapOrbits,
-    paths: &[(&MapPath, Color)],
-    frame: &MapFrame,
-    alpha: f32,
-    render: &dyn Fn(DVec3) -> Vec3,
-) {
-    if alpha <= 0.0 {
-        return;
-    }
-    for body in bodies {
-        let Some(placement) = orbits.placement(bodies, body.index, frame) else {
-            continue;
-        };
-        let shape = &orbits.shapes[body.index];
-        let at = |p: DVec3| {
-            let e = match &placement.axes {
-                Some(axes) => frame_to_ecliptic(axes, p),
-                None => p,
-            };
-            render(placement.anchor + e)
-        };
-        let points = shape.points.iter().map(|&p| at(p));
-        let c = color(&body.color).with_alpha(alpha);
-        if shape.closed {
-            gizmos.linestrip(points.chain(std::iter::once(at(shape.points[0]))), c);
-        } else {
-            gizmos.linestrip(points, c);
-        }
-    }
-    for (path, c) in paths {
-        if path.visible {
-            gizmos.linestrip(path.points.iter().map(|&p| render(p)), c.with_alpha(alpha));
-        }
     }
 }
 

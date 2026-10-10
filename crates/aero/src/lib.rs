@@ -78,11 +78,6 @@ pub fn inverse(q: DQuat) -> DQuat {
     DQuat::from_xyzw(-q.x, -q.y, -q.z, q.w)
 }
 
-/// Hamilton product a b.
-pub fn quat_multiply(a: DQuat, b: DQuat) -> DQuat {
-    a * b
-}
-
 /// The shortest rotation taking `from` to `to`.
 pub fn align(from: DVec3, to: DVec3) -> DQuat {
     let (a, b) = (normalize(from), normalize(to));

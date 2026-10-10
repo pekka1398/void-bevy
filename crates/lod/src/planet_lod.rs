@@ -200,16 +200,8 @@ impl PlanetLod {
         lod
     }
 
-    pub fn cached_tile_count(&self) -> usize {
-        self.ready_count
-    }
-
     pub fn cached_mesh_bytes(&self) -> usize {
         self.ready_mesh_bytes
-    }
-
-    pub fn node_count(&self) -> usize {
-        self.nodes.len()
     }
 
     pub fn node(&self, code: u64) -> Option<&LodNode> {

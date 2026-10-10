@@ -55,11 +55,6 @@ pub fn multiple_scattering_lookup(table: &[f32], p: &AtmosphereParams, r: f64, s
     )
 }
 
-pub fn irradiance_lookup(table: &[f32], p: &AtmosphereParams, r: f64, sun_mu: f64) -> Rgb {
-    let (x, y) = table_coords(p, r, sun_mu);
-    bilinear(table, IRRADIANCE_WIDTH, IRRADIANCE_HEIGHT, x, y)
-}
-
 /// Directions spread evenly over the sphere (a Fibonacci lattice).
 pub fn sphere_directions(count: usize) -> Vec<DVec3> {
     let golden = std::f64::consts::PI * (3.0 - 5f64.sqrt());

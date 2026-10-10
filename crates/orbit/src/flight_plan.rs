@@ -152,15 +152,6 @@ impl FlightPlan {
         self.coast
     }
 
-    /// Lengthening keeps what is integrated and continues; shortening restarts.
-    pub fn set_coast_seconds(&mut self, value: f64) {
-        let shorter = checked_coast(value) < self.coast;
-        self.coast = value;
-        if shorter {
-            self.restart();
-        }
-    }
-
     pub fn anchor_time(&self) -> f64 {
         self.anchor.as_ref().expect("flight plan: no anchor").time
     }
@@ -171,11 +162,6 @@ impl FlightPlan {
             .last()
             .map_or_else(|| self.anchor_time(), |b| b.end_time)
             + self.coast
-    }
-
-    /// How far the trajectory has been integrated.
-    pub fn computed_until(&self) -> f64 {
-        self.run.as_ref().expect("flight plan: no anchor").time
     }
 
     pub fn impact(&self) -> Option<Impact> {

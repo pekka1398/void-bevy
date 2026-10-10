@@ -273,24 +273,6 @@ impl MapPath {
                 .collect();
         }
     }
-
-    /// Apsis label positions now, relative to the origin.
-    pub fn apsis_positions(&self, frame: &MapFrame) -> Vec<(String, DVec3)> {
-        let (Some(path_frame), true) = (&self.frame, self.visible) else {
-            return Vec::new();
-        };
-        let axes = path_frame.axes_at(frame.time);
-        let centre = frame.positions[path_frame.reference] - frame.origin;
-        self.apsides
-            .iter()
-            .map(|a| {
-                (
-                    a.label.clone(),
-                    centre + frame_to_ecliptic(&axes, a.in_frame),
-                )
-            })
-            .collect()
-    }
 }
 
 /// About 256 samples per orbit of the current osculating orbit, and at most 6000 over the path.

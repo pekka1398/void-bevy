@@ -833,9 +833,6 @@ impl FlightSession {
         self.stream.take().unwrap().finish(count);
         self.recording = None;
     }
-    pub fn streaming(&self) -> bool {
-        self.stream.is_some()
-    }
     pub fn save(&mut self, path: impl AsRef<Path>) {
         self.mark();
         self.recording

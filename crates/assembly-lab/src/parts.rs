@@ -12,11 +12,6 @@ pub struct PartMesh {
     pub id: String,
     pub local: Transform,
 }
-#[derive(Component)]
-pub struct Flame {
-    pub id: String,
-    pub local: Transform,
-}
 pub struct RenderPiece {
     pub mesh: Handle<Mesh>,
     pub material: Handle<StandardMaterial>,

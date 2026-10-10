@@ -224,12 +224,6 @@ impl EncounterPhysicsGate {
         }
     }
 
-    pub fn is_physics_active(&self, vessel_id: &str) -> bool {
-        self.active
-            .keys()
-            .any(|(a, b)| a == vessel_id || b == vessel_id)
-    }
-
     pub fn active_pairs(&self) -> Vec<(String, String)> {
         self.active.keys().cloned().collect()
     }

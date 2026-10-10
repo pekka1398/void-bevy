@@ -6,9 +6,6 @@ use void_terrain::noise::noise;
 
 /// Heights above the live sea level, never above the ocean-floor reference sphere.
 pub const CLOUD_BOTTOM: f64 = 1500.0;
-pub const CLOUD_TOP: f64 = 8000.0;
-/// m⁻¹ at unit density.
-pub const CLOUD_EXTINCTION: f64 = 0.0011;
 pub const SHAPE_PERIOD: f64 = 65536.0;
 pub const DETAIL_PERIOD: f64 = 2048.0;
 pub const WEATHER_WIDTH: usize = 2048;

@@ -21,7 +21,6 @@ use void_frames::State;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::mpsc::channel;
 
 use glam::{DMat3, DQuat, DVec3};
 use rapier3d::math::{Rotation, Vector};
@@ -124,7 +123,6 @@ struct BodyRecord {
     published: Rotation,
     /// Prescribed local torque for the next step only.
     torque: Option<DVec3>,
-    contact_delta_v: f64,
     /// Velocity change the solver made in the last step (contacts, joints); zero in a free step.
     solver_delta: DVec3,
     /// Proposed interval contact-model impulse, credited like native solver support in state().
@@ -534,9 +532,7 @@ impl<F: ContactFrame> ContactWorld<F> {
             }
             builder = builder
                 .friction(spec.friction as f32)
-                .restitution(spec.restitution as f32)
-                .active_events(ActiveEvents::CONTACT_FORCE_EVENTS)
-                .contact_force_event_threshold(0.0);
+                .restitution(spec.restitution as f32);
             self.world
                 .colliders
                 .insert_with_parent(builder, handle, &mut self.world.bodies);
@@ -551,7 +547,6 @@ impl<F: ContactFrame> ContactWorld<F> {
             turn_angular_velocity: v64(body.angvel()),
             published: *body.rotation(),
             torque: None,
-            contact_delta_v: 0.0,
             solver_delta: DVec3::ZERO,
             pending_contact_delta: DVec3::ZERO,
         };
@@ -661,23 +656,6 @@ impl<F: ContactFrame> ContactWorld<F> {
         );
     }
 
-    /// Keep the physical collider mass in sync with fuel a part has used.
-    pub fn set_body_mass(&mut self, handle: RigidBodyHandle, mass_kg: f64) {
-        let record = self.record(handle).clone();
-        assert!(mass_kg > 0.0, "contact world: invalid body mass {mass_kg}");
-        assert!(
-            record.inertia_per_kg.is_none(),
-            "set body mass: this body's pieces carry their own masses; use set_piece_masses"
-        );
-        let colliders = self.world.bodies[handle].colliders().to_vec();
-        for (collider, weight) in colliders.iter().zip(&record.weights) {
-            self.world.colliders[*collider].set_mass((mass_kg * weight) as f32);
-        }
-        let w = &mut self.world;
-        w.bodies[handle].recompute_mass_properties_from_colliders(&w.colliders);
-        w.bodies[handle].wake_up(true);
-    }
-
     /// New masses for a body whose compound pieces carry their own mass (in piece order); each
     /// piece's inertia scales with it.
     pub fn set_piece_masses(&mut self, handle: RigidBodyHandle, masses_kg: &[f64]) {
@@ -709,12 +687,6 @@ impl<F: ContactFrame> ContactWorld<F> {
         w.bodies[handle].wake_up(true);
     }
 
-    /// Normal contact impulse per kilogram in the last step, m/s. Joint forces, prescribed
-    /// acceleration and velocity limits are not impact diagnostics.
-    pub fn last_contact_delta_v(&self, handle: RigidBodyHandle) -> f64 {
-        self.record(handle).contact_delta_v
-    }
-
     /// Body-local torque, N m, applied during the next step only.
     pub fn apply_local_torque(&mut self, handle: RigidBodyHandle, torque: DVec3) {
         assert!(torque.is_finite(), "contact world: non-finite torque");
@@ -728,16 +700,6 @@ impl<F: ContactFrame> ContactWorld<F> {
         }
     }
 
-    /// Contact-model impulse in contact-frame axes, torque about this body's COM.
-    /// This shares the native body; it is not an extra owner or force-trial state mutation.
-    pub fn apply_wrench_impulse(
-        &mut self,
-        handle: RigidBodyHandle,
-        linear: DVec3,
-        angular_about_com: DVec3,
-    ) {
-        self.apply_contact_wrench_impulse(handle, linear, angular_about_com, true);
-    }
     /// Actuator/support-motion loads wake; passive suspension/balance does not reset native sleep.
     /// An already sleeping equilibrium skips passive loads and gravity together.
     pub fn apply_contact_wrench_impulse(
@@ -1080,7 +1042,6 @@ impl<F: ContactFrame> ContactWorld<F> {
             {
                 constrained.push(handle);
             }
-            self.record_mut(handle).contact_delta_v = 0.0;
             let push = extra.as_mut().map(|f| {
                 let state = self.state(ephemeris, handle, DVec3::ZERO);
                 f(handle, state)
@@ -1164,24 +1125,7 @@ impl<F: ContactFrame> ContactWorld<F> {
             }
         }
 
-        let (collision_send, _collision_recv) = channel();
-        let (force_send, force_recv) = channel();
-        let events = ChannelEventCollector::new(collision_send, force_send);
-        self.world.step_with_events(&(), &events);
-        while let Ok(event) = force_recv.try_recv() {
-            // Rapier's force events use the manifolds actually solved (including clustered terrain
-            // contacts), not stale geometric impulses.
-            let impulse = f64::from(event.total_force_magnitude) * dt;
-            for collider in [event.collider1, event.collider2] {
-                let Some(body) = self.world.colliders.get(collider).and_then(|c| c.parent()) else {
-                    continue;
-                };
-                if self.bodies.iter().any(|(h, _)| *h == body) {
-                    let mass = f64::from(self.world.bodies[body].mass());
-                    self.record_mut(body).contact_delta_v += impulse / mass;
-                }
-            }
-        }
+        self.world.step_with_events(&(), &());
 
         for &handle in &handles {
             let v = kicked.get(&handle).copied();

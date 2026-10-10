@@ -307,8 +307,6 @@ pub struct Fleet {
     pending: f64,
     next_vessel: u64,
     next_scene: u64,
-    #[cfg(feature = "step-timing")]
-    step_times: [f64; 6],
 }
 /// The fleet's tree reads systems and bodies from the ephemeris and scenes and vessels from the
 /// fleet's own state, which exists at the fleet's time only.
@@ -466,8 +464,6 @@ impl Fleet {
             pending: 0.0,
             next_vessel: 1,
             next_scene: 1,
-            #[cfg(feature = "step-timing")]
-            step_times: [0.0; 6],
         }
     }
     pub fn environment(&self) -> &Arc<Environment> {
@@ -3400,10 +3396,6 @@ impl Fleet {
             }
         }
     }
-    #[cfg(feature = "step-timing")]
-    pub fn step_timings(&self) -> [f64; 6] {
-        self.step_times
-    }
     fn step_all(&mut self) {
         self.step_all_accepted();
     }
@@ -3427,52 +3419,21 @@ impl Fleet {
         }
     }
     fn step_all_accepted(&mut self) {
-        #[cfg(feature = "step-timing")]
-        let mut stamp = std::time::Instant::now();
         self.prepare_parachutes();
-        #[cfg(feature = "step-timing")]
-        {
-            self.step_times[0] += stamp.elapsed().as_secs_f64() * 1000.;
-            stamp = std::time::Instant::now();
-        }
         let end = self.time + self.options.step_seconds;
         for scene in self.scenes.keys().copied().collect::<Vec<_>>() {
             self.step_scene(scene);
-        }
-        #[cfg(feature = "step-timing")]
-        {
-            self.step_times[1] += stamp.elapsed().as_secs_f64() * 1000.;
-            stamp = std::time::Instant::now();
         }
         for id in self.order.clone() {
             if matches!(self.vessel(&id).owner, Owner::Orbit { .. }) {
                 self.advance_orbit(&id, end);
             }
         }
-        #[cfg(feature = "step-timing")]
-        {
-            self.step_times[2] += stamp.elapsed().as_secs_f64() * 1000.;
-            stamp = std::time::Instant::now();
-        }
         self.commit_parachutes(self.options.step_seconds);
         self.time = end;
-        #[cfg(feature = "step-timing")]
-        {
-            self.step_times[3] += stamp.elapsed().as_secs_f64() * 1000.;
-            stamp = std::time::Instant::now();
-        }
         self.commit_thermal(self.options.step_seconds);
-        #[cfg(feature = "step-timing")]
-        {
-            self.step_times[4] += stamp.elapsed().as_secs_f64() * 1000.;
-            stamp = std::time::Instant::now();
-        }
         for scene in self.scenes.keys().copied().collect::<Vec<_>>() {
             self.recenter_scene(scene);
-        }
-        #[cfg(feature = "step-timing")]
-        {
-            self.step_times[5] += stamp.elapsed().as_secs_f64() * 1000.;
         }
     }
     pub fn advance(&mut self, dt: f64) {
