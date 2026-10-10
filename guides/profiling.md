@@ -60,7 +60,8 @@ ref/tracy/bin/tracy-csvexport -s "$T" -u -p -f zzz run.tracy > plots.tsv  # 只�
 ref/tracy/bin/tracy-csvexport -s "$T" -g run.tracy > gpu.tsv          # 每一次 GPU pass
 ```
 
-- **一定要設 `TRACY_NO_SAMPLING=1` 或 `TRACY_SYMBOL_OFFLINE_RESOLVE=1`**：兩個都不設時，Tracy 的取樣（sampling）會在遊戲裡解析 debug 版 800 MB 執行檔的符號，遊戲記憶體從 1.3 GB 漲到 6 GB。`TRACY_NO_SAMPLING=1` 關掉取樣，zone 和 GPU 都照常；`TRACY_SYMBOL_OFFLINE_RESOLVE=1` 保留取樣，但取樣的呼叫堆疊只有位址、沒有函式名稱。
+- 取樣（sampling）：不設 `TRACY_NO_SAMPLING=1` 時 Tracy 會定時取樣各執行緒的呼叫堆疊。現在可以開：Tracy 版執行檔約 440 MB（Bevy 靜態連結，工作區只有行號表），開著取樣玩 3 分鐘，遊戲記憶體停在約 1.7 GB（以前執行檔 800 MB 時會漲到 6 GB，現在沒有）。但取樣得到的不多：我們和 Bevy 的函式在 Statistics → Sampling 裡名稱是 `[unknown]`，只有檔名和行號（例如 `crates/terrain/src/noise.rs:63`），呼叫堆疊只有一層（Rust 沒有 frame pointer），只能看哪幾行最熱，看不到誰呼叫的。只要 zone 時設 `TRACY_NO_SAMPLING=1`，少掉 Tracy 自己解析符號和壓縮資料的負擔。
+- 想知道哪個函式最熱、又不想編 Tracy 版時，`perf` 可以直接量一般的開發編譯（這台 `perf_event_paranoid` 是 2，量自己的程序不用 root）：`perf record -F 199 --call-graph dwarf,16384 -p <PID> -- timeout 5 tail -f /dev/null`，再 `perf report --no-children --stdio`。函式名稱完整（例如 `void_terrain::noise::noise_with_gradient` 在 `Async Compute T` 執行緒），但試過一次呼叫堆疊是空的，只有每個函式自己的時間。
 - 錄一次完整的 `--bench` 約 2.5 分鐘、70 MB 檔案，`tracy-capture` 自己用到約 300 MB。
 
 - `--bench` 在 Tracy 裡畫一條 plot `bench scenario`：量測開始時是情境編號（1 開始），量完歸 0。把 `events.tsv` 的每個 zone 依開始時間（`ns_since_start`）落在哪兩個點之間分到各情境，除以該段 `frame ms` 的點數，就是每幀的時間。`exec_time_ns` 含子 zone；要 self time 用 `-u -e`。GPU zone 的時間軸是顯示卡的時鐘換算來的，和 CPU 的不一定對齊，分情境時只當參考。
