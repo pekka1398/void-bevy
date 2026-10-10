@@ -4,26 +4,27 @@
 
 | 工具 | 看什麼 | 怎麼開 |
 |---|---|---|
-| DEV 面板的 PERFORMANCE | 最近 2 秒的幀時間（平均、最差）、模擬占多少、實際和設定倍率、GPU pass | 一般編譯就有；GPU 那行要 `--features profiling` 或 `--bench` |
+| DEV 面板的 PERFORMANCE | 最近 2 秒的幀時間（平均、最差）、main world 時間、模擬占多少、實際和設定倍率、GPU pass | 一般編譯就有；GPU 那行要 `--features profiling` 或 `--bench` |
 | `--bench <報告>` | 固定的一組情境，每個情境同樣秒數，輸出文字報告 | 一般編譯就能跑 |
 | Tracy | 每個 Bevy system、render 階段、GPU pass、我們自己的 zone，逐幀 | `cargo build -p void-app --features profiling` |
 
 ## 固定情境（`--bench`）
 
-每次合併進 master 前跑一次，和上一次的報告比較。情境定義在 `crates/app/src/fleet_game/perf.rs` 的 `SCENARIOS`：主遊戲世界，每個情境先 R 重設，只改船的起始狀態（O、DEV「放置船」用的同一個 `Action::Place`）和倍率；每個情境先等 4 秒（tile 載入、警告解除），再量 10 秒。
+每次合併進 master 前跑一次，和上一次的報告比較。情境定義在 `crates/app/src/fleet_game/perf.rs` 的 `SCENARIOS`：主遊戲世界，每個情境先 R 重設，只改船的起始狀態（O、DEV「放置船」用的同一個 `Action::Place`）和倍率；每個情境先用 1× 跑 4 秒（tile 載入、R 和 O 留在發射台上的船停穩；它還在動時 on-rails 加速會被拒絕），再要求情境的倍率跑 4 秒（被拒絕就再要求），然後量 10 秒。視窗失焦也照跑。
 
 ```bash
 cargo build -j 2 -p void-app
-# 在 :7 上跑（guides/computeruse.md），視窗拉到 1440×900；失焦也照跑
+# 在 :7 上跑（guides/computeruse.md），開了以後馬上把視窗拉到 1440×900
 DISPLAY=:7 systemd-run --user --scope --quiet --slice=void-agent.slice -- \
   target/debug/void-app --bench <報告.txt>
 ```
 
-跑的時候不要同時編譯或跑別的重東西，數字才能比較。報告開頭的表格每個情境一行：
+跑的時候不要同時編譯或跑別的重東西，數字才能比較。在 Xvnc（`:7`）上，畫面每幀要從顯示卡複製到 Xvnc，present 每幀就要 25–50 ms，所以 `:7` 上的幀時間有很大一塊是 Xvnc 的成本，不是遊戲的；比較改動前後的 main、sim、gpu、倍率最可靠。報告開頭的表格每個情境一行：
 
 - `avg/p95/worst ms`：幀時間（兩幀開始之間的實際時間）。
+- `main ms`：main world 從 `First` 到 `Last` 的時間（遊戲邏輯、UI、畫面準備）。render 在另一條執行緒和它同時跑，所以幀時間大約是 main 和 render（含等螢幕 present）兩者較大的那個。幀時間遠大於 main 時，瓶頸在 render 或 present，要用 Tracy 看。
 - `sim ms`、`sim%`：`simulate` system（推進飛行、加速、滑行預測）每幀的時間和占幀時間的比例。
-- `gpu ms`：最上層 render pass 的 GPU 時間總和；下面各情境的段落列出每個 pass。大氣和雲是同一個 pass `void_air`（每個有大氣的星球一次）；地面和海是 `main_opaque_pass_3d` 裡的 `GroundMaterial`；地圖的線是 gizmo，畫在 `main_transparent_pass_3d`。
+- `gpu ms`：最上層 render pass 的 GPU 時間總和；下面各情境的段落列出每個 pass。大氣和雲在同一個 shader 裡：`void_air_body` 是每個有大氣的星球（包括相機所在的）的大氣和雲，每個一次、加總；`void_air_resolve` 是最後合到畫面上的一次；地面和海是 `main_opaque_pass_3d` 裡的 `GroundMaterial`；地圖的線是 gizmo，畫在 `main_transparent_pass_3d`。GPU 時間會隨顯示卡當下的時脈變：負載低時顯示卡降頻，同一個 pass 可能量到好幾倍，比較時要看同樣條件下跑的報告。
 - `requested / in effect / actual ×`：要求的倍率、警告限制後實際生效的倍率、實際每秒推進的模擬秒數。生效的比要求的低時，段落裡的 notice 寫原因。
 - `RSS MiB`：情境結束時的常駐記憶體；段落裡另有整個程式的峰值。
 
@@ -34,21 +35,29 @@ Tracy 的版本要和 Bevy 用的 `tracy-client` 一致：Bevy 0.19.1 → `traci
 ```bash
 cargo build -j 2 -p void-app --features profiling --target-dir target/profiling
 
-# 開 GUI 看（使用者在自己的桌面）：先開遊戲，再在 Tracy 按 Connect
-target/profiling/debug/void-app &
-ref/tracy/bin/tracy-profiler
+# 開 GUI 看（使用者在自己的桌面）：先開 Tracy，再開遊戲，Tracy 會列出它，點 Connect
+ref/tracy/bin/tracy-profiler &
+TRACY_NO_SAMPLING=1 target/profiling/debug/void-app
 
-# agent 不開 GUI：錄下來再匯出成 CSV
-ref/tracy/bin/tracy-capture -o run.tracy -f -s 120 &      # 等遊戲連上，最多錄 120 秒
-DISPLAY=:7 target/profiling/debug/void-app --bench report.txt
-ref/tracy/bin/tracy-csvexport run.tracy > zones.csv          # 每個 zone 的次數、總時間、平均
-ref/tracy/bin/tracy-csvexport -e run.tracy > self.csv        # 扣掉子 zone 的 self time
-ref/tracy/bin/tracy-csvexport -u -p run.tracy > events.csv   # 每一次 zone 和 plot 點，含時間戳
+# agent 不開 GUI：錄下來再匯出（遊戲結束時 tracy-capture 自己存檔結束）
+systemd-run --user --scope --quiet --slice=void-agent.slice -- ref/tracy/bin/tracy-capture -o run.tracy -f &
+DISPLAY=:7 TRACY_NO_SAMPLING=1 systemd-run --user --scope --quiet --slice=void-agent.slice -- \
+  target/profiling/debug/void-app --bench report.txt
+T=$'\t'   # zone 名稱裡有逗號，一律用 tab 分隔
+ref/tracy/bin/tracy-csvexport -s "$T" run.tracy > zones.tsv           # 每個 zone 的次數、總時間、平均
+ref/tracy/bin/tracy-csvexport -s "$T" -e run.tracy > self.tsv         # 扣掉子 zone 的 self time
+ref/tracy/bin/tracy-csvexport -s "$T" -u run.tracy > events.tsv       # 每一次 zone，含開始時間、執行緒
+ref/tracy/bin/tracy-csvexport -s "$T" -u -p -f zzz run.tracy > plots.tsv  # 只要 plot 點（-f 濾掉所有 zone）
+ref/tracy/bin/tracy-csvexport -s "$T" -g run.tracy > gpu.tsv          # 每一次 GPU pass
 ```
 
-- `--bench` 在 Tracy 裡畫一條 plot `bench scenario`：量測期間是情境編號（1 開始），量完歸 0。用 `-u -p` 的時間戳就能把 zone 分到各個情境。
-- 其他 plot：`frame ms`、`simulate ms`、`warp set`、`warp actual`。
-- 開 Tracy 會讓每個 zone 多花一點時間（幾十到幾百 ns），量出來的倍率會比一般編譯低；比較快慢用一般編譯的 `--bench`，找原因才用 Tracy。
+- **一定要設 `TRACY_NO_SAMPLING=1` 或 `TRACY_SYMBOL_OFFLINE_RESOLVE=1`**：兩個都不設時，Tracy 的取樣（sampling）會在遊戲裡解析 debug 版 800 MB 執行檔的符號，遊戲記憶體從 1.3 GB 漲到 6 GB。`TRACY_NO_SAMPLING=1` 關掉取樣，zone 和 GPU 都照常；`TRACY_SYMBOL_OFFLINE_RESOLVE=1` 保留取樣，但取樣的呼叫堆疊只有位址、沒有函式名稱。
+- 錄一次完整的 `--bench` 約 2.5 分鐘、70 MB 檔案，`tracy-capture` 自己用到約 300 MB。
+
+- `--bench` 在 Tracy 裡畫一條 plot `bench scenario`：量測開始時是情境編號（1 開始），量完歸 0。把 `events.tsv` 的每個 zone 依開始時間（`ns_since_start`）落在哪兩個點之間分到各情境，除以該段 `frame ms` 的點數，就是每幀的時間。`exec_time_ns` 含子 zone；要 self time 用 `-u -e`。GPU zone 的時間軸是顯示卡的時鐘換算來的，和 CPU 的不一定對齊，分情境時只當參考。
+- 其他 plot：`frame ms`、`main world ms`、`simulate ms`、`warp set`、`warp actual`。
+- 主執行緒上 `sub app{name=RenderExtractApp}` 的 self time 是在等 render 執行緒做完上一幀（通常是在等 `present_frames`）。
+- 開 Tracy 會讓每個 zone 多花一點時間，zone 很多的情境（10k× 軌道每幀三萬多個 zone）會慢約兩成；比較快慢用一般編譯的 `--bench`，找原因才用 Tracy。
 
 ## 自己的 zone
 

@@ -1,5 +1,6 @@
 //! Frame timing: the DEV panel's PERFORMANCE readout and `--bench`, the fixed measurement
-//! scenarios (guides/profiling.md). Both read the same per-frame samples `simulate` records.
+//! scenarios (guides/profiling.md). Both read the same per-frame samples: `begin_frame` and
+//! `end_frame` bracket the main world's frame, `simulate` reports its part in between.
 use super::*;
 use bevy::diagnostic::DiagnosticsStore;
 use std::collections::{BTreeMap, VecDeque};
@@ -7,17 +8,25 @@ use std::fmt::Write as _;
 use std::time::Instant;
 use void_fleet_flight::placement::{Placement, PlacementAttitude, PlacementVelocity, SiteKind};
 
-/// One frame as `simulate` saw it.
+/// What `simulate` did this frame.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct FrameSample {
-    /// Wall time since the previous frame began (Bevy's real delta).
-    pub frame_seconds: f64,
+pub(crate) struct Simulated {
     /// Wall time inside `simulate`: the flight, warp and coast forecast.
     pub sim_seconds: f64,
     /// Simulated seconds the flight advanced this frame.
     pub advanced_seconds: f64,
     /// Time rate in effect after any warp limit, 0 while paused.
     pub set_rate: f64,
+}
+/// One frame.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FrameSample {
+    /// Wall time since the previous frame began (Bevy's real, unclamped delta).
+    frame_seconds: f64,
+    /// Wall time of the main world's schedules, `First` to `Last`. Rendering of the previous
+    /// frame (and waiting for the screen) runs beside it on the render thread.
+    main_seconds: f64,
+    simulated: Simulated,
 }
 
 /// Statistics over a run of frames.
@@ -27,6 +36,7 @@ pub(crate) struct Summary {
     frame_avg_ms: f64,
     frame_p95_ms: f64,
     frame_worst_ms: f64,
+    main_avg_ms: f64,
     sim_avg_ms: f64,
     actual_rate: f64,
     set_rates: (f64, f64),
@@ -46,12 +56,18 @@ impl Summary {
             frame_avg_ms: seconds * 1e3 / n as f64,
             frame_p95_ms: frames[((n as f64 * 0.95).ceil() as usize).max(1) - 1],
             frame_worst_ms: frames[n - 1],
-            sim_avg_ms: samples.iter().map(|s| s.sim_seconds).sum::<f64>() * 1e3 / n as f64,
-            actual_rate: samples.iter().map(|s| s.advanced_seconds).sum::<f64>() / seconds,
+            main_avg_ms: samples.iter().map(|s| s.main_seconds).sum::<f64>() * 1e3 / n as f64,
+            sim_avg_ms: samples.iter().map(|s| s.simulated.sim_seconds).sum::<f64>() * 1e3
+                / n as f64,
+            actual_rate: samples
+                .iter()
+                .map(|s| s.simulated.advanced_seconds)
+                .sum::<f64>()
+                / seconds,
             set_rates: samples
                 .iter()
                 .fold((f64::INFINITY, 0.0_f64), |(lo, hi), s| {
-                    (lo.min(s.set_rate), hi.max(s.set_rate))
+                    (lo.min(s.simulated.set_rate), hi.max(s.simulated.set_rate))
                 }),
         })
     }
@@ -68,28 +84,34 @@ impl Summary {
 #[derive(Resource, Default)]
 pub(crate) struct FrameStats {
     recent: VecDeque<FrameSample>,
+    /// When this frame's `First` began.
+    began: Option<Instant>,
+    simulated: Option<Simulated>,
 }
 const WINDOW_SECONDS: f64 = 2.0;
 impl FrameStats {
-    pub fn record(&mut self, s: FrameSample) {
+    /// `simulate`'s part of this frame; exactly once per frame.
+    pub fn simulated(&mut self, s: Simulated) {
         assert!(
-            [
-                s.frame_seconds,
-                s.sim_seconds,
-                s.advanced_seconds,
-                s.set_rate
-            ]
-            .iter()
-            .all(|v| v.is_finite() && *v >= 0.0),
-            "frame stats: invalid sample {s:?}"
+            [s.sim_seconds, s.advanced_seconds, s.set_rate]
+                .iter()
+                .all(|v| v.is_finite() && *v >= 0.0),
+            "frame stats: invalid simulation sample {s:?}"
         );
+        assert!(
+            self.simulated.replace(s).is_none(),
+            "frame stats: simulate reported twice in one frame"
+        );
+    }
+    fn record(&mut self, s: FrameSample) {
         void_diagnostics::plot!("frame ms", s.frame_seconds * 1e3);
-        void_diagnostics::plot!("simulate ms", s.sim_seconds * 1e3);
-        void_diagnostics::plot!("warp set", s.set_rate);
+        void_diagnostics::plot!("main world ms", s.main_seconds * 1e3);
+        void_diagnostics::plot!("simulate ms", s.simulated.sim_seconds * 1e3);
+        void_diagnostics::plot!("warp set", s.simulated.set_rate);
         void_diagnostics::plot!(
             "warp actual",
             if s.frame_seconds > 0.0 {
-                s.advanced_seconds / s.frame_seconds
+                s.simulated.advanced_seconds / s.frame_seconds
             } else {
                 0.0
             }
@@ -105,6 +127,32 @@ impl FrameStats {
         self.recent.back().copied()
     }
 }
+/// Brackets each frame for `FrameStats`; every app that runs `simulate` needs it.
+pub(super) fn add_frame_timing(app: &mut App) {
+    app.add_systems(First, begin_frame)
+        .add_systems(Last, end_frame);
+}
+fn begin_frame(mut stats: ResMut<FrameStats>) {
+    stats.began = Some(Instant::now());
+}
+/// Skipped, like `simulate`, in a frame without the window (while the app closes).
+fn end_frame(time: Res<Time<Real>>, _window: Single<&Window>, mut stats: ResMut<FrameStats>) {
+    let main_seconds = stats
+        .began
+        .take()
+        .expect("frame stats: Last without First")
+        .elapsed()
+        .as_secs_f64();
+    let simulated = stats
+        .simulated
+        .take()
+        .expect("frame stats: simulate did not run this frame");
+    stats.record(FrameSample {
+        frame_seconds: time.delta_secs_f64(),
+        main_seconds,
+        simulated,
+    });
+}
 
 /// The top-level render pass a diagnostic times on the GPU. Nested spans are left out so the
 /// passes add up.
@@ -115,11 +163,22 @@ fn gpu_pass(d: &bevy::diagnostic::Diagnostic) -> Option<&str> {
         .strip_suffix("/elapsed_gpu")
         .filter(|pass| !pass.contains('/'))
 }
-/// The latest GPU milliseconds of each top-level render pass.
+/// GPU milliseconds of each top-level render pass in the latest frame the store has. A pass that
+/// runs several times a frame (the air, once per layer) has one measurement per run, all
+/// stamped with that frame's time; they are added up.
 fn gpu_passes(store: &DiagnosticsStore) -> BTreeMap<String, f64> {
     store
         .iter()
-        .filter_map(|d| Some((gpu_pass(d)?.to_owned(), d.value()?)))
+        .filter_map(|d| {
+            let pass = gpu_pass(d)?;
+            let latest = d.measurement()?.time;
+            let ms = d
+                .measurements()
+                .filter(|m| m.time == latest)
+                .map(|m| m.value)
+                .sum();
+            Some((pass.to_owned(), ms))
+        })
         .collect()
 }
 
@@ -154,11 +213,12 @@ pub(super) fn readout(
                 )
             };
             format!(
-                "PERFORMANCE · last {:.1} s · {} frames\nframe  {:.1} ms avg · {:.1} ms worst\nsim    {:.2} ms/frame · {:.0}% of frame\nwarp   actual {:.0}× · set {}\n{gpu}",
+                "PERFORMANCE · last {:.1} s · {} frames\nframe  {:.1} avg · {:.1} worst · main {:.1} ms\nsim    {:.2} ms/frame · {:.0}% of frame\nwarp   actual {:.0}× · set {}\n{gpu}",
                 s.seconds,
                 s.frames,
                 s.frame_avg_ms,
                 s.frame_worst_ms,
+                s.main_avg_ms,
                 s.sim_avg_ms,
                 s.sim_avg_ms / s.frame_avg_ms * 100.0,
                 s.actual_rate,
@@ -219,7 +279,7 @@ const SCENARIOS: [Scenario; 8] = [
     },
     Scenario {
         name: "atmosphere",
-        description: "placed 2 km over a daylit sea at 150 m/s, clouds and sea in view, 1×",
+        description: "placed 2 km over a daylit sea at 150 m/s, camera near its horizon: sea and sky, 1×",
         rate: 0,
         setup: place_low,
     },
@@ -237,7 +297,7 @@ const SCENARIOS: [Scenario; 8] = [
     },
 ];
 /// Real seconds each scenario runs before measuring (tiles load, warp settles), then measures.
-const SETTLE_SECONDS: f64 = 4.0;
+const SETTLE_SECONDS: f64 = 8.0;
 const MEASURE_SECONDS: f64 = 10.0;
 
 fn launch_orbit(pilot: &mut Pilot) {
@@ -338,6 +398,17 @@ fn place_low(pilot: &mut Pilot) {
         PlacementAttitude::Prograde,
     );
     place(pilot, p);
+    // The camera starts above the ship looking down at the sea; lower it to 8° above the
+    // ship's horizon so the sky and clouds are in view too. A long drag first rests it at the top.
+    let session = &mut pilot.flight.session;
+    for y in [
+        1e4,
+        -(82f64.to_radians() - void_view::MIN_ANGLE_FROM_UP) / void_view::RADIANS_PER_PIXEL,
+    ] {
+        session.execute(Action::View {
+            command: ViewCommand::Drag { x: 0.0, y },
+        });
+    }
 }
 fn place_reentry(pilot: &mut Pilot) {
     let p = surface_placement(
@@ -399,7 +470,7 @@ fn start(pilot: &mut Pilot, scenario: &Scenario) {
     super::reset_world(pilot);
     (scenario.setup)(pilot);
     pilot.flight.paused = false;
-    pilot.flight.rate = scenario.rate;
+    pilot.flight.rate = 0;
     pilot.notice.0.clear();
 }
 #[allow(clippy::too_many_arguments)]
@@ -428,8 +499,10 @@ fn bench(
     let scenario = &SCENARIOS[index];
     let elapsed = now.duration_since(since).as_secs_f64();
     match phase {
-        // Like a pilot pressing "." again after a refusal: the pad vessel left behind by O may
-        // still be settling. The warp limit can still lower the rate each frame.
+        // Like a pilot: run at 1× first so the vessel left on the pad by R and O comes to rest
+        // (on-rails warp is refused while it moves), then ask for the rate, again after any
+        // refusal. The warp limit may still lower it each frame.
+        Phase::Settle if elapsed < SETTLE_SECONDS / 2.0 => pilot.flight.rate = 0,
         Phase::Settle if elapsed < SETTLE_SECONDS => pilot.flight.rate = scenario.rate,
         Phase::Settle => {
             // In a Tracy capture, this plot marks which scenario each measured frame belongs to.
@@ -443,13 +516,17 @@ fn bench(
                 .samples
                 .push(stats.latest().expect("bench: simulate recorded no frame"));
             for d in store.iter() {
-                let (Some(pass), Some(m)) = (gpu_pass(d), d.measurement()) else {
-                    continue;
-                };
+                let Some(pass) = gpu_pass(d) else { continue };
                 let entry = bench.gpu.entry(pass.to_owned()).or_insert((0.0, 0, since));
-                if m.time > entry.2 {
-                    *entry = (entry.0 + m.value, entry.1 + 1, m.time);
+                let mut frame = entry.2;
+                for m in d.measurements().filter(|m| m.time > entry.2) {
+                    entry.0 += m.value;
+                    if m.time > frame {
+                        frame = m.time;
+                        entry.1 += 1;
+                    }
                 }
+                entry.2 = frame;
             }
             if elapsed >= MEASURE_SECONDS {
                 void_diagnostics::plot!("bench scenario", 0.0);
@@ -497,12 +574,13 @@ fn finish_scenario(bench: &mut Bench, pilot: &Pilot, scenario: &Scenario) {
     gpu.sort_by(|a, b| b.1.total_cmp(&a.1));
     let gpu_total: f64 = gpu.iter().map(|g| g.1).sum();
     bench.table.push(format!(
-        "{:<11} {:>6} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>5.0}% {:>8.2} {:>9}× {:>11} {:>10.0} {:>7.0}",
+        "{:<11} {:>6} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>5.0}% {:>8.2} {:>9}× {:>11} {:>10.0} {:>7.0}",
         scenario.name,
         s.frames,
         s.frame_avg_ms,
         s.frame_p95_ms,
         s.frame_worst_ms,
+        s.main_avg_ms,
         s.sim_avg_ms,
         s.sim_avg_ms / s.frame_avg_ms * 100.0,
         gpu_total,
@@ -512,7 +590,7 @@ fn finish_scenario(bench: &mut Bench, pilot: &Pilot, scenario: &Scenario) {
         rss,
     ));
     let mut text = format!(
-        "== {} · {} ==\nframes {} in {:.1} s · frame {:.2} ms avg · {:.2} ms p95 · {:.2} ms worst\nsimulate {:.2} ms/frame ({:.0}% of frame)\nwarp requested {}× · in effect {} · actual {:.1}×\nmemory RSS {:.0} MiB · process peak {:.0} MiB\nend state: {:?} · {:.0} m above {} ground · {} vessels · notice: {}\ngpu {:.2} ms/frame over top-level passes:\n",
+        "== {} · {} ==\nframes {} in {:.1} s · frame {:.2} ms avg · {:.2} ms p95 · {:.2} ms worst\nmain world {:.2} ms/frame (First to Last; rendering runs beside it)\nsimulate {:.2} ms/frame ({:.0}% of frame)\nwarp requested {}× · in effect {} · actual {:.1}×\nmemory RSS {:.0} MiB · process peak {:.0} MiB\nend state: {:?} · {:.0} m above {} ground · {} vessels · notice: {}\ngpu {:.2} ms/frame over top-level passes:\n",
         scenario.name,
         scenario.description,
         s.frames,
@@ -520,6 +598,7 @@ fn finish_scenario(bench: &mut Bench, pilot: &Pilot, scenario: &Scenario) {
         s.frame_avg_ms,
         s.frame_p95_ms,
         s.frame_worst_ms,
+        s.main_avg_ms,
         s.sim_avg_ms,
         s.sim_avg_ms / s.frame_avg_ms * 100.0,
         RATES[scenario.rate],
@@ -570,7 +649,7 @@ fn write_report(
         window.physical_height(),
     );
     report.push_str(
-        "scenario    frames   avg ms   p95 ms worst ms   sim ms   sim%   gpu ms  requested   in effect   actual ×  RSS MiB\n",
+        "scenario    frames   avg ms   p95 ms worst ms  main ms   sim ms   sim%   gpu ms  requested   in effect   actual ×  RSS MiB\n",
     );
     for row in &bench.table {
         report.push_str(row);

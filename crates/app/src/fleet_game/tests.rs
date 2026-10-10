@@ -219,6 +219,7 @@ fn orbital_forecast_replays_and_resumes_without_observation_side_effects() {
         std::time::Duration::from_millis(31),
     ))
     .add_systems(Update, simulate.before(draw));
+    perf::add_frame_timing(&mut app);
     let id = launch_orbit(&mut app);
     session(&mut app).execute(Action::Select { vessel: id });
     app.world_mut().non_send_mut::<Flight>().paused = false;
@@ -263,6 +264,7 @@ fn paused_window_inputs_replay_and_rendering_does_not_change_marks() {
         delta: Vec2::new(0.0, -2.0),
     })
     .add_systems(Update, (controls, simulate).chain().before(draw));
+    perf::add_frame_timing(&mut app);
     app.world_mut().non_send_mut::<Flight>().paused = true;
     press(&mut app, &[KeyCode::KeyL]);
     app.world_mut()

@@ -445,7 +445,8 @@ fn air_pass(
         .map(|(t, i)| (*t, buffers[*i].binding().expect("air uniform"), 0))
         .collect::<Vec<_>>();
     draw_passes.push((&*textures, settings.clone(), settings_index.index()));
-    for (textures, settings, offset) in draw_passes {
+    let layers = draw_passes.len() - 1;
+    for (pass_index, (textures, settings, offset)) in draw_passes.into_iter().enumerate() {
         let (transmittance, multiple, irradiance, weather, shape, detail) =
             textures_for(textures).expect("prepared air textures");
         let post_process = view_target.post_process_write();
@@ -468,7 +469,16 @@ fn air_pass(
         );
         let diagnostics = ctx.diagnostic_recorder();
         let diagnostics = diagnostics.as_deref();
-        let span = diagnostics.time_span(ctx.command_encoder(), "void_air");
+        // GPU timing names: each body's air and clouds (the one around the camera included),
+        // then the final resolve onto the camera's image.
+        let span = diagnostics.time_span(
+            ctx.command_encoder(),
+            if pass_index < layers {
+                "void_air_body"
+            } else {
+                "void_air_resolve"
+            },
+        );
         let mut pass = ctx
             .command_encoder()
             .begin_render_pass(&RenderPassDescriptor {

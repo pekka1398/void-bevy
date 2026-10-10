@@ -470,6 +470,7 @@ pub fn run() {
     if let Some(report) = args.bench {
         perf::add_bench(&mut app, report.into());
     }
+    perf::add_frame_timing(&mut app);
     app.add_systems(
         Update,
         (
@@ -1443,12 +1444,16 @@ fn simulate(
     } else if clear <= 20.0 {
         forecast.coast = None;
     }
-    let running = !flight.paused && flight.playback.is_none();
-    stats.record(perf::FrameSample {
-        frame_seconds: time.delta_secs_f64(),
+    let sim = flight.session.sim();
+    let (paused, rate) = if flight.playback.is_some() {
+        (sim.presentation.paused, sim.presentation.rate)
+    } else {
+        (flight.paused, flight.rate)
+    };
+    stats.simulated(perf::Simulated {
         sim_seconds: started.elapsed().as_secs_f64(),
-        advanced_seconds: flight.session.sim().fleet.time() - sim_before,
-        set_rate: if running { RATES[flight.rate] } else { 0.0 },
+        advanced_seconds: t - sim_before,
+        set_rate: if paused { 0.0 } else { RATES[rate] },
     });
 }
 fn simulate_inner(time: &Time, focused: bool, pilot: &mut Pilot) {
