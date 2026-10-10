@@ -147,6 +147,12 @@ fn fixed_readout(
             height: px(lines as f32 * size * LINE),
             flex_shrink: 0.,
             flex_direction: FlexDirection::Column,
+            // The text node is only as wide as its text, so centred text also needs a centred node.
+            align_items: if layout.justify == Justify::Center {
+                AlignItems::Center
+            } else {
+                AlignItems::Default
+            },
             overflow: Overflow::clip(),
             ..default()
         })
@@ -1065,7 +1071,7 @@ pub(super) fn refresh(
                 }],
                 if flight.paused { "PAUSED" } else { "" }
             ),
-            Readout::Stages => format!("STAGES · {} · {:?}", ship.name, ship.mode),
+            Readout::Stages => format!("STAGES · {:?} · {}", ship.mode, ship.name),
             Readout::Throttle => format!(
                 "{:3.0}%\n{}",
                 c.throttle * 100.,

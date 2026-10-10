@@ -280,17 +280,18 @@ pub(super) fn describe(draft: &PlaceDraft, sim: &void_fleet_flight::FleetFlight)
             draft.path
         ),
     };
+    // The id comes first: names repeat, and a long name is clipped at the panel's edge.
     let target = draft.target.as_ref().map_or("none".into(), |t| {
         if sim.fleet.vessel_ids().contains(t) {
-            format!("{} ({t})", sim.fleet.snapshot(t).name)
+            format!("({t}) {}", sim.fleet.snapshot(t).name)
         } else {
-            format!("{t} (gone)")
+            format!("({t}) gone")
         }
     });
     let text = format!(
-        "PLACE SHIP · {} ({})\n{name} · lat {:.3}° lon {:.3}° · alt {:.0} m\n{site}\n{velocity}\nattitude {:?}\nnear target · gap {:.1} m · {target}",
-        sim.fleet.snapshot(&sim.selected).name,
+        "PLACE SHIP · ({}) {}\n{name} · lat {:.3}° lon {:.3}° · alt {:.0} m\n{site}\n{velocity}\nattitude {:?}\ngap {:.1} m · near target {target}",
         sim.selected,
+        sim.fleet.snapshot(&sim.selected).name,
         draft.latitude,
         draft.longitude,
         draft.altitude,
