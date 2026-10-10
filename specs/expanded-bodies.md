@@ -1,7 +1,7 @@
 # 太陽系擴充到 58 個天體
 
 branch：`feature/expanded-bodies`
-參考：`work/expanded-bodies`（之後改成 `archive/expanded-bodies`）
+參考：tag `archive/expanded-bodies`
 
 ## 目標
 
