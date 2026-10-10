@@ -8,14 +8,14 @@ agent 跑的編譯、遊戲、測試都放進同一個 `void-agent.slice`，合�
 systemctl --user set-property --runtime void-agent.slice MemoryMax=11G MemorySwapMax=0 CPUWeight=20
 ```
 
-編譯、測試、clippy 一律經過 `tools/slice`：它把指令放進 slice，並且整台機器同一時間只讓一個這種指令跑（鎖 `/tmp/void-build.lock`），其他 worktree 或 agent 的編譯會印出 `tools/slice: waiting for ...` 然後排隊，不會兩個 `-j 8` 同時擠在 11G 裡。
+編譯、測試、clippy 一律經過 `tools/slice`：它把指令放進 slice，並且讓所有 agent 的這種指令一個一個跑（鎖 `/tmp/void-build.lock`）：其他 worktree 或 agent 的編譯會印出 `tools/slice: waiting for ...` 然後排隊，不會兩個 `-j 8` 同時擠在 11G 裡。使用者自己的編譯不在這把鎖裡。
 
 ```bash
 tools/slice cargo build -j 8 -p void-app
 ```
 
 - 量時間的工作（計時、benchmark）整段都要拿著同一把鎖：`flock /tmp/void-build.lock <script>`，script 裡的指令直接用 `systemd-run --user --scope --quiet --slice=void-agent.slice --`，不要再經過 `tools/slice`（會等自己的鎖）。
-- 使用者自己在終端機跑的 `cargo run` 不經過這把鎖，也不在 slice 裡。
+- 使用者自己在終端機跑的 `cargo run` 不經過這把鎖，也不在 slice 裡。要複製或刪除 target 時，改拿 cargo 自己的鎖 `<target>/debug/.cargo-lock`：cargo 編譯時整段都拿著它，所以不管是誰的編譯都會等它結束。
 - 遊戲不要經過 `tools/slice`，否則整場遊戲都拿著鎖。先用 `tools/slice cargo build` 編好，再照 `guides/computeruse.md` 用 `systemd-run` 啟動。
 
 超過上限時程式會被系統終止。這時停下來告訴使用者，不要重試。用 `systemctl --user show -p MemoryPeak void-agent.slice` 可以看到目前為止的峰值。
@@ -81,22 +81,22 @@ page cache 在 slice 不夠時會先被回收，真正會讓 slice 被終止的�
 ```bash
 cd ~/Desktop/void-bevy
 git worktree add ~/Desktop/void-bevy-<名稱> -b feature/<名稱>
-flock /tmp/void-build.lock cp -a /mnt/data/void-target/main /mnt/data/void-target/<名稱>
+flock /mnt/data/void-target/main/debug/.cargo-lock cp -a /mnt/data/void-target/main /mnt/data/void-target/<名稱>
 ln -s /mnt/data/void-target/<名稱> ~/Desktop/void-bevy-<名稱>/target
 ```
 
-`cp -a` 拿主目錄已經編好的 target 當起點：依賴不用重編，第一次編譯只重編工作區的 crate（複製約 8 秒，編 `void-app` 約 25 秒）。`flock` 讓複製時不會有編譯正在寫它。主目錄的 target 太大（超過約 15G）時先清理（見下面），或改成 `mkdir -p /mnt/data/void-target/<名稱>`，第一次從零編（`-j 8` 約 6 分鐘）。branch 改了依賴或 `Cargo.toml` 的 profile 時，那部分本來就會重編。
+`cp -a` 拿主目錄已經編好的 target 當起點：依賴不用重編，第一次編譯只重編工作區的 crate（複製約 8 秒，編 `void-app` 約 25 秒）。`flock` 等主目錄正在跑的編譯結束，複製時也不會有新的編譯寫進去。主目錄的 target 太大（超過約 15G）時先清理（見下面），或改成 `mkdir -p /mnt/data/void-target/<名稱>`，第一次從零編（`-j 8` 約 6 分鐘）。branch 改了依賴或 `Cargo.toml` 的 profile 時，那部分本來就會重編。
 
-收掉一個 worktree（合併之後）：
+收掉一個 worktree（合併之後）。worktree 裡還有沒 commit 的改動時 `git worktree remove` 會拒絕，target 也就不會被刪：
 
 ```bash
 cd ~/Desktop/void-bevy
-git worktree remove ~/Desktop/void-bevy-<名稱>
-rm -rf /mnt/data/void-target/<名稱>
+git worktree remove ~/Desktop/void-bevy-<名稱> && \
+  flock /mnt/data/void-target/<名稱>/debug/.cargo-lock rm -rf /mnt/data/void-target/<名稱>
 ```
 
 ## 清理
 
 - worktree 收掉時，它的 target 同時刪掉。
-- target 只會越長越大（舊的編譯結果、換過的 feature、升級過的 Rust 都留著）。`du -sh /mnt/data/void-target/*` 某個超過 30G，或 Rust 升級過，就整個刪掉重編（`flock /tmp/void-build.lock rm -rf /mnt/data/void-target/<名稱>/*`），比挑檔案清乾淨，也只要約 6 分鐘。
+- target 只會越長越大（舊的編譯結果、換過的 feature、升級過的 Rust 都留著）。`du -sh /mnt/data/void-target/*` 某個超過 30G，或 Rust 升級過，就整個刪掉重編（`flock /mnt/data/void-target/<名稱>/debug/.cargo-lock rm -rf /mnt/data/void-target/<名稱>/*`），比挑檔案清乾淨，也只要約 6 分鐘。
 - `/mnt/data` 上只動 `void-target/`，其他資料夾（例如 KSP 的副本）不是這個專案的。
