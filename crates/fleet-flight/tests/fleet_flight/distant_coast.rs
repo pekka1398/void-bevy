@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use void_fleet_flight::{
     checkpoint::FlightCheckpoint,
     session::{Action, FlightSession, world_mark},

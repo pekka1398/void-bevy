@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use common::{Setup, scene};
 use glam::DVec3;
 use std::panic::{AssertUnwindSafe, catch_unwind};

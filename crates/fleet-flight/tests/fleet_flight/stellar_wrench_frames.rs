@@ -1,5 +1,5 @@
 //! Trial convenience loads must name the common owner frame, not an ephemeral environment tree.
-mod common;
+use crate::common;
 use common::stellar_neighborhood;
 use glam::DVec3;
 use void_fleet_flight::session::InitialWorld;

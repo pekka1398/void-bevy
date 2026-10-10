@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use common::solar_world;
 use void_fleet_flight::{
     checkpoint::FlightCheckpoint,

@@ -1,5 +1,5 @@
 //! Crew transactions retain local precision at real stellar separation.
-mod common;
+use crate::common;
 use common::{daylight_terrain_site, stellar_neighborhood};
 use glam::{DMat3, DQuat, DVec3};
 use void_fleet_flight::{

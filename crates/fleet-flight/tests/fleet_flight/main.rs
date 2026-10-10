@@ -1,0 +1,27 @@
+//! All of this crate's integration tests in one binary, so they link once.
+mod common;
+mod aero_wrenches;
+mod aircraft;
+mod checkpoint;
+mod combined_flight;
+mod distant_coast;
+mod durable;
+mod eva;
+mod eva_stellar;
+mod expanded_bodies;
+mod guidance;
+mod integration;
+mod multi_body;
+mod part_states;
+mod placement;
+mod plans;
+mod presentation;
+mod rcs_docking;
+mod session;
+mod solar_scenery;
+mod stellar_world;
+mod stellar_wrench_frames;
+mod thermal;
+mod ui_presentation;
+mod vehicles;
+mod warp;

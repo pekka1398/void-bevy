@@ -12,7 +12,7 @@ use void_orbit::{
     Tolerances, VesselPropagator, VesselState,
 };
 
-mod common;
+use crate::common;
 use common::{compact_seeds, huge, small_system};
 
 fn near(a: f64, b: f64, tolerance: f64) {

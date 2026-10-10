@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use common::Setup;
 use glam::{DQuat, DVec3};
 use void_assembly::fresh_craft;

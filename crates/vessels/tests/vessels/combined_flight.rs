@@ -1,5 +1,5 @@
 //! Combined model: RCS spending and aerodynamic torque share the existing owners.
-mod common;
+use crate::common;
 use common::{Setup, scene};
 use glam::{DQuat, DVec3};
 use void_assembly::{ResourceId, add_part};

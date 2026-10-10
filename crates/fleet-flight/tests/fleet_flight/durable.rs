@@ -70,7 +70,7 @@ fn crashing_command_survives_in_a_separate_process() {
     let child = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "crashing_command_survives_in_a_separate_process",
+            "durable::crashing_command_survives_in_a_separate_process",
             "--nocapture",
         ])
         .env(ENV, &path)
