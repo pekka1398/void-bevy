@@ -15,13 +15,13 @@ pub const PLAN_COLOR: &str = "#ffca66";
 /// Crossings labelled per path; later ones on a long prediction stay unlabelled.
 pub const NODE_LABELS: usize = 8;
 pub const VESSEL_COLOR: &str = "#7dffb0";
+/// Stars and the planets in large type, everything smaller in small type.
 fn body_label_font_size(body: &CelestialBody) -> f32 {
-    if body.parent_index.is_none() {
-        18.0
-    } else if matches!(
+    let planet = matches!(
         body.id.rsplit('/').next().unwrap(),
         "cinder" | "vesper" | "aurelia" | "ares" | "velvet" | "halo" | "azure" | "abyss"
-    ) {
+    );
+    if body.parent_index.is_none() || planet {
         18.0
     } else {
         11.0

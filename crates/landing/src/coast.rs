@@ -16,6 +16,9 @@ use crate::planet_frame::PlanetFrame;
 
 #[derive(Clone, Debug)]
 pub struct CoastPrediction {
+    /// Coordinate source of the inertial trajectory, retained across observation changes.
+    pub source_system: void_frames::SystemId,
+    pub source_offset: void_frames::SplitPosition,
     /// Body-fixed positions with their times, ending at the terrain crossing when there is one.
     pub points: Vec<(f64, DVec3)>,
     pub impact: Option<(f64, DVec3)>,
@@ -44,6 +47,8 @@ pub fn predict_coast(
     horizon_seconds: f64,
 ) -> CoastPrediction {
     let mut result = CoastPrediction {
+        source_system: ephemeris.origin_system(),
+        source_offset: ephemeris.physics_offset(),
         points: vec![(time, state.position)],
         impact: None,
         trajectory: Trajectory::new(),

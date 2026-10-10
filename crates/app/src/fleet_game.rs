@@ -1,6 +1,7 @@
 //! The main game: one world, one entry. Situations are set up in game with DEV "place ship".
 mod docking;
 mod hud;
+mod navigation;
 mod place;
 #[cfg(test)]
 mod tests;

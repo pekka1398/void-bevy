@@ -14,6 +14,7 @@ pub(super) enum Readout {
     Status,
     ViewDiagnostics,
     Place,
+    Navigation,
 }
 #[derive(Component)]
 pub(super) struct Panel;
@@ -57,6 +58,7 @@ pub(super) enum Click {
     Field(Field),
     Toggle(Toggle),
     Place(place::PlaceClick),
+    Navigation(navigation::NavClick),
 }
 #[derive(Resource)]
 pub(super) struct HudFont {
@@ -272,6 +274,7 @@ pub(super) fn spawn(
     commands.insert_resource(UiState::default());
     commands.insert_resource(PendingClicks::default());
     commands.insert_resource(StageCache::default());
+    commands.insert_resource(navigation::NavigationUi::default());
     let clock = panel(
         commands,
         Node {
@@ -564,6 +567,41 @@ pub(super) fn spawn(
             button(commands, r, label, Click::Key(key));
         }
     }
+    {
+        use navigation::{NavClick as N, Operation as O};
+        text(commands, maneuver, "NAVIGATION", 11.);
+        fixed_readout(
+            commands,
+            maneuver,
+            Readout::Navigation,
+            11.,
+            3,
+            TextLayout::no_wrap(),
+            percent(100),
+        );
+        let r = row(commands, maneuver);
+        button(
+            commands,
+            r,
+            "◀ Target",
+            Click::Navigation(N::TargetPrevious),
+        );
+        button(commands, r, "Target ▶", Click::Navigation(N::TargetNext));
+        let r = row(commands, maneuver);
+        for (label, operation) in [
+            ("Depart", O::Depart),
+            ("Correct", O::Correct),
+            ("Capture", O::Capture),
+        ] {
+            button(
+                commands,
+                r,
+                label,
+                Click::Navigation(N::Operation(operation)),
+            );
+        }
+        button(commands, r, "Cancel", Click::Navigation(N::Cancel));
+    }
     let dev = panel(
         commands,
         Node {
@@ -726,6 +764,8 @@ fn spawn_place(commands: &mut Commands, body: Entity) {
 
 /// What the controls can do this frame, worked out once and asked per control by `reason`.
 struct Usable {
+    /// Why each navigation control is unusable, worked out with the rest.
+    navigation: Vec<(navigation::NavClick, Option<String>)>,
     playback: bool,
     target: bool,
     /// Why the selected vessel's plan cannot be changed, if it cannot.
@@ -736,7 +776,7 @@ struct Usable {
     warping: bool,
 }
 impl Usable {
-    fn new(flight: &Flight, draft: &place::PlaceDraft) -> Self {
+    fn new(flight: &Flight, draft: &place::PlaceDraft, nav: &navigation::NavigationUi) -> Self {
         let sim = flight.session.sim();
         let id = &sim.selected;
         let plan = sim.plans.get(id);
@@ -748,7 +788,19 @@ impl Usable {
         } else {
             sim.plan_engine(id).err()
         };
+        use navigation::{NavClick as N, Operation as O};
+        let navigation = [
+            N::TargetPrevious,
+            N::TargetNext,
+            N::Operation(O::Depart),
+            N::Operation(O::Correct),
+            N::Operation(O::Capture),
+            N::Cancel,
+        ]
+        .map(|c| (c, navigation::unavailable(c, nav, flight)))
+        .to_vec();
         Self {
+            navigation,
             playback: flight.playback.is_some(),
             target: draft.target.is_some(),
             edit,
@@ -769,6 +821,13 @@ impl Usable {
                 Some("Place refused: choose a target vessel first".into())
             }
             Click::Field(Field::Place(_)) | Click::Place(_) => None,
+            Click::Navigation(c) => self
+                .navigation
+                .iter()
+                .find(|(n, _)| *n == c)
+                .expect("every navigation control is listed")
+                .1
+                .clone(),
             Click::Key(KeyCode::KeyM) => self.edit.clone(),
             Click::Field(_)
             | Click::Key(
@@ -805,10 +864,14 @@ pub(super) fn interactions(
     mut pending: Option<ResMut<PendingClicks>>,
     camera: Res<CameraView>,
     mut draft: ResMut<place::PlaceDraft>,
+    mut navigation_ui: ResMut<navigation::NavigationUi>,
     mut pilot: Pilot,
     mut nodes: Query<(&mut Node, Option<&Dev>, Option<&Help>)>,
 ) {
     let pilot = &mut pilot;
+    if pilot.flight.playback.is_none() {
+        navigation::poll(pilot, &mut navigation_ui);
+    }
     let queued = pending
         .as_mut()
         .map_or(Vec::new(), |p| std::mem::take(&mut p.0));
@@ -825,7 +888,7 @@ pub(super) fn interactions(
     if keys.just_pressed(KeyCode::Backquote) && state.field.is_none() {
         state.dev = !state.dev;
     }
-    let usable = Usable::new(&pilot.flight, &draft);
+    let usable = Usable::new(&pilot.flight, &draft, &navigation_ui);
     for (interaction, action, mut background) in &mut clicks {
         let hovered = *interaction == Interaction::Hovered && usable.reason(*action).is_none();
         background.0 = if matches!(action, Click::Key(KeyCode::KeyK | KeyCode::KeyL)) && !hovered {
@@ -840,7 +903,7 @@ pub(super) fn interactions(
         if !matches!(click, Click::Field(_)) {
             state.field = None;
         }
-        if let Some(reason) = Usable::new(&pilot.flight, &draft).reason(*click) {
+        if let Some(reason) = Usable::new(&pilot.flight, &draft, &navigation_ui).reason(*click) {
             pilot.notice.0 = reason;
             continue;
         }
@@ -879,6 +942,7 @@ pub(super) fn interactions(
                 });
             }
             Click::Place(click) => place::click(pilot, &mut draft, *click),
+            Click::Navigation(click) => navigation::click(pilot, &mut navigation_ui, *click),
             Click::Key(key) => dispatch(pilot, camera.pointer_over_label, *key),
         }
     }
@@ -1023,6 +1087,7 @@ pub(super) fn refresh(
     camera: Res<CameraView>,
     forecast: Res<Forecast>,
     draft: Res<place::PlaceDraft>,
+    navigation_ui: Res<navigation::NavigationUi>,
     mut texts: Query<
         (&Readout, &mut Text),
         (Without<crate::navball::NavballLabel>, Without<FieldText>),
@@ -1140,7 +1205,8 @@ pub(super) fn refresh(
                 map * 100.
             ),
             Readout::Place => place::describe(&draft, sim),
-            Readout::Maneuver => match Usable::new(&flight, &draft).edit {
+            Readout::Navigation => navigation::describe(&navigation_ui, sim),
+            Readout::Maneuver => match Usable::new(&flight, &draft, &navigation_ui).edit {
                 Some(reason) if !sim.plans.contains_key(id) => reason,
                 _ => plan_description(&flight.session)
                     .split("\nM add")
@@ -1454,6 +1520,7 @@ fn engine_fuel(f: &void_vessels::Fleet, id: &str, p: &void_vessels::PartSnapshot
 pub(super) fn indicators(
     flight: NonSend<Flight>,
     draft: Res<place::PlaceDraft>,
+    navigation_ui: Res<navigation::NavigationUi>,
     captions: Query<&ButtonLabel>,
     camera: Res<CameraView>,
     children: Query<&Children>,
@@ -1481,7 +1548,7 @@ pub(super) fn indicators(
             pending.extend(c.iter());
         }
     }
-    let usable = Usable::new(&flight, &draft);
+    let usable = Usable::new(&flight, &draft, &navigation_ui);
     // Button and generic colour queries are disjoint through Without<Button>.
     for (entity, click, mut bg) in &mut buttons {
         let active = match click {

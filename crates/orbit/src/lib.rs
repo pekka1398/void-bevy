@@ -9,6 +9,7 @@ mod frames;
 pub mod gravity;
 mod hermite;
 mod kepler;
+mod navigation;
 mod nodes;
 mod propagator;
 mod reference_frames;
@@ -29,6 +30,9 @@ pub use hermite::HermiteBasis;
 pub use kepler::{
     EllipticElements, OsculatingOrbit, orbital_period_seconds, osculating_orbit,
     solve_kepler_elliptic, state_from_elements, true_anomaly,
+};
+pub use navigation::{
+    NavigationError, NavigationOperation, NavigationRequest, NavigationSolution, solve_navigation,
 };
 pub use nodes::{NodeKind, OrbitNode, find_nodes};
 pub use propagator::{
