@@ -15,3 +15,4 @@
     - `workflow.md`：一項工作從 spec 開始、到合併進 master 結束的流程，以及各種文件放哪裡
     - `computeruse.md`：在 TigerVNC 上操作遊戲做驗收，讓我用瀏覽器看
     - `ui.md`：遊戲 UI 的版面原則
+    - `architecture.md`：座標、重力、環境、地形、船和零件、改變遊戲狀態等，各自唯一的做法和所在位置
