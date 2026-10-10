@@ -14,9 +14,9 @@ use void_vessels::VesselControl;
 pub mod durable;
 
 /// Recording schema; bump when `Action` or the recording layout changes.
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 35;
+pub const MODEL_VERSION: u32 = 36;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -129,6 +129,12 @@ pub enum Action {
     },
     Sas {
         enabled: bool,
+    },
+    AcceptNavigation {
+        result: Box<crate::navigation_job::NavigationResult>,
+    },
+    GenerateNavigation {
+        request: void_orbit::NavigationRequest,
     },
     AddManeuver {
         spec: void_orbit::ManeuverSpec,
@@ -404,6 +410,16 @@ impl Action {
                     return Outcome::Refused("SAS requires a functioning command part".into());
                 }
                 match sim.fleet.request_sas(&sim.selected, *enabled) {
+                    Ok(()) => Outcome::Applied,
+                    Err(reason) => Outcome::Refused(reason),
+                }
+            }
+            Self::AcceptNavigation { result } => match sim.accept_navigation(result) {
+                Ok(()) => Outcome::Applied,
+                Err(reason) => Outcome::Refused(reason),
+            },
+            Self::GenerateNavigation { request } => {
+                match sim.generate_navigation(&sim.selected.clone(), request) {
                     Ok(()) => Outcome::Applied,
                     Err(reason) => Outcome::Refused(reason),
                 }
@@ -738,6 +754,18 @@ pub struct FlightSession {
     stream: Option<durable::Writer>,
 }
 impl FlightSession {
+    /// Read-only trial query for the navigation UI; no authoritative command is committed.
+    pub fn navigation_reference(&mut self, id: &str) -> Result<usize, String> {
+        self.sim.navigation_reference(id)
+    }
+    /// Observation-only cache preparation, bounded by 32 ordinary ephemeris samples.
+    pub fn prepare_navigation_preview(&mut self, until: f64) -> bool {
+        assert!(until.is_finite(), "invalid navigation preview horizon");
+        let ep = &mut self.sim.fleet.ephemeris;
+        let next = until.min(ep.end_time() + 32. * ep.step_seconds());
+        ep.extend_to(next);
+        ep.end_time() >= until
+    }
     /// Read-only observation prevents callers from bypassing the command journal.
     pub fn sim(&self) -> &FleetFlight {
         &self.sim

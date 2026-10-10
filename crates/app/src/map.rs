@@ -11,14 +11,17 @@ use void_orbit::CelestialBody;
 use void_view::{LabelKind, MapLabel};
 
 pub const PATH_COLOR: &str = "#4fc8ff";
+pub const PLAN_COLOR: &str = "#ffca66";
+/// Crossings labelled per path; later ones on a long prediction stay unlabelled.
+pub const NODE_LABELS: usize = 8;
 pub const VESSEL_COLOR: &str = "#7dffb0";
+/// Stars and the planets in large type, everything smaller in small type.
 fn body_label_font_size(body: &CelestialBody) -> f32 {
-    if body.parent_index.is_none() {
-        18.0
-    } else if matches!(
+    let planet = matches!(
         body.id.rsplit('/').next().unwrap(),
         "cinder" | "vesper" | "aurelia" | "ares" | "velvet" | "halo" | "azure" | "abyss"
-    ) {
+    );
+    if body.parent_index.is_none() || planet {
         18.0
     } else {
         11.0
@@ -78,6 +81,20 @@ pub fn spawn_map_labels(commands: &mut Commands, bodies: &[CelestialBody]) {
             String::new(),
             color(PATH_COLOR),
             12.0,
+        ));
+    }
+    // AN/DN crossings: eight on the coast path, eight on the plan.
+    for index in 0..2 * NODE_LABELS {
+        kinds.push((
+            LabelKind::Node(index),
+            0,
+            String::new(),
+            color(if index >= NODE_LABELS {
+                PLAN_COLOR
+            } else {
+                PATH_COLOR
+            }),
+            11.0,
         ));
     }
     for (kind, slot, name, dot, font_size) in kinds {

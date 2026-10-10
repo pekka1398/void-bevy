@@ -27,6 +27,61 @@ pub struct SavedVesselPlan {
     message: String,
 }
 impl FleetFlight {
+    pub(crate) fn install_navigation_plan(&mut self, id: &str, saved: SavedVesselPlan) {
+        assert!(
+            !saved.executing,
+            "navigation result must not ignite engines"
+        );
+        let precise = self.fleet.precise_snapshot(id);
+        let expected_source = self
+            .plans
+            .get(id)
+            .map_or((precise.system, precise.anchor), |p| (p.system, p.origin));
+        assert_eq!(
+            (saved.system, saved.origin),
+            expected_source,
+            "navigation result changed coordinate source"
+        );
+        let view = self.plan_view(id);
+        let source = view.as_deref().unwrap_or(self.fleet.ephemeris.as_ref());
+        let plan = FlightPlan::from_checkpoint(source, saved.plan);
+        let previous_count = self.plans.get(id).map_or(0, |p| p.plan.count());
+        assert_eq!(
+            plan.count(),
+            previous_count + 1,
+            "navigation result must append one node"
+        );
+        assert_eq!(
+            saved.selected, previous_count,
+            "navigation result must select appended node"
+        );
+        if let Some(previous) = self.plans.get(id) {
+            for i in 0..previous_count {
+                assert_eq!(
+                    plan.maneuver(i),
+                    previous.plan.maneuver(i),
+                    "navigation result changed existing maneuver"
+                );
+            }
+        }
+        assert!(
+            plan.complete() && plan.impact().is_none(),
+            "unverified navigation result"
+        );
+        assert!(saved.selected < plan.count(), "missing navigation node");
+        self.cancel_maneuver_warp("navigation node generated");
+        self.plans.insert(
+            id.into(),
+            VesselPlan {
+                system: saved.system,
+                origin: saved.origin,
+                plan,
+                selected: saved.selected,
+                executing: false,
+                message: saved.message,
+            },
+        );
+    }
     pub fn plan_checkpoints(&self) -> BTreeMap<String, SavedVesselPlan> {
         self.plans
             .iter()
@@ -129,6 +184,7 @@ impl FleetFlight {
         if let Some(p) = self.plans.get_mut(id) {
             p.plan.set_engine(engine);
             p.plan.rebase(&state);
+            p.message = "Plan changed; previous navigation metrics are no longer valid".into();
         } else {
             self.plans.insert(
                 id.into(),
@@ -142,6 +198,135 @@ impl FleetFlight {
                 },
             );
         }
+        Ok(())
+    }
+    /// The default maneuver reference at the end of all already scheduled burns.
+    /// Uses the same split-position local ephemeris as planning, never global f32 rendering data.
+    pub fn navigation_reference(&mut self, id: &str) -> Result<usize, String> {
+        if self.plans.get(id).is_some_and(|p| p.executing) {
+            return Err("Abort the executing maneuver before generating navigation".into());
+        }
+        let engine = self.plan_engine(id)?;
+        let state = self.plan_state(id);
+        let mut view = self.plan_view(id);
+        let source: &mut dyn void_orbit::EphemerisSource = match view.as_mut() {
+            Some(view) => view.as_mut(),
+            None => self.fleet.ephemeris.as_mut(),
+        };
+        let mut candidate = if let Some(existing) = self.plans.get(id) {
+            FlightPlan::from_checkpoint(source, existing.plan.checkpoint())
+        } else {
+            FlightPlan::new(source, self.fleet.options.tolerances, engine, 6000.0)
+        };
+        candidate.set_engine(engine);
+        candidate.rebase(&state);
+        let tail = candidate.tail_state(source)?;
+        let mut positions = vec![glam::DVec3::ZERO; source.bodies().len()];
+        source.positions_at(tail.time, &mut positions);
+        Ok(void_orbit::DominanceTree::new(source.bodies())
+            .dominant(&positions, tail.state().position))
+    }
+    /// Generate exactly one finite-burn node without changing live fuel or vessel state.
+    /// Work on a candidate so refusals also preserve the existing plan and warp state.
+    pub fn generate_navigation(
+        &mut self,
+        id: &str,
+        request: &void_orbit::NavigationRequest,
+    ) -> Result<(), String> {
+        if self.plans.get(id).is_some_and(|p| p.executing) {
+            return Err("Abort the executing maneuver before generating navigation".into());
+        }
+        let engine = self.plan_engine(id)?;
+        let live_state = self.plan_state(id);
+        let precise = self.fleet.precise_snapshot(id);
+        let (system, origin) = self
+            .plans
+            .get(id)
+            .map(|p| (p.system, p.origin))
+            .unwrap_or((precise.system, precise.anchor));
+        let mut view = self.plan_view(id);
+        let source: &mut dyn void_orbit::EphemerisSource = match view.as_mut() {
+            Some(view) => view.as_mut(),
+            None => self.fleet.ephemeris.as_mut(),
+        };
+        let mut candidate = if let Some(existing) = self.plans.get(id) {
+            FlightPlan::from_checkpoint(source, existing.plan.checkpoint())
+        } else {
+            FlightPlan::new(source, self.fleet.options.tolerances, engine, 6000.0)
+        };
+        candidate.set_engine(engine);
+        candidate.rebase(&live_state);
+        let anchor = candidate.tail_state(source)?;
+        if request.earliest_departure < anchor.time {
+            return Err(format!(
+                "Earliest departure must be after existing burns end at T+{:.1}",
+                anchor.time
+            ));
+        }
+        let solution = void_orbit::solve_navigation(
+            source,
+            &anchor,
+            engine,
+            self.fleet.options.tolerances,
+            request,
+        )
+        .map_err(|reason| reason.to_string())?;
+        let selected = candidate.add(solution.maneuver);
+        candidate.status(selected).as_ref().map_err(Clone::clone)?;
+        let last_end = candidate
+            .burns()
+            .last()
+            .expect("navigation adds a valid burn")
+            .end_time;
+        candidate.set_coast_seconds(
+            candidate
+                .coast_seconds()
+                .max(solution.verified_until - last_end),
+        );
+        // Generate a reviewable trajectory even while the game is paused. The solver
+        // verified its trial; now verify the actual appended plan from the live anchor.
+        candidate.extend(source, 2_000_000);
+        if let Some(impact) = candidate.impact() {
+            return Err(format!(
+                "Appended navigation plan impacts body {} at T+{:.1}",
+                impact.body, impact.time
+            ));
+        }
+        if !candidate.complete() {
+            return Err("Appended navigation plan exhausted its prediction budget".into());
+        }
+        let operation = match request.operation {
+            void_orbit::NavigationOperation::Departure => "Departure",
+            void_orbit::NavigationOperation::Correction => "Correction",
+            void_orbit::NavigationOperation::Capture => "Capture",
+        };
+        let message = format!(
+            "{operation} node {} appended: ignition T+{:.1}, Δv {:.1} m/s; predicted closest T+{:.1}, distance {:.1} km, altitude {:.1} km, relative speed {:.1} m/s{}",
+            selected + 1,
+            solution.maneuver.start_time,
+            solution.delta_v_mps,
+            solution.closest_time,
+            solution.closest_distance_m / 1000.0,
+            solution.periapsis_altitude_m / 1000.0,
+            solution.relative_speed_mps,
+            if solution.captured {
+                "; bound orbit verified"
+            } else {
+                ""
+            },
+        );
+        self.cancel_maneuver_warp("navigation node generated");
+        self.plans.insert(
+            id.into(),
+            VesselPlan {
+                system,
+                origin,
+                plan: candidate,
+                selected,
+                executing: false,
+                message,
+            },
+        );
         Ok(())
     }
     pub fn add_maneuver(&mut self, id: &str, spec: ManeuverSpec) -> Result<(), String> {
