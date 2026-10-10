@@ -1427,7 +1427,9 @@ fn simulate(
     mut pilot: Pilot,
 ) {
     let started = std::time::Instant::now();
-    let sim_before = pilot.flight.session.sim().fleet.time();
+    // Counted per Advance command, so a replayed world reset or load in this frame is not
+    // mistaken for time running backwards.
+    let advanced_before = pilot.flight.session.advanced_seconds();
     // The game pauses while its window is unfocused; a bench run measures regardless.
     simulate_inner(&time, window.focused || bench.is_some(), &mut pilot);
     let flight = &mut *pilot.flight;
@@ -1452,7 +1454,7 @@ fn simulate(
     };
     stats.simulated(perf::Simulated {
         sim_seconds: started.elapsed().as_secs_f64(),
-        advanced_seconds: t - sim_before,
+        advanced_seconds: flight.session.advanced_seconds() - advanced_before,
         set_rate: if paused { 0.0 } else { RATES[rate] },
     });
 }

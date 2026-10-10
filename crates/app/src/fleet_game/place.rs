@@ -220,7 +220,8 @@ pub(super) fn click(pilot: &mut Pilot, draft: &mut PlaceDraft, click: PlaceClick
         }
     }
 }
-pub(super) fn apply(pilot: &mut Pilot, action: Action) {
+/// Executes a placement; returns the refusal reason, which is also left in the notice.
+pub(super) fn apply(pilot: &mut Pilot, action: Action) -> Option<String> {
     neutral_pilot(&mut pilot.flight.session);
     match pilot.flight.session.execute(action) {
         Outcome::Applied => {
@@ -231,8 +232,12 @@ pub(super) fn apply(pilot: &mut Pilot, action: Action) {
             pilot.docking.target = None;
             refresh_ports(&mut pilot.docking, &pilot.flight.session);
             pilot.notice.0 = "Ship placed (paused). P resumes; F6 saves this situation.".into();
+            None
         }
-        Outcome::Refused(reason) => pilot.notice.0 = reason,
+        Outcome::Refused(reason) => {
+            pilot.notice.0.clone_from(&reason);
+            Some(reason)
+        }
         other => panic!("unexpected placement outcome {other:?}"),
     }
 }

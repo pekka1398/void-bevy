@@ -21,12 +21,13 @@ pub(crate) struct Simulated {
 /// One frame.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FrameSample {
-    /// Wall time since the previous frame began (Bevy's real, unclamped delta).
+    /// Wall time from this frame's `First` to the next frame's `First`: the frame's whole
+    /// duration, including the wait for rendering and the screen.
     frame_seconds: f64,
     /// Wall time of the main world's schedules, `First` to `Last`. Rendering of the previous
     /// frame (and waiting for the screen) runs beside it on the render thread.
     main_seconds: f64,
-    simulated: Simulated,
+    pub simulated: Simulated,
 }
 
 /// Statistics over a run of frames.
@@ -42,11 +43,12 @@ pub(crate) struct Summary {
     set_rates: (f64, f64),
 }
 impl Summary {
+    /// None until the samples cover some wall time.
     fn of(samples: &[FrameSample]) -> Option<Self> {
-        if samples.is_empty() {
+        let seconds: f64 = samples.iter().map(|s| s.frame_seconds).sum();
+        if seconds <= 0.0 {
             return None;
         }
-        let seconds: f64 = samples.iter().map(|s| s.frame_seconds).sum();
         let mut frames: Vec<f64> = samples.iter().map(|s| s.frame_seconds * 1e3).collect();
         frames.sort_by(f64::total_cmp);
         let n = samples.len();
@@ -80,13 +82,17 @@ impl Summary {
     }
 }
 
-/// The last `WINDOW_SECONDS` of frames, for the DEV panel.
+/// The last `WINDOW_SECONDS` of frames, for the DEV panel. A frame's sample is complete only
+/// when the next frame begins, so the newest one is always the previous frame.
 #[derive(Resource, Default)]
 pub(crate) struct FrameStats {
     recent: VecDeque<FrameSample>,
     /// When this frame's `First` began.
     began: Option<Instant>,
     simulated: Option<Simulated>,
+    /// The previous frame, waiting for its end: when it began, its main-world seconds and
+    /// simulation.
+    ended: Option<(Instant, f64, Simulated)>,
 }
 const WINDOW_SECONDS: f64 = 2.0;
 impl FrameStats {
@@ -104,6 +110,10 @@ impl FrameStats {
         );
     }
     fn record(&mut self, s: FrameSample) {
+        assert!(
+            s.frame_seconds.is_finite() && s.frame_seconds >= 0.0 && s.main_seconds.is_finite(),
+            "frame stats: invalid frame sample {s:?}"
+        );
         void_diagnostics::plot!("frame ms", s.frame_seconds * 1e3);
         void_diagnostics::plot!("main world ms", s.main_seconds * 1e3);
         void_diagnostics::plot!("simulate ms", s.simulated.sim_seconds * 1e3);
@@ -123,7 +133,8 @@ impl FrameStats {
             self.recent.pop_front();
         }
     }
-    fn latest(&self) -> Option<FrameSample> {
+    /// The newest complete frame: the previous one.
+    pub fn latest(&self) -> Option<FrameSample> {
         self.recent.back().copied()
     }
 }
@@ -132,26 +143,27 @@ pub(super) fn add_frame_timing(app: &mut App) {
     app.add_systems(First, begin_frame)
         .add_systems(Last, end_frame);
 }
+/// Ends the previous frame, so its sample covers everything up to this frame: rendering and
+/// the wait for the screen included.
 fn begin_frame(mut stats: ResMut<FrameStats>) {
-    stats.began = Some(Instant::now());
+    let now = Instant::now();
+    if let Some((began, main_seconds, simulated)) = stats.ended.take() {
+        stats.record(FrameSample {
+            frame_seconds: now.duration_since(began).as_secs_f64(),
+            main_seconds,
+            simulated,
+        });
+    }
+    stats.began = Some(now);
 }
 /// Skipped, like `simulate`, in a frame without the window (while the app closes).
-fn end_frame(time: Res<Time<Real>>, _window: Single<&Window>, mut stats: ResMut<FrameStats>) {
-    let main_seconds = stats
-        .began
-        .take()
-        .expect("frame stats: Last without First")
-        .elapsed()
-        .as_secs_f64();
+fn end_frame(_window: Single<&Window>, mut stats: ResMut<FrameStats>) {
+    let began = stats.began.take().expect("frame stats: Last without First");
     let simulated = stats
         .simulated
         .take()
         .expect("frame stats: simulate did not run this frame");
-    stats.record(FrameSample {
-        frame_seconds: time.delta_secs_f64(),
-        main_seconds,
-        simulated,
-    });
+    stats.ended = Some((began, began.elapsed().as_secs_f64(), simulated));
 }
 
 /// The top-level render pass a diagnostic times on the GPU. Nested spans are left out so the
@@ -163,23 +175,44 @@ fn gpu_pass(d: &bevy::diagnostic::Diagnostic) -> Option<&str> {
         .strip_suffix("/elapsed_gpu")
         .filter(|pass| !pass.contains('/'))
 }
-/// GPU milliseconds of each top-level render pass in the latest frame the store has. A pass that
-/// runs several times a frame (the air, once per layer) has one measurement per run, all
-/// stamped with that frame's time; they are added up.
-fn gpu_passes(store: &DiagnosticsStore) -> BTreeMap<String, f64> {
-    store
-        .iter()
-        .filter_map(|d| {
-            let pass = gpu_pass(d)?;
-            let latest = d.measurement()?.time;
-            let ms = d
-                .measurements()
-                .filter(|m| m.time == latest)
-                .map(|m| m.value)
-                .sum();
-            Some((pass.to_owned(), ms))
-        })
-        .collect()
+/// GPU milliseconds of each top-level render pass, per GPU frame, for the frames whose results
+/// arrived after `after`, oldest first. Bevy stamps every measurement of one frame with the
+/// same time when the results arrive. A pass that runs several times a frame (the air, once per
+/// layer) has one measurement per run; they are added up.
+fn gpu_frames(
+    store: &DiagnosticsStore,
+    after: Option<Instant>,
+) -> BTreeMap<Instant, BTreeMap<String, f64>> {
+    let mut frames: BTreeMap<Instant, BTreeMap<String, f64>> = BTreeMap::new();
+    for d in store.iter() {
+        let Some(pass) = gpu_pass(d) else { continue };
+        for m in d
+            .measurements()
+            .filter(|m| after.is_none_or(|a| m.time > a))
+        {
+            assert!(
+                m.value.is_finite() && m.value >= 0.0,
+                "gpu timing: invalid {pass} measurement {} ms",
+                m.value
+            );
+            *frames
+                .entry(m.time)
+                .or_default()
+                .entry(pass.to_owned())
+                .or_default() += m.value;
+        }
+    }
+    frames
+}
+/// Whether the GPU can time render passes at all.
+fn timestamp_queries(device: &bevy::render::renderer::RenderDevice) -> bool {
+    device
+        .features()
+        .contains(bevy::render::render_resource::WgpuFeatures::TIMESTAMP_QUERY)
+}
+/// Whether this run collects render-pass GPU times: Tracy builds and `--bench`.
+fn gpu_timing_on(bench: Option<&Bench>) -> bool {
+    cfg!(feature = "profiling") || bench.is_some()
 }
 
 /// Line count of the DEV PERFORMANCE readout; the panel reserves exactly this much room.
@@ -189,15 +222,24 @@ pub(super) const READOUT_LINES: usize = 5;
 pub(super) fn readout(
     stats: Res<FrameStats>,
     store: Res<DiagnosticsStore>,
+    device: Res<bevy::render::renderer::RenderDevice>,
+    bench: Option<Res<Bench>>,
     mut texts: Query<(&ui::Readout, &mut Text)>,
 ) {
     let window: Vec<_> = stats.recent.iter().copied().collect();
     let text = match Summary::of(&window) {
-        None => "PERFORMANCE · no frames yet\n\n\n\n".to_owned(),
+        None => "PERFORMANCE · no data yet\n\n\n\n".to_owned(),
         Some(s) => {
-            let gpu = gpu_passes(&store);
-            let gpu = if gpu.is_empty() {
+            let gpu = gpu_frames(&store, None)
+                .pop_last()
+                .map(|(_, passes)| passes)
+                .unwrap_or_default();
+            let gpu = if !gpu_timing_on(bench.as_deref()) {
                 "gpu    not measured (--features profiling, or --bench)".to_owned()
+            } else if !timestamp_queries(&device) {
+                "gpu    not measured: the adapter has no timestamp queries".to_owned()
+            } else if gpu.is_empty() {
+                "gpu    no data yet".to_owned()
             } else {
                 let mut passes: Vec<_> = gpu.iter().collect();
                 passes.sort_by(|a, b| b.1.total_cmp(a.1));
@@ -244,6 +286,9 @@ struct Scenario {
     description: &'static str,
     /// Index into `RATES`.
     rate: usize,
+    /// Held paused through the settle and released as measuring begins, so an event right
+    /// after the start (a touchdown) falls inside the measurement.
+    settle_paused: bool,
     setup: fn(&mut Pilot),
 }
 const SCENARIOS: [Scenario; 8] = [
@@ -251,48 +296,56 @@ const SCENARIOS: [Scenario; 8] = [
         name: "ground",
         description: "on the launch pad, 1×",
         rate: 0,
+        settle_paused: false,
         setup: |_| {},
     },
     Scenario {
         name: "orbit-10k",
         description: "O: 400 km orbit of the observed body, 10,000×",
         rate: 7,
+        settle_paused: false,
         setup: launch_orbit,
     },
     Scenario {
         name: "orbit-100k",
         description: "O: 400 km orbit of the observed body, 100,000×",
         rate: 8,
+        settle_paused: false,
         setup: launch_orbit,
     },
     Scenario {
         name: "far-100k",
         description: "placed 1,000,000 km above the home body, circular, 100,000×",
         rate: 8,
+        settle_paused: false,
         setup: place_far,
     },
     Scenario {
         name: "map",
         description: "O orbit, camera zoomed out to the map (3 radii), 1×",
         rate: 0,
+        settle_paused: false,
         setup: map_view,
     },
     Scenario {
         name: "atmosphere",
         description: "placed 2 km over a daylit sea at 150 m/s, camera near its horizon: sea and sky, 1×",
         rate: 0,
+        settle_paused: false,
         setup: place_low,
     },
     Scenario {
         name: "reentry",
         description: "placed 40 km over daylit land, 1,800 m/s, 12° down, retrograde, 4×",
         rate: 2,
+        settle_paused: false,
         setup: place_reentry,
     },
     Scenario {
         name: "landing",
-        description: "placed 30 m over daylit land, 3 m/s down, upright, to touchdown, 1×",
+        description: "placed 30 m over daylit land, 3 m/s down, upright, 1×; held paused through the settle, so the measurement covers the descent, touchdown (about 2 s in) and rest on the ground",
         rate: 0,
+        settle_paused: true,
         setup: place_landing,
     },
 ];
@@ -310,12 +363,9 @@ fn home_body(pilot: &Pilot) -> String {
         .clone()
 }
 fn place(pilot: &mut Pilot, placement: Placement) {
-    place::apply(pilot, Action::Place { placement });
-    assert!(
-        pilot.flight.paused,
-        "bench: placement refused: {}",
-        pilot.notice.0
-    );
+    if let Some(reason) = place::apply(pilot, Action::Place { placement }) {
+        panic!("bench: placement refused: {reason}");
+    }
 }
 fn site(pilot: &Pilot, body: &str, kind: SiteKind) -> (f64, f64) {
     pilot
@@ -438,6 +488,38 @@ enum Phase {
     Settle,
     Measure,
 }
+/// GPU times of the render passes over the GPU frames whose results arrived while measuring.
+struct GpuTotals {
+    /// Arrival time of the newest GPU frame taken.
+    seen: Instant,
+    frames: usize,
+    /// Per pass: GPU ms summed over all frames, and the number of frames it ran in.
+    passes: BTreeMap<String, (f64, usize)>,
+}
+impl GpuTotals {
+    fn new(since: Instant) -> Self {
+        Self {
+            seen: since,
+            frames: 0,
+            passes: BTreeMap::new(),
+        }
+    }
+    fn take(&mut self, store: &DiagnosticsStore) {
+        let frames = gpu_frames(store, Some(self.seen));
+        if let Some(newest) = frames.keys().next_back() {
+            self.seen = *newest;
+        }
+        for passes in frames.values() {
+            self.frames += 1;
+            for (pass, ms) in passes {
+                let entry = self.passes.entry(pass.clone()).or_default();
+                entry.0 += ms;
+                entry.1 += 1;
+            }
+        }
+    }
+}
+
 /// `--bench <report>`: the scenarios one after another, then the report and exit.
 #[derive(Resource)]
 pub(crate) struct Bench {
@@ -446,8 +528,7 @@ pub(crate) struct Bench {
     /// The running scenario, its phase and when that phase began.
     running: Option<(usize, Phase, Instant)>,
     samples: Vec<FrameSample>,
-    /// Per pass: sum of GPU ms, frames counted, time of the last value taken.
-    gpu: BTreeMap<String, (f64, usize, Instant)>,
+    gpu: GpuTotals,
     results: Vec<String>,
     table: Vec<String>,
 }
@@ -460,7 +541,7 @@ pub(super) fn add_bench(app: &mut App, report: PathBuf) {
         next: 0,
         running: None,
         samples: Vec::new(),
-        gpu: BTreeMap::new(),
+        gpu: GpuTotals::new(Instant::now()),
         results: Vec::new(),
         table: Vec::new(),
     })
@@ -469,7 +550,7 @@ pub(super) fn add_bench(app: &mut App, report: PathBuf) {
 fn start(pilot: &mut Pilot, scenario: &Scenario) {
     super::reset_world(pilot);
     (scenario.setup)(pilot);
-    pilot.flight.paused = false;
+    pilot.flight.paused = scenario.settle_paused;
     pilot.flight.rate = 0;
     pilot.notice.0.clear();
 }
@@ -480,6 +561,7 @@ fn bench(
     stats: Res<FrameStats>,
     store: Res<DiagnosticsStore>,
     adapter: Res<bevy::render::renderer::RenderAdapterInfo>,
+    device: Res<bevy::render::renderer::RenderDevice>,
     window: Single<&Window>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -507,30 +589,21 @@ fn bench(
         Phase::Settle => {
             // In a Tracy capture, this plot marks which scenario each measured frame belongs to.
             void_diagnostics::plot!("bench scenario", (index + 1) as f64);
+            pilot.flight.paused = false;
             bench.samples.clear();
-            bench.gpu.clear();
+            bench.gpu = GpuTotals::new(now);
             bench.running = Some((index, Phase::Measure, now));
         }
         Phase::Measure => {
+            // The newest complete frame is the previous one, so the samples start with the frame
+            // that switched to measuring.
             bench
                 .samples
                 .push(stats.latest().expect("bench: simulate recorded no frame"));
-            for d in store.iter() {
-                let Some(pass) = gpu_pass(d) else { continue };
-                let entry = bench.gpu.entry(pass.to_owned()).or_insert((0.0, 0, since));
-                let mut frame = entry.2;
-                for m in d.measurements().filter(|m| m.time > entry.2) {
-                    entry.0 += m.value;
-                    if m.time > frame {
-                        frame = m.time;
-                        entry.1 += 1;
-                    }
-                }
-                entry.2 = frame;
-            }
+            bench.gpu.take(&store);
             if elapsed >= MEASURE_SECONDS {
                 void_diagnostics::plot!("bench scenario", 0.0);
-                finish_scenario(bench, &pilot, scenario);
+                finish_scenario(bench, &pilot, scenario, timestamp_queries(&device));
                 bench.running = None;
                 if bench.next == SCENARIOS.len() {
                     write_report(bench, &adapter, &window);
@@ -559,22 +632,35 @@ fn memory_mib() -> (f64, f64) {
     };
     (field("VmRSS:"), field("VmHWM:"))
 }
-fn finish_scenario(bench: &mut Bench, pilot: &Pilot, scenario: &Scenario) {
+fn finish_scenario(bench: &mut Bench, pilot: &Pilot, scenario: &Scenario, timestamps: bool) {
     let s = Summary::of(&bench.samples).expect("bench: no frames measured");
     let (rss, peak) = memory_mib();
     let sim = pilot.flight.session.sim();
     let ship = sim.fleet.snapshot(&sim.selected);
     let nav = sim.navigation_body(&sim.selected);
     let altitude = sim.altitude(&sim.selected, nav, true);
+    let gpu_frames = bench.gpu.frames;
+    assert!(
+        !timestamps || gpu_frames > 0,
+        "bench: {}: the adapter has timestamp queries but no GPU times arrived in {MEASURE_SECONDS} s",
+        scenario.name
+    );
+    // Every average is over all GPU-timed frames; a pass missing from a frame counts as 0 ms.
     let mut gpu: Vec<_> = bench
         .gpu
+        .passes
         .iter()
-        .map(|(pass, (sum, n, _))| (pass.clone(), sum / *n as f64, *n))
+        .map(|(pass, (sum, n))| (pass.clone(), sum / gpu_frames as f64, *n))
         .collect();
     gpu.sort_by(|a, b| b.1.total_cmp(&a.1));
-    let gpu_total: f64 = gpu.iter().map(|g| g.1).sum();
+    let gpu_total = (gpu_frames > 0).then(|| gpu.iter().map(|g| g.1).sum::<f64>());
+    assert!(
+        gpu_total.is_none_or(f64::is_finite),
+        "bench: GPU total {gpu_total:?}"
+    );
+    let gpu_column = gpu_total.map_or("—".to_owned(), |ms| format!("{ms:.2}"));
     bench.table.push(format!(
-        "{:<11} {:>6} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>5.0}% {:>8.2} {:>9}× {:>11} {:>10.0} {:>7.0}",
+        "{:<11} {:>6} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>5.0}% {:>8} {:>9}× {:>11} {:>10.0} {:>7.0}",
         scenario.name,
         s.frames,
         s.frame_avg_ms,
@@ -583,14 +669,14 @@ fn finish_scenario(bench: &mut Bench, pilot: &Pilot, scenario: &Scenario) {
         s.main_avg_ms,
         s.sim_avg_ms,
         s.sim_avg_ms / s.frame_avg_ms * 100.0,
-        gpu_total,
+        gpu_column,
         RATES[scenario.rate],
         s.set_rate_text(),
         s.actual_rate,
         rss,
     ));
     let mut text = format!(
-        "== {} · {} ==\nframes {} in {:.1} s · frame {:.2} ms avg · {:.2} ms p95 · {:.2} ms worst\nmain world {:.2} ms/frame (First to Last; rendering runs beside it)\nsimulate {:.2} ms/frame ({:.0}% of frame)\nwarp requested {}× · in effect {} · actual {:.1}×\nmemory RSS {:.0} MiB · process peak {:.0} MiB\nend state: {:?} · {:.0} m above {} ground · {} vessels · notice: {}\ngpu {:.2} ms/frame over top-level passes:\n",
+        "== {} · {} ==\nframes {} in {:.1} s · frame {:.2} ms avg · {:.2} ms p95 · {:.2} ms worst\nmain world {:.2} ms/frame (First to Last; rendering runs beside it)\nsimulate {:.2} ms/frame ({:.0}% of frame)\nwarp requested {}× · in effect {} · actual {:.1}×\nmemory RSS {:.0} MiB · process peak {:.0} MiB\nend state: {:?} · {:.0} m above {} ground · {} vessels · notice: {}\n",
         scenario.name,
         scenario.description,
         s.frames,
@@ -615,13 +701,19 @@ fn finish_scenario(bench: &mut Bench, pilot: &Pilot, scenario: &Scenario) {
         } else {
             &pilot.notice.0
         },
-        gpu_total,
     );
-    for (pass, ms, n) in &gpu {
-        writeln!(text, "  {ms:>7.3} ms  {pass}  ({n} frames)").expect("format");
-    }
-    if gpu.is_empty() {
-        text.push_str("  none recorded (the adapter has no timestamp queries)\n");
+    match gpu_total {
+        None => text.push_str("gpu not measured: the adapter has no timestamp queries\n"),
+        Some(total) => {
+            writeln!(
+                text,
+                "gpu {total:.2} ms/frame over {gpu_frames} GPU-timed frames, top-level passes (each averaged over all {gpu_frames}):"
+            )
+            .expect("format");
+            for (pass, ms, n) in &gpu {
+                writeln!(text, "  {ms:>7.3} ms  {pass}  (ran in {n} frames)").expect("format");
+            }
+        }
     }
     eprintln!("{text}");
     bench.results.push(text);

@@ -752,6 +752,9 @@ pub struct FlightSession {
     current_initial: InitialWorld,
     recording: Option<Recording>,
     stream: Option<durable::Writer>,
+    /// Simulated seconds all `Advance` commands have moved the clock, over this session's
+    /// lifetime. A world reset or load sets the clock back; this total only grows.
+    advanced_seconds: f64,
 }
 impl FlightSession {
     /// Read-only trial query for the navigation UI; no authoritative command is committed.
@@ -781,6 +784,7 @@ impl FlightSession {
             current_initial,
             recording: None,
             stream: None,
+            advanced_seconds: 0.0,
         }
     }
     /// Explicit opt-in for headless regression scripts. Live games use --record/begin_stream.
@@ -820,7 +824,16 @@ impl FlightSession {
         if let Some(stream) = &mut self.stream {
             stream.intent(index, &action);
         }
+        let clock = matches!(action, Action::Advance { .. }).then(|| self.sim.fleet.time());
         let outcome = action.apply(&mut self.sim);
+        if let Some(before) = clock {
+            let seconds = self.sim.fleet.time() - before;
+            assert!(
+                seconds.is_finite() && seconds >= 0.0,
+                "session: Advance moved the clock by {seconds} s from {before}"
+            );
+            self.advanced_seconds += seconds;
+        }
         if let Some(initial) = action.replacement_initial() {
             self.current_initial = initial.clone();
         }
@@ -834,6 +847,11 @@ impl FlightSession {
             });
         }
         outcome
+    }
+    /// Simulated seconds advanced by `Advance` commands since this session began, for frame
+    /// statistics; unaffected by world resets and loads.
+    pub fn advanced_seconds(&self) -> f64 {
+        self.advanced_seconds
     }
     pub fn recording_initial(&self) -> &InitialWorld {
         &self.current_initial
@@ -919,6 +937,7 @@ impl FlightSession {
             current_initial,
             recording: None,
             stream: None,
+            advanced_seconds: 0.0,
         }
     }
     pub fn load(path: impl AsRef<Path>) -> Self {
@@ -939,6 +958,7 @@ impl FlightSession {
             current_initial,
             recording: None,
             stream: None,
+            advanced_seconds: 0.0,
         }
     }
 }

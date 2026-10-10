@@ -310,6 +310,65 @@ fn paused_window_inputs_replay_and_rendering_does_not_change_marks() {
     assert_eq!(world_mark(sim(&app)), expected);
 }
 
+/// A replayed frame that resets the world (R) sets the clock back; the frame statistics count
+/// the time its Advance commands moved, not the clock's difference.
+#[test]
+fn replayed_world_reset_counts_advanced_time() {
+    let mut app = initialized_scene();
+    app.add_systems(Update, simulate.before(draw));
+    perf::add_frame_timing(&mut app);
+    let initial = app
+        .world()
+        .non_send::<Flight>()
+        .session
+        .recording_initial()
+        .clone();
+    let mut flown = FlightSession::new(initial.clone()).with_recording();
+    let advance = |seconds| Action::Advance {
+        seconds,
+        rails: false,
+    };
+    let end = Action::EndFrame {
+        paused: false,
+        rate: 0,
+    };
+    for action in [
+        advance(0.5),
+        end.clone(),
+        advance(0.25),
+        Action::ResetWorld {
+            initial: Box::new(initial),
+        },
+        advance(0.125),
+        end,
+    ] {
+        flown.execute(action);
+    }
+    let (playback, replayed) = Playback::new(flown.recording());
+    {
+        let mut flight = app.world_mut().non_send_mut::<Flight>();
+        flight.session = replayed;
+        flight.playback = Some(playback);
+        flight.paused = false;
+    }
+    // A frame's sample completes as the next frame begins; the third frame ends the replay.
+    let mut advanced = vec![];
+    for _ in 0..3 {
+        app.update();
+        let stats = app.world().resource::<perf::FrameStats>();
+        advanced.extend(stats.latest().map(|s| s.simulated.advanced_seconds));
+    }
+    // The clock moves in whole physics steps, so each frame lands within a step of its request.
+    let step = 1.0 / 60.0;
+    assert_eq!(advanced.len(), 2, "{advanced:?}");
+    assert!((advanced[0] - 0.5).abs() < step, "{advanced:?}");
+    assert!(
+        (advanced[1] - (0.25 + 0.125)).abs() < 2.0 * step,
+        "{advanced:?}"
+    );
+    assert!(sim(&app).fleet.time() < 0.125 + step);
+}
+
 #[test]
 fn focus_pause_and_vessel_handoff_neutralize_held_requests() {
     let mut app = initialized_scene();
