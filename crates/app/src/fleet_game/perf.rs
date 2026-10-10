@@ -204,11 +204,29 @@ fn gpu_frames(
     }
     frames
 }
-/// Whether the GPU can time render passes at all.
-fn timestamp_queries(device: &bevy::render::renderer::RenderDevice) -> bool {
-    device
-        .features()
-        .contains(bevy::render::render_resource::WgpuFeatures::TIMESTAMP_QUERY)
+/// Why the GPU cannot time every top-level render pass, or None when it can. Bevy's recorder
+/// writes no timestamp at all without `TIMESTAMP_QUERY` and `TIMESTAMP_QUERY_INSIDE_ENCODERS`,
+/// and none for spans opened on a render pass (most passes) without
+/// `TIMESTAMP_QUERY_INSIDE_PASSES`. A total missing those passes would look complete, so GPU
+/// time counts as not measured unless all three are there.
+fn gpu_timing_unavailable(device: &bevy::render::renderer::RenderDevice) -> Option<String> {
+    use bevy::render::render_resource::WgpuFeatures as F;
+    let missing: Vec<_> = [
+        (F::TIMESTAMP_QUERY, "TIMESTAMP_QUERY"),
+        (
+            F::TIMESTAMP_QUERY_INSIDE_ENCODERS,
+            "TIMESTAMP_QUERY_INSIDE_ENCODERS",
+        ),
+        (
+            F::TIMESTAMP_QUERY_INSIDE_PASSES,
+            "TIMESTAMP_QUERY_INSIDE_PASSES",
+        ),
+    ]
+    .into_iter()
+    .filter(|(feature, _)| !device.features().contains(*feature))
+    .map(|(_, name)| name)
+    .collect();
+    (!missing.is_empty()).then(|| format!("the adapter lacks {}", missing.join(", ")))
 }
 /// Whether this run collects render-pass GPU times: Tracy builds and `--bench`.
 fn gpu_timing_on(bench: Option<&Bench>) -> bool {
@@ -236,8 +254,8 @@ pub(super) fn readout(
                 .unwrap_or_default();
             let gpu = if !gpu_timing_on(bench.as_deref()) {
                 "gpu    not measured (--features profiling, or --bench)".to_owned()
-            } else if !timestamp_queries(&device) {
-                "gpu    not measured: the adapter has no timestamp queries".to_owned()
+            } else if let Some(reason) = gpu_timing_unavailable(&device) {
+                format!("gpu    not measured: {reason}")
             } else if gpu.is_empty() {
                 "gpu    no data yet".to_owned()
             } else {
@@ -603,7 +621,7 @@ fn bench(
             bench.gpu.take(&store);
             if elapsed >= MEASURE_SECONDS {
                 void_diagnostics::plot!("bench scenario", 0.0);
-                finish_scenario(bench, &pilot, scenario, timestamp_queries(&device));
+                finish_scenario(bench, &pilot, scenario, gpu_timing_unavailable(&device));
                 bench.running = None;
                 if bench.next == SCENARIOS.len() {
                     write_report(bench, &adapter, &window);
@@ -632,7 +650,12 @@ fn memory_mib() -> (f64, f64) {
     };
     (field("VmRSS:"), field("VmHWM:"))
 }
-fn finish_scenario(bench: &mut Bench, pilot: &Pilot, scenario: &Scenario, timestamps: bool) {
+fn finish_scenario(
+    bench: &mut Bench,
+    pilot: &Pilot,
+    scenario: &Scenario,
+    gpu_unavailable: Option<String>,
+) {
     let s = Summary::of(&bench.samples).expect("bench: no frames measured");
     let (rss, peak) = memory_mib();
     let sim = pilot.flight.session.sim();
@@ -640,25 +663,28 @@ fn finish_scenario(bench: &mut Bench, pilot: &Pilot, scenario: &Scenario, timest
     let nav = sim.navigation_body(&sim.selected);
     let altitude = sim.altitude(&sim.selected, nav, true);
     let gpu_frames = bench.gpu.frames;
-    assert!(
-        !timestamps || gpu_frames > 0,
-        "bench: {}: the adapter has timestamp queries but no GPU times arrived in {MEASURE_SECONDS} s",
-        scenario.name
-    );
-    // Every average is over all GPU-timed frames; a pass missing from a frame counts as 0 ms.
-    let mut gpu: Vec<_> = bench
-        .gpu
-        .passes
-        .iter()
-        .map(|(pass, (sum, n))| (pass.clone(), sum / gpu_frames as f64, *n))
-        .collect();
-    gpu.sort_by(|a, b| b.1.total_cmp(&a.1));
-    let gpu_total = (gpu_frames > 0).then(|| gpu.iter().map(|g| g.1).sum::<f64>());
-    assert!(
-        gpu_total.is_none_or(f64::is_finite),
-        "bench: GPU total {gpu_total:?}"
-    );
-    let gpu_column = gpu_total.map_or("—".to_owned(), |ms| format!("{ms:.2}"));
+    // Per pass: GPU ms averaged over all GPU-timed frames (a pass missing from a frame counts as
+    // 0 ms) and the frames it ran in; with the total. None when the adapter cannot time every pass.
+    let gpu = gpu_unavailable.is_none().then(|| {
+        assert!(
+            gpu_frames > 0,
+            "bench: {}: the adapter supports GPU timing but no GPU times arrived in {MEASURE_SECONDS} s",
+            scenario.name
+        );
+        let mut passes: Vec<_> = bench
+            .gpu
+            .passes
+            .iter()
+            .map(|(pass, (sum, n))| (pass.clone(), sum / gpu_frames as f64, *n))
+            .collect();
+        passes.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let total: f64 = passes.iter().map(|g| g.1).sum();
+        assert!(total.is_finite(), "bench: GPU total {total}");
+        (total, passes)
+    });
+    let gpu_column = gpu
+        .as_ref()
+        .map_or("—".to_owned(), |(ms, _)| format!("{ms:.2}"));
     bench.table.push(format!(
         "{:<11} {:>6} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>5.0}% {:>8} {:>9}× {:>11} {:>10.0} {:>7.0}",
         scenario.name,
@@ -702,15 +728,20 @@ fn finish_scenario(bench: &mut Bench, pilot: &Pilot, scenario: &Scenario, timest
             &pilot.notice.0
         },
     );
-    match gpu_total {
-        None => text.push_str("gpu not measured: the adapter has no timestamp queries\n"),
-        Some(total) => {
+    match gpu {
+        None => writeln!(
+            text,
+            "gpu not measured: {}",
+            gpu_unavailable.expect("GPU totals are missing only when timing is unavailable")
+        )
+        .expect("format"),
+        Some((total, passes)) => {
             writeln!(
                 text,
                 "gpu {total:.2} ms/frame over {gpu_frames} GPU-timed frames, top-level passes (each averaged over all {gpu_frames}):"
             )
             .expect("format");
-            for (pass, ms, n) in &gpu {
+            for (pass, ms, n) in &passes {
                 writeln!(text, "  {ms:>7.3} ms  {pass}  (ran in {n} frames)").expect("format");
             }
         }
