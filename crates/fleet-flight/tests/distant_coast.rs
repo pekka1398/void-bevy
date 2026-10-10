@@ -70,8 +70,12 @@ fn distant_coast_agrees_with_short_chunks_without_losing_local_position() {
     assert!(reference.advance(3600.0, true).unwrap());
     let a = fast.fleet.precise_snapshot(&fast.selected);
     let b = reference.fleet.precise_snapshot(&reference.selected);
-    assert!(a.position.relative(&b.position).length() < 1e-5);
-    assert!((a.local.velocity - b.local.velocity).length() < 1e-8);
+    // 3.6e9 m of travel at 1000 km/s; the 58-body Sol sums more forces per step, so rounding
+    // alone measured 2.1e-5 m and 1.8e-8 m/s (about 6e-15 of the distance covered).
+    let dp = a.position.relative(&b.position).length();
+    let dv = (a.local.velocity - b.local.velocity).length();
+    assert!(dp < 5e-5, "distant vs short chunks: {dp:e} m");
+    assert!(dv < 5e-8, "distant vs short chunks: {dv:e} m/s");
     assert_eq!(a.local.mass_kg, b.local.mass_kg);
 }
 

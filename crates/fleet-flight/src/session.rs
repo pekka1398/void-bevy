@@ -16,7 +16,7 @@ pub mod durable;
 /// Recording schema; bump when `Action` or the recording layout changes.
 pub const FORMAT_VERSION: u32 = 3;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
-pub const MODEL_VERSION: u32 = 34;
+pub const MODEL_VERSION: u32 = 35;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -194,8 +194,8 @@ pub enum Action {
         craft: Craft,
         site: DVec3,
     },
-    /// A vessel in a circular orbit 400 km above `body`'s radius, `offset` metres from the
-    /// default point. Key O in the game.
+    /// A vessel in a circular orbit 400 km above `body`'s radius (a quarter of the radius for a
+    /// body under 1000 km), `offset` metres from the default point. Key O in the game.
     LaunchOrbitAt {
         body: String,
         craft: Craft,

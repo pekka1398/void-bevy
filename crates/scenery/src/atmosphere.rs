@@ -138,9 +138,21 @@ pub fn transmittance_coords(p: &AtmosphereParams, r: f64, mu: f64) -> (f64, f64)
 
 /// Inverse of `transmittance_coords`: (r, mu).
 pub fn transmittance_ray(p: &AtmosphereParams, x: f64, y: f64) -> (f64, f64) {
+    assert!(
+        (0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y),
+        "transmittance_ray: invalid normalized coordinates x={x}, y={y}"
+    );
     let horizon = (p.top_radius * p.top_radius - p.bottom_radius * p.bottom_radius).sqrt();
     let rho = horizon * y;
-    let r = (rho * rho + p.bottom_radius * p.bottom_radius).sqrt();
+    // The endpoints are exactly the shell boundaries; rebuilding the top from squared radii can
+    // land one ulp outside it on a small body.
+    let r = if y == 1.0 {
+        p.top_radius
+    } else if y == 0.0 {
+        p.bottom_radius
+    } else {
+        (rho * rho + p.bottom_radius * p.bottom_radius).sqrt()
+    };
     let d_min = p.top_radius - r;
     let d_max = rho + horizon;
     let d = d_min + x * (d_max - d_min);

@@ -26,8 +26,8 @@ fn recipes_roundtrip_and_never_create_gas_ground_or_physical_optics() {
         serde_json::to_value(&restored).unwrap()
     );
     let built = restored.world.build();
-    assert_eq!(restored.world.bodies.len(), 10);
-    assert_eq!(built.grounds.len(), 5);
+    assert_eq!(restored.world.bodies.len(), 58);
+    assert_eq!(built.grounds.len(), 53);
     for id in ["sol", "velvet", "halo", "azure", "abyss"] {
         let body = restored.world.body_index(id);
         assert!(!built.terrains.contains_key(&body));
