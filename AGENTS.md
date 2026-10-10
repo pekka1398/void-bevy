@@ -14,6 +14,7 @@
 13. 做到特定領域的工作時，先讀 `guides/` 裡對應的文件：
     - `workflow.md`：一項工作從 spec 開始、到合併進 master 結束的流程，以及各種文件放哪裡
     - `build.md`：編譯、測試的指令和記憶體，多個 worktree 的 target 怎麼放、編譯怎麼排隊
+    - `profiling.md`：效能量測：DEV 的 PERFORMANCE、`--bench`、Tracy 和 perf
     - `computeruse.md`：在 TigerVNC 上操作遊戲做驗收，讓我用瀏覽器看
     - `ui.md`：遊戲 UI 的版面原則
     - `architecture.md`：座標、重力、環境、地形、船和零件、改變遊戲狀態等，各自唯一的做法和所在位置
