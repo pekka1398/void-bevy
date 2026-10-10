@@ -65,6 +65,9 @@ pub(super) struct HudFont {
 }
 #[derive(Resource, Default)]
 pub(super) struct PendingClicks(pub Vec<Click>);
+/// A control's label and its colour while the control is usable; `indicators` greys it otherwise.
+#[derive(Component)]
+pub(super) struct ButtonLabel(Color);
 
 #[derive(Resource, Default)]
 pub(super) struct UiState {
@@ -78,6 +81,12 @@ pub(super) struct UiState {
 }
 const INK: Color = Color::srgb(0.81, 0.84, 0.89);
 const BG: Color = Color::srgba(0.031, 0.039, 0.063, 0.82);
+/// Label colour of a control that cannot be used right now.
+const DIM: Color = Color::srgba(0.81, 0.84, 0.89, 0.3);
+/// Line height as a multiple of font size; fixed text boxes are sized from it.
+const LINE: f32 = 1.2;
+/// Advance of one DejaVu Sans Mono glyph as a multiple of font size.
+const GLYPH: f32 = 0.61;
 fn panel(commands: &mut Commands, node: Node) -> Entity {
     commands
         .spawn((
@@ -121,6 +130,34 @@ fn readout(commands: &mut Commands, parent: Entity, kind: Readout, size: f32) ->
     commands.entity(e).insert(kind);
     e
 }
+/// A readout in a box of fixed size, `lines` lines tall and clipped, so text that changes length
+/// never moves the controls around it. `layout` decides whether long lines fold inside the box.
+fn fixed_readout(
+    commands: &mut Commands,
+    parent: Entity,
+    kind: Readout,
+    size: f32,
+    lines: usize,
+    layout: TextLayout,
+    width: Val,
+) -> Entity {
+    let frame = commands
+        .spawn(Node {
+            width,
+            height: px(lines as f32 * size * LINE),
+            flex_shrink: 0.,
+            flex_direction: FlexDirection::Column,
+            overflow: Overflow::clip(),
+            ..default()
+        })
+        .id();
+    commands.entity(parent).add_child(frame);
+    let e = readout(commands, frame, kind, size);
+    commands
+        .entity(e)
+        .insert((layout, bevy::text::LineHeight::RelativeToFont(LINE)));
+    e
+}
 fn button(commands: &mut Commands, parent: Entity, label: &str, click: Click) {
     let e = commands
         .spawn((
@@ -137,7 +174,8 @@ fn button(commands: &mut Commands, parent: Entity, label: &str, click: Click) {
         ))
         .id();
     observe_button(commands, e, click);
-    text(commands, e, label, 11.);
+    let caption = text(commands, e, label, 11.);
+    commands.entity(caption).insert(ButtonLabel(INK));
     commands.entity(parent).add_child(e);
 }
 fn mode_button(commands: &mut Commands, parent: Entity, label: &str, key: KeyCode) {
@@ -147,6 +185,9 @@ fn mode_button(commands: &mut Commands, parent: Entity, label: &str, key: KeyCod
             Button,
             action,
             Node {
+                // Fixed width: the caption toggles between labels of different length.
+                width: px(64),
+                justify_content: JustifyContent::Center,
                 padding: UiRect::axes(px(4), px(1)),
                 ..default()
             },
@@ -154,9 +195,10 @@ fn mode_button(commands: &mut Commands, parent: Entity, label: &str, key: KeyCod
         ))
         .id();
     let caption = text(commands, entity, label, 11.);
+    let grey = Color::srgb(0.53, 0.57, 0.65);
     commands
         .entity(caption)
-        .insert(TextColor(Color::srgb(0.53, 0.57, 0.65)));
+        .insert((TextColor(grey), ButtonLabel(grey)));
     observe_button(commands, entity, action);
     commands.entity(parent).add_child(entity);
 }
@@ -181,8 +223,10 @@ fn field_input(commands: &mut Commands, parent: Entity, label: &str, field: Fiel
             Button,
             Click::Field(field),
             Node {
+                // Fixed size: typed or long values clip instead of widening and wrapping the row.
                 padding: UiRect::axes(px(5), px(2)),
-                min_width: px(95),
+                width: px(95),
+                overflow: Overflow::clip(),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.078, 0.098, 0.145)),
@@ -190,7 +234,9 @@ fn field_input(commands: &mut Commands, parent: Entity, label: &str, field: Fiel
         .id();
     observe_button(commands, e, Click::Field(field));
     let t = text(commands, e, "—", 11.);
-    commands.entity(t).insert(FieldText(field));
+    commands
+        .entity(t)
+        .insert((FieldText(field), ButtonLabel(INK), TextLayout::no_wrap()));
     commands.entity(r).add_child(e);
 }
 fn row(commands: &mut Commands, parent: Entity) -> Entity {
@@ -230,7 +276,16 @@ pub(super) fn spawn(
             ..base()
         },
     );
-    readout(commands, clock, Readout::Clock, 14.);
+    // Wide enough for "T+ 999d 23:59:59 · 100000× PAUSED"; the rate buttons never shift.
+    fixed_readout(
+        commands,
+        clock,
+        Readout::Clock,
+        14.,
+        1,
+        TextLayout::no_wrap(),
+        px(34. * 14. * GLYPH),
+    );
     let rates = row(commands, clock);
     for (i, r) in RATES.iter().enumerate() {
         let label = if *r >= 1000. {
@@ -250,7 +305,15 @@ pub(super) fn spawn(
             ..base()
         },
     );
-    readout(commands, stages, Readout::Stages, 12.);
+    fixed_readout(
+        commands,
+        stages,
+        Readout::Stages,
+        12.,
+        1,
+        TextLayout::no_wrap(),
+        percent(100),
+    );
     let list = commands
         .spawn((
             StageList,
@@ -344,8 +407,17 @@ pub(super) fn spawn(
         },
     );
     commands.entity(flight).add_child(speed);
+    let centred = TextLayout::new(Justify::Center, LineBreak::NoWrap);
     mode_button(commands, speed, "AGL", KeyCode::KeyK);
-    let altitude = readout(commands, speed, Readout::Altitude, 20.);
+    let altitude = fixed_readout(
+        commands,
+        speed,
+        Readout::Altitude,
+        20.,
+        1,
+        centred,
+        percent(100),
+    );
     commands.entity(altitude).insert(TextColor(Color::WHITE));
     let divider = commands
         .spawn((
@@ -360,11 +432,27 @@ pub(super) fn spawn(
         .id();
     commands.entity(speed).add_child(divider);
     mode_button(commands, speed, "SURFACE", KeyCode::KeyL);
-    let velocity = readout(commands, speed, Readout::Speed, 22.);
+    let velocity = fixed_readout(
+        commands,
+        speed,
+        Readout::Speed,
+        22.,
+        1,
+        centred,
+        percent(100),
+    );
     commands
         .entity(velocity)
         .insert(TextColor(Color::srgb(0.49, 1., 0.69)));
-    let reference = readout(commands, speed, Readout::SpeedReference, 11.);
+    let reference = fixed_readout(
+        commands,
+        speed,
+        Readout::SpeedReference,
+        11.,
+        1,
+        centred,
+        percent(100),
+    );
     commands
         .entity(reference)
         .insert(TextColor(Color::srgb(0.53, 0.57, 0.65)));
@@ -392,7 +480,15 @@ pub(super) fn spawn(
         },
     );
     commands.entity(orbit).insert((Readout::Orbit, OrbitFade));
-    readout(commands, orbit, Readout::Orbit, 12.);
+    fixed_readout(
+        commands,
+        orbit,
+        Readout::Orbit,
+        12.,
+        5,
+        TextLayout::no_wrap(),
+        percent(100),
+    );
     button(
         commands,
         orbit,
@@ -414,7 +510,16 @@ pub(super) fn spawn(
         .entity(maneuver)
         .insert((Readout::Maneuver, ScrollPosition::default()));
     text(commands, maneuver, "MANEUVER", 11.);
-    readout(commands, maneuver, Readout::Maneuver, 11.);
+    // Plan summary folds inside six lines; the fields and buttons below stay put.
+    fixed_readout(
+        commands,
+        maneuver,
+        Readout::Maneuver,
+        11.,
+        6,
+        TextLayout::default(),
+        percent(100),
+    );
     for (field, label) in [
         (Field::Start, "Start T+ s"),
         (Field::Prograde, "Prograde m/s"),
@@ -499,7 +604,15 @@ pub(super) fn spawn(
     ] {
         button(commands, body, label, Click::Toggle(setting));
     }
-    readout(commands, body, Readout::ViewDiagnostics, 11.);
+    fixed_readout(
+        commands,
+        body,
+        Readout::ViewDiagnostics,
+        11.,
+        7,
+        TextLayout::no_wrap(),
+        percent(100),
+    );
     let diagnostics = text(commands, body, "", 11.);
     commands.entity(diagnostics).insert(Hud);
     let help = panel(
@@ -533,17 +646,35 @@ pub(super) fn spawn(
         Node {
             left: px(12),
             top: px(88),
-            max_width: px(440),
+            width: px(440),
             ..base()
         },
     );
-    readout(commands, status, Readout::Status, 11.);
+    // Ship line plus a notice of up to two folded lines; a longer notice is clipped.
+    fixed_readout(
+        commands,
+        status,
+        Readout::Status,
+        11.,
+        3,
+        TextLayout::default(),
+        percent(100),
+    );
 }
 
 /// DEV "place ship" controls; see `place`.
 fn spawn_place(commands: &mut Commands, body: Entity) {
     use place::{PlaceClick as P, PlaceField as F};
-    readout(commands, body, Readout::Place, 11.);
+    // `place::describe` writes exactly `place::DESCRIBE_LINES` lines; none fold.
+    fixed_readout(
+        commands,
+        body,
+        Readout::Place,
+        11.,
+        place::DESCRIBE_LINES,
+        TextLayout::no_wrap(),
+        percent(100),
+    );
     let r = row(commands, body);
     button(commands, r, "◀ Body", Click::Place(P::BodyPrevious));
     button(commands, r, "Body ▶", Click::Place(P::BodyNext));
@@ -586,6 +717,27 @@ fn spawn_place(commands: &mut Commands, body: Entity) {
     );
 }
 
+/// Why a control cannot be used right now. Such controls keep their place, are drawn greyed and
+/// a click only repeats the reason in the notice.
+fn unavailable(click: Click, flight: &Flight, draft: &place::PlaceDraft) -> Option<&'static str> {
+    match click {
+        Click::Dev | Click::Help => None,
+        _ if flight.playback.is_some() => Some("UI controls unavailable during playback"),
+        Click::Field(Field::Place(_)) => None,
+        Click::Field(_) => {
+            let sim = flight.session.sim();
+            sim.plans
+                .get(&sim.selected)
+                .is_none_or(|p| p.plan.count() == 0)
+                .then_some("Add a maneuver before editing values")
+        }
+        Click::Place(place::PlaceClick::ApplyNear) if draft.target.is_none() => {
+            Some("Place refused: choose a target vessel first")
+        }
+        _ => None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn interactions(
     keys: Res<ButtonInput<KeyCode>>,
@@ -618,11 +770,11 @@ pub(super) fn interactions(
         state.dev = !state.dev;
     }
     for (interaction, action, mut background) in &mut clicks {
-        background.0 = if matches!(action, Click::Key(KeyCode::KeyK | KeyCode::KeyL))
-            && *interaction != Interaction::Hovered
-        {
+        let hovered = *interaction == Interaction::Hovered
+            && unavailable(*action, &pilot.flight, &draft).is_none();
+        background.0 = if matches!(action, Click::Key(KeyCode::KeyK | KeyCode::KeyL)) && !hovered {
             Color::NONE
-        } else if *interaction == Interaction::Hovered {
+        } else if hovered {
             Color::srgb(0.16, 0.21, 0.31)
         } else {
             Color::srgb(0.078, 0.098, 0.145)
@@ -632,12 +784,13 @@ pub(super) fn interactions(
         if !matches!(click, Click::Field(_)) {
             state.field = None;
         }
+        if let Some(reason) = unavailable(*click, &pilot.flight, &draft) {
+            pilot.notice.0 = reason.into();
+            continue;
+        }
         match click {
             Click::Dev => state.dev = !state.dev,
             Click::Help => state.help = !state.help,
-            _ if pilot.flight.playback.is_some() => {
-                pilot.notice.0 = "UI controls unavailable during playback".into()
-            }
             Click::Pause => pilot.flight.paused = !pilot.flight.paused,
             Click::Warp(i) => {
                 pilot.flight.rate = *i;
@@ -649,13 +802,10 @@ pub(super) fn interactions(
             }
             Click::Field(field) => {
                 let sim = pilot.flight.session.sim();
-                if let Some(p) = sim.plans.get(&sim.selected).filter(|p| p.plan.count() > 0) {
-                    let spec = p.plan.maneuver(p.selected);
-                    state.field = Some(*field);
-                    state.draft = field_value(*field, &spec).to_string();
-                } else {
-                    pilot.notice.0 = "Add a maneuver before editing values".into();
-                }
+                let p = &sim.plans[&sim.selected];
+                let spec = p.plan.maneuver(p.selected);
+                state.field = Some(*field);
+                state.draft = field_value(*field, &spec).to_string();
             }
             Click::Toggle(setting) => {
                 pilot.flight.session.execute(Action::View {
@@ -1261,9 +1411,11 @@ fn engine_fuel(f: &void_vessels::Fleet, id: &str, p: &void_vessels::PartSnapshot
     (fuel, capacity)
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn indicators(
     flight: NonSend<Flight>,
+    draft: Res<place::PlaceDraft>,
+    captions: Query<&ButtonLabel>,
     camera: Res<CameraView>,
     children: Query<&Children>,
     roots: Query<Entity, With<OrbitFade>>,
@@ -1315,6 +1467,14 @@ pub(super) fn indicators(
         };
         if active {
             bg.0 = Color::srgb(0.12, 0.35, 0.18);
+        }
+        let usable = unavailable(*click, &flight, &draft).is_none();
+        for child in children.get(entity).into_iter().flat_map(|c| c.iter()) {
+            if let (Ok(caption), Ok((Some(mut color), _, _))) =
+                (captions.get(child), colors.get_mut(child))
+            {
+                color.0 = if usable { caption.0 } else { DIM };
+            }
         }
         if let Click::Warp(i) = click
             && RATES[*i] > 4.0

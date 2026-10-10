@@ -237,7 +237,11 @@ fn apply(pilot: &mut Pilot, action: Action) {
     }
 }
 
-/// The panel's summary of the draft and the site under it.
+/// Line count of `describe`; the panel reserves exactly this much room.
+pub(super) const DESCRIBE_LINES: usize = 6;
+
+/// The panel's summary of the draft and the site under it, always `DESCRIBE_LINES` lines. Each
+/// line holds one kind of value so a longer value is clipped at the panel edge, never folded.
 pub(super) fn describe(draft: &PlaceDraft, sim: &void_fleet_flight::FleetFlight) -> String {
     let name = sim
         .fleet
@@ -259,7 +263,8 @@ pub(super) fn describe(draft: &PlaceDraft, sim: &void_fleet_flight::FleetFlight)
             info.sun_elevation_degrees
                 .map_or("—".into(), |e| format!("{e:+.0}°")),
         ),
-        Err(reason) => reason,
+        // Refusal reasons are single sentences; keep them on this line.
+        Err(reason) => reason.replace('\n', " "),
     };
     let velocity = match draft.velocity {
         VelocityKind::Landed => "landed".to_owned(),
@@ -282,8 +287,8 @@ pub(super) fn describe(draft: &PlaceDraft, sim: &void_fleet_flight::FleetFlight)
             format!("{t} (gone)")
         }
     });
-    format!(
-        "PLACE SHIP · {} ({})\n{name} · lat {:.3}° lon {:.3}° · alt {:.0} m\n{site}\n{velocity} · {:?}\nnear target: {target} · gap {:.1} m",
+    let text = format!(
+        "PLACE SHIP · {} ({})\n{name} · lat {:.3}° lon {:.3}° · alt {:.0} m\n{site}\n{velocity}\nattitude {:?}\nnear target · gap {:.1} m · {target}",
         sim.fleet.snapshot(&sim.selected).name,
         sim.selected,
         draft.latitude,
@@ -291,5 +296,11 @@ pub(super) fn describe(draft: &PlaceDraft, sim: &void_fleet_flight::FleetFlight)
         draft.altitude,
         draft.attitude,
         draft.gap
-    )
+    );
+    assert_eq!(
+        text.lines().count(),
+        DESCRIBE_LINES,
+        "place summary line count: {text}"
+    );
+    text
 }

@@ -619,3 +619,33 @@ fn aircraft_keyboard_pitches_up_and_banks_and_yaws_to_player_right() {
         );
     }
 }
+
+/// The DEV place summary keeps its reserved line count whatever the draft holds.
+#[test]
+fn place_summary_keeps_its_line_count() {
+    let mut app = ui_app(void_assembly::rcs_flight_rocket());
+    let target = launch_orbit(&mut app);
+    let mut draft = app.world().resource::<place::PlaceDraft>().clone();
+    for (velocity, attitude, target) in [
+        (
+            place::VelocityKind::Landed,
+            void_fleet_flight::placement::PlacementAttitude::Upright,
+            None,
+        ),
+        (
+            place::VelocityKind::Orbital,
+            void_fleet_flight::placement::PlacementAttitude::Retrograde,
+            Some(target.clone()),
+        ),
+        (
+            place::VelocityKind::Surface,
+            void_fleet_flight::placement::PlacementAttitude::Prograde,
+            Some("gone-vessel".into()),
+        ),
+    ] {
+        draft.velocity = velocity;
+        draft.attitude = attitude;
+        draft.target = target;
+        place::describe(&draft, sim(&app));
+    }
+}
