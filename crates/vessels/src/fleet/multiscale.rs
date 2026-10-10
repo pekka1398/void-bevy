@@ -1,5 +1,6 @@
 //! Precision anchors for the existing Fleet and its existing owner machinery.
 use super::*;
+use void_frames::State;
 
 /// `local` is measured in `system`'s barycentric axes; galaxy position stays split.
 pub struct PreciseVesselSnapshot {
@@ -145,7 +146,7 @@ impl Fleet {
         self.set_view_offset(system_position);
         let id = self.launch(
             craft,
-            FrameState {
+            State {
                 position: DVec3::ZERO,
                 velocity: system_velocity,
             },
@@ -179,7 +180,7 @@ impl Fleet {
         &mut self,
         craft: &Craft,
         system: SystemId,
-        state: FrameState,
+        state: State,
         rotation: DQuat,
         angular_velocity: DVec3,
     ) -> String {
@@ -301,7 +302,7 @@ mod tests {
         let mut craft = void_assembly::fresh_craft();
         craft.parts[0].definition_id = "aero-stabilizer-pod".into();
         let (p, v) = fleet.ephemeris.body_in_system(BodyId(3), 0.0);
-        let state = FrameState {
+        let state = State {
             position: p + DVec3::X * (fleet.ephemeris.bodies()[3].radius_meters + 5000.0),
             velocity: v + DVec3::Y * 80.0,
         };
@@ -309,7 +310,7 @@ mod tests {
         let other = fleet.launch_in_system(
             &craft,
             SystemId(2),
-            FrameState {
+            State {
                 position: DVec3::X * 1e10,
                 velocity: DVec3::ZERO,
             },
@@ -343,7 +344,7 @@ mod tests {
         fleet.launch_in_system(
             &craft,
             SystemId(1),
-            FrameState {
+            State {
                 position: state.position + DVec3::Y * 10.0,
                 velocity: state.velocity,
             },

@@ -1,6 +1,5 @@
 //! The part graph of flying vessels: every part with its own state, and the connections between
 //! parts. A vessel is one connected group of it; separation and docking are graph operations.
-//! See `docs/part-graph.md`.
 use crate::{
     AttachNode, CompiledCraft, Connection, Module, PartDefinition, PartPose, ResourceId, Resources,
     node, validate_resources,
@@ -350,7 +349,7 @@ impl PartGraph {
         };
         self.set_module_state(id, module, state);
     }
-    /// Legacy part action activates all its actionable modules, preserving the old lab's semantics.
+    /// A whole-part action activates all its actionable modules.
     pub fn stage_part(&mut self, id: &str) {
         let ids: Vec<_> = self.part(id).module_stages.keys().cloned().collect();
         for module in ids {

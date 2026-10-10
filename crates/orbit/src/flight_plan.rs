@@ -1,4 +1,4 @@
-//! Burns at full thrust and the trajectory they give, as `lab/orbit/src/orbit/FlightPlan.ts`.
+//! Burns at full thrust and the trajectory they give.
 
 use glam::DVec3;
 use void_frames::BodyId;

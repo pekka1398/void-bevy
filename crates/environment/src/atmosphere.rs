@@ -1,7 +1,4 @@
-//! Air by altitude, as the aerodynamics lab's `Atmosphere.ts` (moved here from `void-aero`, which
-//! re-exports it).
-
-use void_math::{exp, pow};
+//! Air by altitude (`void-aero` re-exports it).
 
 fn finite(value: f64, label: &str) -> f64 {
     assert!(value.is_finite(), "{label}: non-finite");
@@ -14,7 +11,7 @@ fn positive(value: f64, label: &str) -> f64 {
     value
 }
 
-/// Smoothstep from a to b, as the lab's `smooth` (`Math.max(0, Math.min(1, ...))` clamp).
+/// Smoothstep from a to b, clamped to [0, 1].
 pub fn smooth(a: f64, b: f64, x: f64) -> f64 {
     let t = 0.0_f64.max(1.0_f64.min((x - a) / (b - a)));
     t * t * (3.0 - 2.0 * t)
@@ -87,9 +84,9 @@ impl EarthAtmosphere {
 
 fn layer_pressure(p0: f64, t0: f64, t: f64, lapse: f64, dh: f64) -> f64 {
     if lapse == 0.0 {
-        p0 * exp(-G * dh / (R * t0))
+        p0 * f64::exp(-G * dh / (R * t0))
     } else {
-        p0 * pow(t / t0, -G / (R * lapse))
+        p0 * f64::powf(t / t0, -G / (R * lapse))
     }
 }
 
@@ -105,7 +102,7 @@ impl Air {
     };
 }
 
-/// The lab's two atmospheres: Earth's air, and vacuum for comparison.
+/// Two atmospheres: Earth's air, and vacuum for comparison.
 #[derive(Clone, Debug)]
 pub enum Atmosphere {
     Earth(EarthAtmosphere),
@@ -152,7 +149,7 @@ impl Atmosphere {
             temperature_k: t,
             density: pressure_pa / (R * t),
             sound_speed: (1.4 * R * t).sqrt(),
-            viscosity: 1.716e-5 * pow(t / 273.15, 1.5) * (273.15 + 110.4) / (t + 110.4),
+            viscosity: 1.716e-5 * f64::powf(t / 273.15, 1.5) * (273.15 + 110.4) / (t + 110.4),
         }
     }
 }

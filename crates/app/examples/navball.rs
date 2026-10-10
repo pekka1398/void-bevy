@@ -1,7 +1,6 @@
-//! lab/navball's page: the attitude ball on its own, at 320 px and at 150 px (lab/flight's size).
-//! Keys replace the lab's sliders.
+//! The attitude ball on its own, at 320 px and at 150 px.
 //!
-//! WASD QE turn the vessel about its own axes (pitch, yaw, roll) as lab/flight steers. `[` `]`
+//! WASD QE turn the vessel about its own axes (pitch, yaw, roll). `[` `]`
 //! latitude, J L velocity heading, I K velocity pitch, `-` `=` speed (log), R back to the start.
 
 use bevy::prelude::*;
@@ -34,7 +33,7 @@ fn main() {
         .run();
 }
 
-/// The lab's sliders and the vessel's attitude.
+/// The settings and the vessel's attitude.
 #[derive(Resource)]
 struct Lab {
     latitude: f64,
@@ -43,7 +42,7 @@ struct Lab {
     roll: f64,
     velocity_heading: f64,
     velocity_pitch: f64,
-    /// Speed is 10^(this − 1) m/s, as the lab's slider.
+    /// Speed is 10^(this − 1) m/s.
     speed_log: f64,
     nose: DVec3,
     top: DVec3,
@@ -117,7 +116,7 @@ impl Lab {
         }
     }
 
-    /// Turn by small angles about the vessel's own axes, as lab/flight's torques do.
+    /// Turn by small angles about the vessel's own axes.
     fn turn(&mut self, pitch: f64, yaw: f64, roll: f64, seconds: f64) {
         let a = TURN_DEGREES_PER_SECOND * DEG * seconds;
         let (pitch, yaw, roll) = (pitch * a, yaw * a, roll * a);
@@ -167,7 +166,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, window: Sing
             ..default()
         })
         .id();
-    for (diameter, caption) in [(320.0, "320 px"), (150.0, "150 px, as in lab/flight")] {
+    for (diameter, caption) in [(320.0, "320 px"), (150.0, "150 px")] {
         let figure = commands
             .spawn(Node {
                 flex_direction: FlexDirection::Column,
@@ -201,7 +200,7 @@ fn controls(keys: Res<ButtonInput<KeyCode>>, time: Res<Time>, mut lab: ResMut<La
     let seconds = (time.delta_secs_f64()).min(0.05);
     let latitude = axis(&keys, KeyCode::BracketRight, KeyCode::BracketLeft);
     if latitude != 0.0 {
-        // As the lab's slider: the attitude is set again from heading, pitch and roll.
+        // The attitude is set again from heading, pitch and roll.
         lab.latitude = (lab.latitude + latitude * 30.0 * seconds).clamp(-90.0, 90.0);
         lab.set_attitude_from_sliders();
     }

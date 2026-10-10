@@ -1,10 +1,9 @@
-//! lab/lod's OrbitCamera, with the same state and the same mouse mapping (left drag pans, right drag
-//! orbits the planet centre, Shift + left drag turns, the wheel zooms), made to work from space down
-//! to the ground:
+//! An orbit camera (left drag pans, right drag orbits the planet centre, Shift + left drag turns,
+//! the wheel zooms) that works from space down to the ground:
 //!
 //! - Zoom and pan scale with the height above the surface under the camera, not the distance to the
 //!   centre, so a wheel notch at 2 m moves centimetres and at 20,000 km thousands of kilometres.
-//! - Orbiting slows with height the same way (at most lab/lod's 0.005 rad per pixel).
+//! - Orbiting slows with height the same way (at most 0.005 rad per pixel).
 //! - Tilt runs from straight down (0) past the horizon (π/2) to nearly straight up.
 //! - The camera never goes below `MIN_HEIGHT` above the surface (the caller enforces it).
 //!
@@ -13,7 +12,6 @@
 //! the centre and the tilt.
 
 use glam::DVec3;
-use void_math::{cos, hypot, sin, tan};
 
 #[derive(Clone, Debug)]
 pub struct OrbitView {
@@ -63,8 +61,8 @@ impl OrbitView {
 
     pub fn pose(&self) -> Pose {
         let down = -self.p;
-        let forward = down * cos(self.tilt) + self.north * sin(self.tilt);
-        let up = self.p * sin(self.tilt) + self.north * cos(self.tilt);
+        let forward = down * f64::cos(self.tilt) + self.north * f64::sin(self.tilt);
+        let up = self.p * f64::sin(self.tilt) + self.north * f64::cos(self.tilt);
         Pose {
             position: self.p * self.distance + self.offset,
             forward: normalize(forward),
@@ -72,7 +70,7 @@ impl OrbitView {
         }
     }
 
-    /// Right, up and backward (three.js camera axes) in body-fixed axes.
+    /// Right, up and backward (camera axes looking down −z) in body-fixed axes.
     pub fn basis(&self) -> (DVec3, DVec3, DVec3) {
         let Pose { forward, up, .. } = self.pose();
         (normalize(cross(forward, up)), up, -forward)
@@ -99,7 +97,7 @@ impl OrbitView {
         );
         let Pose { forward, up, .. } = self.pose();
         let right = normalize(cross(forward, up));
-        let meters = (height * 2.0 * tan(fov_y_radians / 2.0)) / viewport_height_pixels;
+        let meters = (height * 2.0 * f64::tan(fov_y_radians / 2.0)) / viewport_height_pixels;
         self.offset += right * (-dx_pixels * meters) + up * (dy_pixels * meters);
     }
 
@@ -124,7 +122,8 @@ impl OrbitView {
     pub fn turn(&mut self, heading_radians: f64, tilt_radians: f64) {
         finite("turn", &[heading_radians, tilt_radians]);
         let east = cross(self.north, self.p);
-        self.north = normalize(self.north * cos(heading_radians) + east * sin(heading_radians));
+        self.north =
+            normalize(self.north * f64::cos(heading_radians) + east * f64::sin(heading_radians));
         self.tilt = clamp_tilt(self.tilt + tilt_radians);
     }
 
@@ -133,7 +132,7 @@ impl OrbitView {
     pub fn set_radius(&mut self, radius: f64) {
         finite("set_radius", &[radius]);
         let position = self.pose().position;
-        let current = hypot([position.x, position.y, position.z]);
+        let current = position.length();
         let next = self.max_distance_meters.min(radius);
         self.offset *= next / current;
         self.distance *= next / current;
@@ -151,7 +150,8 @@ impl OrbitView {
         self.p = normalize(direction);
         let north = normalize(reject(DVec3::Z, self.p));
         let east = cross(north, self.p);
-        self.north = normalize(north * cos(heading_radians) + east * sin(heading_radians));
+        self.north =
+            normalize(north * f64::cos(heading_radians) + east * f64::sin(heading_radians));
         self.offset = DVec3::ZERO;
         self.distance = radius;
         self.tilt = clamp_tilt(tilt_radians);
@@ -179,12 +179,12 @@ fn cross(a: DVec3, b: DVec3) -> DVec3 {
 }
 
 fn rotate(value: DVec3, axis: DVec3, radians: f64) -> DVec3 {
-    let (c, s) = (cos(radians), sin(radians));
+    let (c, s) = (f64::cos(radians), f64::sin(radians));
     value * c + cross(axis, value) * s + axis * (axis.dot(value) * (1.0 - c))
 }
 
 fn normalize(a: DVec3) -> DVec3 {
-    let length = hypot([a.x, a.y, a.z]);
+    let length = a.length();
     assert!(
         length.is_finite() && length >= 1e-9,
         "OrbitView: cannot normalize {a:?}"
@@ -195,8 +195,8 @@ fn normalize(a: DVec3) -> DVec3 {
 /// Component of `v` perpendicular to unit `n`.
 fn reject(v: DVec3, n: DVec3) -> DVec3 {
     let r = v - n * v.dot(n);
-    // Over a pole, grid north runs down the prime meridian (as lab/navball does).
-    if hypot([r.x, r.y, r.z]) < 1e-12 {
+    // Over a pole, grid north runs down the prime meridian, as the navball's does.
+    if r.length() < 1e-12 {
         return if n.z > 0.0 { -DVec3::X } else { DVec3::X };
     }
     r

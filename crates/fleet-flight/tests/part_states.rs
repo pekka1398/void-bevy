@@ -4,7 +4,8 @@ use void_assembly::{
     Craft, ModuleState, ParachutePhase, add_part, definition, fresh_craft, full_resources,
 };
 use void_fleet_flight::session::{Action, FlightSession, InitialWorld, Outcome, world_mark};
-use void_landing::{FrameState, PlanetFrame, earth_size};
+use void_frames::State;
+use void_landing::{PlanetFrame, earth_size};
 use void_vessels::flat_site;
 fn craft() -> Craft {
     let mut c = fresh_craft();
@@ -21,7 +22,7 @@ fn drop() -> FlightSession {
     let state = frame.to_inertial(
         &sim.fleet.ephemeris,
         0.0,
-        FrameState {
+        State {
             position: DVec3::X * (p.terrain.radius_meters + 1000.0),
             velocity: -DVec3::X * 80.0,
         },
@@ -184,7 +185,7 @@ fn an_open_parachute_slows_the_same_return_without_changing_mass() {
         let local = frame.to_body_fixed(
             &sim.fleet.ephemeris,
             sim.fleet.time(),
-            FrameState {
+            State {
                 position: state.position,
                 velocity: state.velocity,
             },

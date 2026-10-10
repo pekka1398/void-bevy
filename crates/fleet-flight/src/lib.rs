@@ -1,5 +1,6 @@
 //! First integration boundary for assembly/Fleet flight. No Bevy and no fixed two-stage rocket.
 pub mod checkpoint;
+pub mod placement;
 pub mod plans;
 pub mod presentation;
 pub mod session;
@@ -7,7 +8,8 @@ pub mod warp;
 pub mod world;
 use glam::DVec3;
 use void_assembly::Craft;
-use void_landing::{CoastPrediction, FrameState, LandingPlanet, PlanetFrame, predict_coast};
+use void_frames::State;
+use void_landing::{CoastPrediction, LandingPlanet, PlanetFrame, predict_coast};
 use void_vessels::{Fleet, FleetOptions, VesselControl, VesselMode};
 
 pub struct FleetFlight {
@@ -127,7 +129,7 @@ impl FleetFlight {
         id
     }
     /// Explicit body-local flight fixture. It is a journaled initial state, never a transfer claim.
-    pub fn launch_flight_at(&mut self, body_id: &str, craft: &Craft, local: FrameState) -> String {
+    pub fn launch_flight_at(&mut self, body_id: &str, craft: &Craft, local: State) -> String {
         assert!(
             local.position.is_finite()
                 && local.position.length_squared() > 0.0
@@ -148,7 +150,7 @@ impl FleetFlight {
         let id = self.fleet.launch_in_system(
             craft,
             self.fleet.ephemeris.system_of(body),
-            FrameState {
+            State {
                 position: state.position,
                 velocity: state.velocity,
             },
@@ -231,7 +233,7 @@ impl FleetFlight {
         let frame = PlanetFrame::new(&self.fleet.ephemeris, body_index);
         let body = &frame.body;
         let r = body.radius_meters + 400_000.0;
-        let local = FrameState {
+        let local = State {
             position: DVec3::X * r + offset,
             velocity: DVec3::Y * ((body.gm / r).sqrt() - frame.omega * r),
         };
@@ -243,7 +245,7 @@ impl FleetFlight {
             position: local.position,
             velocity: local.velocity,
         });
-        let state = FrameState {
+        let state = State {
             position: state.position,
             velocity: state.velocity,
         };
@@ -259,7 +261,7 @@ impl FleetFlight {
         id
     }
     /// An origin-frame state in a body's surface (body-fixed) frame.
-    pub fn body_fixed(&self, body: usize, inertial: FrameState) -> FrameState {
+    pub fn body_fixed(&self, body: usize, inertial: State) -> State {
         let s = self
             .fleet
             .frames()
@@ -268,7 +270,7 @@ impl FleetFlight {
                 position: inertial.position,
                 velocity: inertial.velocity,
             });
-        FrameState {
+        State {
             position: s.position,
             velocity: s.velocity,
         }
@@ -336,28 +338,3 @@ impl FleetFlight {
         Ok(plan)
     }
 }
-
-/// Explicit aircraft acceptance terrain: a spherical runway world with <1cm hills.
-/// The authored recipe is persisted and used by both scenery and contact mesh builders.
-/// This is a declared test world, not a hidden replacement for normal terrain.
-pub fn aircraft_acceptance_planet(mut planet: LandingPlanet) -> LandingPlanet {
-    assert!(
-        planet.air_density_scale.is_some(),
-        "aircraft acceptance requires an atmospheric planet"
-    );
-    planet.terrain_config = void_terrain::TerrainConfig::Hills(void_terrain::HillsOptions {
-        name: "Aircraft acceptance runway terrain".into(),
-        radius_meters: planet.terrain.radius_meters,
-        max_height_meters: 0.01,
-        wavelength_meters: 10_000.0,
-        octaves: 1,
-    });
-    planet.terrain =
-        std::sync::Arc::new(void_terrain::Terrain::from_config(&planet.terrain_config));
-    planet.air_datum = 0.0;
-    planet.sea_level = None;
-    planet.label.push_str(" | AIRCRAFT RUNWAY ACCEPTANCE");
-    planet
-}
-
-pub mod water;

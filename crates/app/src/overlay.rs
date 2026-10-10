@@ -1,6 +1,5 @@
 //! The acceptance overlays: what the physics is actually touching, drawn on top of what is being
-//! rendered. The landing lab's page had these and they are the only way to accept contact work by
-//! eye — a rocket resting on terrain looks right whether or not the collider under it is the mesh
+//! rendered. They are the only way to accept contact work by eye — a rocket resting on terrain looks right whether or not the collider under it is the mesh
 //! being drawn, and the overlay is what tells them apart.
 //!
 //! The collision terrain is read back out of Rapier rather than rebuilt here, so a mismatch between
@@ -115,7 +114,7 @@ pub fn unique_edges(triangles: &[[u32; 3]]) -> Vec<u32> {
 }
 
 /// The overlay switches a scene offers, in the order of the function keys that toggle them. Keeping
-/// them in one place is what stops the game and the labs drifting into different keys for the same
+/// them in one place is what stops the game and the examples drifting into different keys for the same
 /// switch, which is how an acceptance pass ends up looking at the wrong thing.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DebugView {

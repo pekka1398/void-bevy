@@ -1,4 +1,4 @@
-//! Rapier rigid bodies in a contact frame, as `lab/landing/src/physics/ContactWorld.ts`: the
+//! Rapier rigid bodies in a contact frame: the
 //! planet's rotating frame on collision tiles streamed around them, or (no terrain) any other
 //! frame.
 //! - Coordinates: Rapier works in f32 relative to an f64 floating origin (body-fixed). The origin
@@ -16,6 +16,8 @@
 //!   or joints keep Rapier's angular solution. Frame torque and prescribed torque are applied before
 //!   solving, so constraints see them.
 
+use void_frames::State;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,12 +27,11 @@ use glam::{DMat3, DQuat, DVec3};
 use rapier3d::math::{Rotation, Vector};
 use rapier3d::prelude::*;
 use void_lod::{OrderedMap, TileMeshOptions, build_tile_indices, build_tile_mesh, tiles_around};
-use void_math::hypot;
 use void_orbit::EphemerisSource;
 use void_rotation::{Mat3, fictitious_torque, rotation_step};
 use void_terrain::Terrain;
 
-use crate::planet_frame::{ContactFrame, FrameState};
+use crate::planet_frame::ContactFrame;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ContactWorldOptions {
@@ -156,25 +157,18 @@ fn q32_normalized(q: DQuat) -> Rotation {
     q32(q).normalize()
 }
 
-/// `Math.fround` equality: the f64 rounded to f32 equals Rapier's f32.
+/// The f64 rounded to f32 equals Rapier's f32.
 fn same32(a: DVec3, b: Vector) -> bool {
     a.x as f32 == b.x && a.y as f32 == b.y && a.z as f32 == b.z
 }
 
-/// v turned by q, in the lab's operation order.
+/// v turned by q.
 fn rotate(q: DQuat, v: DVec3) -> DVec3 {
-    let cx = q.y * v.z - q.z * v.y + q.w * v.x;
-    let cy = q.z * v.x - q.x * v.z + q.w * v.y;
-    let cz = q.x * v.y - q.y * v.x + q.w * v.z;
-    DVec3::new(
-        v.x + 2.0 * (q.y * cz - q.z * cy),
-        v.y + 2.0 * (q.z * cx - q.x * cz),
-        v.z + 2.0 * (q.x * cy - q.y * cx),
-    )
+    q * v
 }
 
 fn normalise_rotation(q: DQuat) -> DQuat {
-    let length = hypot([q.x, q.y, q.z, q.w]);
+    let length = q.length();
     assert!(
         length > 0.0 && length.is_finite(),
         "contact world: invalid rotation"
@@ -270,7 +264,7 @@ pub struct ContactWorld<F: ContactFrame> {
     pub tile_loads: u64,
     pub tile_unloads: u64,
     pub recenters: u64,
-    /// Bodies in insertion order, as the lab's Set.
+    /// Bodies in insertion order.
     bodies: Vec<(RigidBodyHandle, BodyRecord)>,
     tiles: OrderedMap<TileCollider>,
 }
@@ -289,7 +283,7 @@ pub struct ContactRayHit {
 /// Extra acceleration (thrust) for a body, called once per step with its state. Leapfrog kicks
 /// cover the half steps on both sides of a step, so this must return the average over the step
 /// just ended and the step starting; a jump (engine on or off) then lands on the step boundary.
-pub type ExtraAcceleration<'a> = &'a mut dyn FnMut(RigidBodyHandle, FrameState) -> DVec3;
+pub type ExtraAcceleration<'a> = &'a mut dyn FnMut(RigidBodyHandle, State) -> DVec3;
 
 impl<F: ContactFrame> ContactWorld<F> {
     pub fn new(
@@ -441,14 +435,14 @@ impl<F: ContactFrame> ContactWorld<F> {
         &mut self,
         ephemeris: &dyn EphemerisSource,
         spec: &ContactBodySpec,
-        state: FrameState,
+        state: State,
         rotation: DQuat,
         extra_before: DVec3,
     ) -> RigidBodyHandle {
         // Establish a local origin before rounding the initial pose: at planet-radius coordinates
         // f32 can erase a small drop clearance and start a standing body inside the terrain.
         let initial = self.to_local(state.position);
-        if hypot([initial.x, initial.y, initial.z]) > self.options.recenter_meters {
+        if initial.length() > self.options.recenter_meters {
             self.recenter(state.position);
         }
         let p = self.to_local(state.position);
@@ -575,13 +569,13 @@ impl<F: ContactFrame> ContactWorld<F> {
         ephemeris: &dyn EphemerisSource,
         handle: RigidBodyHandle,
         extra: DVec3,
-    ) -> FrameState {
+    ) -> State {
         let record = self.record(handle);
         let position = record.position;
         let body = &self.world.bodies[handle];
         let u = v64(body.linvel());
         if body.is_sleeping() {
-            return FrameState {
+            return State {
                 position,
                 velocity: u,
             };
@@ -596,7 +590,7 @@ impl<F: ContactFrame> ContactWorld<F> {
             u.y + (a.y * dt) / 2.0,
             u.z + (a.z * dt) / 2.0,
         ));
-        FrameState {
+        State {
             position,
             velocity: DVec3::new(
                 u.x + (a.x * dt + d.x) / 2.0,
@@ -1206,16 +1200,15 @@ impl<F: ContactFrame> ContactWorld<F> {
                 after.y * dt + r0.y - r1.y,
                 after.z * dt + r0.z - r1.z,
             );
-            // Free: the solver left the kicked velocity bit for bit and the body moved by exactly that,
+            // Free: the solver left the kicked velocity unchanged and the body moved by exactly that,
             // to f32 rounding (CCD can stop a body short without touching its velocity). A body
             // asleep at the start was not kicked: it moved only if a contact woke it.
             let start = v64(start_translation);
             let moved = t - start;
-            let rounding =
-                1e-6 * (hypot([t.x, t.y, t.z]) + hypot([start.x, start.y, start.z])) + 1e-9;
+            let rounding = 1e-6 * (t.length() + start.length()) + 1e-9;
             let free = !constrained.contains(&handle)
                 && v.is_some_and(|v| same32(v, body.linvel()))
-                && hypot([moved.x - exact.x, moved.y - exact.y, moved.z - exact.z]) <= rounding;
+                && (moved - exact).length() <= rounding;
             let solver_delta = match v {
                 Some(v) if !free => DVec3::new(after.x - v.x, after.y - v.y, after.z - v.z),
                 _ => DVec3::ZERO,
@@ -1299,7 +1292,7 @@ impl<F: ContactFrame> ContactWorld<F> {
     fn recenter_if_needed(&mut self) {
         for (handle, _) in &self.bodies {
             let t = v64(self.world.bodies[*handle].translation());
-            if hypot([t.x, t.y, t.z]) > self.options.recenter_meters {
+            if t.length() > self.options.recenter_meters {
                 let to = DVec3::new(
                     self.origin.x + t.x,
                     self.origin.y + t.y,
@@ -1333,7 +1326,7 @@ impl<F: ContactFrame> ContactWorld<F> {
         let n = tile_resolution;
         for p in positions {
             // Tiles matter only once the body could reach the ground.
-            if hypot([p.x, p.y, p.z]) - r - terrain.max_height_meters > tile_reach_meters {
+            if p.length() - r - terrain.max_height_meters > tile_reach_meters {
                 continue;
             }
             for key in tiles_around(p, tile_reach_meters, tile_level, r) {

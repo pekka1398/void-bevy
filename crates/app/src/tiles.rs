@@ -13,6 +13,10 @@ use bevy::pbr::wireframe::{Wireframe, WireframeColor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{PrimitiveTopology, VertexFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures::check_ready};
+
+/// Tile meshes building at once per tile field, independent of the machine's core count. Each
+/// visible body has its own field; the async compute pool bounds the threads.
+const MAX_TILE_BUILDS: usize = 8;
 use glam::DVec3;
 use void_lod::{
     FACE_EDGES, LodSelection, LodView, PlanetLod, PlanetLodOptions, SurfaceSample, SurfaceSampler,
@@ -20,7 +24,7 @@ use void_lod::{
     stitch_edges,
 };
 
-/// Each vertex's surface height above the reference radius, metres (lab/lod's `height` attribute).
+/// Each vertex's surface height above the reference radius, metres.
 pub const ATTRIBUTE_HEIGHT: MeshVertexAttribute =
     MeshVertexAttribute::new("Height", 917_330_201, VertexFormat::Float32);
 
@@ -81,7 +85,7 @@ impl<M: Material> TileField<M> {
             terrain,
             building: HashMap::new(),
             drawn: HashMap::new(),
-            // Skirts are left out: seams are stitched, as the LOD lab draws by default.
+            // Skirts are left out: seams are stitched.
             indices: indices[..grid].to_vec(),
             material,
             owned_meshes: HashMap::new(),
@@ -114,7 +118,7 @@ impl<M: Material> TileField<M> {
         self.wireframe
     }
 
-    /// Triangle edges on every drawn tile, as the LOD lab's mesh-edge overlay.
+    /// Triangle edges on every drawn tile.
     pub fn set_wireframe(&mut self, commands: &mut Commands, on: bool) {
         self.wireframe = on;
         for (entity, _) in self.drawn.values() {
@@ -133,8 +137,8 @@ impl<M: Material> TileField<M> {
         }
     }
 
-    /// Every drawn tile's four edges as polylines relative to the camera at `eye` (the LOD lab's
-    /// red tile boundaries), along the tile's own grid vertices.
+    /// Every drawn tile's four edges as polylines relative to the camera at `eye`, along the tile's
+    /// own grid vertices.
     pub fn boundaries(&self, eye: DVec3) -> Vec<Vec<Vec3>> {
         let n = self.lod.options.resolution;
         let mut lines = Vec::with_capacity(self.drawn.len() * 4);
@@ -188,13 +192,12 @@ impl<M: Material> TileField<M> {
         self.last_requests = requests.len();
         self.render = render;
         requests.sort_by(|a, b| b.priority.total_cmp(&a.priority));
-        let slots = std::thread::available_parallelism().map_or(4, |n| n.get()) * 2;
         let options = TileMeshOptions {
             radius_meters: self.lod.options.radius_meters,
             resolution: self.lod.options.resolution,
         };
         for request in requests {
-            if self.building.len() >= slots {
+            if self.building.len() >= MAX_TILE_BUILDS {
                 break;
             }
             let code = request.key.code();
@@ -346,8 +349,10 @@ mod lifecycle_tests {
     #[test]
     fn unload_releases_entities_meshes_and_cannot_accept_old_jobs() {
         let planet = void_landing::pebble();
-        let demo = void_landing::demo_rocket(&planet.terrain);
-        let options = void_landing::landing_lod_options(&planet.terrain, &demo.options.contact);
+        let options = void_landing::landing_lod_options(
+            &planet.terrain,
+            &void_fleet_flight::world::ground_tiles(&planet.terrain),
+        );
         let mut field: TileField = TileField::new(
             options.clone(),
             Some(planet.terrain.clone()),

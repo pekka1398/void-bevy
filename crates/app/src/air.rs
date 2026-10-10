@@ -1,4 +1,4 @@
-//! lab/scenery's transport and resolve passes as one Bevy post-process pass (`air.wgsl`): the air
+//! The sky's transport and resolve passes as one Bevy post-process pass (`air.wgsl`): the air
 //! and clouds between the camera and the scene, integrated together in depth order, plus the sun's
 //! disc. It runs on the HDR scene before tone mapping, reading the main depth texture.
 //!
@@ -90,7 +90,7 @@ pub struct AirSettings {
     /// The clouds' base above `bottom_radius`: the sea, or hills' colour band, less the air datum.
     pub sea_level: f32,
     pub focal_pixels: f32,
-    /// The lab's exposure multiplier (10^slider) and tone mapping (`ToneMapping as f32`).
+    /// The exposure multiplier (10^slider) and tone mapping (`ToneMapping as f32`).
     pub exposure: f32,
     pub tone_mapping: f32,
     pub cloud_bottom: f32,
@@ -103,7 +103,7 @@ pub struct AirSettings {
     pub cloud_deck_scale: Vec4,
 }
 
-/// three.js's tone mappings the lab offers, done at the end of the air pass. The camera's own
+/// Tone mappings done at the end of the air pass. The camera's own
 /// `Tonemapping` should be `None`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToneMapping {
@@ -270,7 +270,7 @@ pub fn weather_image(data: Vec<u8>, width: usize, height: usize) -> Image {
 }
 
 /// A repeating RGBA8 noise volume with its whole mip chain, each level the 2×2×2 box average of the
-/// one above, as WebGL's generateMipmap builds it for the lab.
+/// one above.
 pub fn noise_volume_image(data: Vec<u8>, size: usize) -> Image {
     let mut levels = vec![data];
     let mut n = size;
@@ -486,8 +486,6 @@ fn air_pass(
             });
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind_group, &[offset]);
-        #[cfg(feature = "render-metrics")]
-        bevy::log::trace!(target:"void_draw_submission", "draw: 0..3 0..1");
         pass.draw(0..3, 0..1);
         drop(pass);
         span.end(ctx.command_encoder());

@@ -1,5 +1,5 @@
 //! Rigid-body rotation seen from a frame that itself turns at a constant angular velocity Ω (a
-//! planet's body-fixed frame), as `lab/rotation/src/RotatingFrame.ts`.
+//! planet's body-fixed frame).
 //!
 //! All vectors are in the frame's axes. ω is the body's angular velocity relative to the frame
 //! (what a physics engine working in the frame stores), I the body's inertia about its mass centre
@@ -18,7 +18,6 @@
 //!   ground, contacts supply it.
 
 use glam::{DQuat, DVec3};
-use void_math::hypot;
 
 /// Row-major 3 × 3.
 pub type Mat3 = [f64; 9];
@@ -142,7 +141,7 @@ pub fn inertia_in(q: DQuat, inertia_local: &Mat3) -> Mat3 {
 
 /// q turned by the rotation vector w dt (exact for a constant w).
 fn advance(q: DQuat, w: DVec3, dt: f64) -> DQuat {
-    let rate = hypot([w.x, w.y, w.z]);
+    let rate = w.length();
     if rate == 0.0 {
         return q;
     }
@@ -155,7 +154,7 @@ fn advance(q: DQuat, w: DVec3, dt: f64) -> DQuat {
         dw * q.z + dx * q.y - dy * q.x + dz * q.w,
         dw * q.w - dx * q.x - dy * q.y - dz * q.z,
     );
-    let l = hypot([r.x, r.y, r.z, r.w]);
+    let l = r.length();
     DQuat::from_xyzw(r.x / l, r.y / l, r.z / l, r.w / l)
 }
 
@@ -181,7 +180,7 @@ pub fn free_rotation_step(
         &inertia_in(rotation, inertia_local),
         angular_velocity + frame_spin,
     );
-    let rate = hypot([frame_spin.x, frame_spin.y, frame_spin.z]);
+    let rate = frame_spin.length();
     let at = |t: f64| {
         if rate == 0.0 {
             l0

@@ -1,5 +1,4 @@
 use glam::DVec3;
-use serde_json::Value;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use void_orbit::*;
 fn ephemeris(id: &str) -> Ephemeris {
@@ -16,67 +15,34 @@ fn ephemeris(id: &str) -> Ephemeris {
         },
     )
 }
-fn vector(v: &Value) -> DVec3 {
-    DVec3::new(
-        v[0].as_f64().unwrap(),
-        v[1].as_f64().unwrap(),
-        v[2].as_f64().unwrap(),
-    )
-}
-fn spec(v: &Value) -> FrameSpec {
-    match v["kind"].as_str().unwrap() {
-        "barycentric" => FrameSpec::Barycentric,
-        "body-inertial" => FrameSpec::BodyInertial {
-            body: v["body"].as_u64().unwrap() as usize,
-        },
-        "body-surface" => FrameSpec::BodySurface {
-            body: v["body"].as_u64().unwrap() as usize,
-        },
-        "two-body-rotating" => FrameSpec::TwoBodyRotating {
-            primary: v["primary"].as_u64().unwrap() as usize,
-            secondary: v["secondary"].as_u64().unwrap() as usize,
-        },
-        _ => panic!("unknown frame"),
+#[test]
+fn inertial_frames_sit_on_their_body_and_do_not_turn() {
+    let mut eph = ephemeris("sol");
+    eph.extend_to(60.0 * 86400.0);
+    let earth = eph.bodies().iter().position(|b| b.id == "aurelia").unwrap();
+    for t in [0.0, 12.5 * 86400.0, 59.0 * 86400.0] {
+        let mut barycentric = FrameEvaluator::new(&eph, FrameSpec::Barycentric);
+        let frame = barycentric.evaluate(&eph, t);
+        assert_eq!(frame.origin, DVec3::ZERO);
+        assert_eq!(frame.axes, [DVec3::X, DVec3::Y, DVec3::Z]);
+        assert!(barycentric.rotation_period_seconds(&eph, t).is_infinite());
+        let mut inertial = FrameEvaluator::new(&eph, FrameSpec::BodyInertial { body: earth });
+        let frame = inertial.evaluate(&eph, t);
+        assert!((frame.origin - inertial.position(earth)).length() < 1e-3);
+        assert!(to_frame(&frame, inertial.position(earth)).length() < 1e-3);
+        assert!((frame.axes[0].cross(frame.axes[1]) - frame.axes[2]).length() < 1e-14);
+        assert!(inertial.rotation_period_seconds(&eph, t).is_infinite());
+        let direction = DVec3::new(0.2, -0.3, 0.7);
+        assert!(
+            (direction_to_frame(&frame, direction).length() - direction.length()).abs() < 1e-15
+        );
+        let mut surface = FrameEvaluator::new(&eph, FrameSpec::BodySurface { body: earth });
+        let period = surface.rotation_period_seconds(&eph, t);
+        assert!((period / eph.bodies()[earth].rotation.period_seconds - 1.0).abs() < 1e-12);
     }
 }
 #[test]
-fn four_frames_match_ts() {
-    let data: Value = serde_json::from_str(include_str!("golden/reference_frames.json")).unwrap();
-    for system in data["systems"].as_array().unwrap() {
-        let mut eph = ephemeris(system["id"].as_str().unwrap());
-        eph.extend_to(60.0 * 86400.0);
-        for case in system["cases"].as_array().unwrap() {
-            let t = case["t"].as_f64().unwrap();
-            let mut eval = FrameEvaluator::new(&eph, spec(&case["frame"]));
-            let frame = eval.evaluate(&eph, t);
-            // Existing native initial-state ulps accumulate below a metre in 60 days.
-            assert!((frame.origin - vector(&case["origin"])).length() < 1.0);
-            for (i, axis) in frame.axes.iter().enumerate() {
-                assert!((*axis - vector(&case["axes"][i])).length() < 1e-9);
-            }
-            for (i, p) in case["bodies"].as_array().unwrap().iter().enumerate() {
-                assert!(
-                    (to_frame(&frame, eval.position(i)) - vector(p)).length()
-                        < 1.0 + vector(p).length() * 1e-9
-                );
-            }
-            assert!(
-                (direction_to_frame(&frame, DVec3::new(0.2, -0.3, 0.7))
-                    - vector(&case["direction"]))
-                .length()
-                    < 1e-9
-            );
-            let period = eval.rotation_period_seconds(&eph, t);
-            if case["period"].is_null() {
-                assert!(period.is_infinite());
-            } else {
-                assert!((period / case["period"].as_f64().unwrap() - 1.0).abs() < 1e-9);
-            }
-        }
-    }
-}
-#[test]
-fn original_lab_two_body_axis_and_surface_drift() {
+fn two_body_frame_keeps_both_bodies_on_its_axis_and_the_surface_holds_still() {
     let mut eph = ephemeris("sol");
     eph.extend_to(60.0 * 86400.0);
     let earth = eph.bodies().iter().position(|b| b.id == "aurelia").unwrap();

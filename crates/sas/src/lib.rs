@@ -1,4 +1,4 @@
-//! KSP's stability assist on a craft's steering torque, as `lab/sas/src/StabilityAssist.ts`.
+//! KSP's stability assist on a craft's steering torque.
 //!
 //! It returns the same `turn` command a pilot gives (local axes, each in [−1, 1], times the unit's
 //! maximum torque), so SAS never has more authority than the keys.
@@ -19,7 +19,6 @@
 
 use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
-use void_math::{atan2, hypot};
 use void_rotation::{Mat3, matrix};
 
 /// Off: the pilot's command passes through. Pilot: a key is held; SAS stops spin on the other
@@ -34,7 +33,7 @@ pub enum SasPhase {
 }
 
 impl SasPhase {
-    /// The lab's phase text.
+    /// The phase's display text.
     pub fn label(self) -> &'static str {
         match self {
             SasPhase::Off => "off",
@@ -83,7 +82,7 @@ fn mat_vec(m: &Mat3, v: DVec3) -> DVec3 {
     )
 }
 
-/// JavaScript's `Math.sign`: zero (of either sign) and NaN come back unchanged.
+/// The sign: zero (of either sign) and NaN come back unchanged.
 fn sign(v: f64) -> f64 {
     if v > 0.0 {
         1.0
@@ -105,11 +104,11 @@ pub fn attitude_error(target: DQuat, current: DQuat) -> DVec3 {
     if r.w < 0.0 {
         r = DQuat::from_xyzw(-r.x, -r.y, -r.z, -r.w);
     }
-    let s = hypot([r.x, r.y, r.z]);
+    let s = r.length();
     if s == 0.0 {
         return DVec3::ZERO;
     }
-    let angle = 2.0 * atan2(s, r.w);
+    let angle = 2.0 * f64::atan2(s, r.w);
     DVec3::new(r.x / s * angle, r.y / s * angle, r.z / s * angle)
 }
 
@@ -122,7 +121,7 @@ pub struct StabilityAssist {
 }
 
 impl StabilityAssist {
-    /// `max_torque`: N m per unit of turn command on each axis (lab/landing's `STEERING_TORQUE`).
+    /// `max_torque`: N m per unit of turn command on each axis.
     pub fn new(max_torque: f64, tuning: SasTuning) -> Self {
         assert!(
             max_torque > 0.0 && max_torque.is_finite(),
@@ -221,7 +220,7 @@ impl StabilityAssist {
         } else {
             if self.phase != SasPhase::Holding {
                 self.phase = SasPhase::Damping;
-                if hypot([w.x, w.y, w.z]) < lock_rate {
+                if w.length() < lock_rate {
                     self.phase = SasPhase::Holding;
                     self.locked = Some(rotation);
                 }

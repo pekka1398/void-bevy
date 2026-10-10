@@ -36,7 +36,7 @@ struct Appearance {
 }
 impl void_lod::SurfaceSampler for Appearance {
     fn sample(&self, d: DVec3, cell: f64) -> void_lod::SurfaceSample {
-        let (height, color) = self.terrain.sample(d, Some(cell));
+        let (height, color) = self.terrain.sample(d, cell);
         void_lod::SurfaceSample {
             height_meters: height,
             color: self.color.unwrap_or(color.map(|v| v as f32)),
@@ -76,7 +76,7 @@ pub fn build_scenes(
     let mut atmospheres = HashMap::new();
     // Shared deterministic noise assets; per-body coverage/optics remain independent.
     let weather = images.add(crate::air::weather_image(
-        build_cloud_weather(2),
+        build_cloud_weather(),
         WEATHER_WIDTH,
         WEATHER_HEIGHT,
     ));
@@ -263,9 +263,11 @@ pub fn build_scenes(
             transmittance: trans,
             irradiance,
         });
-        let demo = void_landing::demo_rocket(&terrain);
         let mut field = TileField::new(
-            void_landing::landing_lod_options(&terrain, &demo.options.contact),
+            void_landing::landing_lod_options(
+                &terrain,
+                &void_fleet_flight::world::ground_tiles(&terrain),
+            ),
             Some(std::sync::Arc::new(Appearance {
                 terrain,
                 color: d.visual.surface_color,
@@ -321,7 +323,7 @@ fn spawn_far(
                         | SurfaceRecipe::Regolith
                         | SurfaceRecipe::MartianRegolith => {
                             let terrain = &sim.terrains[&body.index];
-                            let (h, c) = terrain.sample(d, None);
+                            let (h, c) = terrain.sample(d, terrain.finest_cell_meters());
                             *p = (d * (1.0 + h / body.radius_meters)).as_vec3().to_array();
                             let c = descriptor
                                 .visual
@@ -450,9 +452,11 @@ impl WorldScenery {
             for (&index, b) in &mut self.bodies {
                 b.field.unload(commands, meshes);
                 let terrain = sim.terrains[&index].clone();
-                let demo = void_landing::demo_rocket(&terrain);
                 b.field = TileField::new(
-                    void_landing::landing_lod_options(&terrain, &demo.options.contact),
+                    void_landing::landing_lod_options(
+                        &terrain,
+                        &void_fleet_flight::world::ground_tiles(&terrain),
+                    ),
                     Some(std::sync::Arc::new(Appearance {
                         terrain,
                         color: b.color,

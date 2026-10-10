@@ -6,7 +6,6 @@
 //! Atmosphere Rendering Technique" (2020), which uses Bruneton's Earth values.
 
 use glam::DVec3;
-use void_math::{exp, hypot, pow};
 
 pub type Rgb = [f64; 3];
 
@@ -63,8 +62,8 @@ pub struct Densities {
 /// Relative density of each constituent at a height above the bottom radius.
 pub fn densities_at(p: &AtmosphereParams, height: f64) -> Densities {
     Densities {
-        rayleigh: exp(-height / p.rayleigh_scale_height),
-        mie: exp(-height / p.mie_scale_height),
+        rayleigh: f64::exp(-height / p.rayleigh_scale_height),
+        mie: f64::exp(-height / p.mie_scale_height),
         ozone: (1.0 - (height - p.ozone_center_height).abs() / (p.ozone_width / 2.0)).max(0.0),
     }
 }
@@ -119,7 +118,7 @@ pub fn transmittance_to_top(p: &AtmosphereParams, r: f64, mu: f64) -> Rgb {
             depth[c] += e[c] * dt;
         }
     }
-    depth.map(|d| exp(-d))
+    depth.map(|d| f64::exp(-d))
 }
 
 /// The transmittance table: 256 zenith cosines by 64 heights, Hillaire's layout. x is where the ray
@@ -187,7 +186,7 @@ pub fn rayleigh_phase(cos_theta: f64) -> f64 {
 /// Cornette–Shanks phase function.
 pub fn mie_phase(g: f64, cos_theta: f64) -> f64 {
     let k = (3.0 / (8.0 * std::f64::consts::PI)) * ((1.0 - g * g) / (2.0 + g * g));
-    (k * (1.0 + cos_theta * cos_theta)) / pow(1.0 + g * g - 2.0 * g * cos_theta, 1.5)
+    (k * (1.0 + cos_theta * cos_theta)) / f64::powf(1.0 + g * g - 2.0 * g * cos_theta, 1.5)
 }
 
 /// Light scattered toward a viewer at `altitude` above the bottom radius, looking along unit
@@ -220,7 +219,7 @@ pub fn sky_radiance(
     for i in 0..steps {
         let t = (i as f64 + 0.5) * dt;
         let (px, py, pz) = (direction.x * t, direction.y * t, r0 + direction.z * t);
-        let r = hypot([px, py, pz]);
+        let r = DVec3::new(px, py, pz).length();
         let height = r - p.bottom_radius;
         let e = extinction_at(p, height);
         let d = densities_at(p, height);
@@ -231,7 +230,7 @@ pub fn sky_radiance(
             transmittance_to_top(p, r.min(p.top_radius), sun_mu)
         };
         for c in 0..3 {
-            let view_t = exp(-(depth[c] + e[c] * dt / 2.0));
+            let view_t = f64::exp(-(depth[c] + e[c] * dt / 2.0));
             let scattering = p.rayleigh_scattering[c] * d.rayleigh * phase_r
                 + p.mie_scattering * d.mie * phase_m;
             radiance[c] += view_t * scattering * to_sun[c] * dt;

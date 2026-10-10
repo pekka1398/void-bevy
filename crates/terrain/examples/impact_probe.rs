@@ -32,14 +32,9 @@ fn main() {
                 let tangent = d.cross(DVec3::Z).normalize();
                 let bitangent = d.cross(tangent);
                 let delta = 2000.0 / t.radius_meters;
-                let (h, c) = t.sample(d, Some(2000.0));
-                let dhx =
-                    (t.sample((d + tangent * delta).normalize(), Some(2000.0)).0 - h) / 2000.0;
-                let dhy = (t
-                    .sample((d + bitangent * delta).normalize(), Some(2000.0))
-                    .0
-                    - h)
-                    / 2000.0;
+                let (h, c) = t.sample(d, 2000.0);
+                let dhx = (t.sample((d + tangent * delta).normalize(), 2000.0).0 - h) / 2000.0;
+                let dhy = (t.sample((d + bitangent * delta).normalize(), 2000.0).0 - h) / 2000.0;
                 let n = (d - tangent * dhx - bitangent * dhy).normalize();
                 let mu0 = n.dot(sun).max(0.0);
                 let mu = n.dot(eye).max(0.0);

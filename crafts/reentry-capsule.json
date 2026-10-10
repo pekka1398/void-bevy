@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "name": "VOID shielded reentry capsule",
+  "parts": [
+    {
+      "id": "pod",
+      "definitionId": "flight-rcs-pod",
+      "resources": {
+        "monopropellant": 20.0
+      },
+      "moduleStages": {},
+      "stage": null,
+      "attachment": null
+    },
+    {
+      "id": "shield",
+      "definitionId": "heat-shield",
+      "resources": {
+        "ablator": 30.0
+      },
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "pod",
+        "parentNodeId": "bottom",
+        "nodeId": "top"
+      }
+    }
+  ]
+}

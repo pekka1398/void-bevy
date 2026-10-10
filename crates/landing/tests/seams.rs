@@ -1,15 +1,15 @@
-//! Swept invariants at the seams between the two physics regimes. The checks in `contact.rs`,
-//! `lander.rs` and `planets.rs` each hold one scenario to the landing lab's own thresholds; these
-//! hold the same properties over many states instead, to show how much room those thresholds have
-//! and to catch a seam that is only right for the one case that happens to be written down.
+//! Swept invariants at the seams of the planet frame and the contact world. The checks in
+//! `contact.rs` each hold one scenario; these hold the same properties over many states instead,
+//! to catch a seam that is only right for the one case that happens to be written down.
 //!
 //! The states are drawn from a fixed seed, printed with every run: a sweep that fails once and
 //! passes next time is worse than no sweep at all, so nothing here draws from the clock.
 
 use std::sync::Arc;
+use void_frames::State;
 
 use glam::DVec3;
-use void_landing::{ContactFrame, FrameState, PlanetFrame, pebble};
+use void_landing::{ContactFrame, PlanetFrame, pebble};
 use void_orbit::{
     BodySpec, EllipticElements, Ephemeris, EphemerisOptions, GravityField, OrbitPlane,
     PropagationRun, RotationSpec, SpinSpec, SystemSpec, Tolerances, VesselPropagator, VesselState,
@@ -140,13 +140,13 @@ fn aurelia() -> Env {
 
 /// A body-fixed state somewhere over the planet: any latitude, from the deck to well past orbit,
 /// moving in any direction at anything from a walk to escape speed.
-fn sample(rng: &mut Rng, frame: &PlanetFrame) -> (f64, FrameState) {
+fn sample(rng: &mut Rng, frame: &PlanetFrame) -> (f64, State) {
     let d = rng.direction();
     let altitude = rng.log_range(1.0, 500e3);
     let speed = rng.log_range(1.0, 2.0 * (frame.body.gm / frame.body.radius_meters).sqrt());
     (
         rng.range(0.0, 5000.0),
-        FrameState {
+        State {
             position: d * (frame.body.radius_meters + altitude),
             velocity: rng.direction() * speed,
         },
@@ -225,7 +225,7 @@ fn frame_transforms_round_trip_from_anywhere() {
                 .to_inertial(
                     &env.ephemeris,
                     t,
-                    FrameState {
+                    State {
                         position: s.position,
                         velocity: DVec3::ZERO,
                     },
@@ -305,7 +305,7 @@ fn the_rotating_frame_equations_follow_the_inertial_ones_from_anywhere() {
             let reference = env.frame.to_body_fixed(
                 &env.ephemeris,
                 t0 + arc,
-                FrameState {
+                State {
                     position: s.position,
                     velocity: s.velocity,
                 },
@@ -357,254 +357,16 @@ fn the_rotating_frame_equations_follow_the_inertial_ones_from_anywhere() {
     );
 }
 
-#[test]
-fn rails_and_physics_agree_wherever_both_coast() {
-    // `planets.rs` compares one 120 s burn's coast on rails against the same coast in physics. The
-    // property is not about that burn: anywhere the stack is coasting, the two must agree to the
-    // arithmetic. Sweeping the burn also pins down what the single case was sensitive to, which is
-    // not the numerics but whether the lob comes back down inside the window — below about 90 s it
-    // does, and then the two sides stop for different reasons. Those cases are skipped, not fudged.
-    let planet = void_landing::aurelia();
-    let (mut eph, index) = void_landing::planet_ephemeris(&planet);
-    let demo = void_landing::demo_rocket(&planet.terrain);
-    let coast = void_landing::LanderControl {
-        up: 1.0,
-        turn: Some(DVec3::ZERO),
-        ..Default::default()
-    };
-    let burn = void_landing::LanderControl {
-        throttle: 1.0,
-        ..coast.clone()
-    };
-    let window = 200.0;
-    let mut worst = Worst::new();
-    let mut compared = 0;
-    for seconds in [90, 110, 130, 150, 180] {
-        let make = |eph: &mut Ephemeris| {
-            void_landing::PartJointRocket::landed(
-                eph,
-                index,
-                planet.terrain.clone(),
-                demo.full.clone(),
-                demo.upper.clone(),
-                demo.booster.clone(),
-                demo.options,
-                demo.launch_site,
-            )
-        };
-        let (mut railed, mut simulated) = (make(&mut eph), make(&mut eph));
-        for l in [&mut railed, &mut simulated] {
-            for _ in 0..seconds * 60 {
-                l.advance(&mut eph, 1.0 / 60.0, &burn, None);
-            }
-            l.advance(&mut eph, 30.0, &coast, None);
-        }
-        railed.advance_on_rails(&mut eph, window);
-        simulated.advance(&mut eph, window, &coast, None);
-        if railed.mode() != void_landing::PhysicsMode::Flight
-            || simulated.mode() != void_landing::PhysicsMode::Flight
-        {
-            continue;
-        }
-        let railed_state = railed.body_fixed_state(&eph);
-        let gap = (railed_state.position - simulated.body_fixed_state(&eph).position).length();
-        let floor = f64::EPSILON * {
-            let mut positions = vec![DVec3::ZERO; eph.bodies().len()];
-            eph.positions_at(railed.time(), &mut positions);
-            positions[index].length()
-        };
-        compared += 1;
-        worst.offer(gap / floor, || {
-            format!(
-                "a {seconds} s burn, coasting at {:.0} km, gap {gap:.2e} m against a {floor:.2e} m floor",
-                (railed_state.position.length() - planet.terrain.radius_meters) / 1e3
-            )
-        });
+fn contact_options() -> void_landing::ContactWorldOptions {
+    void_landing::ContactWorldOptions {
+        step_seconds: 1.0 / 60.0,
+        tile_level: void_landing::level_for_tile_size(100e3, 300.0),
+        tile_resolution: 33,
+        tile_reach_meters: 300.0,
+        tile_keep_meters: 600.0,
+        recenter_meters: 1000.0,
+        sleeping: true,
     }
-    println!(
-        "rails against physics over {compared} burns: within {:.1} ulp of Aurelia's distance from the frame origin (worst {})",
-        worst.value, worst.at
-    );
-    assert!(
-        compared >= 4,
-        "only {compared} burns left both sides coasting"
-    );
-    assert!(
-        worst.value < 16.0,
-        "rails and physics differ by {:.1} ulp at {}",
-        worst.value,
-        worst.at
-    );
-}
-
-/// The lander Pebble's hop checks fly, with no nozzle area so pressure plays no part.
-fn hop_spec() -> void_landing::LanderSpec {
-    void_landing::LanderSpec {
-        thrust_newtons: 20e3,
-        specific_impulse_seconds: 300.0,
-        nozzle_exit_area_m2: 0.0,
-        dry_mass_kg: 1000.0,
-        fuel_mass_kg: 1000.0,
-        half_extents: DVec3::new(1.5, 1.0, 1.5),
-        contact_shape: None,
-        friction: 0.8,
-        crash_tolerance_meters_per_second: None,
-    }
-}
-
-fn hop_options() -> void_landing::LanderOptions {
-    void_landing::LanderOptions {
-        contact: void_landing::ContactWorldOptions {
-            step_seconds: 1.0 / 60.0,
-            tile_level: void_landing::level_for_tile_size(100e3, 300.0),
-            tile_resolution: 33,
-            tile_reach_meters: 300.0,
-            tile_keep_meters: 600.0,
-            recenter_meters: 1000.0,
-            sleeping: true,
-        },
-        tolerances: FRAME_TOLERANCES,
-        band_enter_meters: 200.0,
-        band_exit_meters: 400.0,
-    }
-}
-
-#[test]
-fn the_hand_off_holds_the_inertial_arc_from_anywhere() {
-    // `lander.rs` flies one 10 km hop and holds the arc to within 0.1 m of the orbit integrator
-    // while the craft is clear of the ground. The property is that crossing the band changes which
-    // integrator is running and nothing else, so it should hold for any hop. Contact mode inside the
-    // band runs Rapier in f32 at metres from the floating origin, which is the part a single case
-    // could flatter, so the sweep reports the error against where the craft was when it crossed.
-    let mut rng = Rng(SEED ^ 0x0000_0000_00B0_0B1E);
-    let base = pebble();
-    let system = build_system(&base.system);
-    let mut worst = Worst::new();
-    let mut flown = 0;
-    for _ in 0..40 {
-        let mut eph = Ephemeris::new(
-            &system,
-            EphemerisOptions {
-                step_seconds: 60.0,
-                chunk_steps: 1024,
-            },
-        );
-        eph.extend_to(60.0);
-        let frame = PlanetFrame::new(&eph, 0);
-        // Off the pad under thrust, as the lab's own hop goes, with the burn's length and heading
-        // drawn per case. The comparison starts once the engine is off: the reference is seeded from
-        // whatever state the burn produced, so this measures the hand-off and not the thrust law.
-        let site = rng.direction();
-        let east = DVec3::new(-site.y, site.x, 0.0).normalize();
-        let mut lander = void_landing::Lander::landed(
-            &mut eph,
-            0,
-            base.terrain.clone(),
-            hop_spec(),
-            hop_options(),
-            0.0,
-            site,
-        );
-        let lift = void_landing::LanderControl {
-            throttle: 1.0,
-            up: 1.0,
-            prograde: rng.range(-0.5, 0.5),
-            ..Default::default()
-        };
-        lander.advance(&mut eph, rng.range(12.0, 30.0), &lift);
-        let state = lander.body_fixed_state(&eph);
-        // The reference: this state flown inertially, which knows nothing of terrain or bands.
-        let inertial = frame.to_inertial(&eph, lander.time, state);
-        let mut run = PropagationRun::new(VesselState {
-            time: lander.time,
-            position: inertial.position,
-            velocity: inertial.velocity,
-            mass_kg: lander.mass_kg,
-        });
-        let mut propagator = VesselPropagator::new(&eph, FRAME_TOLERANCES);
-        let coast = void_landing::LanderControl {
-            up: 1.0,
-            ..Default::default()
-        };
-        let changes_at_burnout = lander.mode_changes.len();
-        let (mut case, mut modes) = (Worst::new(), 0);
-        // The bounce rule only applies on the way down, so it waits until the hop has climbed out
-        // of the band: on the way up the clearance is rising in contact mode quite legitimately.
-        let (mut previous_clearance, mut left_band) = (f64::INFINITY, false);
-        while lander.time < 400.0 {
-            lander.advance(&mut eph, 1.0, &coast);
-            if run.impact.is_some() {
-                break;
-            }
-            propagator.advance(&mut eph, &mut run, lander.time, 10_000_000, None, None);
-            modes = lander.mode_changes.len() - changes_at_burnout;
-            // Only while the craft is clear of ground the reference does not have: once it touches
-            // down, the two have stopped flying the same problem, and the reference carries on under
-            // the terrain. Clearance alone does not see the touch — coming in at 170 m/s a one
-            // second step covers 170 m, so the craft can hit and bounce back to 27 m clear without
-            // ever being sampled near the ground. What does see it is the bounce itself: once the
-            // craft is back inside the band on the way down, its clearance must keep falling, and
-            // the step where it stops falling is the step it hit something.
-            // The margin has to cover a step's travel: free fall cannot be certified for a sample
-            // that is closer to the ground than the craft moves in one step, because the touch then
-            // happens inside that step and the sample already carries its deflection.
-            let clearance = lander.clearance(&eph);
-            let reach = 1.5 * lander.body_fixed_state(&eph).velocity.length() * 1.0;
-            let descending_in_band = left_band && lander.mode == void_landing::LanderMode::Contact;
-            if clearance <= reach.max(20.0)
-                || (descending_in_band && clearance >= previous_clearance)
-            {
-                break;
-            }
-            previous_clearance = clearance;
-            left_band |= lander.mode == void_landing::LanderMode::Flight;
-            let s = run.state();
-            let reference = frame.to_body_fixed(
-                &eph,
-                lander.time,
-                FrameState {
-                    position: s.position,
-                    velocity: s.velocity,
-                },
-            );
-            let error = (lander.body_fixed_state(&eph).position - reference.position).length();
-            case.offer(error, || {
-                format!(
-                    "T+{:.0} s, {:?} {:.0} m clear",
-                    lander.time,
-                    lander.mode,
-                    lander.clearance(&eph)
-                )
-            });
-        }
-        // A hop that never left the band, or that came straight back down, is not this test's
-        // subject: it has to cross out and back after burnout for the hand-off to be exercised.
-        if modes < 2 {
-            continue;
-        }
-        flown += 1;
-        worst.offer(case.value, || {
-            format!(
-                "a hop at {:.0} m/s up and {:.0} m/s along at burnout, worst at {}",
-                state.velocity.dot(site),
-                state.velocity.dot(east),
-                case.at
-            )
-        });
-    }
-    println!(
-        "hand-off over {flown} hops that crossed the band and came back: within {:.2e} m of the inertial arc (worst {})",
-        worst.value, worst.at
-    );
-    assert!(flown >= 16, "only {flown} hops crossed the band both ways");
-    // The single hop in lander.rs holds 0.1 m; the sweep is held to the same number rather than to
-    // whatever it happens to measure, so a hop that is worse than the lab's own case fails here.
-    assert!(
-        worst.value < 0.1,
-        "a hop left the inertial arc by {:.2e} m: {}",
-        worst.value,
-        worst.at
-    );
 }
 
 #[test]
@@ -635,7 +397,7 @@ fn moving_the_floating_origin_never_moves_the_craft() {
         let mut world = void_landing::ContactWorld::new(
             frame,
             Some(base.terrain.clone()),
-            hop_options().contact,
+            contact_options(),
             0.0,
             at,
             &mut eph,
@@ -651,7 +413,7 @@ fn moving_the_floating_origin_never_moves_the_craft() {
                 restitution: 0.2,
                 lock_rotations: false,
             },
-            FrameState {
+            State {
                 position: at,
                 velocity: rng.direction() * rng.range(0.0, 20.0),
             },
@@ -663,7 +425,7 @@ fn moving_the_floating_origin_never_moves_the_craft() {
         }
         let before = world.state(&eph, body, DVec3::ZERO);
         // Anywhere inside the distance the world is willing to let a body wander from its origin.
-        let shift = rng.direction() * rng.range(1.0, hop_options().contact.recenter_meters);
+        let shift = rng.direction() * rng.range(1.0, contact_options().recenter_meters);
         world.recenter(world.origin + shift);
         let after = world.state(&eph, body, DVec3::ZERO);
         // f32 resolves about seven digits, so a body a kilometre from its origin is quantised at a
@@ -671,8 +433,7 @@ fn moving_the_floating_origin_never_moves_the_craft() {
         // Rapier's pose. It does not — the world keeps the body-fixed position in an f64 record and
         // only the local pose is f32 — so the move is free, and the sweep holds it to free rather
         // than to the f32 budget. The error is reported in units of that budget to say how much
-        // would be given up if that ever changed. (`contact.rs` allows 1e-3 m for its one move,
-        // which is the landing lab's own threshold and is left alone.)
+        // would be given up if that ever changed.
         let floor = f32::EPSILON as f64 * shift.length().max(1.0);
         worst_position.offer((before.position - after.position).length() / floor, || {
             format!(

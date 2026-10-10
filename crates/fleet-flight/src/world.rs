@@ -10,6 +10,20 @@ use void_orbit::{
 use void_terrain::{Terrain, TerrainConfig};
 use void_vessels::GroundSpec;
 
+/// The collision tiles of a body's ground scene. The drawn terrain is built from the same options
+/// (`void_landing::landing_lod_options`), so what is drawn is what is collided with.
+pub fn ground_tiles(terrain: &Terrain) -> ContactWorldOptions {
+    ContactWorldOptions {
+        step_seconds: 1.0 / 60.0,
+        tile_level: level_for_tile_size(terrain.radius_meters, 300.0),
+        tile_resolution: 33,
+        tile_reach_meters: 300.0,
+        tile_keep_meters: 600.0,
+        recenter_meters: 5000.0,
+        sleeping: true,
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct VisualSettings {
@@ -365,15 +379,7 @@ impl WorldDescription {
                     body_index: body.index,
                     band_enter_meters: 200.0,
                     band_exit_meters: 400.0,
-                    tiles: ContactWorldOptions {
-                        step_seconds: 1.0 / 60.0,
-                        tile_level: level_for_tile_size(t.radius_meters, 300.0),
-                        tile_resolution: 33,
-                        tile_reach_meters: 300.0,
-                        tile_keep_meters: 600.0,
-                        recenter_meters: 5000.0,
-                        sleeping: true,
-                    },
+                    tiles: ground_tiles(&t),
                 });
                 t
             });
@@ -602,6 +608,39 @@ fn unique_bodies<'de, D: serde::Deserializer<'de>>(
         }
     }
     deserializer.deserialize_map(Unique)
+}
+
+/// The main game's world: Aurelia with layered terrain and sea in the authored solar system,
+/// starting landed at the Aurelia launch site with full aerodynamic forces and torques.
+pub fn main_game(craft: &void_assembly::Craft) -> crate::session::InitialWorld {
+    let original = void_landing::aurelia();
+    let terrain_config = TerrainConfig::Layered(void_terrain::LayeredOptions {
+        radius_meters: original.terrain.radius_meters,
+        ..void_terrain::DEFAULT_LAYERED
+    });
+    let terrain = Arc::new(Terrain::from_config(&terrain_config));
+    // Dry lowland on the layered terrain.
+    let (latitude, longitude) = (0.3_f64, 0.5_f64);
+    let site = DVec3::new(
+        latitude.cos() * longitude.cos(),
+        latitude.cos() * longitude.sin(),
+        latitude.sin(),
+    );
+    assert!(
+        terrain.height(site) > void_terrain::SEA_LEVEL,
+        "main game: launch site is underwater"
+    );
+    let planet = LandingPlanet {
+        terrain_config,
+        terrain,
+        air_datum: void_terrain::SEA_LEVEL,
+        sea_level: Some(void_terrain::SEA_LEVEL),
+        ..original
+    };
+    let mut initial = crate::session::InitialWorld::new(&planet, craft, site, true)
+        .with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque);
+    initial.world = solar_scenery(&planet);
+    initial
 }
 
 /// Authored first-pass solar scenery used by the main-game Aurelia preset.

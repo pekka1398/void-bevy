@@ -6,8 +6,8 @@ pub use fleet::*;
 pub use free_fall::FreeFallFrame;
 pub use propulsion::*;
 
-mod scenarios;
-pub use scenarios::*;
+mod sites;
+pub use sites::*;
 
 pub use void_environment::{BodyEnvironment, Environment};
 pub use void_sas::SasPhase;

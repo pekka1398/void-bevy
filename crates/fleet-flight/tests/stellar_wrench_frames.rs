@@ -2,7 +2,6 @@
 use glam::DVec3;
 use void_fleet_flight::{session::InitialWorld, world::stellar_neighborhood};
 use void_frames::State;
-use void_landing::FrameState;
 #[test]
 fn translated_air_load_requires_and_preserves_a_registered_common_frame() {
     let planet = void_landing::aurelia();
@@ -15,7 +14,7 @@ fn translated_air_load_requires_and_preserves_a_registered_common_frame() {
     let id = sim.launch_flight_at(
         "Beryl/aurelia",
         &craft,
-        FrameState {
+        State {
             position: DVec3::X * (planet.terrain.radius_meters + 5000.0),
             velocity: DVec3::Y * 80.0,
         },

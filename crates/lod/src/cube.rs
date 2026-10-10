@@ -1,11 +1,8 @@
-//! The cube sphere and its tiles, as `lab/lod/src/lod/CubeSphere.ts`, `TileKey.ts` and
-//! `TileSearch.ts`. Directions are body-fixed; distances are physical meters.
+//! The cube sphere and its tiles. Directions are body-fixed; distances are physical meters.
 
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use glam::DVec3;
-
-use void_math::{atan, length, tan};
 
 /// Cube face index: 0 +X, 1 −X, 2 +Y, 3 −Y, 4 +Z, 5 −Z.
 pub type CubeFace = u8;
@@ -63,8 +60,8 @@ pub fn face_frame(face: CubeFace) -> &'static FaceFrame {
 /// from either face.
 pub fn cube_to_sphere(face: CubeFace, u: f64, v: f64) -> DVec3 {
     let FaceFrame { n, a, b } = face_frame(face);
-    let p = *n + *a * tan(u * FRAC_PI_4) + *b * tan(v * FRAC_PI_4);
-    p * (1.0 / length(p))
+    let p = *n + *a * f64::tan(u * FRAC_PI_4) + *b * f64::tan(v * FRAC_PI_4);
+    p * (1.0 / p.length())
 }
 
 /// Inverse of `cube_to_sphere`: the face whose normal is closest to the direction, and its
@@ -87,7 +84,7 @@ pub fn sphere_to_cube(direction: DVec3) -> (CubeFace, f64, f64) {
     let FaceFrame { n, a, b } = face_frame(face);
     let dn = direction.dot(*n);
     let (su, sv) = (direction.dot(*a) / dn, direction.dot(*b) / dn);
-    (face, atan(su) / FRAC_PI_4, atan(sv) / FRAC_PI_4)
+    (face, f64::atan(su) / FRAC_PI_4, f64::atan(sv) / FRAC_PI_4)
 }
 
 /// One quadtree node on one cube face; x and y count tiles along the face's u and v axes.
@@ -102,7 +99,7 @@ pub struct TileKey {
 /// Deepest level a tile code can pack: x and y each need `level` bits.
 pub const MAX_CODED_LEVEL: u32 = 21;
 
-/// (face, level, x, y) packed as the orbit lab's `tileCodeOf`: ((level·6 + face)·2²¹ + x)·2²¹ + y.
+/// (face, level, x, y) packed into one code: ((level·6 + face)·2²¹ + x)·2²¹ + y.
 pub fn tile_code_of(face: CubeFace, level: u32, x: u32, y: u32) -> u64 {
     ((u64::from(level) * 6 + u64::from(face)) << MAX_CODED_LEVEL | u64::from(x)) << MAX_CODED_LEVEL
         | u64::from(y)
@@ -185,7 +182,7 @@ impl TileKey {
 }
 
 impl std::fmt::Display for TileKey {
-    /// The lab's `tileId`.
+    /// A readable tile name.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}/{}/{}/{}", self.face, self.level, self.x, self.y)
     }
@@ -214,7 +211,7 @@ pub fn tiles_around(
     level: u32,
     radius_meters: f64,
 ) -> Vec<TileKey> {
-    let r = length(point);
+    let r = point.length();
     assert!(
         r > 0.0 && r.is_finite(),
         "tiles around: invalid point {point}"
@@ -229,13 +226,13 @@ pub fn tiles_around(
     } else {
         DVec3::new(0.0, -d.z, d.y)
     };
-    let t1 = t1 / length(t1);
+    let t1 = t1 / t1.length();
     let t2 = d.cross(t1);
     // The tangent warp keeps every tile within a factor 1.5 of the face-centre width.
     let smallest = FRAC_PI_2 * radius_meters / f64::from(1_u32 << level) / 1.5;
     let extent = reach_meters + smallest;
     let steps = ((2.0 * extent) / (smallest / 2.0)).ceil().max(1.0) as u32;
-    // In scan order, as the lab's Map: callers that add colliders per tile keep its order.
+    // In scan order: callers that add colliders per tile keep its order.
     let mut found = crate::ordered::OrderedMap::new();
     for a in 0..=steps {
         for b in 0..=steps {

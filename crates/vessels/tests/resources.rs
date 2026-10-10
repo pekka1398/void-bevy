@@ -127,7 +127,7 @@ fn active_vacuum_parachute_refuses_rails_without_committing_trial_state() {
     let state = frame.to_inertial(
         &e,
         0.0,
-        void_landing::FrameState {
+        void_frames::State {
             position: DVec3::X * (p.terrain.radius_meters + 130000.0),
             velocity: DVec3::Y * 1e8,
         },
@@ -159,7 +159,7 @@ fn multiple_engines_on_one_part_have_independent_stages_and_states() {
     let state = frame.to_inertial(
         &e,
         0.0,
-        void_landing::FrameState {
+        void_frames::State {
             position: DVec3::X * (p.terrain.radius_meters + 500000.0),
             velocity: DVec3::Y * 7500.0,
         },
@@ -216,7 +216,7 @@ fn saved_state_maps_reject_duplicate_raw_json_keys() {
     c.parts[0].stage = Some(0);
     f.launch(
         &c,
-        void_landing::FrameState {
+        void_frames::State {
             position: DVec3::X * 7000000.0,
             velocity: DVec3::Y * 7000.0,
         },
@@ -259,7 +259,7 @@ fn module_stages_work_without_a_legacy_part_stage_and_parachutes_can_stage() {
     craft.parts[0]
         .module_stages
         .insert("engine2".into(), Some(1));
-    let initial = void_landing::FrameState {
+    let initial = void_frames::State {
         position: DVec3::X * 7000000.0,
         velocity: DVec3::Y * 7000.0,
     };

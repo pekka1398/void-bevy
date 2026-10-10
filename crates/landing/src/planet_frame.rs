@@ -1,16 +1,8 @@
-//! The planet's rotating, body-fixed frame as a frame to do physics in, as
-//! `lab/landing/src/physics/PlanetFrame.ts`.
+//! The planet's rotating, body-fixed frame as a frame to do physics in.
 
 use glam::DVec3;
 use void_frames::{FrameId, State};
 use void_orbit::{CelestialBody, EphemerisSource, SystemFrames, body_orientation, gravity};
-
-/// A position and velocity in one frame.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FrameState {
-    pub position: DVec3,
-    pub velocity: DVec3,
-}
 
 /// A frame to do contact physics in: `ContactWorld` kicks every body by this acceleration (gravity
 /// and the frame's own terms); Rapier's gravity is off. `PlanetFrame` (body-fixed, rotating) is
@@ -40,7 +32,7 @@ pub struct PlanetFrame {
     frames: SystemFrames,
 }
 
-/// Body axes to ecliptic: a.x X + a.y Y + a.z Z with the axes as columns, in the lab's order.
+/// Body axes to ecliptic: a.x X + a.y Y + a.z Z with the axes as columns.
 fn to_ecliptic(axes: &[DVec3; 3], a: DVec3) -> DVec3 {
     DVec3::new(
         a.x * axes[0].x + a.y * axes[1].x + a.z * axes[2].x,
@@ -69,47 +61,21 @@ impl PlanetFrame {
     }
 
     /// The ephemeris' physics-view state (its origin system) to body-fixed, through the tree.
-    pub fn to_body_fixed(
-        &self,
-        ephemeris: &dyn EphemerisSource,
-        t: f64,
-        inertial: FrameState,
-    ) -> FrameState {
-        let s = self
-            .frames
+    pub fn to_body_fixed(&self, ephemeris: &dyn EphemerisSource, t: f64, inertial: State) -> State {
+        self.frames
             .tree
             .at(t, ephemeris)
             .transform(self.frames.origin, self.surface())
-            .apply_state(State {
-                position: inertial.position,
-                velocity: inertial.velocity,
-            });
-        FrameState {
-            position: s.position,
-            velocity: s.velocity,
-        }
+            .apply_state(inertial)
     }
 
     /// Body-fixed state to the ephemeris' physics view, through the tree.
-    pub fn to_inertial(
-        &self,
-        ephemeris: &dyn EphemerisSource,
-        t: f64,
-        local: FrameState,
-    ) -> FrameState {
-        let s = self
-            .frames
+    pub fn to_inertial(&self, ephemeris: &dyn EphemerisSource, t: f64, local: State) -> State {
+        self.frames
             .tree
             .at(t, ephemeris)
             .transform(self.surface(), self.frames.origin)
-            .apply_state(State {
-                position: local.position,
-                velocity: local.velocity,
-            });
-        FrameState {
-            position: s.position,
-            velocity: s.velocity,
-        }
+            .apply_state(local)
     }
 }
 
@@ -152,4 +118,15 @@ impl ContactFrame for PlanetFrame {
     fn spin(&self) -> DVec3 {
         DVec3::new(0.0, 0.0, self.omega)
     }
+}
+
+/// Rotation taking local +y to the outward vertical at a body-fixed point.
+pub fn upright_at(p: DVec3) -> glam::DQuat {
+    let u = p.normalize();
+    // Shortest arc from (0, 1, 0) to u.
+    let w = 1.0 + u.y;
+    if w < 1e-12 {
+        return glam::DQuat::from_xyzw(1.0, 0.0, 0.0, 0.0);
+    }
+    glam::DQuat::from_xyzw(u.z, 0.0, -u.x, w).normalize()
 }

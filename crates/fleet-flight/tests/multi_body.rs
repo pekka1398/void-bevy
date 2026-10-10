@@ -97,8 +97,8 @@ fn terrain_identity_and_airless_moon_are_explicit() {
     for (&body, terrain) in &built.terrains {
         for d in [DVec3::X, DVec3::Y, DVec3::Z] {
             assert_eq!(
-                terrain.sample(d, None),
-                again.terrains[&body].sample(d, None)
+                terrain.sample(d, terrain.finest_cell_meters()),
+                again.terrains[&body].sample(d, again.terrains[&body].finest_cell_meters())
             );
         }
     }
@@ -217,7 +217,7 @@ fn flight_traverses_between_two_bodies_by_time_integration() {
     let id = sim.launch_flight_at(
         "pebble",
         &initial.craft,
-        void_landing::FrameState {
+        void_frames::State {
             position: to_moon * 600.0,
             velocity: to_moon * 10.0,
         },

@@ -1,7 +1,8 @@
 use glam::{DQuat, DVec3};
 use void_assembly::{Craft, demo_craft, export_craft, import_craft};
 use void_fleet_flight::FleetFlight;
-use void_landing::{FrameState, PlanetFrame, earth_size};
+use void_frames::State;
+use void_landing::{PlanetFrame, earth_size};
 use void_vessels::{SasPhase, VesselControl, VesselMode, flat_site, pod_tank};
 
 fn make(craft: &Craft, air: bool) -> FleetFlight {
@@ -16,7 +17,7 @@ fn airborne(sim: &mut FleetFlight, craft: &Craft, height: f64, speed: f64, offse
     let state = frame.to_inertial(
         &sim.fleet.ephemeris,
         sim.fleet.time(),
-        FrameState {
+        State {
             position: DVec3::new(r, offset, 0.0),
             velocity: DVec3::Y * speed,
         },
@@ -173,7 +174,7 @@ fn air_coast_differential(step_seconds: f64) -> (f64, f64) {
         frame.to_body_fixed(
             &sim.fleet.ephemeris,
             sim.fleet.time(),
-            FrameState {
+            State {
                 position: snapshot.position,
                 velocity: snapshot.velocity,
             },
@@ -255,13 +256,11 @@ fn fleet_plan_uses_live_staged_engine_and_trait_ephemeris_without_spending_fuel(
 }
 
 #[test]
-fn main_rocket_preserves_the_legacy_stage_masses_engines_and_delta_v() {
+fn main_rocket_stage_masses_engines_and_delta_v() {
     use void_assembly::{Module, compile, flight_rocket};
     let craft = flight_rocket();
     assert_eq!(import_craft(&export_craft(&craft).unwrap()).unwrap(), craft);
     let compiled = compile(&craft).unwrap();
-    let planet = earth_size();
-    let old = void_landing::demo_rocket(&planet.terrain);
     let stage = |ids: &[&str]| {
         let parts: Vec<_> = compiled
             .parts
@@ -292,35 +291,12 @@ fn main_rocket_preserves_the_legacy_stage_masses_engines_and_delta_v() {
     let (bd, bf, bt, bi) = stage(&[
         "p4", "p5", "p6", "leg0", "leg1", "leg2", "leg3", "foot0", "foot1", "foot2", "foot3",
     ]);
-    assert_eq!(
-        (ud, uf, ut, ui),
-        (
-            old.upper.dry_mass_kg,
-            old.upper.fuel_mass_kg,
-            old.upper.thrust_newtons,
-            old.upper.specific_impulse_seconds
-        )
-    );
-    assert_eq!(
-        (bd, bf, bt, bi),
-        (
-            old.booster.dry_mass_kg,
-            old.booster.fuel_mass_kg,
-            old.booster.thrust_newtons,
-            old.booster.specific_impulse_seconds
-        )
-    );
+    assert_eq!((ud, uf, ut, ui), (300.0, 1470.0, 20_000.0, 340.0));
+    assert_eq!((bd, bf, bt, bi), (500.0, 5350.0, 120_000.0, 310.0));
     assert_eq!(compiled.summary(None).mass_kg, 7620.0);
     let dv = void_assembly::G0
         * (bi * ((ud + uf + bd + bf) / (ud + uf + bd)).ln() + ui * ((ud + uf) / ud).ln());
     assert!((dv - 9600.0).abs() < 1.0, "ideal delta-v: {dv}");
-    // The very same portable craft runs in the independent assembly lab.
-    let mut local = void_assembly::AssemblyFlight::new(&craft, 9.81).unwrap();
-    assert_eq!(local.stage(), Some(0));
-    assert!(local.lit.contains("p6") && !local.lit.contains("p3"));
-    assert_eq!(local.stage(), Some(1));
-    assert_eq!(local.groups.len(), 2);
-    assert_eq!(local.controlled_part_ids(), ["p1", "p2", "p3"]);
     let mut sim = make(&craft, false);
     sim.control(VesselControl {
         throttle: 1.0,
@@ -343,31 +319,12 @@ fn main_rocket_preserves_the_legacy_stage_masses_engines_and_delta_v() {
 }
 
 #[test]
-fn landing_legs_match_the_original_geometry_and_remain_with_the_booster() {
+fn landing_legs_collide_as_cuboid_feet_and_remain_with_the_booster() {
     let craft = void_assembly::flight_rocket();
     let c = void_assembly::compile(&craft).unwrap();
-    let tank = c.part("p5").pose.position;
-    let old = void_landing::booster_pieces();
     for i in 0..4 {
-        let leg = c.part(&format!("leg{i}"));
         let foot = c.part(&format!("foot{i}"));
-        let strut = &old[2 + 2 * i];
-        let pad = &old[3 + 2 * i];
-        let shift = DVec3::Y * 0.175; // original cylinder reference -> tank's centre
-        assert!((leg.pose.position - tank - (strut.position - shift)).length() < 1e-12);
-        assert!((foot.pose.position - tank - (pad.position - shift)).length() < 1e-12);
         assert!((foot.pose.rotation * DVec3::Y - DVec3::Y).length() < 1e-12);
-        let void_landing::SimpleShape::Cylinder {
-            radius,
-            half_height,
-        } = strut.shape
-        else {
-            panic!("original strut shape");
-        };
-        assert_eq!(leg.definition.radius, radius);
-        assert!((leg.definition.height - half_height * 2.0).abs() < 1e-12);
-        let direction = strut.rotation.unwrap() * DVec3::Y;
-        assert!((leg.pose.rotation * DVec3::Y).dot(direction).abs() > 1.0 - 1e-12);
         assert_eq!(foot.definition.shape, void_assembly::Shape::Box);
         assert_eq!(
             (foot.definition.radius, foot.definition.height),

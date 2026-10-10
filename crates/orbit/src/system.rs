@@ -13,7 +13,7 @@ use crate::kepler::{
 /// CODATA 2018, m^3 kg^-1 s^-2.
 pub const GRAVITATIONAL_CONSTANT: f64 = 6.6743e-11;
 
-/// A system as the orbit lab's `SystemSpec` (`lab/orbit/src/orbit/SystemSpec.ts`), read from JSON.
+/// A star system's description, read from JSON.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SystemSpec {
@@ -272,7 +272,7 @@ fn subtree_mass(node: &BodySpec) -> f64 {
         .fold(node.mass_kg, |sum, child| sum + subtree_mass(child))
 }
 
-/// Bodies as the orbit lab's `buildSystem`: Jacobi elements placed subtree by subtree, then
+/// The bodies of a system: Jacobi elements placed subtree by subtree, then
 /// shifted so the barycentre is at rest at the origin.
 pub fn build_system(spec: &SystemSpec) -> BuiltSystem {
     struct Builder {
@@ -402,10 +402,8 @@ pub fn build_system(spec: &SystemSpec) -> BuiltSystem {
     }
 }
 
-/// Body-fixed axes at time t in the ecliptic, as the orbit lab's `bodyOrientation`
-/// (`BodyRotation.ts`): z the spin axis, x the prime meridian. `Spin::body_axes` is the one
-/// formula; it removes whole turns exactly first, so it differs from the lab's
-/// `angle_at_epoch + 2π t / period` in the last digits at large t.
+/// Body-fixed axes at time t in the ecliptic: z the spin axis, x the prime meridian. A shorthand
+/// for `Spin::body_axes`, which removes whole turns exactly first.
 pub fn body_orientation(spin: &Spin, t: f64) -> [DVec3; 3] {
     spin.body_axes(t)
 }

@@ -1,13 +1,12 @@
-//! The view crate against lab/view: golden data from `golden/view.ts`, then the lab's own checks
-//! (`view-check.ts`) with its thresholds.
+//! The view crate: zooming, ground lock, osculating ellipses, path frames and the camera as a LOD
+//! observer.
 
 use std::f64::consts::PI;
 
 use glam::DVec3;
-use serde_json::Value;
 use void_orbit::{
-    EngineSpec, Simulation, SimulationOptions, StartPlane, SystemSpec, Tolerances, VesselStartSpec,
-    body_orientation, osculating_orbit,
+    Ephemeris, EphemerisOptions, SystemSpec, body_orientation, build_system, osculating_orbit,
+    suggested_step_seconds,
 };
 use void_view::{
     FLIGHT_MAX_DISTANCE, FocusGeometry, FocusKind, MAP_MIN_DISTANCE, MIN_ANGLE_FROM_UP,
@@ -15,300 +14,20 @@ use void_view::{
     ellipse_points_in_time, frame_to_ecliptic, orbit_in_surface_frame, rotate, view_state,
 };
 
-/// The orbit lab's surface-frame orbit, angle = epoch + (2π / period) · t. Past the first turn
-/// this rounds where the native `Spin::angle` (exact remainder) does not; the golden data is
-/// checked against this reproduction, and the native function against it within the rounding.
-fn lab_orbit_in_surface_frame(
-    frame_body: &void_orbit::CelestialBody,
-    now: f64,
-    parent_offset: DVec3,
-    relative_position: DVec3,
-    relative_velocity: DVec3,
-    gm: f64,
-    count: usize,
-) -> Vec<DVec3> {
-    let (points, period_seconds) =
-        ellipse_points_in_time(relative_position, relative_velocity, gm, count);
-    let [node, quadrature, pole] = frame_body.rotation.equatorial_basis();
-    let spin = 2.0 * std::f64::consts::PI / frame_body.rotation.period_seconds;
-    (0..=count)
-        .map(|i| {
-            let v = parent_offset + points[i % count];
-            let along = v.x * node.x + v.y * node.y + v.z * node.z;
-            let across = v.x * quadrature.x + v.y * quadrature.y + v.z * quadrature.z;
-            let angle = frame_body.rotation.angle_at_epoch_radians
-                + spin * (now + period_seconds * i as f64 / count as f64);
-            let (c, s) = (angle.cos(), angle.sin());
-            DVec3::new(
-                c * along + s * across,
-                -s * along + c * across,
-                v.x * pole.x + v.y * pole.y + v.z * pole.z,
-            )
-        })
-        .collect()
-}
-fn golden() -> Value {
-    let path = format!("{}/tests/golden/view.json", env!("CARGO_MANIFEST_DIR"));
-    serde_json::from_str(&std::fs::read_to_string(&path).expect(&path)).expect(&path)
-}
-
-fn f(v: &Value) -> f64 {
-    v.as_f64().unwrap_or_else(|| panic!("not a number: {v}"))
-}
-
-fn v3(v: &Value) -> DVec3 {
-    DVec3::new(f(&v[0]), f(&v[1]), f(&v[2]))
-}
-
-fn triples(v: &Value) -> Vec<DVec3> {
-    let a: Vec<f64> = v.as_array().unwrap().iter().map(f).collect();
-    a.chunks(3).map(|c| DVec3::new(c[0], c[1], c[2])).collect()
-}
-
-/// Largest difference relative to `scale`.
-fn relative(a: DVec3, b: DVec3, scale: f64) -> f64 {
-    (a - b).abs().max_element() / scale
-}
-
-fn view_lab_simulation() -> Simulation {
+fn sol() -> (void_orbit::BuiltSystem, Ephemeris) {
     let path = format!("{}/../orbit/systems/sol.json", env!("CARGO_MANIFEST_DIR"));
-    Simulation::new(SimulationOptions {
-        system: SystemSpec::from_json(&std::fs::read_to_string(&path).expect(&path)),
-        steps_per_orbit: 256.0,
-        tolerances: Tolerances {
-            position_meters: 1e-4,
-            velocity_meters_per_second: 1e-7,
+    let system = build_system(&SystemSpec::from_json(
+        &std::fs::read_to_string(&path).expect(&path),
+    ));
+    let ephemeris = Ephemeris::new(
+        &system,
+        EphemerisOptions {
+            step_seconds: suggested_step_seconds(&system.bodies, 256.0),
+            chunk_steps: 2048,
         },
-        vessel_start: VesselStartSpec {
-            home_body_id: "aurelia".into(),
-            altitude_meters: 100e3,
-            plane: StartPlane::Equatorial {
-                inclination_radians: 0.0,
-            },
-        },
-        engine: EngineSpec {
-            thrust_newtons: 250e3,
-            specific_impulse_seconds: 350.0,
-            dry_mass_kg: 10e3,
-            fuel_mass_kg: 30e3,
-        },
-        retention_seconds: 86_400.0,
-        prediction_horizon_seconds: 3.0 * 3600.0,
-        plan_coast_seconds: 86_400.0,
-    })
-}
-
-// --- Against the lab ----------------------------------------------------------------------------
-
-#[test]
-fn view_states_and_camera_match_the_lab() {
-    let g = golden();
-    let mut worst = 0.0_f64;
-    for c in g["views"].as_array().unwrap() {
-        let fc = &c["focus"];
-        let focus = FocusGeometry {
-            kind: if fc["kind"] == "body" {
-                FocusKind::Body
-            } else {
-                FocusKind::Vessel
-            },
-            radial: (!fc["radial"].is_null()).then(|| v3(&fc["radial"])),
-            north: v3(&fc["north"]),
-            reference_radius: f(&fc["referenceRadius"]),
-            altitude: f(&fc["altitude"]),
-            focus_radius: f(&fc["focusRadius"]),
-        };
-        let mode = if c["mode"] == "split" {
-            ViewMode::Split
-        } else {
-            ViewMode::Single
-        };
-        let s = view_state(
-            mode,
-            c["mapOn"].as_bool().unwrap(),
-            &focus,
-            f(&c["distance"]),
-        );
-        let l = &c["state"];
-        worst = worst
-            .max((s.map_weight - f(&l["mapWeight"])).abs())
-            .max((s.up_weight - f(&l["upWeight"])).abs())
-            .max((s.corotation - f(&l["corotation"])).abs())
-            .max(relative(s.up, v3(&l["up"]), 1.0));
-        assert_eq!(s.min_distance, f(&l["minDistance"]));
-        assert_eq!(s.max_distance, f(&l["maxDistance"]));
-        let references = (
-            c["focusReference"].as_u64().unwrap() as usize,
-            c["pathReference"].as_u64().unwrap() as usize,
-        );
-        for (k, kind) in [PathFrameKind::Inertial, PathFrameKind::Surface]
-            .into_iter()
-            .enumerate()
-        {
-            let (body, weight) = camera_spin(&s, kind, references.0, references.1);
-            assert_eq!(body as u64, c["spin"][k]["body"].as_u64().unwrap());
-            worst = worst.max((weight - f(&c["spin"][k]["weight"])).abs());
-        }
-    }
-    let mut camera_worst = 0.0_f64;
-    for c in g["cameras"].as_array().unwrap() {
-        let up = v3(&c["up"]);
-        let mut camera = OrbitCamera::new(v3(&c["start"]["direction"]), f(&c["start"]["distance"]));
-        for (k, step) in c["steps"].as_array().unwrap().iter().enumerate() {
-            let (a, b) = (f(&step["a"]), f(&step["b"]));
-            match k % 4 {
-                0 => camera.drag(a * 400.0, b * 900.0, up),
-                1 => camera.zoom(void_math::exp(a * 2.0), 8.0, 2e13),
-                2 => camera.corotate(up, a * 0.3),
-                _ => camera.clamp_to_up(if k % 8 == 3 { -up } else { up }),
-            }
-            camera_worst = camera_worst
-                .max(relative(camera.direction, v3(&step["direction"]), 1.0))
-                .max((camera.distance - f(&step["distance"])).abs() / camera.distance);
-        }
-    }
-    println!(
-        "{} view states within {worst:.1e}; {} cameras through 30 drags, zooms, turns and clamps within {camera_worst:.1e}",
-        g["views"].as_array().unwrap().len(),
-        g["cameras"].as_array().unwrap().len()
     );
-    assert!(worst < 1e-12 && camera_worst < 1e-12);
+    (system, ephemeris)
 }
-
-#[test]
-fn ellipses_match_the_lab() {
-    let g = golden();
-    let gm = f(&g["gm"]);
-    let (mut angle, mut time) = (0.0_f64, 0.0_f64);
-    for c in g["ellipses"].as_array().unwrap() {
-        let (r, v, n) = (v3(&c["r"]), v3(&c["v"]), c["n"].as_u64().unwrap() as usize);
-        let scale = r.length();
-        for (a, b) in ellipse_points(r, v, gm, n)
-            .iter()
-            .zip(triples(&c["byAngle"]))
-        {
-            angle = angle.max(relative(*a, b, scale));
-        }
-        let (points, period) = ellipse_points_in_time(r, v, gm, n);
-        assert!((period - f(&c["period"])).abs() < 1e-12 * period);
-        for (a, b) in points.iter().zip(triples(&c["byTime"])) {
-            time = time.max(relative(*a, b, scale));
-        }
-    }
-    println!("ellipses by angle within {angle:.1e}, by time within {time:.1e} (relative)");
-    assert!(angle < 1e-13 && time < 1e-12);
-}
-
-#[test]
-fn surface_frame_orbits_and_path_frames_match_the_lab() {
-    let g = golden();
-    let mut sim = view_lab_simulation();
-    let now = f(&g["now"]);
-    let home = g["home"].as_u64().unwrap() as usize;
-    sim.ephemeris.extend_to(now + 86_400.0);
-    let eph = &sim.ephemeris;
-    let bodies = eph.bodies().to_vec();
-    let n = bodies.len();
-    let (mut p, mut v) = (vec![DVec3::ZERO; n], vec![DVec3::ZERO; n]);
-    eph.states_at(now, &mut p, Some(&mut v));
-    let (mut worst, mut native) = (0.0_f64, 0.0_f64);
-    for o in g["surfaceOrbits"].as_array().unwrap() {
-        let b = o["body"].as_u64().unwrap() as usize;
-        let parent = bodies[b].parent_index.unwrap();
-        let points = orbit_in_surface_frame(
-            &bodies[home],
-            now,
-            p[parent] - p[home],
-            p[b] - p[parent],
-            v[b] - v[parent],
-            bodies[parent].gm + bodies[b].gm,
-        );
-        assert_eq!(
-            points.len() as u64,
-            o["count"].as_u64().unwrap(),
-            "{}",
-            bodies[b].id
-        );
-        let lab_points = lab_orbit_in_surface_frame(
-            &bodies[home],
-            now,
-            p[parent] - p[home],
-            p[b] - p[parent],
-            v[b] - v[parent],
-            bodies[parent].gm + bodies[b].gm,
-            points.len() - 1,
-        );
-        let scale = (p[b] - p[home]).length() + (p[b] - p[parent]).length();
-        for (k, lab) in o["kept"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .zip(triples(&o["points"]))
-        {
-            let k = k.as_u64().unwrap() as usize;
-            worst = worst.max(relative(lab_points[k], lab, scale));
-        }
-        for (a, b) in points.iter().zip(&lab_points) {
-            native = native.max(relative(*a, *b, scale));
-        }
-    }
-    println!(
-        "surface-frame orbits of {} bodies: lab formula within {worst:.1e}, native exact angle within {native:.1e} of it (relative)",
-        bodies.len() - 1
-    );
-    assert!(worst < 1e-11);
-    // A year of a fast-turning frame is thousands of turns; the lab's 2π t / P loses about
-    // turns · 2π · 2⁻⁵³ of angle, which the exact remainder keeps.
-    assert!(native < 1e-9, "{native:e}");
-
-    for c in g["paths"].as_array().unwrap() {
-        let kind = if c["kind"] == "surface" {
-            PathFrameKind::Surface
-        } else {
-            PathFrameKind::Inertial
-        };
-        let frame = PathFrame::new(eph, kind, home);
-        let mut cache = PathCache::new(97.5);
-        let mut samples = Vec::new();
-        let point = |t: f64| DVec3::new(7e6 * (t / 900.0).cos(), 7e6 * (t / 900.0).sin(), 1e5);
-        let mut sample = |t: f64| {
-            samples.push(t);
-            frame.at(eph, t, point(t))
-        };
-        cache.update(now - 3000.0, now + 20_000.0, &mut sample);
-        cache.update(now, now + 40_000.0, &mut sample);
-        let lab_samples: Vec<f64> = c["samples"].as_array().unwrap().iter().map(f).collect();
-        assert_eq!(samples, lab_samples, "{kind:?}: sample times");
-        assert_eq!(cache.count() as u64, c["count"].as_u64().unwrap());
-        let mut out = Vec::new();
-        cache.write_relative(
-            &mut out,
-            DVec3::new(1.0, 2.0, 3.0),
-            Some(DVec3::new(10.0, 20.0, 30.0)),
-            Some(DVec3::new(-1.0, -2.0, -3.0)),
-        );
-        assert_eq!(out.len() as u64, c["written"].as_u64().unwrap());
-        // The lab writes three.js axes (x, z, −y) in f32.
-        let mut vertex_worst = 0.0_f64;
-        for (a, b) in out.iter().zip(triples(&c["vertices"])) {
-            let three = DVec3::new(a.x as f32 as f64, a.z as f32 as f64, (-a.y) as f32 as f64);
-            vertex_worst = vertex_worst.max(relative(three, b, 7e6));
-        }
-        let axes = frame.axes_at(now);
-        for (k, axis) in axes.iter().enumerate() {
-            assert!(relative(*axis, v3(&c["axes"][k]), 1.0) < 1e-12);
-        }
-        let at = frame.at(eph, now, DVec3::new(1e11, -2e10, 3e9));
-        let at_error = relative(at, v3(&c["at"]), 1e11);
-        println!(
-            "{kind:?} path frame: {} samples on the lab's grid; vertices within {vertex_worst:.1e}, a far point within {at_error:.1e} (relative)",
-            samples.len()
-        );
-        assert!(vertex_worst < 1e-6 && at_error < 1e-12);
-    }
-}
-
-// --- The lab's checks -----------------------------------------------------------------------------
 
 const DEG: f64 = PI / 180.0;
 const R: f64 = 6.371e6;
@@ -524,13 +243,17 @@ fn osculating_ellipses() {
 fn path_frames_and_surface_orbits() {
     // Path frames through the map's own steps (PathCache, then the turn by the axes now). Samples
     // span a day of Aurelia's spin; "now" is the end.
-    let mut sim = view_lab_simulation();
-    let home_index = sim.body_index("aurelia");
-    let home = sim.system.bodies[home_index].clone();
+    let (system, mut eph) = sol();
+    let home_index = system
+        .bodies
+        .iter()
+        .position(|b| b.id == "aurelia")
+        .unwrap();
+    let home = system.bodies[home_index].clone();
     let day = home.rotation.period_seconds;
     let now = day;
-    sim.ephemeris.extend_to(now);
-    let eph = &sim.ephemeris;
+    eph.extend_to(now);
+    let eph = &eph;
     let centre = |t: f64| eph.body_position(home_index, t);
     let ground = DVec3::new(0.6, -0.5, 0.62) * home.radius_meters;
     let on_ground =

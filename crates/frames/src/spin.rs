@@ -2,7 +2,7 @@ use std::f64::consts::TAU;
 
 use glam::{DMat3, DQuat, DVec3};
 
-/// A body's spin, as the orbit lab's `RotationSpec` (`lab/orbit/src/orbit/SystemSpec.ts`).
+/// A body's spin.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Spin {
     /// Sidereal period, seconds, > 0. Retrograde spin uses obliquity > 90 degrees.
@@ -36,7 +36,7 @@ impl Spin {
         DVec3::new(ob.sin() * lon.cos(), ob.sin() * lon.sin(), ob.cos())
     }
 
-    /// Non-rotating equatorial axes (the body's ECI), as `equatorialAxes` in BodyRotation.ts:
+    /// Non-rotating equatorial axes (the body's ECI):
     /// z is the spin axis, x the node of the equator on the ecliptic, (-sin lon, cos lon, 0).
     pub fn equatorial_axes(&self) -> DQuat {
         let [x, y, z] = self.equatorial_basis();
@@ -56,8 +56,6 @@ impl Spin {
     /// The turns are removed with an exact remainder before scaling, so the angle keeps full
     /// precision however large t is; what remains is t's own spacing (1.2e-7 s at t = 1e9 s).
     pub fn angle(&self, t: f64) -> f64 {
-        // 2π r / period in the lab's order, so within the first turn this is the lab's angle to
-        // the bit; past it, the exact remainder keeps the precision the lab's 2π t / period loses.
         self.angle_at_epoch_radians + TAU * t.rem_euclid(self.period_seconds) / self.period_seconds
     }
 

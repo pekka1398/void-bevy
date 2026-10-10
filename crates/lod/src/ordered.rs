@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-/// A map that iterates in insertion order, as a JavaScript `Map`: setting an existing key keeps
-/// its place, removing one and setting it again moves it to the end. Selection's request order,
-/// eviction order and balancing all depend on this, as they do in the lab.
+/// A map that iterates in insertion order: setting an existing key keeps its place, removing one
+/// and setting it again moves it to the end. Selection's request order, eviction order and
+/// balancing all depend on this, so they come out the same from run to run.
 #[derive(Clone, Debug)]
 pub struct OrderedMap<V> {
     slots: Vec<Option<(u64, V)>>,

@@ -1,7 +1,8 @@
 use glam::{DQuat, DVec3};
 use void_assembly::rendezvous_pod;
 use void_fleet_flight::session::{Action, FlightSession, InitialWorld, Outcome, world_mark};
-use void_landing::{FrameState, PlanetFrame, earth_size};
+use void_frames::State;
+use void_landing::{PlanetFrame, earth_size};
 use void_vessels::{RcsControl, flat_site};
 #[test]
 fn durable_rcs_dock_undock_save_replay_continues_identically() {
@@ -15,7 +16,7 @@ fn durable_rcs_dock_undock_save_replay_continues_identically() {
     let state = frame.to_inertial(
         &sim.fleet.ephemeris,
         0.,
-        FrameState {
+        State {
             position: site * (planet.terrain.radius_meters + 500_000.),
             velocity: DVec3::ZERO,
         },

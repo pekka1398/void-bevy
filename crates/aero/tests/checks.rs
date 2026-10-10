@@ -1,10 +1,9 @@
-//! The lab's own checks (`lab/aerodynamics/aero-check.ts`), with its thresholds.
+//! Physical checks of the aerodynamics and heating.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use glam::{DQuat, DVec3};
 use void_aero::*;
-use void_landing::FrameState;
 
 fn near(value: f64, expected: f64, tolerance: f64) {
     assert!(
@@ -17,20 +16,120 @@ fn panics(f: impl FnOnce()) -> bool {
     catch_unwind(AssertUnwindSafe(f)).is_err()
 }
 
+/// A light aircraft's aerodynamic elements: +z forward, +y up, +x toward the right wing.
 struct Plane {
-    vehicle: Vehicle,
     mass: f64,
     elements: Vec<AeroElement>,
 }
 
+fn wing(
+    area: f64,
+    aspect_ratio: f64,
+    control: ControlSurface,
+    sign: f64,
+    incidence: f64,
+) -> WingAero {
+    WingAero {
+        chord: DVec3::Z,
+        normal: if control == ControlSurface::Rudder {
+            DVec3::X
+        } else {
+            DVec3::Y
+        },
+        area,
+        aspect_ratio,
+        chord_meters: 1.45,
+        sweep_radians: 5.0 * DEG,
+        incidence_radians: incidence * DEG,
+        zero_lift_radians: 0.0,
+        stall_radians: 15.0 * DEG,
+        cd0: 0.018,
+        efficiency: 0.82,
+        pitching_moment: 0.0,
+        control,
+        control_sign: sign,
+        max_deflection_radians: 18.0 * DEG,
+    }
+}
+
+fn main_wing() -> WingAero {
+    wing(7.92, 6.2, ControlSurface::Aileron, 1.0, 3.0)
+}
+
 fn plane() -> Plane {
-    let vehicle = aircraft();
-    let props = mass_properties(&vehicle, &resources(&vehicle));
-    let elements = aero_elements(&vehicle, props.center);
+    let fuselage = AeroShape::Body(BodyAero {
+        axis: DVec3::Z,
+        front_area: 0.72,
+        rear_area: 0.72,
+        side_area: 5.8,
+        wet_area: 19.0,
+        length_meters: 6.8,
+        front_cd: 0.18,
+        rear_cd: 0.4,
+        side_cd: 1.05,
+    });
+    // (id, part position, mass, shape); the fuselage's air acts 0.35 m behind its position.
+    let parts = [
+        ("fuselage", DVec3::ZERO, 750.0, fuselage),
+        (
+            "wing-left",
+            DVec3::new(-2.6, 0.1, 0.0),
+            65.0,
+            AeroShape::Wing(main_wing()),
+        ),
+        (
+            "wing-right",
+            DVec3::new(2.6, 0.1, 0.0),
+            65.0,
+            AeroShape::Wing(wing(7.92, 6.2, ControlSurface::Aileron, -1.0, 3.0)),
+        ),
+        (
+            "tail",
+            DVec3::new(0.0, 0.28, -2.8),
+            35.0,
+            AeroShape::Wing(wing(2.88, 3.6, ControlSurface::Elevator, -1.0, 1.3)),
+        ),
+        (
+            "fin",
+            DVec3::new(0.0, 0.9, -2.6),
+            25.0,
+            AeroShape::Wing(wing(1.68, 1.5, ControlSurface::Rudder, -1.0, 0.0)),
+        ),
+    ];
+    let mass: f64 = parts.iter().map(|p| p.2).sum();
+    let center = parts.iter().map(|p| p.1 * p.2).sum::<DVec3>() / mass;
     Plane {
-        vehicle,
-        mass: props.mass,
-        elements,
+        mass,
+        elements: parts
+            .into_iter()
+            .map(|(id, position, _, shape)| AeroElement {
+                id: id.into(),
+                point: position - center
+                    + if id == "fuselage" {
+                        DVec3::new(0.0, 0.0, -0.35)
+                    } else {
+                        DVec3::ZERO
+                    },
+                shape,
+            })
+            .collect(),
+    }
+}
+
+fn skin() -> ThermalSpec {
+    ThermalSpec {
+        skin_capacity_jk: 570.0 * 120.0,
+        core_capacity_jk: 570.0 * 780.0,
+        conductance_wk: 12.0,
+        radiating_area: 19.0,
+        heating_area: 3.0,
+        convection_area: 12.0,
+        emissivity: 0.8,
+        nose_radius: 0.2,
+        heating_factor: 0.15,
+        max_skin_k: 700.0,
+        max_core_k: 500.0,
+        ablator: None,
     }
 }
 
@@ -40,18 +139,6 @@ const FLIGHT_STATE: AeroState = AeroState {
     rotation: DQuat::IDENTITY,
     angular_velocity: DVec3::ZERO,
 };
-
-fn main_wing(p: &Plane) -> WingAero {
-    match &p.vehicle.parts[p.vehicle.part_index("wing-left")]
-        .aero
-        .as_ref()
-        .unwrap()
-        .shape
-    {
-        AeroShape::Wing(w) => w.clone(),
-        AeroShape::Body(_) => unreachable!(),
-    }
-}
 
 fn earth(h: f64) -> Air {
     Atmosphere::earth().sample(h)
@@ -82,14 +169,11 @@ fn standard_atmosphere_sea_level_eleven_km_and_layer_continuity() {
 }
 
 #[test]
-fn invalid_atmosphere_geometry_and_control_values_reject() {
+fn invalid_atmosphere_and_control_values_reject() {
     let p = plane();
     assert!(panics(|| {
         earth(f64::NAN);
     }));
-    let mut negative_mass = p.vehicle.clone();
-    negative_mass.parts[0].dry_mass_kg = -1.0;
-    assert!(panics(|| validate_vehicle(&negative_mass)));
     assert!(panics(|| {
         aerodynamic_forces(
             &p.elements,
@@ -114,9 +198,6 @@ fn invalid_atmosphere_geometry_and_control_values_reject() {
             &NEUTRAL,
         );
     }));
-    let mut bad_position = p.vehicle.clone();
-    bad_position.parts[0].position.y = f64::NAN;
-    assert!(panics(|| validate_vehicle(&bad_position)));
 }
 
 #[test]
@@ -177,7 +258,7 @@ fn a_common_wind_and_vehicle_velocity_preserve_loads() {
 fn wing_polar_is_odd_stalls_and_drags_more_at_high_incidence() {
     let wing = WingAero {
         zero_lift_radians: 0.0,
-        ..main_wing(&plane())
+        ..main_wing()
     };
     let attached = wing_polar(&wing, 12.0 * DEG, 0.2);
     let stalled = wing_polar(&wing, 30.0 * DEG, 0.2);
@@ -192,7 +273,7 @@ fn pure_spanwise_flow_keeps_skin_drag_without_lift() {
     let wing = AeroElement {
         id: "wing".into(),
         point: DVec3::ZERO,
-        shape: AeroShape::Wing(main_wing(&plane())),
+        shape: AeroShape::Wing(main_wing()),
     };
     let f = aerodynamic_forces(
         &[wing],
@@ -276,42 +357,33 @@ fn aircraft_has_restoring_pitch_stiffness_and_roll_damping() {
 }
 
 #[test]
-fn assembly_craft_keeps_real_mass_and_hides_joined_end_faces() {
-    let rocket = demo_rocket();
-    let mass = mass_properties(&rocket, &resources(&rocket)).mass;
-    assert!(rocket.parts.len() == 6 && mass > 4000.0);
-    let exposed: f64 = rocket
-        .parts
-        .iter()
-        .map(|p| match &p.aero.as_ref().unwrap().shape {
-            AeroShape::Body(b) => b.front_area + b.rear_area,
-            AeroShape::Wing(_) => 0.0,
-        })
-        .sum();
-    near(exposed, 2.0 * std::f64::consts::PI * 0.625 * 0.625, 1e-9);
-}
-
-#[test]
 fn shield_disk_hides_the_pod_going_forward_and_not_backward() {
-    let c = capsule(true, DEFAULT_ABLATOR_KG);
-    let r = resources(&c);
-    let at = |v: f64| {
-        evaluate_vehicle(
-            &c,
-            &r,
-            &AeroState {
-                velocity: DVec3::new(0.0, 0.0, v),
-                ..FLIGHT_STATE
-            },
-            &earth(40000.0),
-            DVec3::ZERO,
-            &NEUTRAL,
-            250.0,
-        )
+    let shield = DiskShield {
+        id: "shield".into(),
+        point: DVec3::new(0.0, 0.0, 1.0),
+        normal: DVec3::Z,
+        radius_meters: 1.25,
     };
-    let pod = c.part_index("pod");
-    assert!(!at(7000.0).heat[pod].env.exposed);
-    assert!(at(-7000.0).heat[pod].env.exposed);
+    let pod = DVec3::ZERO;
+    // The air comes from ahead (+z) when flying forward, from behind when flying backward.
+    assert!(shielded(
+        pod,
+        DVec3::Z,
+        std::slice::from_ref(&shield),
+        "pod"
+    ));
+    assert!(!shielded(
+        pod,
+        -DVec3::Z,
+        std::slice::from_ref(&shield),
+        "pod"
+    ));
+    assert!(!shielded(
+        pod,
+        DVec3::Z,
+        std::slice::from_ref(&shield),
+        "shield"
+    ));
     assert!(!shielded(DVec3::ZERO, DVec3::Z, &[], "pod"));
 }
 
@@ -331,7 +403,7 @@ fn stagnation_flux_follows_v_cubed_and_inverse_root_nose_radius() {
 
 #[test]
 fn skin_core_conduction_conserves_energy_in_an_isolated_part() {
-    let mut spec = aircraft().parts[0].thermal;
+    let mut spec = skin();
     spec.radiating_area = 0.0;
     spec.heating_area = 0.0;
     spec.convection_area = 0.0;
@@ -357,7 +429,19 @@ fn skin_core_conduction_conserves_energy_in_an_isolated_part() {
 
 #[test]
 fn finite_ablator_is_spent_then_the_skin_heats() {
-    let mut spec = capsule(true, DEFAULT_ABLATOR_KG).parts[0].thermal;
+    let mut spec = ThermalSpec {
+        skin_capacity_jk: 30_000.0,
+        core_capacity_jk: 150_000.0,
+        conductance_wk: 1.5,
+        radiating_area: 4.9,
+        heating_area: 4.9,
+        convection_area: 4.9,
+        nose_radius: 1.25,
+        heating_factor: 1.0,
+        max_skin_k: 2400.0,
+        max_core_k: 550.0,
+        ..skin()
+    };
     spec.ablator = Some(Ablator {
         mass_kg: 0.001,
         activation_k: 1100.0,
@@ -378,187 +462,4 @@ fn finite_ablator_is_spent_then_the_skin_heats() {
         b.incoming_j - b.radiation_j + b.core_external_j,
         1e-5,
     );
-}
-
-fn command(elevator: f64, throttle: f64) -> FlightCommand {
-    FlightCommand {
-        controls: Controls {
-            elevator,
-            ..NEUTRAL
-        },
-        throttle,
-        brakes: false,
-    }
-}
-
-#[test]
-fn aircraft_flies_on_real_lift_and_falls_faster_in_vacuum() {
-    let mut live = AircraftFlight::new(aircraft(), FlightStart::Cruise, Atmosphere::earth());
-    let mut vacuum = AircraftFlight::new(aircraft(), FlightStart::Cruise, Atmosphere::Vacuum);
-    for _ in 0..120 * 5 {
-        live.step(&command(0.0, 0.28));
-        vacuum.step(&command(0.0, 0.28));
-    }
-    assert!(
-        live.altitude() > vacuum.altitude() + 80.0,
-        "{} vs {}",
-        live.altitude(),
-        vacuum.altitude()
-    );
-    assert_eq!(live.failure, None);
-    assert!(live.fuel_used_kg > 0.0);
-    assert_eq!(vacuum.fuel_used_kg, 0.0);
-    near(live.fuel_kg() + live.fuel_used_kg, 180.0, 1e-8);
-}
-
-#[test]
-fn runway_rests_on_the_gear_and_thrust_accelerates_it() {
-    let mut live = AircraftFlight::new(aircraft(), FlightStart::Runway, Atmosphere::earth());
-    for _ in 0..120 * 2 {
-        live.step(&command(0.0, 0.0));
-    }
-    assert!(
-        live.altitude() > 0.8 && live.altitude() < 1.3,
-        "{}",
-        live.altitude()
-    );
-    for _ in 0..120 * 8 {
-        live.step(&command(0.0, 1.0));
-    }
-    assert!(
-        live.velocity().z > 20.0,
-        "runway v={} h={} thrust={} failure={:?}",
-        live.velocity(),
-        live.altitude(),
-        live.thrust_n,
-        live.failure
-    );
-    assert_eq!(live.failure, None);
-}
-
-#[test]
-fn aircraft_sustains_a_minute_of_flight_and_takes_off_with_its_elevator() {
-    let mut cruise = AircraftFlight::new(aircraft(), FlightStart::Cruise, Atmosphere::earth());
-    let mut runway = AircraftFlight::new(aircraft(), FlightStart::Runway, Atmosphere::earth());
-    for _ in 0..120 * 60 {
-        cruise.step(&command(0.0, 0.28));
-    }
-    assert_eq!(cruise.failure, None);
-    assert!(cruise.altitude() > 500.0 && cruise.loads.aero.speed > 40.0);
-    for _ in 0..120 * 30 {
-        let elevator = if runway.loads.aero.speed > 40.0 {
-            0.15
-        } else {
-            0.0
-        };
-        runway.step(&command(elevator, 1.0));
-    }
-    assert_eq!(runway.failure, None);
-    assert!(runway.altitude() > 100.0);
-}
-
-#[test]
-fn destructive_contact_stops_the_trial() {
-    let mut live = AircraftFlight::new(aircraft(), FlightStart::Runway, Atmosphere::Vacuum);
-    let body = &mut live.world.bodies[live.body];
-    body.set_translation(rapier3d::math::Vector::new(0.0, 5.0, 0.0), true);
-    body.set_linvel(rapier3d::math::Vector::new(0.0, -30.0, 0.0), true);
-    for _ in 0..120 {
-        if live.failure.is_some() {
-            break;
-        }
-        live.step(&command(0.0, 0.0));
-    }
-    assert_eq!(live.failure.as_deref(), Some("destructive ground impact"));
-}
-
-#[test]
-fn a_corotating_surface_point_has_zero_airspeed() {
-    let mut entry = EntryFlight::new(
-        capsule(true, DEFAULT_ABLATOR_KG),
-        DEFAULT_ENTRY,
-        Atmosphere::earth(),
-    );
-    entry.ephemeris.extend_to(100.0);
-    let fixed = FrameState {
-        position: DVec3::new(entry.frame.body.radius_meters + 1000.0, 0.0, 0.0),
-        velocity: DVec3::ZERO,
-    };
-    let inertial = entry.frame.to_inertial(&entry.ephemeris, 100.0, fixed);
-    let back = entry.frame.to_body_fixed(&entry.ephemeris, 100.0, inertial);
-    let planet = entry.frame.to_inertial(
-        &entry.ephemeris,
-        100.0,
-        FrameState {
-            position: DVec3::ZERO,
-            velocity: DVec3::ZERO,
-        },
-    );
-    // The lab's 400 m/s includes the planet's own orbital motion; ours is the same frame.
-    assert!(length(inertial.velocity) > 400.0);
-    assert!(length(inertial.velocity - planet.velocity) > 400.0);
-    near(length(back.velocity), 0.0, 1e-8);
-}
-
-#[test]
-fn vacuum_entry_conserves_inertial_orbital_energy() {
-    let mut entry = EntryFlight::new(
-        capsule(true, DEFAULT_ABLATOR_KG),
-        DEFAULT_ENTRY,
-        Atmosphere::Vacuum,
-    );
-    let energy = |e: &mut EntryFlight| {
-        e.ephemeris.extend_to(e.time);
-        let inertial = e.frame.to_inertial(
-            &e.ephemeris,
-            e.time,
-            FrameState {
-                position: e.position(),
-                velocity: e.velocity(),
-            },
-        );
-        inertial.velocity.dot(inertial.velocity) / 2.0 - e.frame.body.gm / length(e.position())
-    };
-    let start = energy(&mut entry);
-    entry.advance(120.0, 100_000);
-    near(energy(&mut entry), start, start.abs() * 1e-8);
-}
-
-#[test]
-fn reentry_decelerates_heats_and_spends_ablator_and_bare_fails_first() {
-    let mut protected = EntryFlight::new(
-        capsule(true, DEFAULT_ABLATOR_KG),
-        DEFAULT_ENTRY,
-        Atmosphere::earth(),
-    );
-    let mut bare = EntryFlight::new(
-        capsule(false, DEFAULT_ABLATOR_KG),
-        DEFAULT_ENTRY,
-        Atmosphere::earth(),
-    );
-    protected.advance(400.0, 200_000);
-    bare.advance(400.0, 200_000);
-    let ablator = protected.resources.thermal[0].ablator_kg;
-    eprintln!(
-        "entry t={:.1} h={:.0} v={:.0} q={:.0} flux={:.0} ablator={ablator:.1} terminal={:?}; \
-         bare t={:.1} {:?}",
-        protected.time,
-        protected.altitude(),
-        length(protected.velocity()),
-        protected.max_q_pa,
-        protected.max_flux_wm2,
-        protected.terminal,
-        bare.time,
-        bare.terminal
-    );
-    assert!(protected.max_q_pa > 1000.0 && protected.max_flux_wm2 > 100000.0);
-    assert!(ablator < 130.0);
-    assert!(length(protected.velocity()) < 7600.0 * 0.5);
-    assert!(
-        bare.terminal
-            .as_deref()
-            .is_some_and(|t| t.contains("overheated"))
-    );
-    assert!(bare.time < protected.time);
-    assert_eq!(protected.terminal, None);
 }

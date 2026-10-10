@@ -1,12 +1,11 @@
-//! Bodies' orbits as osculating two-body ellipses, as `lab/view/src/ConicPath.ts`. The vessel's
+//! Bodies' orbits as osculating two-body ellipses. The vessel's
 //! path is its N-body prediction instead.
 
 use glam::DVec3;
-use void_math::{atan2, hypot};
 use void_orbit::solve_kepler_elliptic;
 
 fn length(v: DVec3) -> f64 {
-    hypot([v.x, v.y, v.z])
+    v.length()
 }
 
 fn normalize(v: DVec3) -> DVec3 {
@@ -97,7 +96,7 @@ pub fn ellipse_points_in_time(
     let a = -gm / (2.0 * (v2 / 2.0 - gm / r));
     let b = a * (1.0 - e * e).sqrt();
     // Eccentric and mean anomaly now, from the position in the orbit's own axes.
-    let e0 = atan2(dot(position, q) / b, dot(position, p) / a + e);
+    let e0 = f64::atan2(dot(position, q) / b, dot(position, p) / a + e);
     let m0 = e0 - e * e0.sin();
     let period = 2.0 * std::f64::consts::PI * (a.powi(3) / gm).sqrt();
     let points = (0..count)

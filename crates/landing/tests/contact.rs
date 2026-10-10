@@ -1,13 +1,13 @@
-//! Contacts in the rotating frame: lab/landing's own checks (`landing-check.ts`, "P2"), with its
-//! thresholds. Rapier runs natively here and as WebAssembly there, so these compare what the lab
-//! measures, not bits.
+//! Contacts in the rotating frame: free flight against the inertial arc, rest, rolling across
+//! tiles, moving the floating origin, and the queries the vessels rely on.
 
 use std::sync::Arc;
+use void_frames::State;
 
 use glam::{DQuat, DVec3};
 use void_landing::{
-    BodyShape, ContactBodySpec, ContactFrame, ContactWorld, ContactWorldOptions, FrameState,
-    PlanetFrame, SimpleShape, level_for_tile_size, moon_size, pebble,
+    BodyShape, ContactBodySpec, ContactFrame, ContactWorld, ContactWorldOptions, PlanetFrame,
+    SimpleShape, level_for_tile_size, moon_size, pebble,
 };
 use void_orbit::{
     BodySpec, EllipticElements, Ephemeris, EphemerisOptions, GravityField, OrbitPlane,
@@ -101,18 +101,18 @@ fn plain_pebble() -> Env {
 }
 
 /// A hop from 4 km over the reference sphere (above the 3 km hills): 120 m/s up, 60 m/s east.
-fn hop_start(frame: &PlanetFrame) -> FrameState {
+fn hop_start(frame: &PlanetFrame) -> State {
     let d = DVec3::new(0.4_f64.cos(), 0.4_f64.sin(), 0.05).normalize();
     let east = DVec3::new(-d.y, d.x, 0.0).normalize();
     let r = frame.body.radius_meters + 4000.0;
-    FrameState {
+    State {
         position: d * r,
         velocity: d * 120.0 + east * 60.0,
     }
 }
 
 /// The reference: the orbit crate's integrator in the inertial frame, sampled at times.
-fn inertial_reference(env: &mut Env, start: FrameState, times: &[f64]) -> Vec<FrameState> {
+fn inertial_reference(env: &mut Env, start: State, times: &[f64]) -> Vec<State> {
     let inertial = env.frame.to_inertial(&env.ephemeris, 0.0, start);
     let mut run = PropagationRun::new(VesselState {
         time: 0.0,
@@ -129,7 +129,7 @@ fn inertial_reference(env: &mut Env, start: FrameState, times: &[f64]) -> Vec<Fr
             env.frame.to_body_fixed(
                 &env.ephemeris,
                 t,
-                FrameState {
+                State {
                     position: s.position,
                     velocity: s.velocity,
                 },
@@ -307,7 +307,7 @@ fn rest_on_the_ground() {
     let boxed = world.add_body(
         &ephemeris,
         &spec(shape, 5000.0, 0.8, 0.0),
-        FrameState {
+        State {
             position: at,
             velocity: DVec3::ZERO,
         },
@@ -356,7 +356,7 @@ fn rolling_across_tiles() {
     let ball = world.add_body(
         &ephemeris,
         &spec(SimpleShape::Ball { radius: 1.0 }, 500.0, 0.6, 0.2),
-        FrameState {
+        State {
             position: at,
             velocity,
         },
@@ -395,7 +395,7 @@ fn floating_origin_move() {
     let ball = world.add_body(
         &ephemeris,
         &spec(SimpleShape::Ball { radius: 1.0 }, 500.0, 0.6, 0.2),
-        FrameState {
+        State {
             position: at,
             velocity: DVec3::new(3.0, -2.0, 1.0),
         },
@@ -438,7 +438,7 @@ fn body_overlay_reads_live_collider_shape_and_local_transform() {
             0.6,
             0.2,
         ),
-        FrameState {
+        State {
             position: at,
             velocity: DVec3::ZERO,
         },
@@ -492,7 +492,7 @@ fn suspension_query_excludes_chassis_and_tracks_actual_dynamic_support() {
     let support = world.add_body(
         &ephemeris,
         &body_spec,
-        FrameState {
+        State {
             position: at,
             velocity: DVec3::ZERO,
         },
@@ -502,7 +502,7 @@ fn suspension_query_excludes_chassis_and_tracks_actual_dynamic_support() {
     let chassis = world.add_body(
         &ephemeris,
         &body_spec,
-        FrameState {
+        State {
             position: at + DVec3::Y * 2.0,
             velocity: DVec3::ZERO,
         },
@@ -584,7 +584,7 @@ fn contact_constraint_keeps_real_micrometer_motion_in_native_local_authority() {
             0.0,
             0.0,
         ),
-        FrameState {
+        State {
             position: start,
             velocity: DVec3::ZERO,
         },
@@ -621,7 +621,7 @@ fn boundary_resistance_is_not_credited_as_an_extra_half_contact_impulse() {
             0.,
             0.,
         ),
-        FrameState {
+        State {
             position: start,
             velocity: DVec3::Y * 200.,
         },

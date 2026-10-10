@@ -1,5 +1,5 @@
-//! The lab's multiscale checks with its thresholds. The moving-origin adapter is
-//! checked in ephemeris.rs; Fleet collision and merge are in multiscale-lab/tests.
+//! The coupled world, frames and traveller: precision across light-years, conservation and
+//! agreement with a flat N-body reference. The moving-origin adapter is checked in ephemeris.rs.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -173,7 +173,7 @@ fn frame_round_trips_across_light_years_keep_centimetres() {
     let mut world = wide_world(default_galaxy());
     world.extend_to(100.0, 100_000);
     let state = FramedState {
-        frame: "Aster".into(),
+        frame: world.system_frame("Aster"),
         position: SplitPosition::at(DVec3::new(1.125, 0.01, -2.25)),
         velocity: DVec3::new(1.5, -0.25, 0.125),
     };
@@ -183,8 +183,8 @@ fn frame_round_trips_across_light_years_keep_centimetres() {
         next = reframe(
             &world,
             50.0,
-            &reframe(&world, 50.0, &next, "Beryl"),
-            "Aster",
+            &reframe(&world, 50.0, &next, world.system_frame("Beryl")),
+            world.system_frame("Aster"),
         );
     }
     let after = absolute(&world, 50.0, &next);
@@ -197,17 +197,17 @@ fn frame_changes_change_neither_gravity_nor_axes() {
     let mut world = CoupledWorld::new(compact_seeds(huge()), 10.0, 8192);
     world.extend_to(100.0, 100_000);
     let a = FramedState {
-        frame: "A".into(),
+        frame: world.system_frame("A"),
         position: SplitPosition::at(DVec3::new(5e8, 2e9, 0.0)),
         velocity: DVec3::new(20.0, 0.0, 0.0),
     };
-    let b = reframe(&world, 50.0, &a, "B");
+    let b = reframe(&world, 50.0, &a, world.system_frame("B"));
     let (pa, pb) = (absolute(&world, 50.0, &a).0, absolute(&world, 50.0, &b).0);
     assert!(pa.relative(&pb).length() < 2e-6);
     assert!((world.gravity_at(50.0, &pa) - world.gravity_at(50.0, &pb)).length() < 1e-15);
 }
 
-/// The world's gravity is orbit's one law (point masses here) in the multiscale lab's arithmetic.
+/// The world's gravity is orbit's one law.
 #[test]
 fn gravity_is_the_shared_law() {
     let mut world = CoupledWorld::new(compact_seeds(huge()), 10.0, 8192);
@@ -241,7 +241,7 @@ fn flight_from_a_to_b_matches_direct_n_body_through_the_hand_off() {
     let mut reference = flat_reference(&seeds, SplitPosition::ORIGIN, 10.0);
     let mut world = CoupledWorld::new(seeds, 10.0, 8192);
     let state = FramedState {
-        frame: "A".into(),
+        frame: world.system_frame("A"),
         position: SplitPosition::at(DVec3::new(8e8, 2e9, 0.0)),
         velocity: DVec3::new(500_000.0, 0.0, 0.0),
     };
@@ -265,7 +265,12 @@ fn flight_from_a_to_b_matches_direct_n_body_through_the_hand_off() {
         propagator.advance(&mut reference, &mut run, 9000.0, 100_000, None, None),
         AdvanceOutcome::Reached
     );
-    assert!(flight.events.iter().any(|e| e.from == "A" && e.to == "B"));
+    assert!(
+        flight
+            .events
+            .iter()
+            .any(|e| e.from == world.system_frame("A") && e.to == world.system_frame("B"))
+    );
     let error = (flight.position(&world).vector() - run.state().position).length();
     eprintln!("transfer position error {error:.2e} m");
     assert!(error < 0.02, "transfer error {error}");
@@ -330,11 +335,11 @@ fn the_four_light_year_flight_reaches_beryl_continuously() {
     let mut flight = transfer(&world, 0.02);
     assert!(flight.advance_to(&mut world, 210.0 * YEAR, 100_000));
     assert_eq!(flight.terminal, None);
-    assert_eq!(flight.state.frame, "Beryl");
+    assert_eq!(flight.state.frame, world.system_frame("Beryl"));
     let handoff = flight
         .events
         .iter()
-        .find(|e| e.from == "Aster" && e.to == "Beryl")
+        .find(|e| e.from == world.system_frame("Aster") && e.to == world.system_frame("Beryl"))
         .expect("hand-off");
     assert!(handoff.position_jump < 2e-6 && handoff.velocity_jump < 1e-8);
     assert!(absolute(&world, flight.time, &flight.state).1.x.is_finite());
@@ -348,8 +353,8 @@ fn the_four_light_year_flight_reaches_beryl_continuously() {
 }
 
 #[test]
-fn a_small_system_builds_as_the_lab_fixture() {
-    // The shared fixture is the lab's: two bodies, barycentric, the planet 2e8 m out.
+fn a_small_system_builds_as_described() {
+    // Two bodies, barycentric, the planet 2e8 m out.
     let s = small_system("A", 1e25);
     assert_eq!(s.bodies.len(), 2);
     let r = (s.positions[1] - s.positions[0]).length();

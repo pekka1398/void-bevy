@@ -8,6 +8,5 @@ publish = false
 [dependencies]
 glam.workspace = true
 void-frames.workspace = true
-void-math.workspace = true
 void-orbit.workspace = true
 void-terrain.workspace = true

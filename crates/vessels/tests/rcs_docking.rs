@@ -1,3 +1,5 @@
+mod common;
+use common::{Setup, scene};
 use glam::{DMat3, DQuat, DVec3};
 use void_assembly::*;
 use void_modules::{
@@ -62,14 +64,14 @@ fn allocator_translation_rotation_saturation_and_fuel() {
     );
 }
 fn pair(offset: DVec3, velocity: DVec3, rotation: DQuat, spin: DVec3) -> Fleet {
-    let mut s = create_lab_scene(Scenario::Coast);
+    let mut s = scene(Setup::Coast);
     // Keep existing ships distant; tests exercise true docking modules on newly launched craft.
     let snap = s.fleet.snapshot("v1");
     let craft = rendezvous_pod();
     let p = snap.position + DVec3::X * 1000.;
     s.fleet.launch(
         &craft,
-        void_landing::FrameState {
+        void_frames::State {
             position: p,
             velocity: snap.velocity,
         },
@@ -78,7 +80,7 @@ fn pair(offset: DVec3, velocity: DVec3, rotation: DQuat, spin: DVec3) -> Fleet {
     );
     s.fleet.launch(
         &craft,
-        void_landing::FrameState {
+        void_frames::State {
             position: p + offset,
             velocity: snap.velocity + velocity,
         },
@@ -236,7 +238,7 @@ fn addressed_ports_disarmed_occupied_and_rotating_tip_speed() {
     let pose = f.snapshot("v3");
     let third = f.launch(
         &rendezvous_pod(),
-        void_landing::FrameState {
+        void_frames::State {
             position: pose.position,
             velocity: pose.velocity,
         },
@@ -407,7 +409,7 @@ fn an_empty_pod_never_generates_force_or_rotation() {
     let old = f.snapshot("v3");
     let id = f.launch(
         &craft,
-        void_landing::FrameState {
+        void_frames::State {
             position: old.position + DVec3::X * 5000.0,
             velocity: old.velocity,
         },
@@ -507,7 +509,7 @@ fn just_inside_capture_limits_succeeds() {
 /// Two equal asymmetric supplies accelerate together, keeping a bubble owner throughout the burn.
 /// Only the upper pod has fuel, so mass depletion moves the live scene COM away from its parts origin.
 fn depleted_asymmetric_scene() -> (Fleet, String) {
-    let mut fleet = create_lab_scene(Scenario::Coast).fleet;
+    let mut fleet = scene(Setup::Coast).fleet;
     let start = fleet.snapshot("v1");
     let mut craft = add_part(&rendezvous_pod(), "rcs-pod", "p1", "bottom", "top").unwrap();
     craft.parts[1]
@@ -517,7 +519,7 @@ fn depleted_asymmetric_scene() -> (Fleet, String) {
     for i in 0..2 {
         let id = fleet.launch(
             &craft,
-            void_landing::FrameState {
+            void_frames::State {
                 position: start.position + DVec3::X * (1000.0 + i as f64 * 100.0),
                 velocity: start.velocity,
             },
@@ -577,7 +579,7 @@ fn target_at_actual_port(
     let direction = transform.apply_direction(top.direction);
     fleet.launch(
         &rendezvous_pod(),
-        void_landing::FrameState {
+        void_frames::State {
             position: port.position + direction * gap - rotation * DVec3::Y,
             velocity: port.velocity + relative_velocity,
         },

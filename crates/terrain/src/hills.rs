@@ -1,4 +1,4 @@
-//! lab/landing's placeholder hills (`HillsTerrain.ts`): fractal Perlin noise on the unit sphere,
+//! Placeholder hills: fractal Perlin noise on the unit sphere,
 //! shaped into rolling hills. The landing planets (Pebble, Luna, Terra, Aurelia) use it.
 
 use glam::DVec3;
@@ -37,7 +37,7 @@ impl Hills {
         // Noise has about one feature per unit, so this many units span the radius.
         let mut norm = 0.0;
         for octave in 0..o.octaves {
-            norm += void_math::pow(0.5, f64::from(octave));
+            norm += f64::powf(0.5, f64::from(octave));
         }
         Self {
             max_height: o.max_height_meters,

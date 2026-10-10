@@ -1,5 +1,5 @@
-//! A planet's solid surface, as lab/landing's terrain contract (`Surface.ts`, `TerrainConfig.ts`,
-//! `SurfaceContract.ts`) with scenery's layered planet and landing's hills. The same `Terrain`
+//! A planet's solid surface and its contract, with the layered planet, the hills and the impact,
+//! cratered and volcanic terrains. The same `Terrain`
 //! builds drawn tiles and collision tiles, so what is drawn is what is collided with.
 
 mod ares;
@@ -13,7 +13,6 @@ mod volcanic;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 use void_lod::{SurfaceSample, SurfaceSampler};
-use void_math::hypot;
 
 pub use ares::{AresOptions, AresTerrain, ShieldVolcano};
 pub use cratered::{Cratered, CrateredOptions};
@@ -125,17 +124,33 @@ impl Terrain {
         }
     }
 
+    /// The finest cell this terrain resolves. Full-detail point queries (`height`) sample at it.
+    /// Hills and cratered terrain are not band-limited; the cell does not change them.
+    pub fn finest_cell_meters(&self) -> f64 {
+        match &self.kind {
+            Kind::Ares(_) | Kind::Volcanic(_) | Kind::Impact(_) => 0.25,
+            Kind::Layered(_) => 1.0,
+            Kind::Cratered(_) | Kind::Hills(_) => 0.25,
+        }
+    }
+
     /// Height above the reference radius and a linear colour at a unit body-fixed direction (z the
     /// spin axis, x the prime meridian). `cell_meters` band-limits geometry for a tile of that cell
-    /// size; point queries pass None for full detail. Anything but a unit direction panics.
-    pub fn sample(&self, direction: DVec3, cell_meters: Option<f64>) -> (f64, [f64; 3]) {
+    /// size; full-detail point queries pass `finest_cell_meters`. Anything but a unit direction or
+    /// a finite positive cell panics.
+    pub fn sample(&self, direction: DVec3, cell_meters: f64) -> (f64, [f64; 3]) {
+        assert!(
+            cell_meters.is_finite() && cell_meters > 0.0,
+            "{} terrain: invalid sample cell {cell_meters}",
+            self.name
+        );
         match &self.kind {
-            Kind::Ares(c) => c.sample(direction, cell_meters.unwrap_or(0.25)),
-            Kind::Volcanic(c) => c.sample(direction, cell_meters.unwrap_or(0.25)),
+            Kind::Ares(c) => c.sample(direction, cell_meters),
+            Kind::Volcanic(c) => c.sample(direction, cell_meters),
             Kind::Cratered(c) => c.sample(direction),
-            Kind::Impact(c) => c.sample(direction, cell_meters.unwrap_or(0.25)),
+            Kind::Impact(c) => c.sample(direction, cell_meters),
             Kind::Hills(h) => {
-                let length = hypot([direction.x, direction.y, direction.z]);
+                let length = direction.length();
                 assert!(
                     length.is_finite() && (length - 1.0).abs() <= 1e-9,
                     "{} terrain: expected a unit direction, got {direction} (length {length})",
@@ -143,20 +158,20 @@ impl Terrain {
                 );
                 h.sample(direction)
             }
-            Kind::Layered(l) => l.sample(direction, cell_meters.unwrap_or(1.0)),
+            Kind::Layered(l) => l.sample(direction, cell_meters),
         }
     }
 
-    /// Full-detail height at a direction.
+    /// Full-detail height at a direction: `sample` at `finest_cell_meters`.
     pub fn height(&self, direction: DVec3) -> f64 {
-        self.sample(direction, None).0
+        self.sample(direction, self.finest_cell_meters()).0
     }
 }
 
 /// Tiles: lod's mesh builder samples with each tile's cell size.
 impl SurfaceSampler for Terrain {
     fn sample(&self, direction: DVec3, cell_meters: f64) -> SurfaceSample {
-        let (height_meters, color) = Terrain::sample(self, direction, Some(cell_meters));
+        let (height_meters, color) = Terrain::sample(self, direction, cell_meters);
         SurfaceSample {
             height_meters,
             color: color.map(|c| c as f32),
@@ -173,8 +188,8 @@ pub fn lattice_directions(count: usize) -> Vec<DVec3> {
             let z = 1.0 - 2.0 * (i as f64 + 0.5) / count as f64;
             let r = (1.0 - z * z).sqrt();
             DVec3::new(
-                void_math::cos(golden * i as f64) * r,
-                void_math::sin(golden * i as f64) * r,
+                f64::cos(golden * i as f64) * r,
+                f64::sin(golden * i as f64) * r,
                 z,
             )
         })
@@ -206,17 +221,18 @@ pub fn check_terrain_contract(terrain: &Terrain, samples: usize) -> Vec<Contract
         DVec3::ZERO,
         DVec3::new(f64::NAN, 0.0, 1.0),
     ] {
-        let panicked =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| terrain.sample(bad, None)))
-                .is_err();
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            terrain.sample(bad, terrain.finest_cell_meters())
+        }))
+        .is_err();
         if !panicked {
             fail("non-unit direction panics", format!("{bad}"));
         }
     }
     let step = 0.01 / terrain.radius_meters;
     for d in lattice_directions(samples) {
-        let a = terrain.sample(d, None);
-        let b = terrain.sample(DVec3::new(d.x, d.y, d.z), None);
+        let a = terrain.sample(d, terrain.finest_cell_meters());
+        let b = terrain.sample(DVec3::new(d.x, d.y, d.z), terrain.finest_cell_meters());
         if a != b {
             fail("deterministic", format!("{d}"));
         }
@@ -232,8 +248,8 @@ pub fn check_terrain_contract(terrain: &Terrain, samples: usize) -> Vec<Contract
         } else {
             DVec3::new(0.0, -d.z, d.y)
         };
-        let n = d + t / hypot([t.x, t.y, t.z]) * step;
-        let near = terrain.sample(n / hypot([n.x, n.y, n.z]), None);
+        let n = d + t / t.length() * step;
+        let near = terrain.sample(n / n.length(), terrain.finest_cell_meters());
         // Written this way so a NaN height counts as a jump.
         #[allow(clippy::neg_cmp_op_on_partial_ord)]
         if !((near.0 - a.0).abs() < 1.0) {

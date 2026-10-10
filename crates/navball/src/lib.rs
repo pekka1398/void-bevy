@@ -1,13 +1,12 @@
-//! The navball, as `lab/navball/src/Navball.ts`: the sky and ground around the vessel, seen from
+//! The navball: the sky and ground around the vessel, seen from
 //! outside along its nose. The ball's centre is where the nose points; screen up is the vessel's
 //! top (where the nose goes on pitch up), screen right its right.
 //!
 //! Everything is plain vectors in one caller-chosen frame, so the ball does not care whether that
-//! frame is body-fixed or inertial. [`NavballPainter`] draws it into an RGBA buffer the way the
-//! lab's canvas does; its text labels are handed back for the caller to draw.
+//! frame is body-fixed or inertial. [`NavballPainter`] draws it into an RGBA buffer; its text
+//! labels are handed back for the caller to draw.
 
 use glam::DVec3;
-use void_math::{atan2, hypot};
 
 mod paint;
 
@@ -72,7 +71,7 @@ fn cross(a: DVec3, b: DVec3) -> DVec3 {
 }
 
 fn length(a: DVec3) -> f64 {
-    hypot([a.x, a.y, a.z])
+    a.length()
 }
 
 fn scale(a: DVec3, k: f64) -> DVec3 {
@@ -121,10 +120,9 @@ pub fn navball_basis(input: &NavballInput) -> NavballBasis {
     );
     let (north, east) = horizon_axes(input.up, input.pole, input.prime_meridian);
     NavballBasis {
-        // MIRRORED FROM KSP (kept as the lab has it): top × nose makes the ball a globe seen from
-        // outside. Facing east, 60 is on the right and 120 on the left; facing north, W is on the
-        // right. KSP shows the opposite (E on the right when facing north). lab/flight's yaw keys
-        // follow this same axis, so the ball and the keys agree with each other but both are
+        // MIRRORED FROM KSP: top × nose makes the ball a globe seen from outside. Facing east, 60
+        // is on the right and 120 on the left; facing north, W is on the right. KSP shows the
+        // opposite (E on the right when facing north). The game's yaw keys follow this same axis, so the ball and the keys agree with each other but both are
         // mirrored from KSP. Fixing it means changing this axis and the steering together.
         right: cross(input.top, input.nose),
         top: input.top,
@@ -153,14 +151,14 @@ pub fn heading_pitch(basis: &NavballBasis, direction: DVec3) -> (f64, f64) {
         dot(direction, basis.east),
         dot(direction, basis.up),
     );
-    let heading = atan2(e, n) * 180.0 / std::f64::consts::PI;
+    let heading = f64::atan2(e, n) * 180.0 / std::f64::consts::PI;
     (
         if heading < 0.0 {
             heading + 360.0
         } else {
             heading
         },
-        atan2(u, hypot([n, e])) * 180.0 / std::f64::consts::PI,
+        f64::atan2(u, n.hypot(e)) * 180.0 / std::f64::consts::PI,
     )
 }
 

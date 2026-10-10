@@ -168,9 +168,9 @@ impl FrameTree {
         (inertial, surface)
     }
 
-    /// A frame turning with two bodies of `system` about their barycentre (the orbit lab's
-    /// two-body rotating frame). Its angular velocity is the line's rate in the bodies' plane,
-    /// |r × v| / |r|² about z; the plane's own slow turn is left out, as the lab's period is.
+    /// A frame turning with two bodies of `system` about their barycentre. Its angular velocity is
+    /// the line's rate in the bodies' plane, |r × v| / |r|² about z; the plane's own slow turn is
+    /// left out.
     pub fn add_two_body(
         &mut self,
         system: FrameId,
@@ -580,7 +580,7 @@ impl<S: FrameSource + ?Sized> Snapshot<'_, S> {
 }
 
 /// From one frame to another: up to their common ancestor, across the galaxy if they meet
-/// there, then down, subtracting before turning on the way down, as the orbit lab's `toFrame`.
+/// there, then down, subtracting before turning on the way down.
 #[derive(Clone, Copy, Debug)]
 pub struct Transform {
     /// `from` relative to the common ancestor (its system, when they meet at the root).

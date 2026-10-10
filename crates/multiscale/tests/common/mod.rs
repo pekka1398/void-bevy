@@ -1,4 +1,4 @@
-//! The lab check's compact fixture: three small two-body systems a few million kilometres apart.
+//! A compact fixture: three small two-body systems a few million kilometres apart.
 #![allow(dead_code)]
 
 use glam::DVec3;

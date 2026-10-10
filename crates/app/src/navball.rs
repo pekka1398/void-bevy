@@ -1,5 +1,5 @@
 //! `void_navball`'s ball as a Bevy UI image: the painter draws into the image every frame, and its
-//! heading and pitch labels are text nodes over it (white over a black shadow, as the lab's).
+//! heading and pitch labels are text nodes over it (white over a black shadow).
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;

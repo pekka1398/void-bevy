@@ -6,7 +6,6 @@
 //! square root packs rows toward the ground, where both change fastest). RGBA, alpha 1.
 
 use glam::DVec3;
-use void_math::{cos, exp, hypot, sin};
 
 use crate::atmosphere::{
     AtmosphereParams, Rgb, TRANSMITTANCE_HEIGHT, TRANSMITTANCE_WIDTH, densities_at, extinction_at,
@@ -68,7 +67,11 @@ pub fn sphere_directions(count: usize) -> Vec<DVec3> {
         .map(|i| {
             let z = 1.0 - (2.0 * (i as f64 + 0.5)) / count as f64;
             let s = (1.0 - z * z).sqrt();
-            DVec3::new(s * cos(golden * i as f64), s * sin(golden * i as f64), z)
+            DVec3::new(
+                s * f64::cos(golden * i as f64),
+                s * f64::sin(golden * i as f64),
+                z,
+            )
         })
         .collect()
 }
@@ -108,7 +111,7 @@ pub fn build_multiple_scattering_table(
                 for s in 0..steps {
                     let t = (s as f64 + 0.5) * dt;
                     let (px, py, pz) = (direction.x * t, direction.y * t, r0 + direction.z * t);
-                    let r = hypot([px, py, pz]);
+                    let r = DVec3::new(px, py, pz).length();
                     let h = r - p.bottom_radius;
                     let d = densities_at(p, h);
                     let e = extinction_at(p, h);
@@ -121,7 +124,7 @@ pub fn build_multiple_scattering_table(
                     for c in 0..3 {
                         let scattering =
                             p.rayleigh_scattering[c] * d.rayleigh + p.mie_scattering * d.mie;
-                        let step = exp(-e[c] * dt);
+                        let step = f64::exp(-e[c] * dt);
                         // Integral of exp(-extinction * s) over this step. In vacuum its
                         // exact limit is dt; the quotient would otherwise evaluate 0/0.
                         let absorbed = if e[c] == 0.0 { dt } else { (1.0 - step) / e[c] };
@@ -137,7 +140,7 @@ pub fn build_multiple_scattering_table(
                         direction.y * length,
                         r0 + direction.z * length,
                     );
-                    let r = hypot([px, py, pz]);
+                    let r = DVec3::new(px, py, pz).length();
                     let ground_sun_mu = (px * sun.x + py * sun.y + pz * sun.z) / r;
                     let sunlight = sunlight_at(transmittance, p, p.bottom_radius, ground_sun_mu);
                     for c in 0..3 {
@@ -210,7 +213,7 @@ pub fn march_sky(
             );
             let source =
                 (rayleigh * phase_r + mie * phase_m) * sunlight[c] + (rayleigh + mie) * ms[c];
-            let step = exp(-e[c] * dt);
+            let step = f64::exp(-e[c] * dt);
             radiance[c] += if e[c] == 0.0 {
                 t3[c] * source * dt
             } else {

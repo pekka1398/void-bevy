@@ -1,4 +1,4 @@
-//! The map's state, as `lab/view/src/MapLayer.ts` without the drawing: bodies' osculating orbits
+//! The map's state without the drawing: bodies' osculating orbits
 //! about their parents, the vessel's path with its apsides, and the labels with their priorities.
 //! Orbits, paths and apsides are drawn in one plotting frame. The caller draws lines and labels at
 //! the map weight's opacity.

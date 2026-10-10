@@ -60,7 +60,7 @@ fn guided_burn_splits_substep_boundaries_and_preserves_fuel_and_direction() {
         mass_kg: before.mass_kg,
     });
     let mut prop = VesselPropagator::new(&sim.fleet.ephemeris, sim.fleet.options.tolerances);
-    let mut at_cutoff = void_landing::FrameState {
+    let mut at_cutoff = void_frames::State {
         position: before.position,
         velocity: before.velocity,
     };
@@ -86,7 +86,7 @@ fn guided_burn_splits_substep_boundaries_and_preserves_fuel_and_direction() {
             control,
         );
         if until == end {
-            at_cutoff = void_landing::FrameState {
+            at_cutoff = void_frames::State {
                 position: reference.state().position,
                 velocity: reference.state().velocity,
             };
@@ -241,7 +241,7 @@ fn contact_handoff_aborts_an_armed_burn_instead_of_steering_a_contact_body() {
     let frame = void_landing::PlanetFrame::new(&sim.fleet.ephemeris, sim.home);
     let position =
         DVec3::X * (frame.body.radius_meters + sim.planet.terrain.height(DVec3::X) + 450.0);
-    let local = void_landing::FrameState {
+    let local = void_frames::State {
         position,
         velocity: -DVec3::X * 50.0,
     };

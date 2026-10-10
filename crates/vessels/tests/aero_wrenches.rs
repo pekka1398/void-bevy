@@ -1,6 +1,9 @@
+mod common;
+use common::Setup;
 use glam::{DQuat, DVec3};
 use void_assembly::fresh_craft;
-use void_landing::{FrameState, PlanetFrame, earth_size, planet_environment, planet_ephemeris};
+use void_frames::State;
+use void_landing::{PlanetFrame, earth_size, planet_environment, planet_ephemeris};
 use void_vessels::{Fleet, FleetOptions, VesselMode, VesselSnapshot};
 fn scene(dt: f64, bubble: bool, air: bool) -> Fleet {
     let p = earth_size();
@@ -10,7 +13,7 @@ fn scene(dt: f64, bubble: bool, air: bool) -> Fleet {
     let state = frame.to_inertial(
         &e,
         0.0,
-        FrameState {
+        State {
             position: DVec3::X * (p.terrain.radius_meters + 5000.0),
             velocity: DVec3::Y * 80.0,
         },
@@ -41,7 +44,7 @@ fn scene(dt: f64, bubble: bool, air: bool) -> Fleet {
         c.parts[0].definition_id = "pod".into();
         f.launch(
             &c,
-            FrameState {
+            State {
                 position: state.position + DVec3::Z * 100.0,
                 ..state
             },
@@ -155,7 +158,7 @@ fn eccentric_chute_torque_enters_orbit_and_bubble_without_spending_trial_state()
         c.parts[0].definition_id = "eccentric-chute-pod".into();
         let id = f.launch(
             &c,
-            FrameState {
+            State {
                 position: state.position + DVec3::Z * 5000.0,
                 velocity: state.velocity,
             },
@@ -165,7 +168,7 @@ fn eccentric_chute_torque_enters_orbit_and_bubble_without_spending_trial_state()
         if bubble {
             f.launch(
                 &fresh_craft(),
-                FrameState {
+                State {
                     position: state.position + DVec3::Z * 5100.0,
                     velocity: state.velocity,
                 },
@@ -198,7 +201,7 @@ fn eccentric_chute_torque_enters_orbit_and_bubble_without_spending_trial_state()
 
 #[test]
 fn passive_air_does_not_wake_sleeping_ground_bodies_or_block_idle_rails() {
-    let scene = void_vessels::create_lab_scene(void_vessels::Scenario::Launch);
+    let scene = common::scene(Setup::Launch);
     let mut place = scene
         .fleet
         .environment()
@@ -265,7 +268,7 @@ fn sub_ulp_flameout_commits_once_and_representable_small_burn_is_integrated() {
         let state = PlanetFrame::new(&e, home).to_inertial(
             &e,
             t,
-            FrameState {
+            State {
                 position: DVec3::X * (p.terrain.radius_meters + 500000.0),
                 velocity: DVec3::Y * 7500.0,
             },
@@ -333,7 +336,7 @@ fn ideal_guidance_prescribes_trial_and_accepted_attitude_then_releases_without_a
     let state = PlanetFrame::new(&e, home).to_inertial(
         &e,
         0.0,
-        FrameState {
+        State {
             position: DVec3::X * (p.terrain.radius_meters + 5000.0),
             velocity: DVec3::Y * 80.0,
         },
@@ -419,7 +422,7 @@ fn torque_free_vessel_acquires_air_torque_on_first_ceiling_entry_leg() {
     let state = frame.to_inertial(
         &e,
         0.0,
-        FrameState {
+        State {
             position: DVec3::X * (p.terrain.radius_meters + 120_010.0),
             velocity: -DVec3::X * 30_000.0 + DVec3::Y * 80.0,
         },

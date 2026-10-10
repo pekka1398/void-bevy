@@ -2,8 +2,7 @@ use std::collections::VecDeque;
 
 use glam::DVec3;
 
-/// Barycentric vessel samples (t, x, v) at integrator step points, strictly increasing in time,
-/// as `lab/orbit/src/orbit/Trajectory.ts`.
+/// Barycentric vessel samples (t, x, v) at integrator step points, strictly increasing in time.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Trajectory {

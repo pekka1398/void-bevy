@@ -1,19 +1,22 @@
+mod common;
+use common::{Setup, scene};
 use glam::DVec3;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use void_landing::{ContactFrame, ContactWorld, ContactWorldOptions, FrameState, pebble};
+use void_frames::State;
+use void_landing::{ContactFrame, ContactWorld, ContactWorldOptions, pebble};
 use void_orbit::{AdvanceOutcome, PropagationRun, VesselPropagator, VesselState};
-use void_vessels::{FreeFallFrame, Scenario, create_lab_scene};
+use void_vessels::FreeFallFrame;
 
 #[test]
 #[should_panic(expected = "contact world: terrain is body-fixed; it needs a planet frame")]
 fn free_fall_frame_rejects_terrain() {
-    let mut scene = create_lab_scene(Scenario::Coast);
+    let mut scene = scene(Setup::Coast);
     let initial = scene.fleet.snapshot("v1");
     let frame = FreeFallFrame::new(
         &scene.fleet.ephemeris,
         scene.fleet.options.tolerances,
         0.0,
-        FrameState {
+        State {
             position: initial.position,
             velocity: initial.velocity,
         },
@@ -38,9 +41,9 @@ fn free_fall_frame_rejects_terrain() {
 
 #[test]
 fn lazy_origin_and_conversions_follow_independent_coast() {
-    let mut scene = create_lab_scene(Scenario::Coast);
+    let mut scene = scene(Setup::Coast);
     let initial = scene.fleet.snapshot("v1");
-    let anchor = FrameState {
+    let anchor = State {
         position: initial.position,
         velocity: initial.velocity,
     };
@@ -55,7 +58,7 @@ fn lazy_origin_and_conversions_follow_independent_coast() {
     });
     assert_eq!(frame.origin_time(), 0.0);
     for time in [1.0, 10.0, 100.0] {
-        let local = FrameState {
+        let local = State {
             position: DVec3::new(100.0, 20.0, -5.0),
             velocity: DVec3::new(1.0, -2.0, 3.0),
         };

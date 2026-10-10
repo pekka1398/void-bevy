@@ -1,25 +1,23 @@
-//! Frames that follow one system's barycentre, and a massless probe coasting between systems, as
-//! the lab's `Frames.ts` and `Traveller.ts`.
+//! States relative to one system's barycentre, and a massless probe coasting between systems.
 
 use glam::DVec3;
-use void_math::{hypot, pow};
 use void_orbit::Dopri5;
 
 use crate::CoupledWorld;
-use void_frames::SplitPosition;
+use void_frames::{FrameId, SplitPosition};
 
-/// A position and velocity relative to system `frame`'s barycentre. Every frame has the same
-/// axes; none rotates.
+/// A position and velocity relative to the barycentre frame `frame` of one of the world's
+/// systems. Every such frame has the same axes; none rotates.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FramedState {
-    pub frame: String,
+    pub frame: FrameId,
     pub position: SplitPosition,
     pub velocity: DVec3,
 }
 
 /// The world position and velocity of `state` at `t`.
 pub fn absolute(world: &CoupledWorld, t: f64, state: &FramedState) -> (SplitPosition, DVec3) {
-    let origin = &world.at(t)[world.system_index(&state.frame)];
+    let origin = &world.at(t)[world.frame_system(state.frame)];
     (
         origin.origin.compose(&state.position),
         origin.velocity + state.velocity,
@@ -27,33 +25,33 @@ pub fn absolute(world: &CoupledWorld, t: f64, state: &FramedState) -> (SplitPosi
 }
 
 /// `state` re-expressed in `frame`: split to split, so nothing is lost across light-years.
-pub fn reframe(world: &CoupledWorld, t: f64, state: &FramedState, frame: &str) -> FramedState {
+pub fn reframe(world: &CoupledWorld, t: f64, state: &FramedState, frame: FrameId) -> FramedState {
     let (position, velocity) = absolute(world, t, state);
-    let origin = &world.at(t)[world.system_index(frame)];
+    let origin = &world.at(t)[world.frame_system(frame)];
     FramedState {
-        frame: frame.to_string(),
+        frame,
         position: position.difference(&origin.origin),
         velocity: velocity - origin.velocity,
     }
 }
 
 /// The system whose barycentre is nearest, with 5% hysteresis in favour of the current frame.
-pub fn nearest_frame(world: &CoupledWorld, t: f64, state: &FramedState) -> String {
+pub fn nearest_frame(world: &CoupledWorld, t: f64, state: &FramedState) -> FrameId {
     let (p, _) = absolute(world, t, state);
     let origins = world.at(t);
-    let (mut closest, mut distance) = (state.frame.clone(), f64::INFINITY);
+    let (mut closest, mut distance) = (state.frame, f64::INFINITY);
     for (i, g) in origins.iter().enumerate() {
-        let r = hypot(p.relative(&g.origin).to_array());
+        let r = p.relative(&g.origin).length();
         if r < distance {
             distance = r;
-            closest = world.ids[i].clone();
+            closest = world.system_frame(&world.ids[i]);
         }
     }
-    let current = p.relative(&origins[world.system_index(&state.frame)].origin);
-    if hypot(current.to_array()) > 1.05 * distance {
+    let current = p.relative(&origins[world.frame_system(state.frame)].origin);
+    if current.length() > 1.05 * distance {
         closest
     } else {
-        state.frame.clone()
+        state.frame
     }
 }
 
@@ -62,8 +60,8 @@ pub fn nearest_frame(world: &CoupledWorld, t: f64, state: &FramedState) -> Strin
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameEvent {
     pub time: f64,
-    pub from: String,
-    pub to: String,
+    pub from: FrameId,
+    pub to: FrameId,
     pub position_jump: f64,
     pub velocity_jump: f64,
 }
@@ -86,7 +84,7 @@ impl Traveller {
     pub const MAX_STEP: f64 = 5.0 * 86400.0;
 
     pub fn new(world: &CoupledWorld, time: f64, state: FramedState, max_step: f64) -> Self {
-        world.system_index(&state.frame);
+        world.frame_system(state.frame);
         world.at(time);
         assert!(
             state.velocity.is_finite(),
@@ -113,9 +111,9 @@ impl Traveller {
         }
     }
 
-    pub fn set_frame(&mut self, world: &CoupledWorld, frame: &str) {
+    pub fn set_frame(&mut self, world: &CoupledWorld, frame: FrameId) {
         let before = absolute(world, self.time, &self.state);
-        let from = self.state.frame.clone();
+        let from = self.state.frame;
         let next = reframe(world, self.time, &self.state, frame);
         let after = absolute(world, self.time, &next);
         let d = before.0.relative(&after.0);
@@ -125,9 +123,9 @@ impl Traveller {
             self.events.push(FrameEvent {
                 time: self.time,
                 from,
-                to: frame.to_string(),
-                position_jump: hypot(d.to_array()),
-                velocity_jump: hypot(v.to_array()),
+                to: frame,
+                position_jump: d.length(),
+                velocity_jump: v.length(),
             });
         }
     }
@@ -150,19 +148,19 @@ impl Traveller {
         let mut used = 0;
         while self.time < target && used < budget {
             let base = self.state.clone();
-            let frame = world.system_index(&base.frame);
+            let frame = world.frame_system(base.frame);
             let anchor = base.position;
             let mut h = self.step_hint.min(self.max_step).min(target - self.time);
             let (start_position, start_velocity) = absolute(world, self.time, &base);
             let sources = world.at(self.time);
             for (i, body) in world.bodies.iter().enumerate() {
                 let d = world.body_position(i, &sources).relative(&start_position);
-                let r = hypot(d.to_array());
+                let r = d.length();
                 let clearance = r - body.radius_meters;
                 let member = world.membership[i];
                 let g = &sources[member.system];
                 let v = start_velocity - (g.velocity + g.body_velocity(member.local));
-                let speed = hypot(v.to_array());
+                let speed = v.length();
                 let resolution = 1.0_f64.max(speed * self.time.abs() * f64::EPSILON * 16.0);
                 if clearance <= resolution {
                     self.terminal = Some(format!(
@@ -222,7 +220,7 @@ impl Traveller {
             let factor = if error == 0.0 {
                 5.0
             } else {
-                5.0_f64.min(0.2_f64.max(0.9 * pow(error, -0.2)))
+                5.0_f64.min(0.2_f64.max(0.9 * error.powf(-0.2)))
             };
             self.step_hint = h * factor;
             if error > 1.0 {
@@ -236,7 +234,7 @@ impl Traveller {
             self.time += h;
             self.steps += 1;
             let nearest = nearest_frame(world, self.time, &self.state);
-            self.set_frame(world, &nearest);
+            self.set_frame(world, nearest);
         }
         self.time >= target
     }

@@ -2,7 +2,6 @@ use glam::{DQuat, DVec3};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
-use void_math::hypot;
 
 pub const G0: f64 = 9.80665;
 pub type ModelResult<T> = Result<T, String>;
@@ -318,32 +317,21 @@ pub fn part_inertia_per_kg(part: &PartDefinition) -> DVec3 {
     let side = (3.0 * part.radius * part.radius + part.height * part.height) / 12.0;
     DVec3::new(side, part.radius * part.radius / 2.0, side)
 }
-/// Same operation order as the lab's quaternion matrix multiplication.
+/// v turned by the unit quaternion q.
 pub fn rotate(q: DQuat, v: DVec3) -> DVec3 {
-    let (x, y, z, w) = (q.x, q.y, q.z, q.w);
-    DVec3::new(
-        (1.0 - 2.0 * (y * y + z * z)) * v.x
-            + 2.0 * (x * y - z * w) * v.y
-            + 2.0 * (x * z + y * w) * v.z,
-        2.0 * (x * y + z * w) * v.x
-            + (1.0 - 2.0 * (x * x + z * z)) * v.y
-            + 2.0 * (y * z - x * w) * v.z,
-        2.0 * (x * z - y * w) * v.x
-            + 2.0 * (y * z + x * w) * v.y
-            + (1.0 - 2.0 * (x * x + y * y)) * v.z,
-    )
+    q * v
 }
 fn align(from: DVec3, to: DVec3) -> DQuat {
-    let a = from / hypot(from.to_array());
-    let b = to / hypot(to.to_array());
+    let a = from / from.length();
+    let b = to / to.length();
     if a.dot(b) < -0.999999999 {
         let axis = a.cross(if a.x.abs() < 0.9 { DVec3::X } else { DVec3::Y });
-        let axis = axis / hypot(axis.to_array());
+        let axis = axis / axis.length();
         return DQuat::from_xyzw(axis.x, axis.y, axis.z, 0.0);
     }
     let axis = a.cross(b);
     let w = 1.0 + a.dot(b);
-    let norm = hypot([axis.x, axis.y, axis.z, w]);
+    let norm = glam::DVec4::new(axis.x, axis.y, axis.z, w).length();
     DQuat::from_xyzw(axis.x / norm, axis.y / norm, axis.z / norm, w / norm)
 }
 /// Validate untrusted craft data and derive every part pose from its paired stack nodes.
@@ -680,7 +668,7 @@ pub struct CrossfeedPart<'a> {
     pub definition: &'a PartDefinition,
 }
 
-/// Returns reachable tanks in input part order, matching TS `crossfeedTanks`.
+/// Returns reachable tanks in input part order.
 /// Both ends of each traversed connection must allow crossfeed. Connections to
 /// parts outside this graph are ignored, so callers may pass a subset of a vessel.
 /// Pass only active connections after separation. Cycles are supported.

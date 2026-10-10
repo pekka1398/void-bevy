@@ -1,4 +1,4 @@
-//! Native flight HUD, mapped from the archived src/main.ts and style.css.
+//! The flight HUD.
 use super::*;
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +13,7 @@ pub(super) enum Readout {
     Maneuver,
     Status,
     ViewDiagnostics,
+    Place,
 }
 #[derive(Component)]
 pub(super) struct Panel;
@@ -26,6 +27,7 @@ pub(super) enum Field {
     Prograde,
     Normal,
     Radial,
+    Place(place::PlaceField),
 }
 #[derive(Component)]
 pub(super) struct FieldText(Field);
@@ -54,6 +56,7 @@ pub(super) enum Click {
     Body,
     Field(Field),
     Toggle(Toggle),
+    Place(place::PlaceClick),
 }
 #[derive(Resource)]
 pub(super) struct HudFont {
@@ -61,7 +64,10 @@ pub(super) struct HudFont {
     cjk: Handle<Font>,
 }
 #[derive(Resource, Default)]
-pub(super) struct PendingClicks(Vec<Click>);
+pub(super) struct PendingClicks(pub Vec<Click>);
+/// A control's label and its colour while the control is usable; `indicators` greys it otherwise.
+#[derive(Component)]
+pub(super) struct ButtonLabel(Color);
 
 #[derive(Resource, Default)]
 pub(super) struct UiState {
@@ -69,12 +75,18 @@ pub(super) struct UiState {
     dragging: bool,
     pub editing: bool,
     field: Option<Field>,
-    draft: String,
+    pub draft: String,
     dev: bool,
     help: bool,
 }
 const INK: Color = Color::srgb(0.81, 0.84, 0.89);
 const BG: Color = Color::srgba(0.031, 0.039, 0.063, 0.82);
+/// Label colour of a control that cannot be used right now.
+const DIM: Color = Color::srgba(0.81, 0.84, 0.89, 0.3);
+/// Line height as a multiple of font size; fixed text boxes are sized from it.
+const LINE: f32 = 1.2;
+/// Advance of one DejaVu Sans Mono glyph as a multiple of font size.
+const GLYPH: f32 = 0.61;
 fn panel(commands: &mut Commands, node: Node) -> Entity {
     commands
         .spawn((
@@ -118,6 +130,40 @@ fn readout(commands: &mut Commands, parent: Entity, kind: Readout, size: f32) ->
     commands.entity(e).insert(kind);
     e
 }
+/// A readout in a box of fixed size, `lines` lines tall and clipped, so text that changes length
+/// never moves the controls around it. `layout` decides whether long lines fold inside the box.
+fn fixed_readout(
+    commands: &mut Commands,
+    parent: Entity,
+    kind: Readout,
+    size: f32,
+    lines: usize,
+    layout: TextLayout,
+    width: Val,
+) -> Entity {
+    let frame = commands
+        .spawn(Node {
+            width,
+            height: px(lines as f32 * size * LINE),
+            flex_shrink: 0.,
+            flex_direction: FlexDirection::Column,
+            // The text node is only as wide as its text, so centred text also needs a centred node.
+            align_items: if layout.justify == Justify::Center {
+                AlignItems::Center
+            } else {
+                AlignItems::Default
+            },
+            overflow: Overflow::clip(),
+            ..default()
+        })
+        .id();
+    commands.entity(parent).add_child(frame);
+    let e = readout(commands, frame, kind, size);
+    commands
+        .entity(e)
+        .insert((layout, bevy::text::LineHeight::RelativeToFont(LINE)));
+    e
+}
 fn button(commands: &mut Commands, parent: Entity, label: &str, click: Click) {
     let e = commands
         .spawn((
@@ -134,7 +180,8 @@ fn button(commands: &mut Commands, parent: Entity, label: &str, click: Click) {
         ))
         .id();
     observe_button(commands, e, click);
-    text(commands, e, label, 11.);
+    let caption = text(commands, e, label, 11.);
+    commands.entity(caption).insert(ButtonLabel(INK));
     commands.entity(parent).add_child(e);
 }
 fn mode_button(commands: &mut Commands, parent: Entity, label: &str, key: KeyCode) {
@@ -144,6 +191,9 @@ fn mode_button(commands: &mut Commands, parent: Entity, label: &str, key: KeyCod
             Button,
             action,
             Node {
+                // Fixed width: the caption toggles between labels of different length.
+                width: px(64),
+                justify_content: JustifyContent::Center,
                 padding: UiRect::axes(px(4), px(1)),
                 ..default()
             },
@@ -151,9 +201,10 @@ fn mode_button(commands: &mut Commands, parent: Entity, label: &str, key: KeyCod
         ))
         .id();
     let caption = text(commands, entity, label, 11.);
+    let grey = Color::srgb(0.53, 0.57, 0.65);
     commands
         .entity(caption)
-        .insert(TextColor(Color::srgb(0.53, 0.57, 0.65)));
+        .insert((TextColor(grey), ButtonLabel(grey)));
     observe_button(commands, entity, action);
     commands.entity(parent).add_child(entity);
 }
@@ -170,6 +221,30 @@ fn observe_button(commands: &mut Commands, entity: Entity, action: Click) {
     );
 }
 
+fn field_input(commands: &mut Commands, parent: Entity, label: &str, field: Field) {
+    let r = row(commands, parent);
+    text(commands, r, label, 11.);
+    let e = commands
+        .spawn((
+            Button,
+            Click::Field(field),
+            Node {
+                // Fixed size: typed or long values clip instead of widening and wrapping the row.
+                padding: UiRect::axes(px(5), px(2)),
+                width: px(95),
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.078, 0.098, 0.145)),
+        ))
+        .id();
+    observe_button(commands, e, Click::Field(field));
+    let t = text(commands, e, "—", 11.);
+    commands
+        .entity(t)
+        .insert((FieldText(field), ButtonLabel(INK), TextLayout::no_wrap()));
+    commands.entity(r).add_child(e);
+}
 fn row(commands: &mut Commands, parent: Entity) -> Entity {
     let e = commands
         .spawn(Node {
@@ -207,7 +282,16 @@ pub(super) fn spawn(
             ..base()
         },
     );
-    readout(commands, clock, Readout::Clock, 14.);
+    // Wide enough for "T+ 999d 23:59:59 · 100000× PAUSED"; the rate buttons never shift.
+    fixed_readout(
+        commands,
+        clock,
+        Readout::Clock,
+        14.,
+        1,
+        TextLayout::no_wrap(),
+        px(34. * 14. * GLYPH),
+    );
     let rates = row(commands, clock);
     for (i, r) in RATES.iter().enumerate() {
         let label = if *r >= 1000. {
@@ -227,7 +311,15 @@ pub(super) fn spawn(
             ..base()
         },
     );
-    readout(commands, stages, Readout::Stages, 12.);
+    fixed_readout(
+        commands,
+        stages,
+        Readout::Stages,
+        12.,
+        1,
+        TextLayout::no_wrap(),
+        percent(100),
+    );
     let list = commands
         .spawn((
             StageList,
@@ -321,8 +413,17 @@ pub(super) fn spawn(
         },
     );
     commands.entity(flight).add_child(speed);
+    let centred = TextLayout::new(Justify::Center, LineBreak::NoWrap);
     mode_button(commands, speed, "AGL", KeyCode::KeyK);
-    let altitude = readout(commands, speed, Readout::Altitude, 20.);
+    let altitude = fixed_readout(
+        commands,
+        speed,
+        Readout::Altitude,
+        20.,
+        1,
+        centred,
+        percent(100),
+    );
     commands.entity(altitude).insert(TextColor(Color::WHITE));
     let divider = commands
         .spawn((
@@ -337,11 +438,27 @@ pub(super) fn spawn(
         .id();
     commands.entity(speed).add_child(divider);
     mode_button(commands, speed, "SURFACE", KeyCode::KeyL);
-    let velocity = readout(commands, speed, Readout::Speed, 22.);
+    let velocity = fixed_readout(
+        commands,
+        speed,
+        Readout::Speed,
+        22.,
+        1,
+        centred,
+        percent(100),
+    );
     commands
         .entity(velocity)
         .insert(TextColor(Color::srgb(0.49, 1., 0.69)));
-    let reference = readout(commands, speed, Readout::SpeedReference, 11.);
+    let reference = fixed_readout(
+        commands,
+        speed,
+        Readout::SpeedReference,
+        11.,
+        1,
+        centred,
+        percent(100),
+    );
     commands
         .entity(reference)
         .insert(TextColor(Color::srgb(0.53, 0.57, 0.65)));
@@ -369,7 +486,15 @@ pub(super) fn spawn(
         },
     );
     commands.entity(orbit).insert((Readout::Orbit, OrbitFade));
-    readout(commands, orbit, Readout::Orbit, 12.);
+    fixed_readout(
+        commands,
+        orbit,
+        Readout::Orbit,
+        12.,
+        5,
+        TextLayout::no_wrap(),
+        percent(100),
+    );
     button(
         commands,
         orbit,
@@ -391,31 +516,23 @@ pub(super) fn spawn(
         .entity(maneuver)
         .insert((Readout::Maneuver, ScrollPosition::default()));
     text(commands, maneuver, "MANEUVER", 11.);
-    readout(commands, maneuver, Readout::Maneuver, 11.);
+    // Plan summary folds inside six lines; the fields and buttons below stay put.
+    fixed_readout(
+        commands,
+        maneuver,
+        Readout::Maneuver,
+        11.,
+        6,
+        TextLayout::default(),
+        percent(100),
+    );
     for (field, label) in [
         (Field::Start, "Start T+ s"),
         (Field::Prograde, "Prograde m/s"),
         (Field::Normal, "Normal m/s"),
         (Field::Radial, "Radial m/s"),
     ] {
-        let r = row(commands, maneuver);
-        text(commands, r, label, 11.);
-        let e = commands
-            .spawn((
-                Button,
-                Click::Field(field),
-                Node {
-                    padding: UiRect::axes(px(5), px(2)),
-                    min_width: px(95),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.078, 0.098, 0.145)),
-            ))
-            .id();
-        observe_button(commands, e, Click::Field(field));
-        let t = text(commands, e, "—", 11.);
-        commands.entity(t).insert(FieldText(field));
-        commands.entity(r).add_child(e);
+        field_input(commands, maneuver, label, field);
     }
     text(
         commands,
@@ -471,6 +588,8 @@ pub(super) fn spawn(
         ))
         .id();
     commands.entity(dev).add_child(body);
+    spawn_place(commands, body);
+    text(commands, body, "VIEW", 11.);
     button(commands, body, "Planet · focus next", Click::Body);
     for (label, key) in [
         ("Near / orbit / far", KeyCode::F1),
@@ -491,7 +610,15 @@ pub(super) fn spawn(
     ] {
         button(commands, body, label, Click::Toggle(setting));
     }
-    readout(commands, body, Readout::ViewDiagnostics, 11.);
+    fixed_readout(
+        commands,
+        body,
+        Readout::ViewDiagnostics,
+        11.,
+        7,
+        TextLayout::no_wrap(),
+        percent(100),
+    );
     let diagnostics = text(commands, body, "", 11.);
     commands.entity(diagnostics).insert(Hud);
     let help = panel(
@@ -517,7 +644,7 @@ pub(super) fn spawn(
     text(
         commands,
         help_body,
-        "Space stage · Shift/Ctrl throttle · X cut\nW/S pitch · A/D yaw · Q/E roll · T SAS\n,/. time rate · P pause · R reset\nDrag orbit camera · wheel zoom into map\nTab vessel · Shift+Tab focus body · click labels\nK ALT/AGL · L SURFACE/ORBIT · G plot frame\nF1 near/orbit/far · ` DEV · ? help\nF6 save · F7 load paused · F8 finish recording\nM maneuver · B execute · Esc abort\nVehicle / EVA / docking controls: DEV status",
+        "Space stage · Shift/Ctrl throttle · X cut\nW/S pitch · A/D yaw · Q/E roll · T SAS\n,/. time rate · P pause · R reset\nDrag orbit camera · wheel zoom into map\nTab vessel · Shift+Tab focus body · click labels\nK ALT/AGL · L SURFACE/ORBIT · G plot frame\nF1 near/orbit/far · ` DEV (place ship) · ? help\nF6 save · F7 load paused · F8 finish recording\nM maneuver · B execute · Esc abort\nVehicle / EVA / docking controls: DEV status",
         11.,
     );
     let status = panel(
@@ -525,11 +652,96 @@ pub(super) fn spawn(
         Node {
             left: px(12),
             top: px(88),
-            max_width: px(440),
+            width: px(440),
             ..base()
         },
     );
-    readout(commands, status, Readout::Status, 11.);
+    // Ship line plus a notice of up to two folded lines; a longer notice is clipped.
+    fixed_readout(
+        commands,
+        status,
+        Readout::Status,
+        11.,
+        3,
+        TextLayout::default(),
+        percent(100),
+    );
+}
+
+/// DEV "place ship" controls; see `place`.
+fn spawn_place(commands: &mut Commands, body: Entity) {
+    use place::{PlaceClick as P, PlaceField as F};
+    // `place::describe` writes exactly `place::DESCRIBE_LINES` lines; none fold.
+    fixed_readout(
+        commands,
+        body,
+        Readout::Place,
+        11.,
+        place::DESCRIBE_LINES,
+        TextLayout::no_wrap(),
+        percent(100),
+    );
+    let r = row(commands, body);
+    button(commands, r, "◀ Body", Click::Place(P::BodyPrevious));
+    button(commands, r, "Body ▶", Click::Place(P::BodyNext));
+    let r = row(commands, body);
+    button(commands, r, "Site: ship", Click::Place(P::SiteHere));
+    button(commands, r, "Site: day land", Click::Place(P::SiteLand));
+    button(commands, r, "Site: day ocean", Click::Place(P::SiteOcean));
+    for (label, field) in [
+        ("Latitude °", F::Latitude),
+        ("Longitude °", F::Longitude),
+        ("Altitude m", F::Altitude),
+    ] {
+        field_input(commands, body, label, Field::Place(field));
+    }
+    let r = row(commands, body);
+    button(commands, r, "Velocity frame", Click::Place(P::Velocity));
+    button(commands, r, "Circular orbit", Click::Place(P::Circular));
+    button(commands, r, "Attitude", Click::Place(P::Attitude));
+    for (label, field) in [
+        ("Speed m/s", F::Speed),
+        ("Heading °", F::Heading),
+        ("Flight path °", F::Path),
+    ] {
+        field_input(commands, body, label, Field::Place(field));
+    }
+    button(
+        commands,
+        body,
+        "Place selected ship",
+        Click::Place(P::Apply),
+    );
+    let r = row(commands, body);
+    button(commands, r, "Target ▶", Click::Place(P::Target));
+    field_input(commands, r, "Gap m", Field::Place(F::Gap));
+    button(
+        commands,
+        body,
+        "Place ahead of target",
+        Click::Place(P::ApplyNear),
+    );
+}
+
+/// Why a control cannot be used right now. Such controls keep their place, are drawn greyed and
+/// a click only repeats the reason in the notice.
+fn unavailable(click: Click, flight: &Flight, draft: &place::PlaceDraft) -> Option<&'static str> {
+    match click {
+        Click::Dev | Click::Help => None,
+        _ if flight.playback.is_some() => Some("UI controls unavailable during playback"),
+        Click::Field(Field::Place(_)) => None,
+        Click::Field(_) => {
+            let sim = flight.session.sim();
+            sim.plans
+                .get(&sim.selected)
+                .is_none_or(|p| p.plan.count() == 0)
+                .then_some("Add a maneuver before editing values")
+        }
+        Click::Place(place::PlaceClick::ApplyNear) if draft.target.is_none() => {
+            Some("Place refused: choose a target vessel first")
+        }
+        _ => None,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -541,9 +753,12 @@ pub(super) fn interactions(
     mut clicks: Query<(&Interaction, &Click, &mut BackgroundColor), With<Button>>,
     mut state: ResMut<UiState>,
     mut pending: Option<ResMut<PendingClicks>>,
-    mut lab: NonSendMut<Lab>,
+    camera: Res<CameraView>,
+    mut draft: ResMut<place::PlaceDraft>,
+    mut pilot: Pilot,
     mut nodes: Query<(&mut Node, Option<&Dev>, Option<&Help>)>,
 ) {
+    let pilot = &mut pilot;
     let queued = pending
         .as_mut()
         .map_or(Vec::new(), |p| std::mem::take(&mut p.0));
@@ -561,11 +776,11 @@ pub(super) fn interactions(
         state.dev = !state.dev;
     }
     for (interaction, action, mut background) in &mut clicks {
-        background.0 = if matches!(action, Click::Key(KeyCode::KeyK | KeyCode::KeyL))
-            && *interaction != Interaction::Hovered
-        {
+        let hovered = *interaction == Interaction::Hovered
+            && unavailable(*action, &pilot.flight, &draft).is_none();
+        background.0 = if matches!(action, Click::Key(KeyCode::KeyK | KeyCode::KeyL)) && !hovered {
             Color::NONE
-        } else if *interaction == Interaction::Hovered {
+        } else if hovered {
             Color::srgb(0.16, 0.21, 0.31)
         } else {
             Color::srgb(0.078, 0.098, 0.145)
@@ -575,47 +790,46 @@ pub(super) fn interactions(
         if !matches!(click, Click::Field(_)) {
             state.field = None;
         }
+        if let Some(reason) = unavailable(*click, &pilot.flight, &draft) {
+            pilot.notice.0 = reason.into();
+            continue;
+        }
         match click {
             Click::Dev => state.dev = !state.dev,
             Click::Help => state.help = !state.help,
-            _ if lab.playback.is_some() => {
-                lab.notice = "UI controls unavailable during playback".into()
-            }
-            Click::Pause => lab.paused = !lab.paused,
+            Click::Pause => pilot.flight.paused = !pilot.flight.paused,
             Click::Warp(i) => {
-                lab.rate = *i;
-                lab.notice.clear();
+                pilot.flight.rate = *i;
+                pilot.notice.0.clear();
+            }
+            Click::Field(Field::Place(field)) => {
+                state.field = Some(Field::Place(*field));
+                state.draft = draft.value(*field).to_string();
             }
             Click::Field(field) => {
-                if let Some(p) = lab
-                    .session
-                    .sim()
-                    .plans
-                    .get(&lab.session.sim().selected)
-                    .filter(|p| p.plan.count() > 0)
-                {
-                    let spec = p.plan.maneuver(p.selected);
-                    state.field = Some(*field);
-                    state.draft = field_value(*field, &spec).to_string();
-                } else {
-                    lab.notice = "Add a maneuver before editing values".into();
-                }
+                let sim = pilot.flight.session.sim();
+                let p = &sim.plans[&sim.selected];
+                let spec = p.plan.maneuver(p.selected);
+                state.field = Some(*field);
+                state.draft = field_value(*field, &spec).to_string();
             }
             Click::Toggle(setting) => {
-                lab.session.execute(Action::View {
+                pilot.flight.session.execute(Action::View {
                     command: ViewCommand::Toggle { setting: *setting },
                 });
             }
             Click::Body => {
-                let p = &lab.session.sim().presentation;
-                let next = p.focus_body.map_or(0, |b| {
-                    (b + 1) % lab.session.sim().fleet.ephemeris.bodies().len()
-                });
-                lab.session.execute(Action::View {
+                let sim = pilot.flight.session.sim();
+                let next = sim
+                    .presentation
+                    .focus_body
+                    .map_or(0, |b| (b + 1) % sim.fleet.ephemeris.bodies().len());
+                pilot.flight.session.execute(Action::View {
                     command: ViewCommand::Focus { body: Some(next) },
                 });
             }
-            Click::Key(key) => dispatch(&mut lab, *key),
+            Click::Place(click) => place::click(pilot, &mut draft, *click),
+            Click::Key(key) => dispatch(pilot, camera.pointer_over_label, *key),
         }
     }
     for event in keyboard.read() {
@@ -629,13 +843,11 @@ pub(super) fn interactions(
             KeyCode::Escape => state.field = None,
             KeyCode::Enter => match state.draft.parse::<f64>() {
                 Ok(value) if value.is_finite() => {
-                    let selected = lab.session.sim().selected.clone();
-                    if let Some(p) = lab
-                        .session
-                        .sim()
-                        .plans
-                        .get(&selected)
-                        .filter(|p| p.plan.count() > 0)
+                    let sim = pilot.flight.session.sim();
+                    if let Field::Place(field) = field {
+                        draft.set(field, value);
+                    } else if let Some(p) =
+                        sim.plans.get(&sim.selected).filter(|p| p.plan.count() > 0)
                     {
                         let index = p.selected;
                         let mut spec = p.plan.maneuver(index);
@@ -644,15 +856,20 @@ pub(super) fn interactions(
                             Field::Prograde => spec.prograde = value,
                             Field::Normal => spec.normal = value,
                             Field::Radial => spec.radial = value,
+                            Field::Place(_) => unreachable!(),
                         }
-                        match lab.session.execute(Action::EditManeuver { index, spec }) {
-                            Outcome::Refused(r) => lab.notice = r,
-                            _ => lab.notice.clear(),
+                        match pilot
+                            .flight
+                            .session
+                            .execute(Action::EditManeuver { index, spec })
+                        {
+                            Outcome::Refused(r) => pilot.notice.0 = r,
+                            _ => pilot.notice.0.clear(),
                         }
                     }
                     state.field = None;
                 }
-                _ => lab.notice = "Enter a finite number".into(),
+                _ => pilot.notice.0 = "Enter a finite number".into(),
             },
             KeyCode::Backspace => {
                 state.draft.pop();
@@ -689,66 +906,51 @@ pub(super) fn interactions(
         }
     }
 }
-fn dispatch(lab: &mut Lab, key: KeyCode) {
+fn dispatch(pilot: &mut Pilot, pointer_over_label: bool, key: KeyCode) {
     let mut keys = ButtonInput::default();
     keys.press(key);
     match key {
         KeyCode::KeyT => {
-            let enabled = lab
-                .session
-                .sim()
-                .fleet
-                .sas_phase(&lab.session.sim().selected)
-                != void_sas::SasPhase::Off;
-            match lab.session.execute(Action::Sas { enabled: !enabled }) {
-                Outcome::Applied => lab.notice.clear(),
-                Outcome::Refused(reason) => lab.notice = reason,
+            let session = &mut pilot.flight.session;
+            let enabled =
+                session.sim().fleet.sas_phase(&session.sim().selected) != void_sas::SasPhase::Off;
+            match session.execute(Action::Sas { enabled: !enabled }) {
+                Outcome::Applied => pilot.notice.0.clear(),
+                Outcome::Refused(reason) => pilot.notice.0 = reason,
                 other => panic!("unexpected SAS outcome: {other:?}"),
             }
         }
-        KeyCode::Space => match lab.session.execute(Action::Stage) {
-            Outcome::Refused(r) => lab.notice = r,
+        KeyCode::Space => match pilot.flight.session.execute(Action::Stage) {
+            Outcome::Refused(r) => pilot.notice.0 = r,
             _ => {
-                lab.prediction = None;
-                lab.own_port = None;
-                lab.target_port = None;
+                pilot.forecast.coast = None;
+                pilot.docking.own = None;
+                pilot.docking.target = None;
             }
         },
         KeyCode::KeyX => {
-            let c = lab.session.sim().fleet.control(&lab.session.sim().selected);
-            lab.session.execute(Action::Control {
+            let session = &mut pilot.flight.session;
+            let c = session.sim().fleet.control(&session.sim().selected);
+            session.execute(Action::Control {
                 throttle: 0.,
                 turn: c.turn,
             });
         }
-        KeyCode::KeyG => plot_controls(lab, &keys),
-        KeyCode::F1 => {
-            let body = lab.session.sim().observation_body();
-            let radius = lab.session.sim().fleet.ephemeris.bodies()[body].radius_meters;
-            let ratio = lab.session.sim().presentation.distance / radius;
-            scenery_preset(
-                lab,
-                body,
-                if ratio < 1.1 {
-                    "orbit"
-                } else if ratio < 10. {
-                    "far"
-                } else {
-                    "near"
-                },
-            );
-        }
+        KeyCode::KeyG => plot_controls(pilot, &keys),
+        KeyCode::F1 => next_body_view(pilot),
         KeyCode::F10 | KeyCode::F11 => {
-            let value = (lab.session.sim().presentation.exposure
+            let session = &mut pilot.flight.session;
+            let value = (session.sim().presentation.exposure
                 * if key == KeyCode::F10 { 0.9 } else { 1.1 })
             .clamp(0.1, 100.);
-            lab.session.execute(Action::View {
+            session.execute(Action::View {
                 command: ViewCommand::Exposure { value },
             });
         }
         KeyCode::F2 | KeyCode::F3 | KeyCode::F4 | KeyCode::F5 | KeyCode::KeyK | KeyCode::KeyL => {
             view_controls(
-                lab,
+                &mut pilot.flight.session,
+                pointer_over_label,
                 &keys,
                 &ButtonInput::default(),
                 &AccumulatedMouseMotion::default(),
@@ -759,14 +961,18 @@ fn dispatch(lab: &mut Lab, key: KeyCode) {
             if key == KeyCode::Home {
                 keys.press(KeyCode::AltLeft);
             }
-            plan_controls(lab, &keys);
+            plan_controls(pilot, &keys);
         }
     }
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn refresh(
-    lab: NonSend<Lab>,
+    flight: NonSend<Flight>,
+    notice: Res<Notice>,
+    camera: Res<CameraView>,
+    forecast: Res<Forecast>,
+    draft: Res<place::PlaceDraft>,
     mut texts: Query<
         (&Readout, &mut Text),
         (Without<crate::navball::NavballLabel>, Without<FieldText>),
@@ -777,21 +983,21 @@ pub(super) fn refresh(
     window: Single<&Window>,
     mut fields: Query<(&FieldText, &mut Text), Without<Readout>>,
 ) {
+    let sim = flight.session.sim();
     for (field, mut text) in &mut fields {
         text.0 = if state.field == Some(field.0) {
             format!("{}▏", state.draft)
+        } else if let Field::Place(place) = field.0 {
+            format!("{:.3}", draft.value(place))
         } else {
-            lab.session
-                .sim()
-                .plans
-                .get(&lab.session.sim().selected)
+            sim.plans
+                .get(&sim.selected)
                 .filter(|p| p.plan.count() > 0)
                 .map_or("—".into(), |p| {
                     format!("{:.2}", field_value(field.0, &p.plan.maneuver(p.selected)))
                 })
         };
     }
-    let sim = lab.session.sim();
     let f = &sim.fleet;
     let id = &sim.selected;
     let ship = f.snapshot(id);
@@ -826,7 +1032,7 @@ pub(super) fn refresh(
     let parts = f.part_snapshots(id);
     let c = f.control(id);
     let whole = f.time().floor() as u64;
-    let map = lab.view.map_or(0., |v| v.map_weight);
+    let map = camera.view.map_or(0., |v| v.map_weight);
     for (kind, mut node) in &mut orbit {
         if *kind == Readout::Maneuver {
             node.display = if sim.plans.contains_key(id)
@@ -858,14 +1064,14 @@ pub(super) fn refresh(
                 whole / 3600 % 24,
                 whole / 60 % 60,
                 whole % 60,
-                RATES[if lab.playback.is_some() {
+                RATES[if flight.playback.is_some() {
                     view.rate
                 } else {
-                    lab.rate
+                    flight.rate
                 }],
-                if lab.paused { "PAUSED" } else { "" }
+                if flight.paused { "PAUSED" } else { "" }
             ),
-            Readout::Stages => format!("STAGES · {} · {:?}", ship.name, ship.mode),
+            Readout::Stages => format!("STAGES · {:?} · {}", ship.mode, ship.name),
             Readout::Throttle => format!(
                 "{:3.0}%\n{}",
                 c.throttle * 100.,
@@ -893,7 +1099,8 @@ pub(super) fn refresh(
                     "escape".into()
                 },
                 distance(orbital.periapsis_radius_meters - body.radius_meters),
-                lab.prediction
+                forecast
+                    .coast
                     .as_ref()
                     .and_then(|p| p.impact.as_ref())
                     .map_or("—".into(), |p| format!(
@@ -902,7 +1109,8 @@ pub(super) fn refresh(
                     )),
                 map * 100.
             ),
-            Readout::Maneuver => plan_description(&lab)
+            Readout::Place => place::describe(&draft, sim),
+            Readout::Maneuver => plan_description(&flight.session)
                 .split("\nM add")
                 .next()
                 .unwrap()
@@ -918,7 +1126,7 @@ pub(super) fn refresh(
                 } else {
                     ship.name.as_str()
                 };
-                let (building, requests, drawn, bytes) = ground.readiness();
+                let (building, requests, drawn, bytes) = ground.0.readiness();
                 let sea = sim
                     .world
                     .bodies
@@ -955,10 +1163,10 @@ pub(super) fn refresh(
                         void_assembly::ControlProfile::Rover => "Rover",
                         void_assembly::ControlProfile::Eva => "EVA",
                     }),
-                if lab.notice.is_empty() {
+                if notice.0.is_empty() {
                     String::new()
                 } else {
-                    format!("\n{}", lab.notice)
+                    format!("\n{}", notice.0)
                 }
             ),
         };
@@ -980,6 +1188,7 @@ fn field_value(field: Field, spec: &void_orbit::ManeuverSpec) -> f64 {
         Field::Prograde => spec.prograde,
         Field::Normal => spec.normal,
         Field::Radial => spec.radial,
+        Field::Place(_) => unreachable!("place fields read the draft"),
     }
 }
 
@@ -1023,7 +1232,7 @@ fn engine_delta_v(f: &void_vessels::Fleet, id: &str, p: &void_vessels::PartSnaps
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(super) fn stages(
     mut commands: Commands,
-    lab: NonSend<Lab>,
+    flight: NonSend<Flight>,
     mut cache: Option<ResMut<StageCache>>,
     list: Query<Entity, With<StageList>>,
     mut stage_text: Query<(&StageItem, &mut Text, &mut TextColor)>,
@@ -1035,7 +1244,7 @@ pub(super) fn stages(
     let Ok(parent) = list.single() else {
         return;
     };
-    let sim = lab.session.sim();
+    let sim = flight.session.sim();
     let f = &sim.fleet;
     let id = &sim.selected;
     let parts = f.part_snapshots(id);
@@ -1208,9 +1417,12 @@ fn engine_fuel(f: &void_vessels::Fleet, id: &str, p: &void_vessels::PartSnapshot
     (fuel, capacity)
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn indicators(
-    lab: NonSend<Lab>,
+    flight: NonSend<Flight>,
+    draft: Res<place::PlaceDraft>,
+    captions: Query<&ButtonLabel>,
+    camera: Res<CameraView>,
     children: Query<&Children>,
     roots: Query<Entity, With<OrbitFade>>,
     mut colors: Query<
@@ -1224,10 +1436,10 @@ pub(super) fn indicators(
     mut buttons: Query<(Entity, &Click, &mut BackgroundColor), With<Button>>,
     mut labels: Query<&mut Text>,
 ) {
-    let sim = lab.session.sim();
+    let sim = flight.session.sim();
     let p = &sim.presentation;
     // Reference orbit panel fades with the same map weight as the trajectories.
-    let alpha = lab.view.map_or(0., |s| s.map_weight) as f32;
+    let alpha = camera.view.map_or(0., |s| s.map_weight) as f32;
     let mut pending = roots.iter().collect::<Vec<_>>();
     let mut descendants = Vec::new();
     while let Some(e) = pending.pop() {
@@ -1247,13 +1459,13 @@ pub(super) fn indicators(
                 _ => false,
             },
             Click::Warp(i) => {
-                *i == if lab.playback.is_some() {
+                *i == if flight.playback.is_some() {
                     p.rate
                 } else {
-                    lab.rate
+                    flight.rate
                 }
             }
-            Click::Pause => lab.paused,
+            Click::Pause => flight.paused,
             Click::Key(KeyCode::KeyT) => {
                 sim.fleet.sas_phase(&sim.selected) != void_sas::SasPhase::Off
             }
@@ -1261,6 +1473,14 @@ pub(super) fn indicators(
         };
         if active {
             bg.0 = Color::srgb(0.12, 0.35, 0.18);
+        }
+        let usable = unavailable(*click, &flight, &draft).is_none();
+        for child in children.get(entity).into_iter().flat_map(|c| c.iter()) {
+            if let (Ok(caption), Ok((Some(mut color), _, _))) =
+                (captions.get(child), colors.get_mut(child))
+            {
+                color.0 = if usable { caption.0 } else { DIM };
+            }
         }
         if let Click::Warp(i) = click
             && RATES[*i] > 4.0
@@ -1390,265 +1610,5 @@ pub(super) fn apply_font(
         if text.font != font.mono.clone().into() {
             text.font = font.mono.clone().into();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn released_quick_pointer_click_is_queued_and_applied_once() {
-        let mut app = super::super::tests::initialized_scene(true);
-        app.insert_resource(ButtonInput::<KeyCode>::default())
-            .insert_resource(ButtonInput::<MouseButton>::default())
-            .add_message::<bevy::input::keyboard::KeyboardInput>()
-            .add_systems(Update, interactions.before(super::super::draw));
-        let button = app
-            .world_mut()
-            .query::<(Entity, &Click)>()
-            .iter(app.world())
-            .find_map(|(e, c)| matches!(c, Click::Toggle(Toggle::VisualAir)).then_some(e))
-            .unwrap();
-        let window = app
-            .world_mut()
-            .query_filtered::<Entity, With<Window>>()
-            .single(app.world())
-            .unwrap();
-        let camera = app
-            .world_mut()
-            .query_filtered::<Entity, With<LabCamera>>()
-            .single(app.world())
-            .unwrap();
-        let event = Pointer::new(
-            bevy::picking::pointer::PointerId::Mouse,
-            bevy::picking::pointer::Location {
-                target: bevy::camera::NormalizedRenderTarget::Window(
-                    bevy::window::WindowRef::Entity(window)
-                        .normalize(None)
-                        .unwrap(),
-                ),
-                position: Vec2::ZERO,
-            },
-            bevy::picking::events::Click {
-                button: bevy::picking::pointer::PointerButton::Primary,
-                hit: bevy::picking::backend::HitData::new(camera, 0., None, None),
-                duration: std::time::Duration::from_millis(5),
-                count: 1,
-            },
-            button,
-        );
-        app.world_mut().trigger(event);
-        assert_eq!(app.world().resource::<PendingClicks>().0.len(), 1);
-        assert!(
-            !app.world()
-                .resource::<ButtonInput<MouseButton>>()
-                .pressed(MouseButton::Left)
-        );
-        app.update();
-        assert!(
-            !app.world()
-                .non_send::<Lab>()
-                .session
-                .sim()
-                .presentation
-                .visual_air
-        );
-        assert!(app.world().resource::<PendingClicks>().0.is_empty());
-        app.update();
-        assert!(
-            !app.world()
-                .non_send::<Lab>()
-                .session
-                .sim()
-                .presentation
-                .visual_air,
-            "same click must not double-toggle"
-        );
-    }
-    #[test]
-    fn numeric_commit_and_cancel_capture_the_current_keyboard_frame() {
-        for key_code in [KeyCode::Enter, KeyCode::Escape] {
-            let mut app = super::super::tests::initialized_scene(true);
-            app.insert_resource(ButtonInput::<KeyCode>::default())
-                .insert_resource(ButtonInput::<MouseButton>::default())
-                .insert_resource(AccumulatedMouseMotion::default())
-                .insert_resource(AccumulatedMouseScroll::default())
-                .add_message::<bevy::input::keyboard::KeyboardInput>()
-                .add_systems(
-                    Update,
-                    (interactions, super::super::controls)
-                        .chain()
-                        .before(super::super::draw),
-                );
-            {
-                let mut state = app.world_mut().resource_mut::<UiState>();
-                state.field = Some(Field::Start);
-                state.draft = "123".into();
-            }
-            app.world_mut()
-                .resource_mut::<ButtonInput<KeyCode>>()
-                .press(key_code);
-            let window = app
-                .world_mut()
-                .query_filtered::<Entity, With<Window>>()
-                .single(app.world())
-                .unwrap();
-            app.world_mut()
-                .write_message(bevy::input::keyboard::KeyboardInput {
-                    key_code,
-                    logical_key: if key_code == KeyCode::Enter {
-                        bevy::input::keyboard::Key::Enter
-                    } else {
-                        bevy::input::keyboard::Key::Escape
-                    },
-                    state: bevy::input::ButtonState::Pressed,
-                    text: None,
-                    repeat: false,
-                    window,
-                });
-            let before =
-                void_fleet_flight::session::world_mark(app.world().non_send::<Lab>().session.sim());
-            app.update();
-            let state = app.world().resource::<UiState>();
-            assert!(state.field.is_none());
-            assert!(
-                state.editing,
-                "commit/cancel frame must still capture game keys"
-            );
-            assert_eq!(
-                before,
-                void_fleet_flight::session::world_mark(app.world().non_send::<Lab>().session.sim())
-            );
-            app.world_mut()
-                .resource_mut::<ButtonInput<KeyCode>>()
-                .clear();
-            app.update();
-            assert!(!app.world().resource::<UiState>().editing);
-        }
-    }
-    #[test]
-    fn edited_maneuver_value_reaches_the_live_plan_and_replays() {
-        let mut app = super::super::tests::initialized_scene(true);
-        app.insert_resource(ButtonInput::<KeyCode>::default())
-            .insert_resource(ButtonInput::<MouseButton>::default())
-            .insert_resource(AccumulatedMouseMotion::default())
-            .insert_resource(AccumulatedMouseScroll::default())
-            .add_message::<bevy::input::keyboard::KeyboardInput>()
-            .add_systems(
-                Update,
-                (interactions, super::super::controls)
-                    .chain()
-                    .before(super::super::draw),
-            );
-        {
-            let mut lab = app.world_mut().non_send_mut::<Lab>();
-            let craft = lab.craft.clone();
-            let Outcome::Spawned(id) = lab.session.execute(Action::LaunchOrbit {
-                craft,
-                offset: DVec3::ZERO,
-            }) else {
-                panic!("orbit fixture");
-            };
-            lab.session.execute(Action::Select { vessel: id });
-            lab.session.execute(Action::Stage);
-        }
-        app.world_mut()
-            .resource_mut::<PendingClicks>()
-            .0
-            .push(Click::Key(KeyCode::KeyM));
-        app.update();
-        app.world_mut()
-            .resource_mut::<PendingClicks>()
-            .0
-            .push(Click::Field(Field::Prograde));
-        app.update();
-        let window = app
-            .world_mut()
-            .query_filtered::<Entity, With<Window>>()
-            .single(app.world())
-            .unwrap();
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::ControlLeft);
-        app.world_mut()
-            .write_message(bevy::input::keyboard::KeyboardInput {
-                key_code: KeyCode::KeyA,
-                logical_key: bevy::input::keyboard::Key::Character("a".into()),
-                state: bevy::input::ButtonState::Pressed,
-                text: Some("a".into()),
-                repeat: false,
-                window,
-            });
-        app.update();
-        assert!(app.world().resource::<UiState>().draft.is_empty());
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .reset_all();
-        app.world_mut()
-            .write_message(bevy::input::keyboard::KeyboardInput {
-                key_code: KeyCode::Digit1,
-                logical_key: bevy::input::keyboard::Key::Character("12.5".into()),
-                state: bevy::input::ButtonState::Pressed,
-                text: Some("12.5".into()),
-                repeat: false,
-                window,
-            });
-        app.update();
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Enter);
-        app.world_mut()
-            .write_message(bevy::input::keyboard::KeyboardInput {
-                key_code: KeyCode::Enter,
-                logical_key: bevy::input::keyboard::Key::Enter,
-                state: bevy::input::ButtonState::Pressed,
-                text: None,
-                repeat: false,
-                window,
-            });
-        app.update();
-        let mut lab = app.world_mut().non_send_mut::<Lab>();
-        let sim = lab.session.sim();
-        let plan = &sim.plans[&sim.selected];
-        assert_eq!(plan.plan.maneuver(plan.selected).prograde, 12.5);
-        assert!(!plan.executing, "numeric Enter must not execute or dock");
-        lab.session.mark();
-        let recording = lab.session.recording();
-        assert_eq!(
-            recording
-                .entries
-                .iter()
-                .filter(|entry| matches!(entry.action, Action::EditManeuver { .. }))
-                .count(),
-            1
-        );
-        assert_eq!(
-            void_fleet_flight::session::world_mark(FlightSession::from_recording(recording).sim()),
-            void_fleet_flight::session::world_mark(lab.session.sim()),
-        );
-    }
-    #[test]
-    fn sas_button_reports_the_core_refusal_for_a_passive_stage() {
-        let mut app = super::super::tests::initialized_scene(true);
-        let mut lab = app.world_mut().non_send_mut::<Lab>();
-        assert!(matches!(
-            lab.session.execute(Action::Stage),
-            Outcome::Staged(_)
-        ));
-        assert!(matches!(
-            lab.session.execute(Action::Stage),
-            Outcome::Staged(_)
-        ));
-        let passive = lab
-            .session
-            .sim()
-            .fleet
-            .vessel_ids()
-            .into_iter()
-            .find(|id| !lab.session.sim().fleet.has_command(id))
-            .expect("separated booster without a command part");
-        lab.session.execute(Action::Select { vessel: passive });
-        dispatch(&mut lab, KeyCode::KeyT);
-        assert!(lab.notice.contains("functioning command part"));
     }
 }

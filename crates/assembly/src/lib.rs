@@ -1,11 +1,9 @@
-//! Stack-node craft model and local Rapier test flight, ported from lab/assembly.
-//! No Bevy dependency: the editor and rendering live in void-app's assembly example.
+//! Stack-node craft model: part catalog, attachment graph, resources and crew. No Bevy dependency;
+//! the editor lives in `void-assembly-lab`.
 mod graph;
 mod model;
-mod runtime;
 pub use graph::*;
 pub use model::*;
-pub use runtime::*;
 
 mod thermal;
 pub use thermal::*;

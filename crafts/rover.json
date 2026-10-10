@@ -1,0 +1,141 @@
+{
+  "version": 3,
+  "name": "Four-wheel rover",
+  "parts": [
+    {
+      "id": "chassis",
+      "definitionId": "rover-crewed-chassis",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": null
+    },
+    {
+      "id": "wheel0",
+      "definitionId": "rover-wheel-left",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "chassis",
+        "parentNodeId": "surface-0",
+        "nodeId": "mount",
+        "pose": {
+          "position": [
+            -0.775,
+            0.0,
+            0.7
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      }
+    },
+    {
+      "id": "wheel1",
+      "definitionId": "rover-wheel-right",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "chassis",
+        "parentNodeId": "surface-1",
+        "nodeId": "mount",
+        "pose": {
+          "position": [
+            0.775,
+            0.0,
+            0.7
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      }
+    },
+    {
+      "id": "wheel2",
+      "definitionId": "rover-rear-wheel-left",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "chassis",
+        "parentNodeId": "surface-2",
+        "nodeId": "mount",
+        "pose": {
+          "position": [
+            -0.775,
+            0.0,
+            -0.7
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      }
+    },
+    {
+      "id": "wheel3",
+      "definitionId": "rover-rear-wheel-right",
+      "resources": {},
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "chassis",
+        "parentNodeId": "surface-3",
+        "nodeId": "mount",
+        "pose": {
+          "position": [
+            0.775,
+            0.0,
+            -0.7
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      }
+    },
+    {
+      "id": "p1",
+      "definitionId": "crew-seat",
+      "resources": {
+        "monopropellant": 5.0
+      },
+      "moduleStages": {},
+      "stage": null,
+      "attachment": {
+        "parentId": "chassis",
+        "parentNodeId": "surface-4",
+        "nodeId": "mount",
+        "pose": {
+          "position": [
+            0.0,
+            0.675,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      }
+    }
+  ]
+}

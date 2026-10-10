@@ -1,4 +1,4 @@
-//! The view lab (`lab/view`): one view from the vessel out to the whole system. The camera's
+//! One view from the vessel out to the whole system. The camera's
 //! per-frame decisions (map fade, up turn, co-rotation; single or split view), bodies' orbits as
 //! osculating ellipses, the plotting frame (inertial or turning with a body) and the map's lines
 //! and labels. Drawing is the caller's.

@@ -1,5 +1,4 @@
-//! Tile neighbours across edges and cube faces, as `lab/lod/src/lod/FaceAdjacency.ts` and
-//! `TileNeighbors.ts`.
+//! Tile neighbours across edges and cube faces.
 
 use std::sync::LazyLock;
 

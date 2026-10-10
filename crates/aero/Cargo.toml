@@ -7,13 +7,5 @@ publish = false
 
 [dependencies]
 glam.workspace = true
-rapier3d.workspace = true
 void-assembly.workspace = true
 void-environment.workspace = true
-void-frames.workspace = true
-void-landing.workspace = true
-void-math.workspace = true
-void-orbit.workspace = true
-
-[dev-dependencies]
-serde_json.workspace = true

@@ -1,4 +1,4 @@
-// lab/scenery's Stars.ts: one-pixel points 1e12 m away, their colour scaled by how dark the sky is.
+// Stars: one-pixel points 1e12 m away, their colour scaled by how dark the sky is.
 
 #import bevy_pbr::mesh_functions::{get_world_from_local, mesh_position_local_to_world}
 #import bevy_pbr::view_transformations::position_world_to_clip

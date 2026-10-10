@@ -1,26 +1,13 @@
-//! Aerodynamics, heating and reentry, ported from `lab/aerodynamics`: a layered Earth atmosphere,
-//! body and wing forces at each element's own airflow, two-layer part heating with a finite
-//! ablator, three test vehicles, an aircraft on Rapier and a 6-DOF capsule reentry. No Bevy.
-//!
-//! The vector and quaternion operations keep the lab's operation order, so the results agree with
-//! it bit for bit except where V8's own `sin`, `cos` and `pow` round differently (see `void_math`).
+//! Aerodynamics and heating: body and wing forces at each element's own airflow, and two-layer
+//! part heating with a finite ablator. No Bevy.
 
 mod aero;
-mod entry;
-mod flight;
-mod loads;
 mod thermal;
-mod vehicle;
 
 pub use aero::*;
-pub use entry::*;
-pub use flight::*;
-pub use loads::*;
 pub use thermal::*;
-pub use vehicle::*;
 
 use glam::{DQuat, DVec3};
-use void_math::hypot;
 
 pub use void_assembly::rotate;
 /// The atmosphere model lives in `void-environment`; aero keeps the names it always had.
@@ -28,7 +15,7 @@ pub use void_environment::{Air, Atmosphere, EarthAtmosphere, smooth, validate_ai
 
 pub const DEG: f64 = std::f64::consts::PI / 180.0;
 
-/// `Math.max(lo, Math.min(hi, x))`.
+/// `x` clamped to [lo, hi].
 pub fn clamp(x: f64, lo: f64, hi: f64) -> f64 {
     lo.max(hi.min(x))
 }
@@ -59,17 +46,17 @@ pub(crate) fn validate_rotation(q: DQuat) {
         finite(v, "rotation");
     }
     assert!(
-        (hypot([q.x, q.y, q.z, q.w]) - 1.0).abs() <= 1e-8,
+        (q.length() - 1.0).abs() <= 1e-8,
         "Rotation must be a unit quaternion"
     );
 }
 
-/// Length as `Math.hypot`.
+/// A vector's length.
 pub fn length(v: DVec3) -> f64 {
-    hypot([v.x, v.y, v.z])
+    v.length()
 }
 
-/// The lab's `normalize`: a zero or non-finite vector has no direction.
+/// The unit vector along `v`; a zero or non-finite vector has no direction.
 pub fn normalize(v: DVec3) -> DVec3 {
     let len = length(v);
     assert!(
@@ -83,7 +70,7 @@ pub fn normalize(v: DVec3) -> DVec3 {
 }
 
 pub fn unit(q: DQuat) -> DQuat {
-    let n = positive(hypot([q.x, q.y, q.z, q.w]), "quaternion length");
+    let n = positive(q.length(), "quaternion length");
     DQuat::from_xyzw(q.x / n, q.y / n, q.z / n, q.w / n)
 }
 
@@ -91,14 +78,9 @@ pub fn inverse(q: DQuat) -> DQuat {
     DQuat::from_xyzw(-q.x, -q.y, -q.z, q.w)
 }
 
-/// Hamilton product a b, in the lab's term order.
+/// Hamilton product a b.
 pub fn quat_multiply(a: DQuat, b: DQuat) -> DQuat {
-    DQuat::from_xyzw(
-        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
-    )
+    a * b
 }
 
 /// The shortest rotation taking `from` to `to`.

@@ -733,7 +733,6 @@ dependencies = [
  "slotmap",
  "smallvec",
  "thiserror 2.0.21",
- "tracing",
  "variadics_please",
 ]
 
@@ -5457,14 +5456,8 @@ name = "void-aero"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "rapier3d",
- "serde_json",
  "void-assembly",
  "void-environment",
- "void-frames",
- "void-landing",
- "void-math",
- "void-orbit",
 ]
 
 [[package]]
@@ -5476,20 +5469,16 @@ dependencies = [
  "glam 0.32.1",
  "half",
  "serde_json",
- "void-aero",
  "void-assembly",
  "void-assembly-lab",
  "void-diagnostics",
- "void-environment",
  "void-fleet-flight",
  "void-frames",
  "void-landing",
  "void-lod",
- "void-math",
  "void-multiscale",
  "void-navball",
  "void-orbit",
- "void-rotation",
  "void-sas",
  "void-scenery",
  "void-terrain",
@@ -5502,10 +5491,8 @@ name = "void-assembly"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "rapier3d",
  "serde",
  "serde_json",
- "void-math",
 ]
 
 [[package]]
@@ -5532,7 +5519,6 @@ version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
  "void-frames",
- "void-math",
  "void-orbit",
  "void-terrain",
 ]
@@ -5575,11 +5561,9 @@ dependencies = [
  "glam 0.32.1",
  "rapier3d",
  "serde",
- "serde_json",
  "void-environment",
  "void-frames",
  "void-lod",
- "void-math",
  "void-orbit",
  "void-rotation",
  "void-terrain",
@@ -5590,17 +5574,6 @@ name = "void-lod"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "serde",
- "serde_json",
- "void-math",
-]
-
-[[package]]
-name = "void-math"
-version = "0.0.0"
-dependencies = [
- "glam 0.32.1",
- "libm",
 ]
 
 [[package]]
@@ -5625,7 +5598,6 @@ dependencies = [
  "serde",
  "serde_json",
  "void-frames",
- "void-math",
  "void-orbit",
 ]
 
@@ -5634,8 +5606,6 @@ name = "void-navball"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "serde_json",
- "void-math",
 ]
 
 [[package]]
@@ -5646,7 +5616,6 @@ dependencies = [
  "serde",
  "serde_json",
  "void-frames",
- "void-math",
 ]
 
 [[package]]
@@ -5654,8 +5623,6 @@ name = "void-rotation"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "serde_json",
- "void-math",
 ]
 
 [[package]]
@@ -5664,10 +5631,6 @@ version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
  "serde",
- "serde_json",
- "void-landing",
- "void-math",
- "void-orbit",
  "void-rotation",
 ]
 
@@ -5676,10 +5639,8 @@ name = "void-scenery"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "libm",
  "serde",
  "serde_json",
- "void-math",
  "void-terrain",
 ]
 
@@ -5691,7 +5652,6 @@ dependencies = [
  "serde",
  "serde_json",
  "void-lod",
- "void-math",
 ]
 
 [[package]]
@@ -5720,11 +5680,9 @@ name = "void-view"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "serde_json",
  "void-frames",
  "void-landing",
  "void-lod",
- "void-math",
  "void-orbit",
  "void-terrain",
 ]

@@ -2,7 +2,8 @@
 use glam::{DQuat, DVec3};
 use void_assembly::fresh_craft;
 use void_fleet_flight::session::{Action, FlightSession, InitialWorld, Outcome, world_mark};
-use void_landing::{FrameState, PlanetFrame, earth_size};
+use void_frames::State;
+use void_landing::{PlanetFrame, earth_size};
 use void_vessels::flat_site;
 fn advance(s: &mut FlightSession, seconds: f64) {
     assert_eq!(
@@ -55,7 +56,7 @@ fn aerodynamic_wrench_checkpoint_and_recording_continue_exactly() {
         let state = PlanetFrame::new(&sim.fleet.ephemeris, sim.home).to_inertial(
             &sim.fleet.ephemeris,
             0.0,
-            FrameState {
+            State {
                 position: DVec3::X * (p.terrain.radius_meters + 5000.0),
                 velocity: DVec3::Y * 80.0,
             },

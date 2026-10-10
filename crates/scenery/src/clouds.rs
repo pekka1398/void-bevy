@@ -2,7 +2,6 @@
 //! references for the shader's density and shell intervals.
 
 use glam::DVec3;
-use void_math::{asin, cos, hypot, pow, sin};
 use void_terrain::noise::noise;
 
 /// Heights above the live sea level, never above the ocean-floor reference sphere.
@@ -30,7 +29,7 @@ pub fn cloud_smooth(a: f64, b: f64, v: f64) -> f64 {
 /// Global weather on body-fixed directions: (humidity, vertical type). No cube-face coordinates or
 /// tile state.
 pub fn cloud_weather(d: DVec3) -> (f64, f64) {
-    let latitude = asin(d.z.clamp(-1.0, 1.0));
+    let latitude = f64::asin(d.z.clamp(-1.0, 1.0));
     // Warp broad weather systems before adding weaker regional structure.
     let x = d.x + 0.18 * noise(d.x * 3.0 + 71.0, d.y * 3.0, d.z * 3.0);
     let y = d.y + 0.18 * noise(d.x * 3.0, d.y * 3.0 + 29.0, d.z * 3.0);
@@ -40,10 +39,11 @@ pub fn cloud_weather(d: DVec3) -> (f64, f64) {
             + 0.6 * noise(x * 23.0, y * 23.0 + 17.0, z * 23.0)
             + 0.18 * noise(x * 47.0 + 7.0, y * 47.0, z * 47.0)
             + 0.06 * noise(x * 89.0, y * 89.0 + 53.0, z * 89.0)
-            + 0.12 * cos(latitude * 4.0),
+            + 0.12 * f64::cos(latitude * 4.0),
     );
     let kind = clamp01(
-        0.45 + 0.5 * noise(d.x * 11.0, d.y * 11.0, d.z * 11.0 + 31.0) + 0.25 * cos(latitude * 2.0),
+        0.45 + 0.5 * noise(d.x * 11.0, d.y * 11.0, d.z * 11.0 + 31.0)
+            + 0.25 * f64::cos(latitude * 2.0),
     );
     (humidity, kind)
 }
@@ -56,7 +56,7 @@ pub fn weather_coverage(humidity: f64, amount: f64) -> f64 {
     ) * 0.9
 }
 
-/// JavaScript's Math.round on a non-negative value.
+/// Round half up, for a non-negative value.
 fn round_byte(v: f64) -> u8 {
     (v + 0.5).floor() as u8
 }
@@ -66,17 +66,20 @@ pub fn weather_direction(x: usize, y: usize) -> DVec3 {
     let latitude = std::f64::consts::PI * (y as f64 / (WEATHER_HEIGHT - 1) as f64 - 0.5);
     let longitude = std::f64::consts::PI * (2.0 * x as f64 / WEATHER_WIDTH as f64 - 1.0);
     DVec3::new(
-        cos(latitude) * cos(longitude),
-        cos(latitude) * sin(longitude),
-        sin(latitude),
+        f64::cos(latitude) * f64::cos(longitude),
+        f64::cos(latitude) * f64::sin(longitude),
+        f64::sin(latitude),
     )
 }
 
+/// Threads a cloud texture build uses, whatever the machine's core count.
+pub const CLOUD_BUILD_THREADS: usize = 4;
+
 /// RGBA8: R = humidity, G = vertical type (thin stratiform → deep cumulus), A = 255. Rows build in
-/// parallel on `threads` threads.
-pub fn build_cloud_weather(threads: usize) -> Vec<u8> {
+/// parallel on `CLOUD_BUILD_THREADS` threads.
+pub fn build_cloud_weather() -> Vec<u8> {
     let mut data = vec![0u8; WEATHER_WIDTH * WEATHER_HEIGHT * 4];
-    let rows_per = WEATHER_HEIGHT.div_ceil(threads.max(1));
+    let rows_per = WEATHER_HEIGHT.div_ceil(CLOUD_BUILD_THREADS);
     std::thread::scope(|scope| {
         for (chunk, rows) in data.chunks_mut(rows_per * WEATHER_WIDTH * 4).enumerate() {
             scope.spawn(move || {
@@ -192,38 +195,45 @@ fn worley(x: f64, y: f64, z: f64, period: i64) -> f64 {
 
 /// A repeating RGBA8 noise volume, `size`³, samples at texel centres (linear repeat filtering
 /// therefore agrees at the seam). Shape (`detail` false): R Perlin–Worley, G fine value noise, B a
-/// smooth low-frequency field for regional banks. Detail: R Worley.
+/// smooth low-frequency field for regional banks. Detail: R Worley. Builds on
+/// `CLOUD_BUILD_THREADS` threads.
 pub fn build_cloud_noise(size: usize, detail: bool) -> Vec<u8> {
     let mut data = vec![0u8; size * size * size * 4];
     let cells: i64 = if detail { 4 } else { 8 };
     let c = cells as f64;
+    let slab_bytes = size * size * 4;
+    let slabs_per = size.div_ceil(CLOUD_BUILD_THREADS);
     std::thread::scope(|scope| {
-        for (z, slab) in data.chunks_mut(size * size * 4).enumerate() {
+        for (chunk, slabs) in data.chunks_mut(slabs_per * slab_bytes).enumerate() {
             scope.spawn(move || {
-                for y in 0..size {
-                    for x in 0..size {
-                        let s = size as f64;
-                        let (qx, qy, qz) = (
-                            (x as f64 + 0.5) / s,
-                            (y as f64 + 0.5) / s,
-                            (z as f64 + 0.5) / s,
-                        );
-                        let w = worley(qx * c, qy * c, qz * c, cells);
-                        let perlin = perlin_noise(qx * c, qy * c, qz * c, cells);
-                        let fine = value_noise(qx * c * 2.0, qy * c * 2.0, qz * c * 2.0, cells * 2);
-                        let i = (y * size + x) * 4;
-                        slab[i] = round_byte(
-                            clamp01(if detail {
-                                w
-                            } else {
-                                (0.65 * perlin + 0.35 * w - 0.25) / 0.5
-                            }) * 255.0,
-                        );
-                        slab[i + 1] = round_byte(fine * 255.0);
-                        // A separate smooth, low-frequency field organizes regional cloud banks.
-                        slab[i + 2] =
-                            round_byte(perlin_noise(qx * 2.0, qy * 2.0, qz * 2.0, 2) * 255.0);
-                        slab[i + 3] = 255;
+                for (k, slab) in slabs.chunks_mut(slab_bytes).enumerate() {
+                    let z = chunk * slabs_per + k;
+                    for y in 0..size {
+                        for x in 0..size {
+                            let s = size as f64;
+                            let (qx, qy, qz) = (
+                                (x as f64 + 0.5) / s,
+                                (y as f64 + 0.5) / s,
+                                (z as f64 + 0.5) / s,
+                            );
+                            let w = worley(qx * c, qy * c, qz * c, cells);
+                            let perlin = perlin_noise(qx * c, qy * c, qz * c, cells);
+                            let fine =
+                                value_noise(qx * c * 2.0, qy * c * 2.0, qz * c * 2.0, cells * 2);
+                            let i = (y * size + x) * 4;
+                            slab[i] = round_byte(
+                                clamp01(if detail {
+                                    w
+                                } else {
+                                    (0.65 * perlin + 0.35 * w - 0.25) / 0.5
+                                }) * 255.0,
+                            );
+                            slab[i + 1] = round_byte(fine * 255.0);
+                            // A separate smooth, low-frequency field organizes regional cloud banks.
+                            slab[i + 2] =
+                                round_byte(perlin_noise(qx * 2.0, qy * 2.0, qz * 2.0, 2) * 255.0);
+                            slab[i + 3] = 255;
+                        }
                     }
                 }
             });
@@ -299,7 +309,7 @@ pub fn cloud_density(
     let sheet = cloud_smooth(0.55, 0.85, coverage) * (1.0 - 0.6 * kind);
     let base = cells * (1.0 - sheet) + 0.32 * coverage * sheet;
     let filtered_base = base * (1.0 - unresolved)
-        + (pow(coverage, 3.0) * 0.45 * (1.0 - sheet) + 0.32 * coverage * sheet)
+        + (f64::powf(coverage, 3.0) * 0.45 * (1.0 - sheet) + 0.32 * coverage * sheet)
             * clamp01(1.0 - h * h * 0.6)
             * unresolved;
     clamp01(filtered_base * profile - (1.0 - detail) * 0.16 * o.detail_weight)
@@ -315,7 +325,7 @@ pub fn cloud_shell_intervals(
     outer: f64,
     scene_distance: f64,
 ) -> Vec<(f64, f64)> {
-    let r = hypot([origin.x, origin.y, origin.z]);
+    let r = origin.length();
     let mu = (origin.x * direction.x + origin.y * direction.y + origin.z * direction.z) / r;
     let roots = |radius: f64| {
         let altitude = r - radius;
@@ -326,7 +336,7 @@ pub fn cloud_shell_intervals(
         return Vec::new();
     };
     let (start, end) = (outside.0.max(0.0), scene_distance.min(outside.1));
-    // Written as the TS does, so a NaN end also gives no interval.
+    // Written so that a NaN end also gives no interval.
     #[allow(clippy::neg_cmp_op_on_partial_ord)]
     if !(end > start) {
         return Vec::new();

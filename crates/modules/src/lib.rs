@@ -1,7 +1,7 @@
 //! Pure part-module loads, shared by Fleet owners. Wrenches name their frame and moment
 //! reference; the caller supplies trial attitude/point velocity and commits state only after
 //! accepted time. Geometry, resources, and deployment states are never mutated by evaluation.
-//! No Bevy and no Fleet; see `docs/aero-wrenches.md`.
+//! No Bevy and no Fleet.
 mod air;
 pub mod wrench;
 pub use wrench::Wrench;

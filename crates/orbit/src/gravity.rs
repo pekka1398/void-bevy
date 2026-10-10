@@ -19,8 +19,7 @@ pub fn pull(gm: f64, c: f64, axis: DVec3, r: DVec3) -> DVec3 {
     a
 }
 
-/// `a += pull(gm, c, axis, r)`, adding the point mass and then the bulge. A sum over bodies made
-/// this way rounds exactly as the orbit lab's propagator sums, which its impact-time checks need.
+/// `a += pull(gm, c, axis, r)`, adding the point mass and then the bulge.
 #[inline]
 pub fn add_pull(a: &mut DVec3, gm: f64, c: f64, axis: DVec3, r: DVec3) {
     let r2 = r.x * r.x + r.y * r.y + r.z * r.z;

@@ -1,5 +1,4 @@
-// lab/scenery's transport and resolve passes (AtmosphereNodes.transport, sunDisc, CloudNodes,
-// SceneryPipeline), as one full-screen pass over the rendered scene: every pixel's colour plus the
+// The sky's transport and resolve passes as one full-screen pass over the rendered scene: every pixel's colour plus the
 // sun's disc is dimmed by the air and clouds between it and the camera, and the light they scatter
 // toward the camera on the way is added. Air and clouds are integrated together, in depth order.
 //
@@ -91,7 +90,7 @@ fn shape() -> AtmosphereShape {
     return AtmosphereShape(air.bottom_radius, air.top_radius, air.horizon);
 }
 
-// ---------------------------------------------------------------- clouds (CloudNodes.ts)
+// ---------------------------------------------------------------- clouds
 
 /// Stable camera-relative height: (r² − R²) / (r + R), with the CPU's camera altitude.
 fn cloud_height(position: vec3<f32>) -> f32 {
@@ -335,7 +334,7 @@ fn transport(ray: Ray) -> Medium {
     let top_near = -projection - sqrt(top_discriminant);
     let top_far = -projection + sqrt(top_discriminant);
     let start = max(top_near, 0.0);
-    // The lab's mix(1e30, ground, hit): as a + (b − a)·t that loses the ground distance to rounding
+    // Not mix(1e30, ground, hit): as a + (b − a)·t that loses the ground distance to rounding
     // (1e30 − 1e30 = 0) on some GPUs, ending every ground ray at the camera. select picks exactly.
     let end = min(min(top_far, ray.scene_distance), select(1e30, ground_distance, hits_ground));
     if !(end > start) {
@@ -436,8 +435,8 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     return vec4(tone_map(radiance), 1.0);
 }
 
-// ---------------------------------------------------------------- three.js's tone mapping
-// (ToneMappingFunctions.js), so exposure and curves match the lab exactly; Bevy's own is off.
+// ---------------------------------------------------------------- tone mapping
+// Done here, after the air, with its own exposure; Bevy's own is off.
 
 fn tone_map(color: vec3<f32>) -> vec3<f32> {
     let mode = u32(air.tone_mapping);

@@ -14,7 +14,7 @@ use void_frames::{
 };
 use void_landing::{
     BodyShape, ContactBodySpec, ContactFrame, ContactWorld, ContactWorldOptions,
-    EncounterPhysicsGate, EncounterRanges, FrameState, Piece, PieceMass, PlanetFrame, SimpleShape,
+    EncounterPhysicsGate, EncounterRanges, Piece, PieceMass, PlanetFrame, SimpleShape,
 };
 pub use void_modules::rcs::RcsControl;
 use void_modules::{Conditions, has_atmosphere, vessel_air_at};
@@ -28,6 +28,7 @@ use void_terrain::Terrain;
 
 mod eva;
 mod guidance;
+mod placement;
 mod thermal;
 mod vehicles;
 pub use eva::CrewSeat;
@@ -36,7 +37,7 @@ pub use guidance::{GuidanceStatus, GuidedBurn};
 use wrenches::{GuidedAirSource, RigidFlightSource, SceneStepSource};
 
 type SceneGroup = (Option<usize>, Vec<String>, Vec<(u64, usize)>);
-/// Explicit physics configurations; full air dynamics is accepted in its lab before opting
+/// Explicit physics configurations; full air dynamics is accepted on its own before opting
 /// the main game in. ForceOnly retains the original no-spin air sampling and force pathway.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,8 +106,8 @@ pub struct VesselSnapshot {
     pub part_ids: Vec<String>,
 }
 impl VesselSnapshot {
-    fn state(&self) -> FrameState {
-        FrameState {
+    fn state(&self) -> State {
+        State {
             position: self.position,
             velocity: self.velocity,
         }
@@ -367,14 +368,14 @@ fn vec32(v: DVec3) -> rapier3d::math::Vector {
 fn quat64(q: rapier3d::math::Rotation) -> DQuat {
     DQuat::from_xyzw(q.x as f64, q.y as f64, q.z as f64, q.w as f64).normalize()
 }
-fn state_of(s: FrameState) -> State {
+fn state_of(s: State) -> State {
     State {
         position: s.position,
         velocity: s.velocity,
     }
 }
-fn frame_state(s: State) -> FrameState {
-    FrameState {
+fn frame_state(s: State) -> State {
+    State {
         position: s.position,
         velocity: s.velocity,
     }
@@ -983,7 +984,7 @@ impl Fleet {
     pub fn launch(
         &mut self,
         craft: &Craft,
-        state: FrameState,
+        state: State,
         rotation: DQuat,
         angular_velocity: DVec3,
     ) -> String {
@@ -1076,42 +1077,7 @@ impl Fleet {
         let lowest = c
             .parts
             .iter()
-            .map(|p| {
-                let ay = (p.pose.rotation * DVec3::Y).y;
-                let hull = if p.definition.box_size_meters.is_none() {
-                    // Keep unchanged Craft2 launch arithmetic, including its subtraction order.
-                    let radial = if p.definition.shape == Shape::Box {
-                        p.definition.radius
-                            * ((p.pose.rotation * DVec3::X).y.abs()
-                                + (p.pose.rotation * DVec3::Z).y.abs())
-                    } else {
-                        p.definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
-                    };
-                    p.pose.position.y - ay.abs() * p.definition.height / 2.0 - radial
-                } else {
-                    let extent = if p.definition.shape == Shape::Box {
-                        let h = part_box_size(p.definition) / 2.0;
-                        h.x * (p.pose.rotation * DVec3::X).y.abs()
-                            + h.y * ay.abs()
-                            + h.z * (p.pose.rotation * DVec3::Z).y.abs()
-                    } else {
-                        ay.abs() * p.definition.height / 2.0
-                            + p.definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
-                    };
-                    p.pose.position.y - extent
-                };
-                p.definition.modules.iter().fold(hull, |lowest, m| match m {
-                    Module::Wheel { parameters: d, .. } => {
-                        let hub = p.pose.position + p.pose.rotation * d.suspension_origin;
-                        let end = hub
-                            + p.pose.rotation
-                                * d.suspension_direction
-                                * (d.rest_length_meters + d.travel_meters);
-                        lowest.min(end.y - d.radius_meters)
-                    }
-                    _ => lowest,
-                })
-            })
+            .map(|p| part_lowest_y(p.definition, &p.pose))
             .fold(f64::INFINITY, f64::min);
         let g = &self.grounds[self.ground_index(body)];
         let r = g.frame.body.radius_meters + self.terrain(body).height(d) + cy - lowest + 0.05;
@@ -1212,7 +1178,7 @@ impl Fleet {
         self.frames.surface[self.grounds[g].spec.body_index]
     }
     /// Inertial state to a ground's body-fixed coordinates.
-    fn body_fixed(&self, g: usize, state: FrameState) -> FrameState {
+    fn body_fixed(&self, g: usize, state: State) -> State {
         let s = self
             .frames()
             .transform(self.frames.origin, self.surface(g))
@@ -1224,21 +1190,21 @@ impl Fleet {
             .transform(self.scenes[&s].contact, self.frames.origin)
             .rotation()
     }
-    fn to_inertial(&self, s: u64, state: FrameState) -> FrameState {
+    fn to_inertial(&self, s: u64, state: State) -> State {
         frame_state(
             self.frames()
                 .transform(self.scenes[&s].contact, self.frames.origin)
                 .apply_state(state_of(state)),
         )
     }
-    fn scene_local(&self, s: u64, state: FrameState) -> FrameState {
+    fn scene_local(&self, s: u64, state: State) -> State {
         frame_state(
             self.frames()
                 .transform(self.frames.origin, self.scenes[&s].contact)
                 .apply_state(state_of(state)),
         )
     }
-    fn scene_centre(&self, v: &Vessel) -> FrameState {
+    fn scene_centre(&self, v: &Vessel) -> State {
         let Owner::Scene { scene, body, push } = v.owner else {
             panic!("expected scene")
         };
@@ -1372,7 +1338,7 @@ impl Fleet {
                 origin: self
                     .to_inertial(
                         id,
-                        FrameState {
+                        State {
                             position: s.world.origin,
                             velocity: DVec3::ZERO,
                         },
@@ -1384,7 +1350,7 @@ impl Fleet {
             })
             .collect()
     }
-    pub fn relative(&self, id: &str, to: &str) -> FrameState {
+    pub fn relative(&self, id: &str, to: &str) -> State {
         let a = self.vessel(id);
         let b = self.vessel(to);
         if let (Owner::Scene { scene: sa, .. }, Owner::Scene { scene: sb, .. }) =
@@ -1395,7 +1361,7 @@ impl Fleet {
             let y = self.scene_centre(b);
             let d = x.position - y.position;
             let q = self.axes(*sa);
-            return FrameState {
+            return State {
                 position: q * d,
                 velocity: q
                     * (x.velocity - y.velocity + self.scenes[sa].world.frame.spin().cross(d)),
@@ -1411,7 +1377,7 @@ impl Fleet {
             });
         let d = x.position - self.centre_of_mass_local(to);
         let rotation = self.snapshot(to).rotation;
-        FrameState {
+        State {
             position: rotation * d,
             velocity: rotation * x.velocity
                 + self.snapshot(to).angular_velocity.cross(rotation * d),
@@ -1463,7 +1429,7 @@ impl Fleet {
                     position: self
                         .to_inertial(
                             id,
-                            FrameState {
+                            State {
                                 position: t.origin,
                                 velocity: DVec3::ZERO,
                             },
@@ -1498,7 +1464,7 @@ impl Fleet {
                 let position = self
                     .to_inertial(
                         scene,
-                        FrameState {
+                        State {
                             position: world.position(body),
                             velocity: DVec3::ZERO,
                         },
@@ -1534,7 +1500,7 @@ impl Fleet {
         scene
     }
     fn new_scene_local(&mut self, ground: Option<usize>, ids: &[String]) -> u64 {
-        let mut c = FrameState {
+        let mut c = State {
             position: DVec3::ZERO,
             velocity: DVec3::ZERO,
         };
@@ -1750,7 +1716,7 @@ impl Fleet {
         &mut self,
         v: &mut Vessel,
         scene: u64,
-        local: FrameState,
+        local: State,
         q: DQuat,
         w: DVec3,
         push: DVec3,
@@ -1995,7 +1961,7 @@ impl Fleet {
     pub fn clearance(&self, id: &str, body: usize) -> f64 {
         self.clearance_over(self.vessel(id), self.ground_index(body))
     }
-    pub fn body_fixed_state(&self, id: &str, body: usize) -> FrameState {
+    pub fn body_fixed_state(&self, id: &str, body: usize) -> State {
         let g = self.ground_index(body);
         let v = self.vessel(id);
         if matches!(v.owner,Owner::Scene { scene,.. } if self.scenes[&scene].ground==Some(g)) {
@@ -2229,7 +2195,7 @@ impl Fleet {
                 .collect();
             let c = self.recentre(&members);
             let offset = q * c;
-            let local = FrameState {
+            let local = State {
                 position: state.position + offset,
                 velocity: state.velocity + w.cross(offset),
             };
@@ -2465,7 +2431,7 @@ impl Fleet {
             node_b: node_b.into(),
         };
         self.parts.check_connection(&connection);
-        // Core join preserves poses; the lab enforces the 0.25 m debug capture range.
+        // Core join preserves poses; the caller enforces the capture range.
         self.settle(&a);
         self.settle(&b);
         let va = self.vessels.remove(&a).unwrap();
@@ -2535,7 +2501,7 @@ impl Fleet {
         self.add_scene_body(
             &mut joined,
             scene,
-            FrameState {
+            State {
                 position: c,
                 velocity,
             },
@@ -3748,3 +3714,37 @@ pub use checkpoint::FleetCheckpoint;
 #[path = "fleet/multiscale.rs"]
 mod multiscale;
 pub use multiscale::PreciseVesselSnapshot;
+
+/// Lowest point of a part, including wheel travel, along its parts frame's +Y axis.
+fn part_lowest_y(definition: &PartDefinition, pose: &PartPose) -> f64 {
+    let ay = (pose.rotation * DVec3::Y).y;
+    let hull = if definition.box_size_meters.is_none() {
+        // Keep unchanged Craft2 launch arithmetic, including its subtraction order.
+        let radial = if definition.shape == Shape::Box {
+            definition.radius
+                * ((pose.rotation * DVec3::X).y.abs() + (pose.rotation * DVec3::Z).y.abs())
+        } else {
+            definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
+        };
+        pose.position.y - ay.abs() * definition.height / 2.0 - radial
+    } else {
+        let extent = if definition.shape == Shape::Box {
+            let h = part_box_size(definition) / 2.0;
+            h.x * (pose.rotation * DVec3::X).y.abs()
+                + h.y * ay.abs()
+                + h.z * (pose.rotation * DVec3::Z).y.abs()
+        } else {
+            ay.abs() * definition.height / 2.0 + definition.radius * (1.0 - ay * ay).max(0.0).sqrt()
+        };
+        pose.position.y - extent
+    };
+    definition.modules.iter().fold(hull, |lowest, m| match m {
+        Module::Wheel { parameters: d, .. } => {
+            let hub = pose.position + pose.rotation * d.suspension_origin;
+            let end = hub
+                + pose.rotation * d.suspension_direction * (d.rest_length_meters + d.travel_meters);
+            lowest.min(end.y - d.radius_meters)
+        }
+        _ => lowest,
+    })
+}

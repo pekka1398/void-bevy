@@ -1,6 +1,6 @@
-//! The lab's `NavballWidget` without a canvas: sky and ground per pixel (the same formula), then
-//! the grid, markers, reticle and rim stroked with antialiased coverage and blended source-over as
-//! the canvas does. Lengths are CSS pixels times `pixel_ratio`, as the lab's.
+//! The navball painted into a pixel buffer: sky and ground per pixel, then the grid, markers,
+//! reticle and rim stroked with antialiased coverage and blended source-over. Lengths are CSS
+//! pixels times `pixel_ratio`.
 
 use glam::DVec3;
 
@@ -17,7 +17,7 @@ const SHADOW: [f64; 4] = [0.0, 0.0, 0.0, 170.0 / 255.0];
 const RIM: [f64; 4] = [26.0, 32.0, 48.0, 1.0];
 
 /// A heading or pitch label: centre in CSS pixels from the ball's top-left corner, and its
-/// opacity. The lab draws it in 600 10 px monospace, white over a black shadow 1 px down-right.
+/// opacity. Meant to be drawn in 600 10 px monospace, white over a black shadow 1 px down-right.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NavballLabel {
     pub x: f64,
