@@ -815,6 +815,7 @@ impl FlightSession {
             .map_or((0, 0), |r| (r.entries.len(), r.marks.len()))
     }
     pub fn execute(&mut self, action: Action) -> Outcome {
+        void_diagnostics::zone!("FlightSession::execute");
         let index = self.retained_counts().0;
         if let Some(stream) = &mut self.stream {
             stream.intent(index, &action);

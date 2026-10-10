@@ -98,7 +98,7 @@ fn arguments_accept_only_the_kept_entries() {
     let parse = |args: &[&str]| Arguments::parse(args.iter().map(|s| s.to_string()));
     assert!(parse(&[]).is_ok());
     assert!(parse(&["--craft", "c.json", "--record", "r"]).is_ok());
-    assert!(parse(&["--load", "s.json", "--profile", "p"]).is_ok());
+    assert!(parse(&["--bench", "report.txt"]).is_ok());
     assert!(parse(&["--recover-recording", "a", "--output", "b"]).is_ok());
     for bad in [
         &["--reentry"][..],
@@ -108,6 +108,9 @@ fn arguments_accept_only_the_kept_entries() {
         &["--replay", "a", "--record", "b"],
         &["--output", "b"],
         &["--craft", "a", "--craft", "b"],
+        &["--profile", "p"],
+        &["--bench", "r", "--load", "s"],
+        &["--verify", "a", "--bench", "r"],
     ] {
         assert!(parse(bad).is_err(), "{bad:?}");
     }

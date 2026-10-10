@@ -6,5 +6,6 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+void-diagnostics.workspace = true
 glam.workspace = true
 

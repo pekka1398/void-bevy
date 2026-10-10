@@ -211,6 +211,7 @@ impl FleetFlight {
             "flight: invalid duration"
         );
         let seconds = self.warp_duration(seconds)?;
+        void_diagnostics::zone!("FleetFlight::advance");
         let done = if rails {
             if let Some(reason) = self.fleet.rails_blocker() {
                 return Err(reason);
@@ -221,11 +222,15 @@ impl FleetFlight {
             true
         };
         self.finish_warp_step(done);
-        self.update_plans();
+        {
+            void_diagnostics::zone!("FleetFlight::update_plans");
+            self.update_plans();
+        }
         Ok(done)
     }
     /// Vacuum coast, as the current game's cyan line. No engine or atmosphere in the prediction.
     pub fn predict(&mut self, horizon: f64) -> CoastPrediction {
+        void_diagnostics::zone!("FleetFlight::predict");
         let time = self.fleet.time();
         let body = self.nearby_body(&self.selected);
         let mass = self.fleet.snapshot(&self.selected).mass_kg;

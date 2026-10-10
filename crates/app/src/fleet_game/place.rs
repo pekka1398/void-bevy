@@ -220,7 +220,7 @@ pub(super) fn click(pilot: &mut Pilot, draft: &mut PlaceDraft, click: PlaceClick
         }
     }
 }
-fn apply(pilot: &mut Pilot, action: Action) {
+pub(super) fn apply(pilot: &mut Pilot, action: Action) {
     neutral_pilot(&mut pilot.flight.session);
     match pilot.flight.session.execute(action) {
         Outcome::Applied => {

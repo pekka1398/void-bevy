@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+void-diagnostics.workspace = true
 serde.workspace = true
 glam.workspace = true
 rapier3d.workspace = true

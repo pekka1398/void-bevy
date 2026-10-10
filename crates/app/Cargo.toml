@@ -5,13 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# Tracy: every Bevy system, render stage and GPU pass, plus our own zones. See guides/profiling.md.
+profiling = ["bevy/trace_tracy", "void-diagnostics/tracy"]
+
 [dependencies]
 void-fleet-flight = { path = "../fleet-flight" }
 void-multiscale.workspace = true
 void-assembly.workspace = true
 void-assembly-lab = { path = "../assembly-lab" }
 void-vessels.workspace = true
-void-diagnostics = { path = "../diagnostics" }
+void-diagnostics.workspace = true
 bevy.workspace = true
 glam.workspace = true
 void-frames.workspace = true

@@ -238,6 +238,7 @@ impl<M: Material> TileField<M> {
         tiles: &mut Query<&mut Transform, F>,
         eye: DVec3,
     ) {
+        void_diagnostics::zone!("Tiles::draw");
         let n = self.lod.options.resolution;
         let selected: HashSet<u64> = self.render.iter().copied().collect();
         // Tiles that left the selection, or whose stitched seams changed, are dropped and redrawn.
