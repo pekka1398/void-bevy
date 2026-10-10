@@ -8,6 +8,13 @@
 4. 合併進 master：
    - merge commit 的說明寫 spec 最後版本的原文，加上完成報告（做了什麼、和 spec 不同的地方、留下的問題）。
    - 同一個 commit 刪掉 `specs/<名稱>.md`。
+   - 合併前在 `crates/` 跑一次下面的檢查，列出的名稱都是沒人用的程式碼，要刪掉或說明為什麼留著：
+
+     ```bash
+     for n in $(grep -rhoE "pub(\(crate\))? (fn|struct|enum|const|trait|type|static) \w+" --include=*.rs */src | awk '{print $3}' | sort -u); do
+       if [ "$(grep -rwo --include=*.rs --include=*.wgsl "$n" . | wc -l)" -le 1 ]; then echo "$n"; fi
+     done
+     ```
 
 `specs/` 裡只放進行中的工作。做完的工作用 `git log --merges` 查。
 

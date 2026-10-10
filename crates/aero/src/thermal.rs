@@ -72,38 +72,6 @@ pub struct ThermalBudget {
     pub stored_j: f64,
 }
 
-pub fn validate_thermal(s: &ThermalSpec) {
-    for (value, key) in [
-        (s.skin_capacity_jk, "skinCapacityJK"),
-        (s.core_capacity_jk, "coreCapacityJK"),
-        (s.nose_radius, "noseRadius"),
-        (s.max_skin_k, "maxSkinK"),
-        (s.max_core_k, "maxCoreK"),
-    ] {
-        positive(value, key);
-    }
-    for (value, key) in [
-        (s.conductance_wk, "conductanceWK"),
-        (s.radiating_area, "radiatingArea"),
-        (s.heating_area, "heatingArea"),
-        (s.convection_area, "convectionArea"),
-        (s.heating_factor, "heatingFactor"),
-        (s.emissivity, "emissivity"),
-    ] {
-        finite(value, key);
-        assert!(value >= 0.0, "Negative thermal {key}");
-    }
-    assert!(s.emissivity <= 1.0, "Emissivity outside [0,1]");
-    if let Some(a) = s.ablator {
-        positive(a.activation_k, "ablation temperature");
-        positive(a.latent_j_kg, "ablation energy");
-        assert!(
-            a.mass_kg >= 0.0 && a.mass_kg.is_finite(),
-            "Invalid ablator mass"
-        );
-    }
-}
-
 pub fn thermal_state(spec: &ThermalSpec, temperature_k: f64) -> ThermalState {
     positive(temperature_k, "initial temperature");
     ThermalState {

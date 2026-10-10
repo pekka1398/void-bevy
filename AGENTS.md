@@ -16,3 +16,4 @@
     - `computeruse.md`：在 TigerVNC 上操作遊戲做驗收，讓我用瀏覽器看
     - `ui.md`：遊戲 UI 的版面原則
     - `architecture.md`：座標、重力、環境、地形、船和零件、改變遊戲狀態等，各自唯一的做法和所在位置
+14. 要寫新東西前，先找現成的（`guides/architecture.md`、glam、已有的 crate）。用新做法取代舊做法時，舊的在同一個 commit 刪掉，不留沒人呼叫的程式碼。
