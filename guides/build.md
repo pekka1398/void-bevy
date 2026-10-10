@@ -44,7 +44,7 @@ tools/slice cargo build -j 8 -p void-app
   cargo build -j 8 --release -p void-app --no-default-features
   ```
 
-  忘了加 `--no-default-features` 時，`--release` 會直接編譯失敗，不會產生依賴 `target/` 裡 `.so` 的執行檔。
+  不只 `build`：`run`、`test`、`clippy` 加 `--release`，還有 `cargo bench`，只要包含 `void-app` 都要加 `--no-default-features`。忘了加時會直接編譯失敗，錯誤訊息會說要加什麼，不會產生依賴 `target/` 裡 `.so` 的執行檔。
 - 只單獨編 `void-assembly-lab`（不含 `void-app`）時，Bevy 的 feature 組合不同，會另外重編一部分 Bevy。平常用 `-p void-app` 或 `--workspace` 就不會。
 
 工作區的 crate 只留行號表（`debug = "line-tables-only"`），除錯資訊放在 `target/debug/deps/*.dwo`（`split-debuginfo = "unpacked"`）。panic 的 backtrace 照樣有檔名和行號，但要讀得到 `.dwo`：執行檔搬離 `target/` 或 target 被清掉之後，backtrace 就只剩函式名。

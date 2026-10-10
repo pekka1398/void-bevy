@@ -1,6 +1,10 @@
 // The `dev` feature links Bevy as a shared library, which a shipped executable must not depend on.
 #[cfg(all(feature = "dev", not(debug_assertions)))]
-compile_error!("release builds link Bevy statically: cargo build --release -p void-app --no-default-features");
+compile_error!(
+    "the default `dev` feature links Bevy as a shared library and is for debug builds only. \
+     Add --no-default-features to every optimised build of void-app: cargo build/run/test/clippy \
+     --release -p void-app --no-default-features, cargo bench -p void-app --no-default-features"
+);
 
 pub mod air;
 pub mod fleet_game;
