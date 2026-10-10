@@ -1,7 +1,7 @@
 # Orbit 自動導航、繪圖參照系與 AN／DN
 
-討論定案：2026-10-09。狀態：功能已接線並通過 agent 驗證，待人類驗收；未合併。
-實作分支：`work/orbit-navigation`，worktree `/home/pekka/Desktop/void-bevy-navigation`；證據及驗收操作見該 worktree 的 `docs/orbit-navigation.md`。
+討論定案：2026-10-09。狀態：重做中（舊實作驗收時整機失去回應，見 `work/orbit-navigation` 最後兩個 commit）。
+實作分支：`feature/orbit-navigation`，建在 `feature/expanded-bodies` 上。第一階段：繪圖參照系核對與 AN／DN；第二階段：自動導航。
 共用開發與架構規則依 repository 根目錄 `AGENTS.md`。
 
 ## 已確認的結論
@@ -65,33 +65,33 @@
 
 ## 本地參考資料（絕對路徑）
 
-以下外部 repo 已由使用者授權 clone 至 vendor，供閱讀參考；未加入 Cargo 依賴。方法應適配 VOID 的 N 體／有限燃燒模型，直接搬用程式碼前須核對各 repo 授權。
+以下外部 repo 已由使用者授權 clone 至 ref，供閱讀參考；未加入 Cargo 依賴。方法應適配 VOID 的 N 體／有限燃燒模型，直接搬用程式碼前須核對各 repo 授權。
 
 ### MechJeb2
 
-- Repo：`/home/pekka/Desktop/void-bevy/vendor/MechJeb2`
+- Repo：`/home/pekka/Desktop/void-bevy/ref/MechJeb2`
 - 閱讀版本：`cadbe3d12d2f8fb6801f86d2bc1025ce4c198eec`
-- `/home/pekka/Desktop/void-bevy/vendor/MechJeb2/MechJeb2/MechJebModuleManeuverPlanner.cs`
-- `/home/pekka/Desktop/void-bevy/vendor/MechJeb2/MechJeb2/Maneuver/OperationTransfer.cs`
-- `/home/pekka/Desktop/void-bevy/vendor/MechJeb2/MechJeb2/Maneuver/OperationAdvancedTransfer.cs`
-- `/home/pekka/Desktop/void-bevy/vendor/MechJeb2/MechJeb2/Maneuver/OperationCourseCorrection.cs`
-- `/home/pekka/Desktop/void-bevy/vendor/MechJeb2/MechJeb2/Maneuver/TransferCalculator.cs`
-- `/home/pekka/Desktop/void-bevy/vendor/MechJeb2/MechJeb2/OrbitalManeuverCalculator.cs`
-- `/home/pekka/Desktop/void-bevy/vendor/MechJeb2/MechJebLib/Maneuvers/InterplanetaryTransfer.cs`
-- `/home/pekka/Desktop/void-bevy/vendor/MechJeb2/MechJebLibTest/ManeuversTests/InterplanetaryTransferTests.cs`
+- `/home/pekka/Desktop/void-bevy/ref/MechJeb2/MechJeb2/MechJebModuleManeuverPlanner.cs`
+- `/home/pekka/Desktop/void-bevy/ref/MechJeb2/MechJeb2/Maneuver/OperationTransfer.cs`
+- `/home/pekka/Desktop/void-bevy/ref/MechJeb2/MechJeb2/Maneuver/OperationAdvancedTransfer.cs`
+- `/home/pekka/Desktop/void-bevy/ref/MechJeb2/MechJeb2/Maneuver/OperationCourseCorrection.cs`
+- `/home/pekka/Desktop/void-bevy/ref/MechJeb2/MechJeb2/Maneuver/TransferCalculator.cs`
+- `/home/pekka/Desktop/void-bevy/ref/MechJeb2/MechJeb2/OrbitalManeuverCalculator.cs`
+- `/home/pekka/Desktop/void-bevy/ref/MechJeb2/MechJebLib/Maneuvers/InterplanetaryTransfer.cs`
+- `/home/pekka/Desktop/void-bevy/ref/MechJeb2/MechJebLibTest/ManeuversTests/InterplanetaryTransferTests.cs`
 
 閱讀結論：一般轉移可依條件生成一或兩個節點；直接天體轉移並非一般就生成捕獲。此版本 AdvancedTransfer 最後 OptimizeEjectionToTarget 回傳單一出發節點，include capture burn 不等於建立捕獲節點。修正是獨立操作。
 上游：https://github.com/MuMech/MechJeb2
 
 ### Principia
 
-- Repo：`/home/pekka/Desktop/void-bevy/vendor/Principia`
+- Repo：`/home/pekka/Desktop/void-bevy/ref/Principia`
 - 閱讀版本：`0feb271b24a2a0c9ab200e34766711265d220039`
-- `/home/pekka/Desktop/void-bevy/vendor/Principia/ksp_plugin_adapter/reference_frame_selector.cs`：模式與參考平面描述。
-- `/home/pekka/Desktop/void-bevy/vendor/Principia/ksp_plugin/plugin.cpp`：ComputeAndRenderNodes，逐時轉換後求交點、赤道相關性限制。
-- `/home/pekka/Desktop/void-bevy/vendor/Principia/physics/apsides_body.hpp`：ComputeNodes，z 變號、Hermite 插值與求根。
-- `/home/pekka/Desktop/void-bevy/vendor/Principia/physics/apsides_test.cpp`：交點測試。
-- `/home/pekka/Desktop/void-bevy/vendor/Principia/ksp_plugin_adapter/map_node_pool.cs`：AN／DN 標記、法向速度與表觀傾角資訊。
+- `/home/pekka/Desktop/void-bevy/ref/Principia/ksp_plugin_adapter/reference_frame_selector.cs`：模式與參考平面描述。
+- `/home/pekka/Desktop/void-bevy/ref/Principia/ksp_plugin/plugin.cpp`：ComputeAndRenderNodes，逐時轉換後求交點、赤道相關性限制。
+- `/home/pekka/Desktop/void-bevy/ref/Principia/physics/apsides_body.hpp`：ComputeNodes，z 變號、Hermite 插值與求根。
+- `/home/pekka/Desktop/void-bevy/ref/Principia/physics/apsides_test.cpp`：交點測試。
+- `/home/pekka/Desktop/void-bevy/ref/Principia/ksp_plugin_adapter/map_node_pool.cs`：AN／DN 標記、法向速度與表觀傾角資訊。
 
 上游：https://github.com/mockingbirdnest/Principia
 
@@ -107,4 +107,4 @@
 - `/home/pekka/Desktop/void-bevy/crates/app/src/fleet_game.rs`
 - `/home/pekka/Desktop/void-bevy/crates/app/src/fleet_game/ui.rs`
 
-擴充天體及近期標籤修正在尚未合併的 `/home/pekka/Desktop/void-bevy-bodies`，branch `work/expanded-bodies`。開始新功能前核對當時 Git 狀態與整合基底；不可將本 spec 當成合併／push 授權，也不要覆蓋其他未完成工作。
+擴充天體及標籤修正在 `feature/expanded-bodies`（本 branch 的基底）。開始新功能前核對當時 Git 狀態與整合基底；不可將本 spec 當成合併／push 授權，也不要覆蓋其他未完成工作。

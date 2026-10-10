@@ -2,7 +2,7 @@
 //! plotted, not the physical integration frame. Evaluate each path sample at its own time.
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
-use void_frames::{BodyId, FrameId};
+use void_frames::{BodyId, FrameId, State, SystemId};
 
 use crate::{EphemerisSource, SystemFrames};
 
@@ -56,6 +56,7 @@ pub fn to_frame(frame: &PlotFrameState, barycentric: DVec3) -> DVec3 {
 
 /// A plotting frame as a frame of the ephemeris' tree: barycentric is the origin system,
 /// body-inertial and body-surface the body's frames, two-body rotating a node of its own.
+#[derive(Clone, Debug)]
 pub struct FrameEvaluator {
     pub spec: FrameSpec,
     frames: SystemFrames,
@@ -65,11 +66,31 @@ pub struct FrameEvaluator {
 
 impl FrameEvaluator {
     pub fn new(ephemeris: &dyn EphemerisSource, spec: FrameSpec) -> Self {
+        Self::new_in_system(ephemeris, spec, ephemeris.origin_system())
+    }
+
+    pub fn new_in_system(
+        ephemeris: &dyn EphemerisSource,
+        spec: FrameSpec,
+        system: SystemId,
+    ) -> Self {
+        assert!(
+            system.0 < ephemeris.system_count(),
+            "plot system out of range"
+        );
         let n = ephemeris.bodies().len();
         spec.assert_valid(n);
         let mut frames = SystemFrames::new(ephemeris);
+        // BodyStates and trajectory samples are relative to the source's physics offset,
+        // while FrameSource body centres remain relative to their unshifted system barycentre.
+        // Represent that offset once as a split tree node rather than flattening it into points.
+        if ephemeris.physics_offset() != void_frames::SplitPosition::ORIGIN {
+            frames.origin = frames
+                .tree
+                .add_split_fixed(frames.origin, ephemeris.physics_offset());
+        }
         let frame = match spec {
-            FrameSpec::Barycentric => frames.origin,
+            FrameSpec::Barycentric => frames.systems[system.0],
             FrameSpec::BodyInertial { body } => frames.inertial[body],
             FrameSpec::BodySurface { body } => frames.surface[body],
             FrameSpec::TwoBodyRotating { primary, secondary } => {
@@ -128,6 +149,56 @@ impl FrameEvaluator {
             origin: to.apply_point(DVec3::ZERO),
             axes: [DVec3::X, DVec3::Y, DVec3::Z].map(|axis| to.apply_direction(axis)),
         }
+    }
+
+    /// Transform both position and its time derivative, including origin motion and rotation.
+    pub fn state_at(&self, ephemeris: &dyn EphemerisSource, t: f64, state: State) -> State {
+        assert!(
+            t.is_finite() && state.position.is_finite() && state.velocity.is_finite(),
+            "nonfinite plotting state"
+        );
+        let at = self.frames.tree.at(t, ephemeris);
+        let mut transformed = at
+            .transform(self.frames.origin, self.frame)
+            .apply_state(state);
+        if matches!(self.spec, FrameSpec::TwoBodyRotating { .. }) {
+            // The physical tree's two-body angular velocity includes in-plane motion only.
+            // For plotting, include changing orbital-normal orientation under N-body forces.
+            // Differencing directions avoids differencing large absolute positions.
+            let dt = 0.01_f64.min((ephemeris.end_time() - ephemeris.start_time()) / 4.0);
+            assert!(
+                dt > 0.0,
+                "pair plotting velocity needs ephemeris time coverage"
+            );
+            let lo = (t - dt).max(ephemeris.start_time());
+            let hi = (t + dt).min(ephemeris.end_time());
+            assert!(hi > lo, "pair plotting velocity outside coverage");
+            let current = at.transform(self.frame, self.frames.origin);
+            let relative = state.position - current.apply_point(DVec3::ZERO);
+            let old_omega = current.to_motion().angular_velocity;
+            let before = self
+                .frames
+                .tree
+                .at(lo, ephemeris)
+                .transform(self.frame, self.frames.origin);
+            let after = self
+                .frames
+                .tree
+                .at(hi, ephemeris)
+                .transform(self.frame, self.frames.origin);
+            let correction = [DVec3::X, DVec3::Y, DVec3::Z].map(|axis| {
+                let direction = current.apply_direction(axis);
+                let derivative =
+                    (after.apply_direction(axis) - before.apply_direction(axis)) / (hi - lo);
+                derivative.dot(relative) + direction.dot(old_omega.cross(relative))
+            });
+            transformed.velocity += DVec3::from_array(correction);
+        }
+        assert!(
+            transformed.position.is_finite() && transformed.velocity.is_finite(),
+            "nonfinite transformed plotting state"
+        );
+        transformed
     }
 
     /// Position from the most recent evaluate/rotation-period query.

@@ -730,6 +730,7 @@ fn controls(
     ui_state: Res<ui::UiState>,
     mut camera: ResMut<CameraView>,
     mut profiling: ResMut<Profiling>,
+    plots: Res<MapPlots>,
     mut pilot: Pilot,
 ) {
     let pilot = &mut pilot;
@@ -749,6 +750,10 @@ fn controls(
     let (over_label, clicked) =
         crate::map::label_click(&markers, buttons, camera.view.map_or(0.0, |s| s.map_weight));
     if pilot.flight.playback.is_none()
+        && let Some(void_view::LabelKind::Node(index)) = clicked
+    {
+        place_maneuver_at_node(pilot, &plots, index);
+    } else if pilot.flight.playback.is_none()
         && let Some(kind) = clicked
     {
         let bodies = pilot.flight.session.sim().fleet.ephemeris.bodies();
@@ -762,6 +767,7 @@ fn controls(
                     .index,
             ),
             void_view::LabelKind::Vessel | void_view::LabelKind::Apsis => None,
+            void_view::LabelKind::Node(_) => unreachable!("handled above"),
         };
         pilot.flight.session.execute(Action::View {
             command: ViewCommand::Focus { body },
@@ -2242,12 +2248,46 @@ fn draw_map(
             );
         }
     }
-    let wanted = void_view::map_labels(
+    let mut wanted = void_view::map_labels(
         bodies,
         &frame,
         sim.presentation.focus_body,
         &plots.coast.apsides,
     );
+    for (plan, path) in [(false, &plots.coast), (true, &plots.plan)] {
+        for (index, (node, position)) in path.nodes.iter().take(crate::map::NODE_LABELS).enumerate()
+        {
+            let kind = match node.kind {
+                void_orbit::NodeKind::Ascending => "AN",
+                void_orbit::NodeKind::Descending => "DN",
+            };
+            let inclination = node
+                .apparent_inclination_radians
+                .map_or(String::new(), |a| format!(" · {:.1}°", a.to_degrees()));
+            wanted.push(void_view::MapLabel {
+                kind: void_view::LabelKind::Node(
+                    index + if plan { crate::map::NODE_LABELS } else { 0 },
+                ),
+                text: format!(
+                    "{}{} +{:.0}s · {:+.1}m/s{}",
+                    if plan { "Plan " } else { "" },
+                    kind,
+                    node.time - fleet.time(),
+                    node.normal_speed_mps,
+                    inclination
+                ),
+                color: if plan {
+                    crate::map::PLAN_COLOR
+                } else {
+                    crate::map::PATH_COLOR
+                }
+                .into(),
+                relative: *position,
+                priority: 1e48 - index as f64,
+            });
+        }
+    }
+    wanted.sort_by(|a, b| b.priority.total_cmp(&a.priority));
     let (camera, transform, parented) = *camera;
     assert!(!parented, "map camera must remain a root entity");
     // The camera's Transform was set this frame in Update; its GlobalTransform still holds the
@@ -2262,4 +2302,61 @@ fn draw_map(
         view.map_weight,
         &render,
     );
+}
+
+/// Clicking an AN/DN crossing centres the selected maneuver's burn on it, or adds a zero-Δv
+/// maneuver there to edit. A finite burn is centred on the crossing rather than started at it.
+fn place_maneuver_at_node(pilot: &mut Pilot, plots: &MapPlots, index: usize) {
+    let path = if index < crate::map::NODE_LABELS {
+        &plots.coast
+    } else {
+        &plots.plan
+    };
+    let Some((node, _)) = path.nodes.get(index % crate::map::NODE_LABELS) else {
+        pilot.notice.0 = "Crossing is no longer in the prediction".into();
+        return;
+    };
+    let time = node.time;
+    let sim = pilot.flight.session.sim();
+    let action = if let Some(plan) = sim.plans.get(&sim.selected).filter(|p| p.plan.count() > 0) {
+        let mut spec = plan.plan.maneuver(plan.selected);
+        let half = plan
+            .plan
+            .status(plan.selected)
+            .as_ref()
+            .map_or(0.0, |b| (b.end_time - b.start_time) * 0.5);
+        spec.start_time = time - half;
+        if spec.start_time < sim.fleet.time() {
+            pilot.notice.0 = "Burn centred on this crossing would begin in the past".into();
+            return;
+        }
+        Action::EditManeuver {
+            index: plan.selected,
+            spec,
+        }
+    } else {
+        let reference_body = match sim.presentation.plotting_frame {
+            void_orbit::FrameSpec::BodyInertial { body }
+            | void_orbit::FrameSpec::BodySurface { body } => body,
+            void_orbit::FrameSpec::TwoBodyRotating { primary, .. } => primary,
+            void_orbit::FrameSpec::Barycentric => sim.observation_body(),
+        };
+        Action::AddManeuver {
+            spec: void_orbit::ManeuverSpec {
+                start_time: time,
+                reference_body,
+                reference_mode: void_orbit::ReferenceMode::Auto,
+                prograde: 0.0,
+                normal: 0.0,
+                radial: 0.0,
+            },
+        }
+    };
+    match pilot.flight.session.execute(action) {
+        Outcome::Applied => {
+            pilot.notice.0 = "Maneuver placed at the reference-plane crossing".into();
+        }
+        Outcome::Refused(reason) => pilot.notice.0 = reason,
+        other => panic!("unexpected node-placement outcome {other:?}"),
+    }
 }
