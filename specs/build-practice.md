@@ -21,7 +21,11 @@
 
 - 每個 crate 的整合測試合併成一個執行檔（`tests/<crate>/main.rs` 底下放模組）。測試一個不少（490 個），還在原來的 crate。
 - Bevy 的 `dynamic_linking`，照 Bevy 文件的建議只用在開發編譯，release 維持靜態連結。`cargo run -p void-app` 和直接跑 `target/debug/void-app` 都要能開遊戲。
+- 工作區的 crate 只留行號表（`debug = "line-tables-only"`），除錯資訊不進執行檔（`split-debuginfo = "unpacked"`），backtrace 仍要有檔名和行號。
 - 每個 worktree 各自的 target 放在 `/mnt/data`，寫進 guide。主目錄的 `target/` 不動，搬移的指令交給使用者。
+- 不同 worktree、agent 的編譯自動排隊（`tools/slice`：flock 加 slice），不會兩個 `-j 8` 同時擠在 11G 裡。
+- 不跑測試（使用者決定），只確認測試編得過、`--list` 數量一樣。
+- 改動前只量完整編譯、改一行、check；nightly 的做法（cranelift、平行前端、share-generics）不做，列在報告裡。
 
 ### 2. 量改動前後
 
@@ -31,7 +35,6 @@
 |---|---|
 | 完整編譯 | 空的 target，`cargo build -p void-app` |
 | 改一行 | 在 `crates/vessels` 和 `crates/app` 各改一行之後重編 `void-app` |
-| 測試 | 改一行之後跑全部測試 |
 | check | 改一行之後 `cargo check --workspace --all-targets` |
 
 先前已量到的完整編譯（`-j 2`、6、8）也列進對照表；`-j 2` 那次和別的編譯重疊，註明，不重量。

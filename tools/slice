@@ -1,0 +1,12 @@
+#!/bin/sh
+# Usage: tools/slice <command...>
+# Runs a heavy command in void-agent.slice, one at a time on this machine: a build
+# from another worktree or agent waits here instead of sharing the 11G limit.
+set -e
+lock=/tmp/void-build.lock
+exec 9>"$lock"
+if ! flock -n 9; then
+  echo "tools/slice: waiting for $lock, another build holds it" >&2
+  flock 9
+fi
+exec systemd-run --user --scope --quiet --slice=void-agent.slice -- "$@"
