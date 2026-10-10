@@ -1,6 +1,5 @@
 //! The part graph of flying vessels: every part with its own state, and the connections between
 //! parts. A vessel is one connected group of it; separation and docking are graph operations.
-//! See `docs/part-graph.md`.
 use crate::{
     AttachNode, CompiledCraft, Connection, Module, PartDefinition, PartPose, ResourceId, Resources,
     node, validate_resources,

@@ -4,7 +4,6 @@
 //! answer comes back in that frame's axes. Part modules compute drag, heating, buoyancy and engine
 //! back pressure from it. How a vessel moves (rails, the integrator, contact) is the solver's
 //! business: it adds its own frame's terms (origin acceleration, tides, centrifugal, Coriolis).
-//! See `docs/environment.md`.
 
 mod atmosphere;
 

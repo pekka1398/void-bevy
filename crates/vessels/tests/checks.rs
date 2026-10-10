@@ -710,9 +710,9 @@ fn landed_pod_settles_sleeps_and_rides_on_rails() {
 /// local slope — about 5.0 degrees here — is the expected outcome, and a 3-degree tilt threshold
 /// is not a property worth holding. Kept ignored rather
 /// than deleted so the settle, sleep and rails parts of the check stay runnable on demand; the
-/// pod on Aurelia above covers those on flat ground. See docs/vessels.md.
+/// pod on Aurelia above covers those on flat ground.
 #[test]
-#[ignore = "tilt threshold measures the launch site's slope, not a contact defect; see docs/vessels.md"]
+#[ignore = "tilt threshold measures the launch site's slope, not a contact defect"]
 fn landed_rocket_settles_sleeps_and_rides_on_rails() {
     landed(pebble(), demo_craft());
 }
