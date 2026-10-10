@@ -11,42 +11,32 @@
 
 ## 要做的
 
-### 1. 量現狀
+範圍已縮小（使用者決定）：不做逐項對照實驗，直接套用明顯有利的做法，改動前後各量一次，寫 guide。不租伺服器。
 
-在 slice 裡量下面幾種情況的時間（牆鐘時間）和 slice 的記憶體峰值（`MemoryPeak`，每次量之前先歸零或記下起始值）。至少量兩次，避免偶然的結果：
+已查過、不用再試的：
+- rustc 1.99 在 x86_64 Linux 預設就用 lld 連結，不試 mold。
+- 依賴已經是 `opt-level = 3` 加 `debug = "line-tables-only"`，維持原樣。
+
+### 1. 套用
+
+- 每個 crate 的整合測試合併成一個執行檔（`tests/<crate>/main.rs` 底下放模組）。測試一個不少（490 個），還在原來的 crate。
+- Bevy 的 `dynamic_linking`，照 Bevy 文件的建議只用在開發編譯，release 維持靜態連結。`cargo run -p void-app` 和直接跑 `target/debug/void-app` 都要能開遊戲。
+- 每個 worktree 各自的 target 放在 `/mnt/data`，寫進 guide。主目錄的 `target/` 不動，搬移的指令交給使用者。
+
+### 2. 量改動前後
+
+在自己的 target 目錄（`/mnt/data` 上）用 `-j 8` 量，改動前（`ab549af`）和改動後各一次，記牆鐘時間和該次的記憶體峰值：
 
 | 情況 | 內容 |
 |---|---|
-| 完整編譯 | 清掉工作區 crate 和依賴之後，`cargo build -p void-app` |
+| 完整編譯 | 空的 target，`cargo build -p void-app` |
 | 改一行 | 在 `crates/vessels` 和 `crates/app` 各改一行之後重編 `void-app` |
-| 測試 | 全部測試，以及只測單一 crate |
-| check | `cargo check --workspace --all-targets` |
+| 測試 | 改一行之後跑全部測試 |
+| check | 改一行之後 `cargo check --workspace --all-targets` |
 
-用 `cargo build --timings` 看 CPU 在哪些時段閒著、哪些 crate 最慢、連結花多久。
+先前已量到的完整編譯（`-j 2`、6、8）也列進對照表；`-j 2` 那次和別的編譯重疊，註明，不重量。
 
-### 2. 逐項實驗
-
-每一項都和現狀比較時間和記憶體峰值：
-
-- `-j` 2、4、6、8；
-- Bevy 的 `dynamic_linking`，只用在開發編譯；
-- 把每個 crate 的測試合併成一個執行檔，例如 `tests/main.rs` 底下放模組；
-- 工作區自己的 crate 也只留行號表（`debug = "line-tables-only"`）；
-- 連結器：確認現在用的是哪一個，再試 mold；
-- 檢查有沒有因為 feature 組合不同造成依賴重編（例如 `-p A` 和 `-p B` 各編一份 Bevy）；
-- 清理 `target/` 的方法（例如 `cargo sweep`），量清理前後的大小，並確認清完之後不會讓下次編譯從零開始；
-- 多個 worktree 怎麼共用編譯結果：例如共用依賴、但各自的最終執行檔分開（`--target-dir`、sccache 等），比較硬碟用量和重編時間；
-- 把 target 放到 `/mnt/data`：那是另一顆 NVMe（ext4，還有約 250G），系統碟只剩約 80G。量放在兩顆碟上的編譯時間有沒有差，決定 target 長期放哪裡。搬移時用保留檔案時間的方式（例如 `rsync -a`），搬完確認 `cargo build` 不會重編。`/mnt/data` 上其他資料夾（例如 KSP 的副本）不准動。
-
-**注意**：主目錄的 `target/` 有其他 worktree 透過 symlink 在用。量「完整編譯」時用自己的 target 目錄，不准清掉或改動主目錄的 `target/`。要清主目錄的 `target/` 時，先告訴我，確認當下沒有其他工作在用它。
-
-如果發現其他值得試的做法，加進 spec 再試。
-
-### 3. 選定並套用
-
-選出這台機器上最好的組合，把設定改進專案。不能讓遊戲或測試的行為改變，遊戲的效能也不能變差。
-
-### 4. 寫 `guides/build.md`
+### 3. 寫 `guides/build.md`
 
 - 什麼情況用什麼指令：check、只測改到的 crate、全部測試；
 - `-j` 開多少，大概會用到多少記憶體；
@@ -55,9 +45,9 @@
 
 `guides/computeruse.md` 裡現在那段資源限制的說明搬到 `guides/build.md`，computeruse.md 只留一句指過去，同一件事只寫在一個地方。照 `guides/workflow.md` 的原則，只寫看程式碼看不出來、但一定要遵守的東西，內容要和實際量到的數字對得上。
 
-### 5. AGENTS.md 第 4 條
+### 4. AGENTS.md 第 4 條
 
-如果結果顯示 `-j 2` 應該放寬，提出第 4 條的新寫法，附上數字，由我決定。agent 不准自己改 AGENTS.md。
+如果結果顯示 `-j 2` 應該放寬，提出第 4 條的新寫法，附上數字，由我決定。agent 不准自己改 AGENTS.md。在我同意之前，平常的編譯維持 `-j 2`。
 
 ## 不做
 
