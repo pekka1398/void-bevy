@@ -1,6 +1,6 @@
 # Orbit 自動導航、繪圖參照系與 AN／DN
 
-討論定案：2026-10-09。狀態：重做中（舊實作驗收時整機失去回應，見 `work/orbit-navigation` 最後兩個 commit）。
+討論定案：2026-10-09。狀態：重做中（舊實作驗收時整機失去回應，見 `archive/orbit-navigation` 最後兩個 commit）。
 實作分支：`feature/orbit-navigation`，建在 `feature/expanded-bodies` 上。第一階段：繪圖參照系核對與 AN／DN；第二階段：自動導航。
 共用開發與架構規則依 repository 根目錄 `AGENTS.md`。
 

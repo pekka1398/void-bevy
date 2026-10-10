@@ -520,13 +520,13 @@ pub(super) fn spawn(
         .entity(maneuver)
         .insert((Readout::Maneuver, ScrollPosition::default()));
     text(commands, maneuver, "MANEUVER", 11.);
-    // Plan summary folds inside six lines; the fields and buttons below stay put.
+    // Plan summary folds inside five lines; the fields and buttons below stay put.
     fixed_readout(
         commands,
         maneuver,
         Readout::Maneuver,
         11.,
-        6,
+        5,
         TextLayout::default(),
         percent(100),
     );
@@ -538,12 +538,6 @@ pub(super) fn spawn(
     ] {
         field_input(commands, maneuver, label, field);
     }
-    text(
-        commands,
-        maneuver,
-        "Click value · type · Enter commit · Esc cancel",
-        10.,
-    );
     for controls in [
         vec![
             ("Add", KeyCode::KeyM),
@@ -683,7 +677,7 @@ pub(super) fn spawn(
     text(
         commands,
         help_body,
-        "Space stage · Shift/Ctrl throttle · X cut\nW/S pitch · A/D yaw · Q/E roll · T SAS\n,/. time rate · P pause · R reset\nDrag orbit camera · wheel zoom into map\nTab vessel · Shift+Tab focus body · click labels\nK ALT/AGL · L SURFACE/ORBIT · G plot frame\nF1 near/orbit/far · ` DEV (place ship) · ? help\nF6 save · F7 load paused · F8 finish recording\nM maneuver · B execute · Esc abort\nVehicle / EVA / docking controls: DEV status",
+        "Space stage · Shift/Ctrl throttle · X cut\nW/S pitch · A/D yaw · Q/E roll · T SAS\n,/. time rate · P pause · R reset\nDrag orbit camera · wheel zoom into map\nTab vessel · Shift+Tab focus body · click labels\nK ALT/AGL · L SURFACE/ORBIT · G plot frame\nF1 near/orbit/far · ` DEV (place ship) · ? help\nF6 save · F7 load paused · F8 finish recording\nM maneuver · B execute · Esc abort\nManeuver values: click · type · Enter commit · Esc cancel\nVehicle / EVA / docking controls: DEV status",
         11.,
     );
     let status = panel(
