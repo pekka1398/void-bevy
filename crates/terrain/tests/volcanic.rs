@@ -14,8 +14,8 @@ fn volcanic_contract_and_cell_filtering() {
     assert_eq!(terrain.sea_level_meters(), None);
     let mut detail = 0.0;
     for d in lattice_directions(1000) {
-        let fine = terrain.sample(d, Some(1.0));
-        let coarse = terrain.sample(d, Some(10000.0));
+        let fine = terrain.sample(d, 1.0);
+        let coarse = terrain.sample(d, 10000.0);
         assert!((0.0..=terrain.max_height_meters).contains(&coarse.0));
         assert!(fine.1.iter().all(|v| *v > 0.05 && *v < 0.25));
         detail += (fine.0 - coarse.0).abs();
@@ -24,12 +24,12 @@ fn volcanic_contract_and_cell_filtering() {
 }
 
 #[test]
-#[should_panic(expected = "invalid volcanic cell")]
+#[should_panic(expected = "invalid sample cell")]
 fn invalid_cell_is_rejected() {
     Terrain::from_config(&TerrainConfig::Volcanic(VolcanicOptions::vesper(
         6_051_800.0,
     )))
-    .sample(glam::DVec3::Z, Some(f64::NAN));
+    .sample(glam::DVec3::Z, f64::NAN);
 }
 
 #[test]

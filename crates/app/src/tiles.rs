@@ -13,6 +13,10 @@ use bevy::pbr::wireframe::{Wireframe, WireframeColor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{PrimitiveTopology, VertexFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures::check_ready};
+
+/// Tile meshes building at once per tile field, independent of the machine's core count. Each
+/// visible body has its own field; the async compute pool bounds the threads.
+const MAX_TILE_BUILDS: usize = 8;
 use glam::DVec3;
 use void_lod::{
     FACE_EDGES, LodSelection, LodView, PlanetLod, PlanetLodOptions, SurfaceSample, SurfaceSampler,
@@ -188,13 +192,12 @@ impl<M: Material> TileField<M> {
         self.last_requests = requests.len();
         self.render = render;
         requests.sort_by(|a, b| b.priority.total_cmp(&a.priority));
-        let slots = std::thread::available_parallelism().map_or(4, |n| n.get()) * 2;
         let options = TileMeshOptions {
             radius_meters: self.lod.options.radius_meters,
             resolution: self.lod.options.resolution,
         };
         for request in requests {
-            if self.building.len() >= slots {
+            if self.building.len() >= MAX_TILE_BUILDS {
                 break;
             }
             let code = request.key.code();

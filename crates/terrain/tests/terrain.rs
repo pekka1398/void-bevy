@@ -71,7 +71,7 @@ fn a_tile_stands_on_the_terrain_it_was_built_from() {
         for (p, h) in tile.positions.iter().zip(&tile.heights).take(33 * 33) {
             let world = tile.origin + DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]));
             let direction = world.normalize();
-            let (height, _) = terrain.sample(direction, Some(cell));
+            let (height, _) = terrain.sample(direction, cell);
             worst = worst
                 .max((f64::from(*h) - height).abs())
                 .max((world.length() - terrain.radius_meters - height).abs());

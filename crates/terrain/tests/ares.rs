@@ -15,7 +15,7 @@ fn serialized_contract_and_global_envelope() {
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
     for d in lattice_directions(100_000) {
-        let (h, c) = t.sample(d, None);
+        let (h, c) = t.sample(d, t.finest_cell_meters());
         lo = lo.min(h);
         hi = hi.max(h);
         assert!(
@@ -23,7 +23,7 @@ fn serialized_contract_and_global_envelope() {
                 .all(|v| v.is_finite() && (0.0..=1.0).contains(&v))
         );
         for cell in [1000.0, 60_000.0] {
-            let h = t.sample(d, Some(cell)).0;
+            let h = t.sample(d, cell).0;
             assert!((0.0..=t.max_height_meters).contains(&h));
         }
     }
@@ -47,9 +47,14 @@ fn provinces_have_real_relief_and_polar_material() {
     let across = center.cross(center.cross(DVec3::Z).normalize());
     let wall = (center + across * 100_000.0 / t.radius_meters).normalize();
     assert!(t.height(wall) - t.height(center) > 3000.0);
-    let ice = t.sample(DVec3::Z, None).1;
+    let ice = t.sample(DVec3::Z, t.finest_cell_meters()).1;
     assert!(ice[0] > 0.65 && (ice[0] - ice[2]).abs() < 0.1);
-    let dust = t.sample(DVec3::new(-0.3, 0.7, 0.65).normalize(), None).1;
+    let dust = t
+        .sample(
+            DVec3::new(-0.3, 0.7, 0.65).normalize(),
+            t.finest_cell_meters(),
+        )
+        .1;
     assert!(dust[0] > dust[1] && dust[1] > dust[2]);
 }
 #[test]
@@ -73,7 +78,7 @@ fn canyon_chart_is_finite_at_both_spin_poles() {
             (pole + along * 0.01).normalize(),
             (pole + across * 0.01).normalize(),
         ] {
-            let (h, c) = t.sample(d, Some(10.0));
+            let (h, c) = t.sample(d, 10.0);
             assert!(h.is_finite() && c.into_iter().all(f64::is_finite));
         }
     }

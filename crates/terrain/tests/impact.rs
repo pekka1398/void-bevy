@@ -55,8 +55,8 @@ fn basins_young_impacts_and_scale_are_distinct() {
     let mut max = f64::NEG_INFINITY;
     let mut differences = 0;
     for d in lattice_directions(1024) {
-        let a = t.sample(d, None);
-        let b = t.sample(d, Some(20_000.0));
+        let a = t.sample(d, t.finest_cell_meters());
+        let b = t.sample(d, 20_000.0);
         min = min.min(a.0);
         max = max.max(a.0);
         if (a.0 - b.0).abs() > 10.0 {
@@ -75,7 +75,7 @@ fn invalid_data_is_rejected() {
     let mut o = ImpactOptions::cinder(2_439_700.0);
     o.basins[0].direction = [0.0; 3];
     assert!(std::panic::catch_unwind(|| Terrain::from_config(&TerrainConfig::Impact(o))).is_err());
-    assert!(std::panic::catch_unwind(|| terrain().sample(DVec3::X, Some(f64::NAN))).is_err());
+    assert!(std::panic::catch_unwind(|| terrain().sample(DVec3::X, f64::NAN)).is_err());
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn dense_global_envelope_includes_full_detail() {
     let t = terrain();
     // Full detail, not only the coarse shell: repeated octave overlap must stay in the envelope.
     for d in lattice_directions(100_000) {
-        let (height, color) = t.sample(d, None);
+        let (height, color) = t.sample(d, t.finest_cell_meters());
         assert!((0.0..=t.max_height_meters).contains(&height));
         assert!(color.iter().all(|v| (0.0..=1.0).contains(v)));
     }

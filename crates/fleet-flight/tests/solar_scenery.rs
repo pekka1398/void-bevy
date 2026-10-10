@@ -109,8 +109,7 @@ fn cratered_collision_vertices_match_renderer_sampler() {
         for v in vertices.iter().step_by(64) {
             let p = into.apply_point(tile.local_position + DVec3::from_array(v.map(f64::from)));
             assert!(
-                (p.length() - terrain.radius_meters - terrain.sample(p.normalize(), Some(cell)).0)
-                    .abs()
+                (p.length() - terrain.radius_meters - terrain.sample(p.normalize(), cell).0).abs()
                     < 1e-3
             );
         }

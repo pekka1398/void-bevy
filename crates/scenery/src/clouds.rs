@@ -72,11 +72,14 @@ pub fn weather_direction(x: usize, y: usize) -> DVec3 {
     )
 }
 
+/// Threads a cloud texture build uses, whatever the machine's core count.
+pub const CLOUD_BUILD_THREADS: usize = 4;
+
 /// RGBA8: R = humidity, G = vertical type (thin stratiform → deep cumulus), A = 255. Rows build in
-/// parallel on `threads` threads.
-pub fn build_cloud_weather(threads: usize) -> Vec<u8> {
+/// parallel on `CLOUD_BUILD_THREADS` threads.
+pub fn build_cloud_weather() -> Vec<u8> {
     let mut data = vec![0u8; WEATHER_WIDTH * WEATHER_HEIGHT * 4];
-    let rows_per = WEATHER_HEIGHT.div_ceil(threads.max(1));
+    let rows_per = WEATHER_HEIGHT.div_ceil(CLOUD_BUILD_THREADS);
     std::thread::scope(|scope| {
         for (chunk, rows) in data.chunks_mut(rows_per * WEATHER_WIDTH * 4).enumerate() {
             scope.spawn(move || {
@@ -192,38 +195,45 @@ fn worley(x: f64, y: f64, z: f64, period: i64) -> f64 {
 
 /// A repeating RGBA8 noise volume, `size`³, samples at texel centres (linear repeat filtering
 /// therefore agrees at the seam). Shape (`detail` false): R Perlin–Worley, G fine value noise, B a
-/// smooth low-frequency field for regional banks. Detail: R Worley.
+/// smooth low-frequency field for regional banks. Detail: R Worley. Builds on
+/// `CLOUD_BUILD_THREADS` threads.
 pub fn build_cloud_noise(size: usize, detail: bool) -> Vec<u8> {
     let mut data = vec![0u8; size * size * size * 4];
     let cells: i64 = if detail { 4 } else { 8 };
     let c = cells as f64;
+    let slab_bytes = size * size * 4;
+    let slabs_per = size.div_ceil(CLOUD_BUILD_THREADS);
     std::thread::scope(|scope| {
-        for (z, slab) in data.chunks_mut(size * size * 4).enumerate() {
+        for (chunk, slabs) in data.chunks_mut(slabs_per * slab_bytes).enumerate() {
             scope.spawn(move || {
-                for y in 0..size {
-                    for x in 0..size {
-                        let s = size as f64;
-                        let (qx, qy, qz) = (
-                            (x as f64 + 0.5) / s,
-                            (y as f64 + 0.5) / s,
-                            (z as f64 + 0.5) / s,
-                        );
-                        let w = worley(qx * c, qy * c, qz * c, cells);
-                        let perlin = perlin_noise(qx * c, qy * c, qz * c, cells);
-                        let fine = value_noise(qx * c * 2.0, qy * c * 2.0, qz * c * 2.0, cells * 2);
-                        let i = (y * size + x) * 4;
-                        slab[i] = round_byte(
-                            clamp01(if detail {
-                                w
-                            } else {
-                                (0.65 * perlin + 0.35 * w - 0.25) / 0.5
-                            }) * 255.0,
-                        );
-                        slab[i + 1] = round_byte(fine * 255.0);
-                        // A separate smooth, low-frequency field organizes regional cloud banks.
-                        slab[i + 2] =
-                            round_byte(perlin_noise(qx * 2.0, qy * 2.0, qz * 2.0, 2) * 255.0);
-                        slab[i + 3] = 255;
+                for (k, slab) in slabs.chunks_mut(slab_bytes).enumerate() {
+                    let z = chunk * slabs_per + k;
+                    for y in 0..size {
+                        for x in 0..size {
+                            let s = size as f64;
+                            let (qx, qy, qz) = (
+                                (x as f64 + 0.5) / s,
+                                (y as f64 + 0.5) / s,
+                                (z as f64 + 0.5) / s,
+                            );
+                            let w = worley(qx * c, qy * c, qz * c, cells);
+                            let perlin = perlin_noise(qx * c, qy * c, qz * c, cells);
+                            let fine =
+                                value_noise(qx * c * 2.0, qy * c * 2.0, qz * c * 2.0, cells * 2);
+                            let i = (y * size + x) * 4;
+                            slab[i] = round_byte(
+                                clamp01(if detail {
+                                    w
+                                } else {
+                                    (0.65 * perlin + 0.35 * w - 0.25) / 0.5
+                                }) * 255.0,
+                            );
+                            slab[i + 1] = round_byte(fine * 255.0);
+                            // A separate smooth, low-frequency field organizes regional cloud banks.
+                            slab[i + 2] =
+                                round_byte(perlin_noise(qx * 2.0, qy * 2.0, qz * 2.0, 2) * 255.0);
+                            slab[i + 3] = 255;
+                        }
                     }
                 }
             });

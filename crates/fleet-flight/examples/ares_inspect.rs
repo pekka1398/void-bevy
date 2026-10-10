@@ -40,8 +40,8 @@ fn main() {
         println!(
             "{km:6.1} {:10.2} {:10.2} {:?}",
             terrain.height(d),
-            terrain.sample(d, Some(1000.)).0,
-            terrain.sample(d, None).1
+            terrain.sample(d, 1000.).0,
+            terrain.sample(d, terrain.finest_cell_meters()).1
         );
     }
     println!("along {along}; across {across}");
