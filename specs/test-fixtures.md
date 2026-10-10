@@ -16,15 +16,15 @@ branch：`cleanup/test-fixtures`
 2. **新增只給測試用的 crate `crates/testkit`**
    - 只出現在各 crate 的 `[dev-dependencies]`，正式程式碼不依賴它。
    - 放進去的東西：
-     - `void-landing` 的假星球：pebble、Luna、Terra、丘陵版 Aurelia、`planet_by_id`、`planet_environment`、`planet_ephemeris`。沒人用的 `aurelia_fast` 直接刪掉。
-     - `void-multiscale/fixtures.rs` 的假星系。`default_galaxy` 如果遊戲本身要用，就留在正式程式碼。
-     - `void-assembly` 只給測試用的船：`crewed_flight_rocket`、`crew_rover`、`rendezvous_pod`。
+     - `void-landing` 的假星球（`LandingPlanet` 型別和 LOD 設定留在 landing）：pebble、Luna、Terra、丘陵版 Aurelia、`planet_by_id`、`planet_environment`、`planet_ephemeris`。沒人用的 `aurelia_fast` 直接刪掉。
+     - `void-multiscale/fixtures.rs` 的假星系，包括 `default_galaxy`、`AU`、`YEAR`。遊戲本身有用到的 `LIGHT_YEAR` 留在 `void-multiscale`。
+     - `void-assembly` 只給測試用的船：`crewed_flight_rocket`、`crew_rover`、`rendezvous_pod`、`rover`、`reentry_capsule`，以及 rover 的資料檔。玩家用的船在根目錄 `crafts/`，不受影響。沒人讀的 `data/crewed-rocket.json` 刪掉。
      - `void-vessels/sites.rs` 的 `flat_site`、`pod_tank`。`nearby_site` 留著，遊戲按 N 生船時會用到。
    - 只有單一 crate 的測試在用的東西，放在那個 crate 的 `tests/` 裡，不進 testkit：
-     - fleet-flight 的 `aurelia_selene`、`stellar_neighborhood`、`daylight_terrain_site`；
-     - terrain 的 `sunlit_*`；
-     - assembly 的 `migrate_legacy_craft`。
-   - 寫在 `src/` 裡、需要用到這些假資料的單元測試，搬到 `tests/`。
+     - fleet-flight 的 `aurelia_selene`、`stellar_neighborhood`、`daylight_terrain_site`，放在 `tests/common/mod.rs`。測試用的 Selene 改成直接拿主世界的那一份。
+   - terrain 的 `sunlit_shield_rim`、`sunlit_upland` 只用來替驗收找特殊地點（第 8 條已不這樣驗收），而且用到 `Volcanic` 的私有欄位，連同只檢查它們的測試直接刪掉。
+   - assembly 的 `migrate_legacy_craft` 是舊格式的轉換工具（第 12 條），連同它的 example 直接刪掉，測試只保留「版本 1 的船會被拒絕」。
+   - 寫在 `src/` 裡的單元測試可以直接用 testkit，因為 testkit 不依賴 app 和 vessels。
 
 3. **只給測試用的 Action 和固定場景**
    - `Action` 裡只有測試在用的 `LaunchState`、`LaunchSplitState`、`LaunchFlightAt`、`LaunchGroundAt` 刪掉。

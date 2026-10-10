@@ -5,11 +5,10 @@ use std::sync::Arc;
 use glam::DVec3;
 use void_environment::{Atmosphere, EarthAtmosphere, Environment};
 use void_frames::State;
-use void_landing::{
-    ContactFrame, LandingPlanet, PlanetFrame, planet_by_id, planet_environment, planet_ephemeris,
-};
+use void_landing::{ContactFrame, LandingPlanet, PlanetFrame};
 use void_orbit::{SystemFrames, gravity};
 use void_terrain::{DEFAULT_LAYERED, LayeredOptions, SEA_LEVEL, Terrain, TerrainConfig};
+use void_testkit::{planet_by_id, planet_environment, planet_ephemeris};
 
 /// Layered terrain is shaped around its sea, so the world's air starts there and the sea is in the
 /// world; hills have no sea and their air starts at the reference sphere.

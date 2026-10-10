@@ -8,11 +8,11 @@ use void_fleet_flight::{
 
 #[test]
 fn visual_controls_preserve_physics_and_roundtrip_checkpoint_and_journal() {
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let mut initial = InitialWorld::new(
         &planet,
-        &void_vessels::pod_tank("UI witness"),
-        void_vessels::flat_site(&planet),
+        &void_testkit::pod_tank("UI witness"),
+        void_testkit::flat_site(&planet),
         true,
     );
     initial.world = solar_world(&planet);

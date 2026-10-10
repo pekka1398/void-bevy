@@ -1,5 +1,6 @@
-use void_assembly::{Module, ModuleState, PartGraph, ResourceId, compile, reentry_capsule};
+use void_assembly::{Module, ModuleState, PartGraph, ResourceId, compile};
 use void_modules::thermal::{Input, advance, commit};
+use void_testkit::reentry_capsule;
 fn inputs(graph: &PartGraph) -> Vec<Input> {
     ["test/pod", "test/shield"]
         .into_iter()

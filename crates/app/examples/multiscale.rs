@@ -9,6 +9,7 @@
 //! wheel: zoom, click a label to focus it.
 
 use std::collections::VecDeque;
+use void_testkit::*;
 
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;

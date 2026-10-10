@@ -120,9 +120,9 @@ fn typed_supply_stays_with_connected_vessel_members_and_closed_parts_block_it() 
 
 #[test]
 fn active_vacuum_parachute_refuses_rails_without_committing_trial_state() {
-    let p = void_landing::earth_size();
-    let (e, home) = void_landing::planet_ephemeris(&p);
-    let env = void_landing::planet_environment(&p, &e, home, true);
+    let p = void_testkit::earth_size();
+    let (e, home) = void_testkit::planet_ephemeris(&p);
+    let env = void_testkit::planet_environment(&p, &e, home, true);
     let frame = void_landing::PlanetFrame::new(&e, home);
     let state = frame.to_inertial(
         &e,
@@ -152,9 +152,9 @@ fn active_vacuum_parachute_refuses_rails_without_committing_trial_state() {
 
 #[test]
 fn multiple_engines_on_one_part_have_independent_stages_and_states() {
-    let p = void_landing::earth_size();
-    let (e, home) = void_landing::planet_ephemeris(&p);
-    let env = void_landing::planet_environment(&p, &e, home, false);
+    let p = void_testkit::earth_size();
+    let (e, home) = void_testkit::planet_ephemeris(&p);
+    let env = void_testkit::planet_environment(&p, &e, home, false);
     let frame = void_landing::PlanetFrame::new(&e, home);
     let state = frame.to_inertial(
         &e,
@@ -206,9 +206,9 @@ fn multiple_engines_on_one_part_have_independent_stages_and_states() {
 
 #[test]
 fn saved_state_maps_reject_duplicate_raw_json_keys() {
-    let p = void_landing::earth_size();
-    let (e, home) = void_landing::planet_ephemeris(&p);
-    let env = void_landing::planet_environment(&p, &e, home, false);
+    let p = void_testkit::earth_size();
+    let (e, home) = void_testkit::planet_ephemeris(&p);
+    let env = void_testkit::planet_environment(&p, &e, home, false);
     let mut f = Fleet::new(e, env, 0.0, vec![], FleetOptions::default());
     let mut c = fresh_craft();
     c.parts[0].definition_id = "dual-resource-pod".into();
@@ -246,9 +246,9 @@ fn saved_state_maps_reject_duplicate_raw_json_keys() {
 
 #[test]
 fn module_stages_work_without_a_legacy_part_stage_and_parachutes_can_stage() {
-    let p = void_landing::earth_size();
-    let (e, home) = void_landing::planet_ephemeris(&p);
-    let env = void_landing::planet_environment(&p, &e, home, false);
+    let p = void_testkit::earth_size();
+    let (e, home) = void_testkit::planet_ephemeris(&p);
+    let env = void_testkit::planet_environment(&p, &e, home, false);
     let mut fleet = Fleet::new(e, env, 0.0, vec![], FleetOptions::default());
     let mut craft = fresh_craft();
     craft.parts[0].definition_id = "dual-resource-pod".into();

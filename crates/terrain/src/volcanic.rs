@@ -61,39 +61,6 @@ impl Volcanic {
             shields,
         }
     }
-    /// A sunlit summit-caldera rim on the smallest suitable shield, for ordinary world fixtures.
-    /// Returns a point on existing terrain; it does not alter the field or illumination.
-    pub fn sunlit_shield_rim(&self, sun: DVec3) -> DVec3 {
-        assert!(sun.is_finite() && (sun.length() - 1.0).abs() < 1e-9);
-        let (index, center) = self
-            .shields
-            .iter()
-            .enumerate()
-            .filter(|(_, center)| center.dot(sun) > 0.5)
-            .min_by(|(a, _), (b, _)| Self::shield_size(*a).total_cmp(&Self::shield_size(*b)))
-            .expect("no sunlit shield in volcanic recipe");
-        let east = DVec3::Z.cross(*center).normalize();
-        (*center + east * Self::shield_size(index) * 0.12).normalize()
-    }
-    /// Elevated deformed terrain near the subsolar hemisphere, sampled from this exact field.
-    pub fn sunlit_upland(&self, sun: DVec3) -> DVec3 {
-        assert!(sun.is_finite() && (sun.length() - 1.0).abs() < 1e-9);
-        crate::lattice_directions(8192)
-            .into_iter()
-            .filter(|d| d.dot(sun) > 0.5 && self.upland_strength(*d) > 0.85)
-            .max_by(|a, b| {
-                self.sample(*a, 100.0)
-                    .0
-                    .total_cmp(&self.sample(*b, 100.0).0)
-            })
-            .expect("no sunlit upland")
-    }
-    fn upland_strength(&self, d: DVec3) -> f64 {
-        let offset = f64::from(self.options.seed) * 0.173;
-        let n = |p: DVec3, k: f64| noise(p.x + offset + k, p.y, p.z);
-        let warp = d + DVec3::new(n(d * 3.0, 0.0), n(d * 3.0, 19.0), n(d * 3.0, 37.0)) * 0.17;
-        smoothstep(0.10, 0.38, n(warp * 4.5, 71.0))
-    }
     fn shield_size(index: usize) -> f64 {
         0.025 + 0.065 * (index * 37 % 101) as f64 / 100.0
     }

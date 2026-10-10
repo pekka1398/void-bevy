@@ -3,8 +3,8 @@ use void_orbit::{FrameSpec, Trajectory};
 use void_view::plot::{BodyPlots, PlotPath};
 #[test]
 fn surface_plot_keeps_a_ground_point_fixed_and_cache_rewinds() {
-    let planet = void_landing::earth_size();
-    let (mut eph, body) = void_landing::planet_ephemeris(&planet);
+    let planet = void_testkit::earth_size();
+    let (mut eph, body) = void_testkit::planet_ephemeris(&planet);
     eph.extend_to(3600.0);
     let radius = planet.terrain.radius_meters + 100.0;
     let omega = eph.bodies()[body].rotation.rate();

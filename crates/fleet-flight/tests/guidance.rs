@@ -5,11 +5,12 @@ use void_fleet_flight::{
     checkpoint::FlightCheckpoint,
     session::{InitialWorld, world_mark},
 };
-use void_landing::earth_size;
 use void_orbit::{
     AttitudeLaw, Control, PropagationRun, ThrustControl, VesselPropagator, VesselState,
 };
-use void_vessels::{GuidanceStatus, VesselControl, VesselMode, flat_site};
+use void_testkit::earth_size;
+use void_testkit::flat_site;
+use void_vessels::{GuidanceStatus, VesselControl, VesselMode};
 
 fn fixture() -> (FleetFlight, InitialWorld, String) {
     let planet = earth_size();

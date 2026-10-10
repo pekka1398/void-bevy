@@ -84,7 +84,7 @@ fn circular_orbit_placement_stays_in_orbit_and_replays() {
 
 #[test]
 fn ocean_drop_floats_on_the_main_world_sea() {
-    let mut s = session(&void_assembly::reentry_capsule());
+    let mut s = session(&void_testkit::reentry_capsule());
     let (latitude, longitude) = s.sim().daylight_site("aurelia", SiteKind::Ocean).unwrap();
     let placement = Placement {
         body: "aurelia".into(),

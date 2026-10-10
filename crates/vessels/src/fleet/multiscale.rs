@@ -252,8 +252,8 @@ impl Fleet {
 mod tests {
     use super::*;
     fn fleet() -> Fleet {
-        let world = std::rc::Rc::new(std::cell::RefCell::new(void_multiscale::wide_world(
-            void_multiscale::default_galaxy(),
+        let world = std::rc::Rc::new(std::cell::RefCell::new(void_testkit::wide_world(
+            void_testkit::default_galaxy(),
         )));
         let ephemeris = void_multiscale::FrameEphemeris::new(world, "Aster");
         let environment = Arc::new(Environment::new(&ephemeris).with(

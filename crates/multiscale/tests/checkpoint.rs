@@ -1,6 +1,7 @@
 use glam::DVec3;
 use void_frames::SplitPosition;
-use void_multiscale::{CoupledCheckpoint, CoupledWorld, wide_seeds};
+use void_multiscale::{CoupledCheckpoint, CoupledWorld};
+use void_testkit::wide_seeds;
 
 #[test]
 fn exact_continuation_keeps_compensation_and_interpolation() {

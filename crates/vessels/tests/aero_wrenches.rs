@@ -3,7 +3,8 @@ use common::Setup;
 use glam::{DQuat, DVec3};
 use void_assembly::fresh_craft;
 use void_frames::State;
-use void_landing::{PlanetFrame, earth_size, planet_environment, planet_ephemeris};
+use void_landing::PlanetFrame;
+use void_testkit::{earth_size, planet_environment, planet_ephemeris};
 use void_vessels::{Fleet, FleetOptions, VesselMode, VesselSnapshot};
 fn scene(dt: f64, bubble: bool, air: bool) -> Fleet {
     let p = earth_size();
@@ -242,7 +243,7 @@ fn passive_air_does_not_wake_sleeping_ground_bodies_or_block_idle_rails() {
     f.launch_landed(
         &fresh_craft(),
         scene.body_index,
-        void_vessels::flat_site(&scene.planet),
+        void_testkit::flat_site(&scene.planet),
     );
     f.set_sas("v1", true);
     f.advance(30.0);

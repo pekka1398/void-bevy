@@ -3,14 +3,13 @@
 use std::sync::Arc;
 
 use glam::DVec3;
-use void_landing::{
-    ContactWorldOptions, landing_lod_options, level_for_tile_size, pebble, planet_by_id,
-};
+use void_landing::{ContactWorldOptions, landing_lod_options, level_for_tile_size};
 use void_lod::{
     FACE_EDGES, LodView, PlanetLod, TileMeshData, TileMeshOptions, build_tile_mesh, neighbor_key,
     tile_containing, tiles_around,
 };
 use void_terrain::Terrain;
+use void_testkit::{pebble, planet_by_id};
 
 const PLANETS: [&str; 5] = ["pebble", "luna", "terra", "aurelia", "aurelia-fast"];
 

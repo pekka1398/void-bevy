@@ -4,10 +4,9 @@
 use glam::DVec3;
 use void_orbit::{BuiltSystem, SystemSpec, build_system};
 
-use crate::{CoupledWorld, FramedState, SystemSeed, Traveller};
 use void_frames::SplitPosition;
+use void_multiscale::{CoupledWorld, FramedState, LIGHT_YEAR, SystemSeed, Traveller};
 
-pub const LIGHT_YEAR: f64 = 299_792_458.0 * 365.25 * 86400.0;
 pub const AU: f64 = 149_597_870_700.0;
 pub const YEAR: f64 = 365.25 * 86400.0;
 const SPEED_OF_LIGHT: f64 = 299_792_458.0;

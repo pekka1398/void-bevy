@@ -7,7 +7,7 @@ use void_frames::State;
 use glam::{DQuat, DVec3};
 use void_landing::{
     BodyShape, ContactBodySpec, ContactFrame, ContactWorld, ContactWorldOptions, PlanetFrame,
-    SimpleShape, level_for_tile_size, moon_size, pebble,
+    SimpleShape, level_for_tile_size,
 };
 use void_orbit::{
     BodySpec, EllipticElements, Ephemeris, EphemerisOptions, GravityField, OrbitPlane,
@@ -15,6 +15,7 @@ use void_orbit::{
     build_system, suggested_step_seconds,
 };
 use void_terrain::Terrain;
+use void_testkit::{moon_size, pebble};
 
 const TILE_SIZE_METERS: f64 = 300.0;
 const RESOLUTION: usize = 33;

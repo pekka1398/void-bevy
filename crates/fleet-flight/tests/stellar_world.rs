@@ -6,9 +6,9 @@ use void_frames::{FrameSource, SystemId};
 
 #[test]
 fn authored_neighborhood_launches_normal_craft_and_directly_restores_celestial_state() {
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let craft = void_assembly::demo_craft();
-    let mut initial = InitialWorld::new(&planet, &craft, void_vessels::flat_site(&planet), true);
+    let mut initial = InitialWorld::new(&planet, &craft, void_testkit::flat_site(&planet), true);
     initial.world = stellar_neighborhood(&planet);
     initial.launch_body = "Sol/aurelia".into();
     let mut session = FlightSession::new(initial);
@@ -57,11 +57,11 @@ fn authored_neighborhood_launches_normal_craft_and_directly_restores_celestial_s
 
 #[test]
 fn stellar_checkpoint_refuses_missing_state_or_conflicting_world_bound() {
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let mut initial = InitialWorld::new(
         &planet,
         &void_assembly::demo_craft(),
-        void_vessels::flat_site(&planet),
+        void_testkit::flat_site(&planet),
         true,
     );
     initial.world = stellar_neighborhood(&planet);
@@ -89,11 +89,11 @@ fn stellar_checkpoint_refuses_missing_state_or_conflicting_world_bound() {
 #[test]
 fn fleet_keeps_remote_orbit_ships_in_their_own_system_without_flattening() {
     use glam::{DQuat, DVec3};
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let mut initial = InitialWorld::new(
         &planet,
         &void_assembly::demo_craft(),
-        void_vessels::flat_site(&planet),
+        void_testkit::flat_site(&planet),
         true,
     );
     initial.world = stellar_neighborhood(&planet);
@@ -110,14 +110,14 @@ fn fleet_keeps_remote_orbit_ships_in_their_own_system_without_flattening() {
         velocity: v + DVec3::Y * (sim.fleet.ephemeris.bodies()[body].gm / radius).sqrt(),
     };
     let a = sim.fleet.launch_in_system(
-        &void_vessels::pod_tank("Beryl A · acceptance fixture"),
+        &void_testkit::pod_tank("Beryl A · acceptance fixture"),
         SystemId(1),
         state,
         DQuat::IDENTITY,
         DVec3::ZERO,
     );
     let b = sim.fleet.launch_in_system(
-        &void_vessels::pod_tank("Beryl B · acceptance fixture"),
+        &void_testkit::pod_tank("Beryl B · acceptance fixture"),
         SystemId(1),
         State {
             position: state.position + DVec3::new(0.03, 100.0, 0.0),
@@ -145,11 +145,11 @@ fn fleet_keeps_remote_orbit_ships_in_their_own_system_without_flattening() {
 }
 
 fn neighborhood_initial() -> InitialWorld {
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let mut initial = InitialWorld::new(
         &planet,
         &void_assembly::demo_craft(),
-        void_vessels::flat_site(&planet),
+        void_testkit::flat_site(&planet),
         true,
     );
     initial.world = stellar_neighborhood(&planet);
@@ -165,7 +165,7 @@ fn interstellar_bubble_preserves_centimeter_separation_and_dock_undock() {
     let position =
         void_frames::SplitPosition::at(DVec3::new(2.0 * void_multiscale::LIGHT_YEAR, 0.0, 0.0));
     let velocity = DVec3::new(2.0, 0.0, 0.0);
-    let craft = void_assembly::rendezvous_pod();
+    let craft = void_testkit::rendezvous_pod();
     let a = sim.fleet.launch_at_split(
         &craft,
         SystemId(0),
@@ -220,7 +220,7 @@ fn accepted_cruise_handoff_preserves_split_position_and_velocity() {
     let boundary = 4.24 * 1.05 / 2.05 * void_multiscale::LIGHT_YEAR;
     let position = void_frames::SplitPosition::at(DVec3::X * boundary).translate(DVec3::X * -40.0);
     let id = sim.fleet.launch_at_split(
-        &void_vessels::pod_tank("Boundary coast · acceptance fixture"),
+        &void_testkit::pod_tank("Boundary coast · acceptance fixture"),
         SystemId(0),
         position,
         DVec3::X * 1000.0,
@@ -310,7 +310,7 @@ fn journal_replays_remote_ground_orbit_and_split_cruise_with_precise_marks() {
             offset: DVec3::ZERO,
         },
         Action::LaunchSplitState {
-            craft: void_vessels::pod_tank("Cruise · acceptance fixture"),
+            craft: void_testkit::pod_tank("Cruise · acceptance fixture"),
             system: SystemId(0),
             position: void_frames::SplitPosition::at(
                 DVec3::X * (2.0 * void_multiscale::LIGHT_YEAR),
@@ -381,11 +381,11 @@ fn remote_staging_burns_actual_fuel_and_continues_after_direct_restore() {
 #[test]
 fn aircraft_air_data_is_local_in_remote_system_and_journal_keeps_exact_part_poses() {
     use glam::{DQuat, DVec3};
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let mut initial = InitialWorld::new(
         &planet,
         &void_assembly::demo_craft(),
-        void_vessels::flat_site(&planet),
+        void_testkit::flat_site(&planet),
         true,
     );
     initial.world = stellar_neighborhood(&planet);
@@ -446,7 +446,7 @@ fn handoff_chooses_the_closest_of_all_three_systems_before_hysteresis() {
         .translate(DVec3::X * (4.2 * void_multiscale::LIGHT_YEAR));
     let mut sim = initial.build();
     let id = sim.fleet.launch_at_split(
-        &void_vessels::pod_tank("Three-root decision · fixture"),
+        &void_testkit::pod_tank("Three-root decision · fixture"),
         SystemId(0),
         void_frames::SplitPosition::at(DVec3::X * (2.18 * void_multiscale::LIGHT_YEAR)),
         DVec3::ZERO,
@@ -472,7 +472,7 @@ fn absolute_and_system_relative_spawns_agree_at_nonzero_galaxy_origin() {
     let (origin, origin_velocity) = sim.fleet.ephemeris.system_state(system, 0.0);
     let galaxy = origin.compose(&local);
     let local_velocity = DVec3::Y * 7600.0;
-    let craft = void_vessels::pod_tank("Coordinate contract · fixture");
+    let craft = void_testkit::pod_tank("Coordinate contract · fixture");
     let a = sim.fleet.launch_at_split(
         &craft,
         system,
@@ -503,7 +503,7 @@ fn moving_interstellar_bubble_keeps_its_free_fall_origin_bounded() {
     let mut sim = neighborhood_initial().build();
     let origin = void_frames::SplitPosition::at(DVec3::X * (2.0 * void_multiscale::LIGHT_YEAR));
     let velocity = DVec3::X * 1_000_000.0;
-    let craft = void_vessels::pod_tank("Bubble reanchor · declared fixture");
+    let craft = void_testkit::pod_tank("Bubble reanchor · declared fixture");
     let a = sim.fleet.launch_at_split(
         &craft,
         SystemId(0),

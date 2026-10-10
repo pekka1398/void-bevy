@@ -30,7 +30,7 @@ pub fn stellar_neighborhood(planet: &LandingPlanet) -> WorldDescription {
     let mut world = solar_world(planet);
     let home = SystemPlacement {
         id: "Sol".into(),
-        origin: void_multiscale::default_galaxy(),
+        origin: void_testkit::default_galaxy(),
         velocity: DVec3::new(220_000.0, 0.0, 0.0),
     };
     let mut neighbor_spec = world.system.clone();

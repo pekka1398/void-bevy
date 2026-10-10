@@ -1,8 +1,8 @@
 use glam::DVec3;
 use void_assembly::{demo_craft, export_craft};
 use void_fleet_flight::session::{Action, FlightSession, InitialWorld, Outcome, world_mark};
-use void_landing::earth_size;
-use void_vessels::flat_site;
+use void_testkit::earth_size;
+use void_testkit::flat_site;
 
 fn session(air: bool) -> FlightSession {
     let planet = earth_size();
@@ -133,8 +133,8 @@ fn unsupported_versions_missing_marks_and_changed_catalog_fail_explicitly() {
 }
 #[test]
 fn an_empty_checkpoint_and_long_sleeping_rails_are_reconstructable() {
-    let planet = void_landing::aurelia();
-    let craft = void_vessels::pod_tank("Sleeping save");
+    let planet = void_testkit::aurelia();
+    let craft = void_testkit::pod_tank("Sleeping save");
     let mut s = FlightSession::new(InitialWorld::new(
         &planet,
         &craft,

@@ -9,13 +9,14 @@ use std::sync::Arc;
 use void_frames::State;
 
 use glam::DVec3;
-use void_landing::{ContactFrame, PlanetFrame, pebble};
+use void_landing::{ContactFrame, PlanetFrame};
 use void_orbit::{
     BodySpec, EllipticElements, Ephemeris, EphemerisOptions, GravityField, OrbitPlane,
     PropagationRun, RotationSpec, SpinSpec, SystemSpec, Tolerances, VesselPropagator, VesselState,
     build_system, suggested_step_seconds,
 };
 use void_terrain::Terrain;
+use void_testkit::pebble;
 
 const SEED: u64 = 0x5EED_1A17_D00D_F00D;
 const FRAME_TOLERANCES: Tolerances = Tolerances {
@@ -126,8 +127,8 @@ fn harsh_pebble() -> Env {
 /// its centre is an astronomical unit from the frame the inertial side is written in, which is where
 /// the arithmetic actually hurts. This is the case the game runs, so it sets the real thresholds.
 fn aurelia() -> Env {
-    let base = void_landing::aurelia();
-    let (mut ephemeris, index) = void_landing::planet_ephemeris(&base);
+    let base = void_testkit::aurelia();
+    let (mut ephemeris, index) = void_testkit::planet_ephemeris(&base);
     ephemeris.extend_to(6000.0);
     let frame = PlanetFrame::new(&ephemeris, index);
     Env {

@@ -1,7 +1,9 @@
 use glam::{DQuat, DVec3};
-use void_assembly::{ModuleState, ResourceId, reentry_capsule};
+use void_assembly::{ModuleState, ResourceId};
 use void_frames::State;
-use void_landing::{PlanetFrame, earth_size, planet_environment, planet_ephemeris};
+use void_landing::PlanetFrame;
+use void_testkit::reentry_capsule;
+use void_testkit::{earth_size, planet_environment, planet_ephemeris};
 use void_vessels::{Fleet, FleetOptions, VesselMode};
 fn scene(bubble: bool) -> Fleet {
     scene_at(bubble, 55000.0)
@@ -98,7 +100,7 @@ fn rails_stop_before_air_entry_without_spending_material_in_a_quiet_chunk() {
     assert!(f.rails_blocker().is_none());
     assert!(!f.advance_on_rails(1000.0));
     let height =
-        f.snapshot("v1").position.length() - void_landing::earth_size().terrain.radius_meters;
+        f.snapshot("v1").position.length() - void_testkit::earth_size().terrain.radius_meters;
     assert!(
         height > 120000.0,
         "thermal rails gate must stop before physical air, got {height}"

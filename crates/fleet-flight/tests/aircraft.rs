@@ -26,7 +26,7 @@ fn flat_runway_planet(mut planet: void_landing::LandingPlanet) -> void_landing::
 }
 
 fn make() -> FlightSession {
-    let planet = flat_runway_planet(void_landing::earth_size());
+    let planet = flat_runway_planet(void_testkit::earth_size());
     let site = DVec3::new(0.8, 0.55, 0.25).normalize();
     FlightSession::new(
         InitialWorld::new(&planet, &aircraft(), site, true)

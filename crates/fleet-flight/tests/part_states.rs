@@ -7,8 +7,9 @@ use void_assembly::{
 };
 use void_fleet_flight::session::{Action, FlightSession, InitialWorld, Outcome, world_mark};
 use void_frames::State;
-use void_landing::{PlanetFrame, earth_size};
-use void_vessels::flat_site;
+use void_landing::PlanetFrame;
+use void_testkit::earth_size;
+use void_testkit::flat_site;
 fn craft() -> Craft {
     let mut c = fresh_craft();
     c.parts[0].definition_id = "parachute-pod".into();
@@ -202,7 +203,7 @@ fn an_open_parachute_slows_the_same_return_without_changing_mass() {
 
 #[test]
 fn second_body_parachute_state_and_optical_world_resume_together() {
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let mut world = aurelia_selene(&planet);
     let moon = world.bodies.get_mut("selene").unwrap();
     moon.air_density_scale = Some(0.2);

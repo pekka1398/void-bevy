@@ -5482,6 +5482,7 @@ dependencies = [
  "void-sas",
  "void-scenery",
  "void-terrain",
+ "void-testkit",
  "void-vessels",
  "void-view",
 ]
@@ -5540,6 +5541,7 @@ dependencies = [
  "void-orbit",
  "void-scenery",
  "void-terrain",
+ "void-testkit",
  "void-vessels",
  "void-view",
 ]
@@ -5567,6 +5569,7 @@ dependencies = [
  "void-orbit",
  "void-rotation",
  "void-terrain",
+ "void-testkit",
 ]
 
 [[package]]
@@ -5588,6 +5591,7 @@ dependencies = [
  "void-frames",
  "void-landing",
  "void-orbit",
+ "void-testkit",
 ]
 
 [[package]]
@@ -5599,6 +5603,7 @@ dependencies = [
  "serde_json",
  "void-frames",
  "void-orbit",
+ "void-testkit",
 ]
 
 [[package]]
@@ -5655,6 +5660,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "void-testkit"
+version = "0.0.0"
+dependencies = [
+ "glam 0.32.1",
+ "serde_json",
+ "void-assembly",
+ "void-environment",
+ "void-frames",
+ "void-landing",
+ "void-multiscale",
+ "void-orbit",
+ "void-terrain",
+]
+
+[[package]]
 name = "void-vessels"
 version = "0.0.0"
 dependencies = [
@@ -5673,6 +5693,7 @@ dependencies = [
  "void-rotation",
  "void-sas",
  "void-terrain",
+ "void-testkit",
 ]
 
 [[package]]
@@ -5685,6 +5706,7 @@ dependencies = [
  "void-lod",
  "void-orbit",
  "void-terrain",
+ "void-testkit",
 ]
 
 [[package]]

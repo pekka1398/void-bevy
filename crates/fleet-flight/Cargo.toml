@@ -25,4 +25,5 @@ void-environment.workspace = true
 void-scenery.workspace = true
 
 [dev-dependencies]
+void-testkit.workspace = true
 void-lod.workspace = true

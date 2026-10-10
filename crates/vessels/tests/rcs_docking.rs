@@ -6,6 +6,7 @@ use void_modules::{
     Conditions,
     rcs::{RcsControl, allocate},
 };
+use void_testkit::*;
 use void_vessels::*;
 fn graph() -> (PartGraph, Vec<String>) {
     let mut g = PartGraph::new();
@@ -180,7 +181,7 @@ fn capture_split_preserves_ids_pose_momentum_and_checkpoint_continuation() {
     );
     let saved = serde_json::to_string(&f.checkpoint()).unwrap();
     let mut restored = Fleet::from_checkpoint(
-        void_landing::planet_ephemeris(&void_landing::aurelia()).0,
+        void_testkit::planet_ephemeris(&void_testkit::aurelia()).0,
         f.environment().clone(),
         serde_json::from_str(&saved).unwrap(),
     );

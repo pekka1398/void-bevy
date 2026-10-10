@@ -5,9 +5,9 @@ use void_fleet_flight::{
     presentation::{Toggle, ViewCommand},
     session::{Action, FlightSession, InitialWorld, Playback, world_mark},
 };
-use void_vessels::flat_site;
+use void_testkit::flat_site;
 fn session() -> FlightSession {
-    let planet = void_landing::earth_size();
+    let planet = void_testkit::earth_size();
     FlightSession::new(InitialWorld::new(
         &planet,
         &demo_craft(),
@@ -250,7 +250,7 @@ fn plain_camera_can_focus_every_body_and_return_to_the_ship() {
 #[test]
 fn camera_tracks_the_upper_command_part_before_and_after_staging() {
     for main_camera in [true, false] {
-        let planet = void_landing::earth_size();
+        let planet = void_testkit::earth_size();
         let craft = void_assembly::flight_rocket();
         let mut s = FlightSession::new(InitialWorld::new(
             &planet,
@@ -295,7 +295,7 @@ fn camera_tracks_the_upper_command_part_before_and_after_staging() {
 #[test]
 fn all_plot_frames_survive_checkpoint_and_journal_without_changing_physics() {
     use void_orbit::FrameSpec;
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let mut original = FlightSession::new(InitialWorld::new(
         &planet,
         &demo_craft(),

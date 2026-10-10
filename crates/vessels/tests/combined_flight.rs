@@ -2,9 +2,11 @@
 mod common;
 use common::{Setup, scene};
 use glam::{DQuat, DVec3};
-use void_assembly::{ResourceId, add_part, rendezvous_pod};
+use void_assembly::{ResourceId, add_part};
 use void_frames::State;
-use void_landing::{PlanetFrame, earth_size, planet_environment, planet_ephemeris};
+use void_landing::PlanetFrame;
+use void_testkit::rendezvous_pod;
+use void_testkit::{earth_size, planet_environment, planet_ephemeris};
 use void_vessels::{AirDynamics, Fleet, FleetOptions, RcsControl, VesselMode};
 
 fn fixture(air: bool) -> Fleet {
@@ -172,7 +174,8 @@ fn combined_mode_rcs_and_air_have_independent_rails_gates_across_owner_handoffs(
 
 #[test]
 fn full_air_ground_rcs_wakes_sleep_and_updates_live_mass_only_after_acceptance() {
-    use void_vessels::{GroundSpec, flat_site};
+    use void_testkit::flat_site;
+    use void_vessels::GroundSpec;
     let scene = scene(Setup::Launch);
     let mut place = scene
         .fleet

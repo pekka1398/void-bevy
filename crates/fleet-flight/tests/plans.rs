@@ -5,9 +5,9 @@ use void_fleet_flight::{
     session::{Action, FlightSession, InitialWorld, Outcome, world_mark},
 };
 use void_orbit::{ManeuverSpec, ReferenceMode};
-use void_vessels::flat_site;
+use void_testkit::flat_site;
 fn fixture() -> FlightSession {
-    let planet = void_landing::earth_size();
+    let planet = void_testkit::earth_size();
     let craft = demo_craft();
     let mut session = FlightSession::new(InitialWorld::new(
         &planet,

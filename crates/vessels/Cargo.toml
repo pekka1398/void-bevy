@@ -21,5 +21,6 @@ void-modules.workspace = true
 void-aero.workspace = true
 
 [dev-dependencies]
+void-testkit.workspace = true
 void-multiscale.workspace = true
 serde_json.workspace = true

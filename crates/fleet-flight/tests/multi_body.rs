@@ -2,9 +2,10 @@ mod common;
 use common::aurelia_selene;
 use glam::DVec3;
 use void_fleet_flight::session::{Action, FlightSession, InitialWorld, world_mark};
-use void_vessels::{VesselMode, flat_site, pod_tank};
+use void_testkit::{flat_site, pod_tank};
+use void_vessels::VesselMode;
 fn initial() -> InitialWorld {
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let site = flat_site(&planet);
     InitialWorld {
         air_dynamics: void_vessels::AirDynamics::ForceOnly,
@@ -161,7 +162,7 @@ fn flight_traverses_between_two_bodies_by_time_integration() {
     let mut initial = initial();
     // Small binary accelerates the acceptance run without teleporting after launch. Both bodies
     // and their motion remain the same production N-body ephemeris and Fleet owner machinery.
-    let template = void_landing::pebble();
+    let template = void_testkit::pebble();
     initial.world = void_fleet_flight::world::WorldDescription::single(&template, false);
     initial.world.system.root.mass_kg = 1e10;
     initial.world.system.root.radius_meters = 100.0;
@@ -297,7 +298,7 @@ fn duplicate_world_body_ids_are_rejected_by_parser() {
 
 #[test]
 fn air_switch_does_not_manufacture_air_on_an_airless_preset() {
-    for planet in [void_landing::pebble(), void_landing::moon_size()] {
+    for planet in [void_testkit::pebble(), void_testkit::moon_size()] {
         let craft = pod_tank("Airless compatibility");
         let initial = InitialWorld::new(&planet, &craft, flat_site(&planet), true);
         let sim = initial.build();
@@ -345,7 +346,7 @@ fn refocusing_a_ship_on_another_body_places_the_camera_above_its_local_horizon()
     session.execute(Action::LaunchGroundAt {
         body: "selene".into(),
         craft: session.recording_initial().craft.clone(),
-        site: void_vessels::flat_site(&session.sim().world.landing_planet("selene")),
+        site: void_testkit::flat_site(&session.sim().world.landing_planet("selene")),
     });
     session.execute(Action::Select {
         vessel: "v2".into(),

@@ -6,9 +6,9 @@ use void_fleet_flight::{
     warp::ManeuverWarp,
 };
 use void_orbit::{ManeuverSpec, ReferenceMode};
-use void_vessels::{flat_site, pod_tank};
+use void_testkit::{flat_site, pod_tank};
 fn fixture() -> FlightSession {
-    let planet = void_landing::earth_size();
+    let planet = void_testkit::earth_size();
     let mut s = FlightSession::new(InitialWorld::new(
         &planet,
         &pod_tank("Sleepable pod"),

@@ -7,13 +7,13 @@ use void_fleet_flight::{
     world::WorldDescription,
 };
 fn initial() -> InitialWorld {
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     InitialWorld {
         world: solar_world(&planet),
         air_dynamics: void_vessels::AirDynamics::ForceAndTorque,
         launch_body: "aurelia".into(),
-        craft: void_vessels::pod_tank("Scenery witness"),
-        launch_site: void_vessels::flat_site(&planet),
+        craft: void_testkit::pod_tank("Scenery witness"),
+        launch_site: void_testkit::flat_site(&planet),
     }
 }
 #[test]

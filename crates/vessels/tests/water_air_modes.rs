@@ -11,10 +11,10 @@ fn make_with_ground(
     height: f64,
     ground: bool,
 ) -> (Fleet, String) {
-    let mut planet = void_landing::earth_size();
+    let mut planet = void_testkit::earth_size();
     planet.sea_level = sea.then_some(9000.);
-    let (e, home) = void_landing::planet_ephemeris(&planet);
-    let env = void_landing::planet_environment(&planet, &e, home, air);
+    let (e, home) = void_testkit::planet_ephemeris(&planet);
+    let env = void_testkit::planet_environment(&planet, &e, home, air);
     let frames = env.frames();
     let at = frames.tree.at(0., &e);
     let transform = at.transform(frames.surface[home], frames.origin);
@@ -110,7 +110,7 @@ fn wet_scene_does_not_change_remote_dry_scene_cadence_and_restores_at_boundary()
     let (reference, _) = make_with_ground(AirDynamics::ForceAndTorque, true, false, 5., true);
     // Replace the reference launch with the exact antipodal initial conditions.
     let mut reference = Fleet::new(
-        void_landing::planet_ephemeris(&void_landing::earth_size()).0,
+        void_testkit::planet_ephemeris(&void_testkit::earth_size()).0,
         reference.environment().clone(),
         0.,
         vec![ground_spec(0)],
@@ -136,7 +136,7 @@ fn wet_scene_does_not_change_remote_dry_scene_cadence_and_restores_at_boundary()
     assert!((a.angular_velocity - b.angular_velocity).length() < 1e-10);
     let checkpoint = mixed.checkpoint();
     let mut restored = Fleet::from_checkpoint(
-        void_landing::planet_ephemeris(&void_landing::earth_size()).0,
+        void_testkit::planet_ephemeris(&void_testkit::earth_size()).0,
         mixed.environment().clone(),
         checkpoint,
     );

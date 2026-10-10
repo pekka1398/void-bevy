@@ -1,12 +1,13 @@
 use glam::{DMat3, DQuat, DVec3};
-use void_assembly::{ModuleState, crew_rover};
+use void_assembly::ModuleState;
 use void_fleet_flight::{
     checkpoint::FlightCheckpoint,
     session::{Action, FlightSession, InitialWorld, Outcome, world_mark},
 };
-use void_vessels::flat_site;
+use void_testkit::crew_rover;
+use void_testkit::flat_site;
 fn make() -> FlightSession {
-    let p = void_landing::earth_size();
+    let p = void_testkit::earth_size();
     FlightSession::new(InitialWorld::new(&p, &crew_rover(), flat_site(&p), false)).with_recording()
 }
 fn momentum(s: &FlightSession) -> (f64, DVec3, DVec3, DVec3) {
@@ -221,7 +222,7 @@ fn grounded_eva_walk_and_jump_use_native_contact_and_finite_actuators() {
 
 #[test]
 fn low_gravity_jump_is_a_real_ballistic_impulse() {
-    let p = void_landing::pebble();
+    let p = void_testkit::pebble();
     let mut s = FlightSession::new(InitialWorld::new(&p, &crew_rover(), flat_site(&p), false));
     s.execute(Action::Advance {
         seconds: 5.0,
@@ -308,7 +309,7 @@ fn orbital_backpack_uses_existing_finite_resource_and_checkpoint_journal() {
 
 #[test]
 fn positive_strafe_and_yaw_follow_body_fixed_player_right_not_graphics_x() {
-    let p = void_landing::earth_size();
+    let p = void_testkit::earth_size();
     let mut s = FlightSession::new(InitialWorld::new(
         &p,
         &void_assembly::eva_suit(),

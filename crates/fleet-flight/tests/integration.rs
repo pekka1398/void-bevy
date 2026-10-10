@@ -2,8 +2,10 @@ use glam::{DQuat, DVec3};
 use void_assembly::{Craft, demo_craft, export_craft, import_craft};
 use void_fleet_flight::FleetFlight;
 use void_frames::State;
-use void_landing::{PlanetFrame, earth_size};
-use void_vessels::{SasPhase, VesselControl, VesselMode, flat_site, pod_tank};
+use void_landing::PlanetFrame;
+use void_testkit::earth_size;
+use void_testkit::{flat_site, pod_tank};
+use void_vessels::{SasPhase, VesselControl, VesselMode};
 
 fn make(craft: &Craft, air: bool) -> FleetFlight {
     let planet = earth_size();
@@ -140,7 +142,7 @@ fn air_coast_differential(step_seconds: f64) -> (f64, f64) {
         (make(&craft, true), make(&craft, true), make(&craft, true));
     for sim in [&mut orbit, &mut bubble, &mut rails] {
         // This differential concerns airborne owners only; omit the unrelated launch-pad ship.
-        let (ephemeris, _) = void_landing::planet_ephemeris(&sim.planet);
+        let (ephemeris, _) = void_testkit::planet_ephemeris(&sim.planet);
         // The same world: Aurelia's air at density scale 1.
         let environment = sim.fleet.environment().clone();
         sim.fleet = void_vessels::Fleet::new(

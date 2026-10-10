@@ -32,9 +32,9 @@ fn wings() -> (PartGraph, Vec<String>) {
 }
 #[test]
 fn mirror_pair_adds_lift_cancels_roll_and_deflection_produces_opposite_roll() {
-    let planet = void_landing::earth_size();
-    let (ephemeris, home) = void_landing::planet_ephemeris(&planet);
-    let environment = void_landing::planet_environment(&planet, &ephemeris, home, true);
+    let planet = void_testkit::earth_size();
+    let (ephemeris, home) = void_testkit::planet_ephemeris(&planet);
+    let environment = void_testkit::planet_environment(&planet, &ephemeris, home, true);
     let (graph, ids) = wings();
     let at = environment.frames().tree.at(0.0, &ephemeris);
     let query = environment.frames().surface[home];
