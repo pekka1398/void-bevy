@@ -527,6 +527,7 @@ impl Fleet {
         }
     }
     fn air_source(&self, v: &Vessel) -> Option<Arc<dyn AirSource>> {
+        void_diagnostics::zone!("air_source");
         if !has_atmosphere(&self.environment) {
             return None;
         }
@@ -707,6 +708,7 @@ impl Fleet {
         }
     }
     fn commit_parachutes(&mut self, seconds: f64) {
+        void_diagnostics::zone!("commit_parachutes");
         let changes: Vec<_> = self
             .parts
             .parts()
@@ -881,6 +883,7 @@ impl Fleet {
         ))
     }
     fn propulsion_of(&self, v: &Vessel) -> Propulsion {
+        void_diagnostics::zone!("propulsion_of");
         self.propulsion_at(v, &self.conditions(v, self.time), self.time)
     }
     pub fn thrust(&self, id: &str) -> Propulsion {
@@ -1915,6 +1918,7 @@ impl Fleet {
         self.put(v);
     }
     fn ground_for(&self, v: &Vessel) -> Option<usize> {
+        void_diagnostics::zone!("ground_for");
         self.grounds.iter().enumerate().find(|(i,g)| { let inside=matches!(v.owner,Owner::Scene { scene,.. } if self.scenes[&scene].ground==Some(*i)); self.contact_clearance(v,*i)<=if inside { g.spec.band_exit_meters } else { g.spec.band_enter_meters+0.1 } }).map(|(i,_)|i)
     }
     /// Sea loads use the body's surface owner even when solid seabed is far below.
@@ -1999,6 +2003,7 @@ impl Fleet {
         }
     }
     fn band_safe_seconds(&self) -> f64 {
+        void_diagnostics::zone!("band_safe_seconds");
         let mut safe = f64::INFINITY;
         for id in &self.order {
             let v = self.vessel(id);
@@ -3109,6 +3114,7 @@ impl Fleet {
         self.put(v);
     }
     fn step_scene(&mut self, scene: u64) {
+        void_diagnostics::zone!("Fleet::step_scene");
         let previous = self.enter_scene(scene);
         self.step_scene_local(scene);
         self.reanchor_scene(scene);
@@ -3462,6 +3468,7 @@ impl Fleet {
         }
     }
     pub fn advance(&mut self, dt: f64) {
+        void_diagnostics::zone!("Fleet::advance");
         assert!(dt >= 0.0 && dt.is_finite(), "fleet: invalid dt");
         let step = self.options.step_seconds;
         let target = self.time + self.pending + dt;
@@ -3473,7 +3480,10 @@ impl Fleet {
             } else {
                 step
             };
-            self.reconcile(lookahead);
+            {
+                void_diagnostics::zone!("Fleet::reconcile");
+                self.reconcile(lookahead);
+            }
             if !self.scenes.is_empty()
                 || self.active_parachutes()
                 || self.thermal_rails_blocker().is_some()
@@ -3482,6 +3492,7 @@ impl Fleet {
                     self.pending = (target - self.time).max(0.0);
                     return;
                 }
+                void_diagnostics::zone!("Fleet::step_all");
                 self.step_all();
             } else {
                 if self.time + 1e-9 >= target {
@@ -3493,6 +3504,7 @@ impl Fleet {
                     .min(self.time + self.band_safe_seconds());
                 let elapsed = end - self.time;
                 for id in self.order.clone() {
+                    void_diagnostics::zone!("Fleet::advance_orbit");
                     self.advance_orbit(&id, end);
                 }
                 self.time = end;
@@ -3538,6 +3550,7 @@ impl Fleet {
         }
     }
     pub fn rails_blocker(&self) -> Option<String> {
+        void_diagnostics::zone!("rails_blocker");
         if let Some(reason) = self.thermal_rails_blocker() {
             return Some(reason);
         }
@@ -3588,6 +3601,7 @@ impl Fleet {
         }
     }
     pub fn advance_on_rails(&mut self, dt: f64) -> bool {
+        void_diagnostics::zone!("Fleet::advance_on_rails");
         assert!(dt >= 0.0 && dt.is_finite(), "fleet: invalid rails dt");
         assert!(
             self.rails_blocker().is_none(),
@@ -3611,6 +3625,7 @@ impl Fleet {
         self.pending = 0.0;
         let mut done = true;
         'coast: while self.time + 1e-9 < target {
+            void_diagnostics::zone!("rails chunk");
             if self.rails_blocker().is_some() {
                 done = false;
                 break;
@@ -3628,6 +3643,7 @@ impl Fleet {
                 .min(self.time + self.band_safe_seconds());
             let ids = self.order.clone();
             for (i, a) in ids.iter().enumerate() {
+                void_diagnostics::zone!("rails pair gate");
                 for b in &ids[i + 1..] {
                     let pair = self.gate.update(
                         a,
@@ -3656,6 +3672,7 @@ impl Fleet {
                 }
             }
             for id in ids {
+                void_diagnostics::zone!("rails propagate vessel");
                 let previous = self.enter_vessel(&id);
                 let air = self.air_source(self.vessel(&id));
                 self.propagator.set_air_source(air);
@@ -3669,6 +3686,7 @@ impl Fleet {
                 self.restore_view(previous);
             }
             for scene in self.scenes.keys().copied().collect::<Vec<_>>() {
+                void_diagnostics::zone!("rails idle scene");
                 let previous = self.enter_scene(scene);
                 self.scenes
                     .get_mut(&scene)

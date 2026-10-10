@@ -75,6 +75,7 @@ impl Fleet {
     /// Moving vessels must coast independently in Orbit. Sleeping ground craft are
     /// covered by their body's envelope; active ground and near-field craft keep short chunks.
     pub fn rails_coast_chunk_seconds(&self) -> f64 {
+        void_diagnostics::zone!("rails_coast_chunk_seconds");
         let short = if has_atmosphere(&self.environment) {
             self.options.flight_chunk_seconds
         } else {
@@ -89,6 +90,7 @@ impl Fleet {
     }
 
     fn distant_coast_clear(&self, dt: f64) -> bool {
+        void_diagnostics::zone!("distant_coast_clear");
         if self.rails_blocker().is_some() {
             return false;
         }

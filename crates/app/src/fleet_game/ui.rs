@@ -15,6 +15,7 @@ pub(super) enum Readout {
     ViewDiagnostics,
     Place,
     Navigation,
+    Performance,
 }
 #[derive(Component)]
 pub(super) struct Panel;
@@ -621,6 +622,16 @@ pub(super) fn spawn(
         ))
         .id();
     commands.entity(dev).add_child(body);
+    // `perf::readout` writes exactly `perf::READOUT_LINES` lines; none fold.
+    fixed_readout(
+        commands,
+        body,
+        Readout::Performance,
+        11.,
+        super::perf::READOUT_LINES,
+        TextLayout::no_wrap(),
+        percent(100),
+    );
     spawn_place(commands, body);
     text(commands, body, "VIEW", 11.);
     button(commands, body, "Planet · focus next", Click::Body);
@@ -1200,6 +1211,8 @@ pub(super) fn refresh(
             ),
             Readout::Place => place::describe(&draft, sim),
             Readout::Navigation => navigation::describe(&navigation_ui, sim),
+            // Written by `perf::readout`.
+            Readout::Performance => continue,
             Readout::Maneuver => match Usable::new(&flight, &draft, &navigation_ui).edit {
                 Some(reason) if !sim.plans.contains_key(id) => reason,
                 _ => plan_description(&flight.session)

@@ -280,6 +280,7 @@ impl PlanetLod {
     }
 
     pub fn select(&mut self, view: &LodView) -> LodSelection {
+        void_diagnostics::zone!("PlanetLod::select");
         let started = Instant::now();
         self.frame += 1;
         assert!(

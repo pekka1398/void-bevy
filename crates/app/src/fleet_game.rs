@@ -2,6 +2,7 @@
 mod docking;
 mod hud;
 mod navigation;
+mod perf;
 mod place;
 #[cfg(test)]
 mod tests;
@@ -111,18 +112,6 @@ pub(crate) struct PartVisuals {
     parts: HashMap<String, Vec<Entity>>,
     collision: HashMap<(u64, String), Vec<Vec3>>,
     rebuild: bool,
-}
-/// `--profile <file>`: CPU spans written on exit or F9.
-#[derive(Resource, Default)]
-pub(crate) struct Profiling(Option<(void_diagnostics::Profiler, PathBuf)>);
-impl Drop for Profiling {
-    fn drop(&mut self) {
-        if !std::thread::panicking()
-            && let Some((profile, path)) = self.0.take()
-        {
-            profile.write(path);
-        }
-    }
 }
 /// The world's terrain, air and far-body scenery.
 #[derive(Resource)]
@@ -282,10 +271,11 @@ struct Visual {
 }
 
 const HELP: &str = "VOID\n\
-Usage: void-app [--craft <craft.json>] [--load <save.json>] [--record <journal>] [--profile <file>]\n\
-       void-app --replay <journal> [--profile <file>]\n\
-       void-app --verify <journal> [--profile <file>]\n\
+Usage: void-app [--craft <craft.json>] [--load <save.json>] [--record <journal>]\n\
+       void-app --replay <journal>\n\
+       void-app --verify <journal>\n\
        void-app --recover-recording <stream> --output <journal>\n\
+       void-app --bench <report.txt>\n\
 \n\
 --craft     fly this craft (JSON) instead of the default rocket; crafts/ has an aircraft,\n\
             a rover and a reentry capsule\n\
@@ -294,7 +284,8 @@ Usage: void-app [--craft <craft.json>] [--load <save.json>] [--record <journal>]
 --replay    play a journal back in the window, checking every state mark\n\
 --verify    replay a journal without a window and report the end state\n\
 --recover-recording  turn an interrupted --record stream into a journal\n\
---profile   write CPU timing spans (JSON) on exit or F9\n\
+--bench     run the fixed measurement scenarios in the window, write the report, exit\n\
+            (guides/profiling.md; build with --features profiling for Tracy)\n\
 \n\
 In game: ` DEV panel (place ship, view toggles) | ? keys";
 
@@ -307,7 +298,7 @@ struct Arguments {
     verify: Option<String>,
     recover: Option<String>,
     output: Option<String>,
-    profile: Option<String>,
+    bench: Option<String>,
     help: bool,
 }
 impl Arguments {
@@ -328,7 +319,7 @@ impl Arguments {
                 "--verify" => &mut parsed.verify,
                 "--recover-recording" => &mut parsed.recover,
                 "--output" => &mut parsed.output,
-                "--profile" => &mut parsed.profile,
+                "--bench" => &mut parsed.bench,
                 _ => return Err(format!("unknown argument {name:?}; see --help")),
             };
             let value = args.next().ok_or(format!("{name} needs a value"))?;
@@ -346,14 +337,26 @@ impl Arguments {
                 || a.record.is_some()
                 || a.replay.is_some()
                 || a.verify.is_some()
-                || a.profile.is_some())
+                || a.bench.is_some())
         {
             return Err("--recover-recording takes only --output".into());
         }
         if a.verify.is_some()
+            && (a.craft.is_some()
+                || a.load.is_some()
+                || a.record.is_some()
+                || a.replay.is_some()
+                || a.bench.is_some())
+        {
+            return Err("--verify takes no other arguments".into());
+        }
+        if a.bench.is_some()
             && (a.craft.is_some() || a.load.is_some() || a.record.is_some() || a.replay.is_some())
         {
-            return Err("--verify takes only --profile".into());
+            return Err(
+                "--bench runs the main world with the default craft; it takes no other arguments"
+                    .into(),
+            );
         }
         if a.replay.is_some() && (a.craft.is_some() || a.load.is_some() || a.record.is_some()) {
             return Err(
@@ -385,14 +388,9 @@ pub fn run() {
         );
         return;
     }
+    void_diagnostics::start();
     if let Some(path) = &args.verify {
-        let mut profile = void_diagnostics::Profiler::new();
-        let started = std::time::Instant::now();
         let session = FlightSession::load(path);
-        profile.span("headless_verify", started, std::time::Instant::now());
-        if let Some(output) = &args.profile {
-            profile.write(output);
-        }
         println!(
             "Verified Fleet session: T+{:.6} s, {} vessels, selected {}",
             session.sim().fleet.time(),
@@ -441,10 +439,6 @@ pub fn run() {
         flight.session.begin_stream(path);
         flight.recording = Some(path.into());
     }
-    let profiling = Profiling(
-        args.profile
-            .map(|path| (void_diagnostics::Profiler::new(), path.into())),
-    );
     let mut app = App::new();
     app.add_plugins((
         DefaultPlugins
@@ -471,13 +465,15 @@ pub fn run() {
         brightness: 40.0,
         color: Color::srgb_u8(0xcb, 0xe7, 0xff),
         ..default()
-    })
-    .insert_resource(profiling);
+    });
     insert_game(&mut app, flight);
+    if let Some(report) = args.bench {
+        perf::add_bench(&mut app, report.into());
+    }
+    perf::add_frame_timing(&mut app);
     app.add_systems(
         Update,
         (
-            begin_profile_frame,
             ui::interactions,
             ui::scroll_panels,
             controls,
@@ -487,6 +483,7 @@ pub fn run() {
             draw_map,
             instruments,
             ui::refresh,
+            perf::readout,
             ui::stages,
             ui::indicators,
             ui::apply_font,
@@ -506,7 +503,7 @@ fn insert_game(app: &mut App, flight: Flight) {
         .init_resource::<CameraView>()
         .init_resource::<MapPlots>()
         .init_resource::<PartVisuals>()
-        .init_resource::<Profiling>()
+        .init_resource::<perf::FrameStats>()
         .add_systems(Startup, (setup, setup_scenery).chain());
 }
 // Capture the GPU window image independently of the desktop/VNC presentation path.
@@ -685,6 +682,38 @@ fn crew_transfer(pilot: &mut Pilot) {
     }
 }
 
+/// R: back to the world's start, paused.
+fn reset_world(pilot: &mut Pilot) {
+    let initial = pilot.flight.session.recording_initial().clone();
+    pilot.flight.session.execute(Action::ResetWorld {
+        initial: Box::new(initial),
+    });
+    let flight = &mut *pilot.flight;
+    flight.paused = true;
+    flight.rate = 0;
+    flight.ground_spawns = 0;
+    pilot.visuals.rebuild = true;
+    pilot.forecast.coast = None;
+    pilot.docking.own = None;
+    pilot.docking.target = None;
+    pilot.notice.0.clear();
+}
+/// O: the craft in orbit of the observed body, selected.
+fn launch_orbit(pilot: &mut Pilot) {
+    let sim = pilot.flight.session.sim();
+    let body = sim.fleet.ephemeris.bodies()[sim.observation_body()]
+        .id
+        .clone();
+    let craft = pilot.flight.craft.clone();
+    let Outcome::Spawned(id) = pilot.flight.session.execute(Action::LaunchOrbitAt {
+        body,
+        craft,
+        offset: DVec3::ZERO,
+    }) else {
+        unreachable!()
+    };
+    select_pilot(pilot, &id);
+}
 fn axis(keys: &ButtonInput<KeyCode>, plus: KeyCode, minus: KeyCode) -> f64 {
     keys.pressed(plus) as i32 as f64 - keys.pressed(minus) as i32 as f64
 }
@@ -730,7 +759,6 @@ fn controls(
     markers: Query<(&Interaction, &crate::map::MapMarker)>,
     ui_state: Res<ui::UiState>,
     mut camera: ResMut<CameraView>,
-    mut profiling: ResMut<Profiling>,
     plots: Res<MapPlots>,
     mut pilot: Pilot,
 ) {
@@ -801,14 +829,6 @@ fn controls(
             pilot.notice.0 = "No recording active; start with --record <file>".into();
         }
     }
-    if keys.just_pressed(KeyCode::F9) {
-        if let Some((profile, path)) = profiling.0.take() {
-            profile.write(&path);
-            pilot.notice.0 = format!("CPU profile finished: {}", path.display());
-        } else {
-            pilot.notice.0 = "No CPU profile active; start with --profile <file>".into();
-        }
-    }
     if keys.just_pressed(KeyCode::KeyP) {
         pilot.flight.paused = !pilot.flight.paused;
         if pilot.flight.paused {
@@ -816,19 +836,7 @@ fn controls(
         }
     }
     if keys.just_pressed(KeyCode::KeyR) {
-        let initial = pilot.flight.session.recording_initial().clone();
-        pilot.flight.session.execute(Action::ResetWorld {
-            initial: Box::new(initial),
-        });
-        let flight = &mut *pilot.flight;
-        flight.paused = true;
-        flight.rate = 0;
-        flight.ground_spawns = 0;
-        pilot.visuals.rebuild = true;
-        pilot.forecast.coast = None;
-        pilot.docking.own = None;
-        pilot.docking.target = None;
-        pilot.notice.0.clear();
+        reset_world(pilot);
     }
     if keys.just_pressed(KeyCode::Tab)
         && keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
@@ -853,19 +861,7 @@ fn controls(
         pilot.forecast.coast = None;
     }
     if keys.just_pressed(KeyCode::KeyO) {
-        let sim = pilot.flight.session.sim();
-        let body = sim.fleet.ephemeris.bodies()[sim.observation_body()]
-            .id
-            .clone();
-        let craft = pilot.flight.craft.clone();
-        let Outcome::Spawned(id) = pilot.flight.session.execute(Action::LaunchOrbitAt {
-            body,
-            craft,
-            offset: DVec3::ZERO,
-        }) else {
-            unreachable!()
-        };
-        select_pilot(pilot, &id);
+        launch_orbit(pilot);
     }
     if keys.just_pressed(KeyCode::KeyN) {
         let flight = &mut *pilot.flight;
@@ -1423,19 +1419,19 @@ fn view_controls(
     }
 }
 
-fn begin_profile_frame(time: Res<Time>, mut profiling: ResMut<Profiling>) {
-    if let Some((profile, _)) = &mut profiling.0 {
-        profile.sample("frame_interval", time.delta_secs_f64() * 1000.0);
-    }
-}
 fn simulate(
     time: Res<Time>,
     window: Single<&Window>,
-    mut profiling: ResMut<Profiling>,
+    bench: Option<Res<perf::Bench>>,
+    mut stats: ResMut<perf::FrameStats>,
     mut pilot: Pilot,
 ) {
     let started = std::time::Instant::now();
-    simulate_inner(&time, &window, &mut pilot);
+    // Counted per Advance command, so a replayed world reset or load in this frame is not
+    // mistaken for time running backwards.
+    let advanced_before = pilot.flight.session.advanced_seconds();
+    // The game pauses while its window is unfocused; a bench run measures regardless.
+    simulate_inner(&time, window.focused || bench.is_some(), &mut pilot);
     let flight = &mut *pilot.flight;
     let sim = flight.session.sim();
     let t = sim.fleet.time();
@@ -1450,13 +1446,21 @@ fn simulate(
     } else if clear <= 20.0 {
         forecast.coast = None;
     }
-    if let Some((profile, _)) = &mut profiling.0 {
-        profile.span("simulation", started, std::time::Instant::now());
-    }
+    let sim = flight.session.sim();
+    let (paused, rate) = if flight.playback.is_some() {
+        (sim.presentation.paused, sim.presentation.rate)
+    } else {
+        (flight.paused, flight.rate)
+    };
+    stats.simulated(perf::Simulated {
+        sim_seconds: started.elapsed().as_secs_f64(),
+        advanced_seconds: flight.session.advanced_seconds() - advanced_before,
+        set_rate: if paused { 0.0 } else { RATES[rate] },
+    });
 }
-fn simulate_inner(time: &Time, window: &Window, pilot: &mut Pilot) {
+fn simulate_inner(time: &Time, focused: bool, pilot: &mut Pilot) {
     let flight = &mut *pilot.flight;
-    if flight.paused || !window.focused {
+    if flight.paused || !focused {
         if flight.playback.is_none() {
             flight.session.execute(Action::EndFrame {
                 paused: flight.paused,
@@ -1538,7 +1542,6 @@ fn draw(
     mut commands: Commands,
     mut pilot: Pilot,
     mut camera_view: ResMut<CameraView>,
-    mut profiling: ResMut<Profiling>,
     assets: Res<RenderAssets>,
     mut ground: ResMut<Ground>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -1554,7 +1557,6 @@ fn draw(
     window: Single<&Window>,
     mut gizmos: Gizmos,
 ) {
-    let started = std::time::Instant::now();
     let pilot = &mut pilot;
     refresh_ports(&mut pilot.docking, &pilot.flight.session);
     let visuals = &mut *pilot.visuals;
@@ -1822,9 +1824,6 @@ fn draw(
         }
     }
     hud.0 = diagnostics_text(&pilot.flight, &pilot.notice, &pilot.docking, &selected);
-    if let Some((profile, _)) = &mut profiling.0 {
-        profile.span("draw_lod_overlays", started, std::time::Instant::now());
-    }
 }
 /// The DEV panel's full status text.
 fn diagnostics_text(
@@ -1924,7 +1923,7 @@ fn diagnostics_text(
             String::new()
         };
     format!(
-        "VOID{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels | rails chunk ≤{:.0}s\n{}\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN craft beside launch site | O orbital craft | R reset | , . warp | K altitude | L speed\nF1 near/orbit/far | Home ship | Alt+F10/F11 exposure\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}{}\n{}\n{}\n{}{} | Water {:.0} N\n{}\n{}",
+        "VOID{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels | rails chunk ≤{:.0}s\n{}\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN craft beside launch site | O orbital craft | R reset | , . warp | K altitude | L speed\nF1 near/orbit/far | Home ship | Alt+F10/F11 exposure\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording\n{}{}\n{}\n{}\n{}{} | Water {:.0} N\n{}\n{}",
         stellar_status,
         selected.name,
         sim.selected,
@@ -2194,6 +2193,7 @@ fn draw_map(
         void_orbit::FrameSpec::Barycentric => reference,
     };
     if let Some(prediction) = &forecast.coast {
+        void_diagnostics::zone!("map coast path");
         plots.coast.update(
             &fleet.ephemeris,
             &prediction.trajectory,
@@ -2211,6 +2211,7 @@ fn draw_map(
         plots.plan_vessel = sim.selected.clone();
     }
     if let Some(p) = sim.plans.get(&plots.plan_vessel) {
+        void_diagnostics::zone!("map plan path");
         plots.plan.update(
             &fleet.ephemeris,
             &p.plan.trajectory,
@@ -2229,6 +2230,7 @@ fn draw_map(
         .apply_point(camera_view.eye);
     let render = |v: DVec3| (q.conjugate() * (v + frame.origin - eye_inertial)).as_vec3();
     if view.map_weight > 0.0 {
+        void_diagnostics::zone!("map body paths");
         for (body, points) in bodies.iter().zip(plots.bodies.update(
             &fleet.ephemeris,
             spec,
@@ -2250,6 +2252,7 @@ fn draw_map(
             );
         }
     }
+    void_diagnostics::zone!("map labels");
     let mut wanted = void_view::map_labels(
         bodies,
         &frame,

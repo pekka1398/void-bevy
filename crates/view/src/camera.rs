@@ -30,7 +30,7 @@ pub const FLIGHT_MAX_DISTANCE: f64 = 150_000.0;
 pub const MAP_MIN_DISTANCE: f64 = 18_000.0;
 /// The view direction keeps at least this angle from straight up or down, radians.
 pub const MIN_ANGLE_FROM_UP: f64 = 0.02;
-const RADIANS_PER_PIXEL: f64 = 0.005;
+pub const RADIANS_PER_PIXEL: f64 = 0.005;
 /// Nearest camera distance from the vessel, metres (the vessel is about 6 m long).
 pub const VESSEL_MIN_DISTANCE: f64 = 8.0;
 /// Nearest camera distance from a focused body's centre, in its radii.

@@ -6,6 +6,14 @@ compile_error!(
      --release -p void-app --no-default-features, cargo bench -p void-app --no-default-features"
 );
 
+// Tracy's C client is linked into whichever crate pulls in tracy-client first: with `dev` that is
+// the Bevy shared library, which does not export it, so our own zones fail to link.
+#[cfg(all(feature = "dev", feature = "profiling"))]
+compile_error!(
+    "the `profiling` feature needs Bevy linked statically. Build it with --no-default-features: \
+     cargo build -p void-app --no-default-features --features profiling --target-dir target/profiling"
+);
+
 pub mod air;
 pub mod fleet_game;
 pub mod flight;

@@ -11,7 +11,7 @@ void-multiscale.workspace = true
 void-assembly.workspace = true
 void-assembly-lab = { path = "../assembly-lab" }
 void-vessels.workspace = true
-void-diagnostics = { path = "../diagnostics" }
+void-diagnostics.workspace = true
 bevy.workspace = true
 glam.workspace = true
 void-frames.workspace = true
@@ -36,6 +36,9 @@ fontique = { version = "=0.9.0", default-features = false }
 [features]
 default = ["dev"]
 dev = ["bevy/dynamic_linking"]
+# Tracy: every Bevy system, render stage and GPU pass, plus our own zones. Needs static Bevy
+# (--no-default-features); see guides/profiling.md.
+profiling = ["bevy/trace_tracy", "void-diagnostics/tracy"]
 
 [dev-dependencies]
 void-testkit.workspace = true

@@ -5,5 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# Turned on by void-app's `profiling` feature; off, `zone!` compiles to nothing.
+tracy = ["dep:tracy-client"]
+
 [dependencies]
-serde_json.workspace = true
+# The client Bevy's `trace_tracy` uses (through tracing-tracy), so both talk to one Tracy.
+tracy-client = { version = "=0.18.3", optional = true }

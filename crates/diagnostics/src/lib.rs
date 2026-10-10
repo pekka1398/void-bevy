@@ -1,115 +1,52 @@
-//! Optional, engine-free timing collection. Durations are system wall time, not process CPU time
-//! or GPU time. Reports distinguish those quantities and never fabricate GPU statistics.
-use serde_json::{Value, json};
-use std::{collections::BTreeMap, fs, path::Path, time::Instant};
+//! Tracy zones and plots for our own code, beside the ones Bevy's `trace_tracy` gives every system,
+//! render stage and GPU pass. With the `tracy` feature (void-app's `profiling`) a `zone!` is a
+//! Tracy zone until the end of the enclosing block; without it, `zone!` and `plot!` compile to
+//! nothing, so the normal build pays nothing. See guides/profiling.md.
+//!
+//! A zone needs Tracy's client running, which Bevy's `LogPlugin` starts; a zone hit before that
+//! (or in a program without it) panics rather than silently dropping the measurement.
 
-pub struct Profiler {
-    epoch: Instant,
-    spans: Vec<Value>,
-    samples: BTreeMap<String, Vec<f64>>,
-    threads: BTreeMap<String, u64>,
+#[cfg(feature = "tracy")]
+#[doc(hidden)]
+pub use tracy_client;
+
+/// `zone!("name");` times the rest of the enclosing block. Zones that should be siblings go in
+/// their own blocks; a later `zone!` in the same block nests inside the earlier one.
+#[cfg(feature = "tracy")]
+#[macro_export]
+macro_rules! zone {
+    ($name:literal) => {
+        let _zone = $crate::tracy_client::span!($name);
+    };
 }
-impl Default for Profiler {
-    fn default() -> Self {
-        Self::new()
-    }
+/// `zone!("name");` times the rest of the enclosing block. Zones that should be siblings go in
+/// their own blocks; a later `zone!` in the same block nests inside the earlier one.
+#[cfg(not(feature = "tracy"))]
+#[macro_export]
+macro_rules! zone {
+    ($name:literal) => {};
 }
-impl Profiler {
-    pub fn new() -> Self {
-        Self {
-            epoch: Instant::now(),
-            spans: vec![],
-            samples: BTreeMap::new(),
-            threads: BTreeMap::new(),
-        }
-    }
-    pub fn sample(&mut self, name: &str, milliseconds: f64) {
-        assert!(
-            !name.is_empty() && milliseconds.is_finite() && milliseconds >= 0.0,
-            "profiling: invalid timing sample"
-        );
-        self.samples
-            .entry(name.into())
-            .or_default()
-            .push(milliseconds);
-    }
-    pub fn span(&mut self, name: &str, start: Instant, end: Instant) {
-        assert!(
-            start >= self.epoch && end >= start,
-            "profiling: invalid span timestamps"
-        );
-        let duration = end.duration_since(start).as_secs_f64();
-        self.sample(name, duration * 1000.0);
-        let key = format!("{:?}", std::thread::current().id());
-        let next = self.threads.len() as u64 + 1;
-        let tid = *self.threads.entry(key).or_insert(next);
-        self.spans
-            .push(json!({"name":name,"cat":"system_wall","ph":"X",
-            "ts":start.duration_since(self.epoch).as_secs_f64()*1e6,"dur":duration*1e6,
-            "pid":std::process::id(),"tid":tid}));
-    }
-    pub fn report(&self) -> Value {
-        let metrics: BTreeMap<_, _> = self
-            .samples
-            .iter()
-            .map(|(name, values)| {
-                let mut sorted = values.clone();
-                sorted.sort_by(f64::total_cmp);
-                let quantile =
-                    |p: f64| sorted[((sorted.len() as f64 * p).ceil() as usize).max(1) - 1];
-                (
-                    name,
-                    json!({"samples":sorted.len(),"min_ms":sorted[0],
-                "mean_ms":sorted.iter().sum::<f64>()/sorted.len() as f64,
-                "p50_ms":quantile(0.5),"p95_ms":quantile(0.95),"max_ms":sorted[sorted.len()-1]}),
-                )
-            })
-            .collect();
-        json!({"traceEvents":self.spans,"displayTimeUnit":"ms","metrics":metrics,
-            "measurement":"system wall durations and supplied frame intervals; GPU time is not measured",
-            "threads":self.threads})
-    }
-    pub fn write(&self, path: impl AsRef<Path>) {
-        let path = path.as_ref();
-        let parent = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        fs::create_dir_all(parent).expect("profiling: create directory");
-        let bytes = serde_json::to_vec(&self.report()).expect("profiling: encode report");
-        fs::write(path, bytes).expect("profiling: write report");
-    }
+
+/// `plot!("name", value)` adds a point to a Tracy plot. The value is not evaluated without Tracy.
+#[cfg(feature = "tracy")]
+#[macro_export]
+macro_rules! plot {
+    ($name:literal, $value:expr) => {
+        $crate::tracy_client::plot!($name, $value)
+    };
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn nearest_rank_quantiles_and_trace_units_are_explicit() {
-        let mut profile = Profiler::new();
-        for n in (1..=100).rev() {
-            profile.sample("frame", n as f64);
-        }
-        let start = Instant::now();
-        profile.span(
-            "simulation",
-            start,
-            start + std::time::Duration::from_micros(250),
-        );
-        let report = profile.report();
-        assert_eq!(report["metrics"]["frame"]["p50_ms"], 50.0);
-        assert_eq!(report["metrics"]["frame"]["p95_ms"], 95.0);
-        assert_eq!(report["metrics"]["frame"]["mean_ms"], 50.5);
-        assert_eq!(report["traceEvents"][0]["dur"], 250.0);
-        assert_eq!(report["metrics"]["simulation"]["p95_ms"], 0.25);
-        assert_eq!(report["traceEvents"][0]["ph"], "X");
-    }
-    #[test]
-    fn empty_capture_has_no_invented_samples() {
-        assert_eq!(Profiler::new().report()["metrics"], json!({}));
-    }
-    #[test]
-    #[should_panic(expected = "invalid timing sample")]
-    fn nonfinite_timing_fails() {
-        Profiler::new().sample("frame", f64::NAN);
-    }
+/// `plot!("name", value)` adds a point to a Tracy plot. The value is not evaluated without Tracy.
+#[cfg(not(feature = "tracy"))]
+#[macro_export]
+macro_rules! plot {
+    ($name:literal, $value:expr) => {};
 }
+
+/// Starts Tracy's client at program start, so zones outside Bevy's app (`--verify`) have one too.
+#[cfg(feature = "tracy")]
+pub fn start() {
+    tracy_client::Client::start();
+}
+/// Starts Tracy's client at program start, so zones outside Bevy's app (`--verify`) have one too.
+#[cfg(not(feature = "tracy"))]
+pub fn start() {}

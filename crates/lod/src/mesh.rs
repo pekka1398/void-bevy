@@ -90,6 +90,7 @@ pub fn build_tile_mesh(
     sampler: &impl SurfaceSampler,
     options: TileMeshOptions,
 ) -> TileMeshData {
+    void_diagnostics::zone!("build_tile_mesh");
     let started = Instant::now();
     let n = options.resolution;
     assert!(

@@ -133,6 +133,7 @@ impl Fleet {
         inputs
     }
     pub(super) fn commit_thermal(&mut self, seconds: f64) {
+        void_diagnostics::zone!("commit_thermal");
         let inputs = self.thermal_inputs();
         if inputs.is_empty() || seconds == 0.0 {
             return;
@@ -195,6 +196,7 @@ impl Fleet {
     /// Incoming aerodynamic heating requires accepted physics steps; quiet cooling can evolve
     /// on rails without freezing temperature or material state.
     pub(super) fn thermal_rails_blocker(&self) -> Option<String> {
+        void_diagnostics::zone!("thermal_rails_blocker");
         // Enter physics before the next rails chunk can reach any atmosphere. A conservative
         // speed/gravity buffer avoids charging an entire quiet chunk at its hot end state.
         let at = self.frames();

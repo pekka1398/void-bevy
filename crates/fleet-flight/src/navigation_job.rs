@@ -28,6 +28,7 @@ pub fn baseline(sim: &FleetFlight) -> serde_json::Value {
 }
 impl NavigationJob {
     pub fn solve(self) -> Result<NavigationResult, String> {
+        void_diagnostics::zone!("NavigationJob::solve");
         let mut sim = self.checkpoint.restore();
         let baseline = baseline(&sim);
         let vessel = sim.selected.clone();

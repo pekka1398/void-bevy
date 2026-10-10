@@ -142,6 +142,10 @@ impl Ephemeris {
     /// Integrate forward until the covered interval contains t.
     pub fn extend_to(&mut self, t: f64) {
         assert!(t.is_finite(), "ephemeris extend to {t}");
+        if self.end_time() >= t {
+            return;
+        }
+        void_diagnostics::zone!("Ephemeris::extend_to");
         while self.end_time() < t {
             self.step();
             self.last_step += 1;
