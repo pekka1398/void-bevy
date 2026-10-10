@@ -6,25 +6,30 @@
 |---|---|---|
 | DEV 面板的 PERFORMANCE | 最近 2 秒的幀時間（平均、最差）、main world 時間、模擬占多少、實際和設定倍率、GPU pass | 一般編譯就有；GPU 那行要 `--features profiling` 或 `--bench` |
 | `--bench <報告>` | 固定的一組情境，每個情境同樣秒數，輸出文字報告 | 一般編譯就能跑 |
-| Tracy | 每個 Bevy system、render 階段、GPU pass、我們自己的 zone，逐幀 | `cargo build -p void-app --features profiling` |
+| Tracy | 每個 Bevy system、render 階段、GPU pass、我們自己的 zone，逐幀 | 用 `--features profiling` 編譯（指令在下面 Tracy 一節） |
+
+下面的指令分兩種：標「agent」的是 agent 跑的，編譯、遊戲、測試一律放進 `void-agent.slice`、編譯用 `-j 2`（AGENTS.md 第 4 條、guides/computeruse.md）；標「使用者桌面」的是使用者自己在桌面上跑的。
 
 ## 固定情境（`--bench`）
 
-每次合併進 master 前跑一次，和上一次的報告比較。情境定義在 `crates/app/src/fleet_game/perf.rs` 的 `SCENARIOS`：主遊戲世界，每個情境先 R 重設，只改船的起始狀態（O、DEV「放置船」用的同一個 `Action::Place`）和倍率；每個情境先用 1× 跑 4 秒（tile 載入、R 和 O 留在發射台上的船停穩；它還在動時 on-rails 加速會被拒絕），再要求情境的倍率跑 4 秒（被拒絕就再要求），然後量 10 秒。視窗失焦也照跑。
+每次合併進 master 前跑一次，和上一次的報告比較。情境定義在 `crates/app/src/fleet_game/perf.rs` 的 `SCENARIOS`：主遊戲世界，每個情境先 R 重設，只改船的起始狀態（O、DEV「放置船」用的同一個 `Action::Place`）和倍率；每個情境先用 1× 跑 4 秒（tile 載入、R 和 O 留在發射台上的船停穩；它還在動時 on-rails 加速會被拒絕），再要求情境的倍率跑 4 秒（被拒絕就再要求），然後量 10 秒。`landing` 例外：放置後整個 settle 都保持暫停（tile 照樣載入），量測開始時才放開，所以量到的 10 秒包含下降、著地（約 2 秒）和停在地上；報告裡每個情境的說明寫了量的是什麼。視窗失焦也照跑。
 
 ```bash
-cargo build -j 2 -p void-app
-# 在 :7 上跑（guides/computeruse.md），開了以後馬上把視窗拉到 1440×900
+# agent：在 :7 上跑（guides/computeruse.md），開了以後馬上把視窗拉到 1440×900
+systemd-run --user --scope --quiet --slice=void-agent.slice -- cargo build -j 2 -p void-app
 DISPLAY=:7 systemd-run --user --scope --quiet --slice=void-agent.slice -- \
   target/debug/void-app --bench <報告.txt>
+
+# 使用者桌面
+cargo build -p void-app && target/debug/void-app --bench <報告.txt>
 ```
 
 跑的時候不要同時編譯或跑別的重東西，數字才能比較。在 Xvnc（`:7`）上，畫面每幀要從顯示卡複製到 Xvnc，present 每幀就要 25–50 ms，所以 `:7` 上的幀時間有很大一塊是 Xvnc 的成本，不是遊戲的；比較改動前後的 main、sim、gpu、倍率最可靠。報告開頭的表格每個情境一行：
 
-- `avg/p95/worst ms`：幀時間（兩幀開始之間的實際時間）。
+- `avg/p95/worst ms`：幀時間：這一幀的 `First` 開始到下一幀的 `First` 開始，含等 render 和螢幕。
 - `main ms`：main world 從 `First` 到 `Last` 的時間（遊戲邏輯、UI、畫面準備）。render 在另一條執行緒和它同時跑，所以幀時間大約是 main 和 render（含等螢幕 present）兩者較大的那個。幀時間遠大於 main 時，瓶頸在 render 或 present，要用 Tracy 看。
 - `sim ms`、`sim%`：`simulate` system（推進飛行、加速、滑行預測）每幀的時間和占幀時間的比例。
-- `gpu ms`：最上層 render pass 的 GPU 時間總和；下面各情境的段落列出每個 pass。大氣和雲在同一個 shader 裡：`void_air_body` 是每個有大氣的星球（包括相機所在的）的大氣和雲，每個一次、加總；`void_air_resolve` 是最後合到畫面上的一次；地面和海是 `main_opaque_pass_3d` 裡的 `GroundMaterial`；地圖的線是 gizmo，畫在 `main_transparent_pass_3d`。GPU 時間會隨顯示卡當下的時脈變：負載低時顯示卡降頻，同一個 pass 可能量到好幾倍，比較時要看同樣條件下跑的報告。
+- `gpu ms`：每個有 GPU 時間的幀裡，最上層 render pass 的 GPU 時間加總，再對這些幀平均；下面各情境的段落列出有幾幀、每個 pass 的平均（分母一樣是全部這些幀，某幀沒跑的 pass 算 0）和它跑了幾幀。顯示卡不支援 timestamp query 時寫「not measured」；支援卻一幀都沒收到時 `--bench` 直接報錯結束。大氣和雲在同一個 shader 裡：`void_air_body` 是每個有大氣的星球（包括相機所在的）的大氣和雲，每個一次、加總；`void_air_resolve` 是最後合到畫面上的一次；地面和海是 `main_opaque_pass_3d` 裡的 `GroundMaterial`；地圖的線是 gizmo，畫在 `main_transparent_pass_3d`。GPU 時間會隨顯示卡當下的時脈變：負載低時顯示卡降頻，同一個 pass 可能量到好幾倍，比較時要看同樣條件下跑的報告。
 - `requested / in effect / actual ×`：要求的倍率、警告限制後實際生效的倍率、實際每秒推進的模擬秒數。生效的比要求的低時，段落裡的 notice 寫原因。
 - `RSS MiB`：情境結束時的常駐記憶體；段落裡另有整個程式的峰值。
 
@@ -33,13 +38,14 @@ DISPLAY=:7 systemd-run --user --scope --quiet --slice=void-agent.slice -- \
 Tracy 的版本要和 Bevy 用的 `tracy-client` 一致：Bevy 0.19.1 → `tracing-tracy 0.11.4` → `tracy-client 0.18.3` → `tracy-client-sys 0.27.0` → **Tracy v0.13.0**（protocol 76）。原始碼、建置腳本和編好的程式在 `ref/tracy/`（`bin/` 下有 `tracy-profiler`、`tracy-capture`、`tracy-csvexport`）。升級 Bevy 後，看 `tracy-client-sys` 的 `tracy/common/TracyVersion.hpp` 換對應的 Tracy，用 `ref/tracy/build.sh` 重編。
 
 ```bash
-cargo build -j 2 -p void-app --features profiling --target-dir target/profiling
-
-# 開 GUI 看（使用者在自己的桌面）：先開 Tracy，再開遊戲，Tracy 會列出它，點 Connect
+# 使用者桌面：開 GUI 看。先開 Tracy，再開遊戲，Tracy 會列出它，點 Connect
+cargo build -p void-app --features profiling --target-dir target/profiling
 ref/tracy/bin/tracy-profiler &
 TRACY_NO_SAMPLING=1 target/profiling/debug/void-app
 
-# agent 不開 GUI：錄下來再匯出（遊戲結束時 tracy-capture 自己存檔結束）
+# agent：不開 GUI，錄下來再匯出（遊戲結束時 tracy-capture 自己存檔結束）
+systemd-run --user --scope --quiet --slice=void-agent.slice -- \
+  cargo build -j 2 -p void-app --features profiling --target-dir target/profiling
 systemd-run --user --scope --quiet --slice=void-agent.slice -- ref/tracy/bin/tracy-capture -o run.tracy -f &
 DISPLAY=:7 TRACY_NO_SAMPLING=1 systemd-run --user --scope --quiet --slice=void-agent.slice -- \
   target/profiling/debug/void-app --bench report.txt
