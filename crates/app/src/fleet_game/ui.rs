@@ -1018,11 +1018,7 @@ pub(super) fn refresh(
             position: f.centre_of_mass_local(id),
             velocity: DVec3::ZERO,
         });
-    let altitude = if view.altitude_agl && sim.terrains.contains_key(&nav) {
-        f.clearance(id, nav)
-    } else {
-        inertial.position.length() - body.radius_meters
-    };
+    let altitude = sim.altitude(id, nav, view.altitude_agl);
     let speed = if view.speed_surface {
         surface.velocity.length()
     } else {

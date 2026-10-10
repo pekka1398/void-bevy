@@ -1854,11 +1854,7 @@ fn diagnostics_text(
             velocity: DVec3::ZERO,
         });
     let agl = sim.presentation.altitude_agl && sim.terrains.contains_key(&navigation);
-    let altitude = if agl {
-        f.clearance(&sim.selected, navigation)
-    } else {
-        r.length() - body.radius_meters
-    };
+    let altitude = sim.altitude(&sim.selected, navigation, agl);
     let speed = if sim.presentation.speed_surface {
         surface.velocity.length()
     } else {

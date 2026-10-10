@@ -97,6 +97,32 @@ impl FleetFlight {
             })
             .expect("flight: no terrain bodies")
     }
+    /// Altitude for the pilot. ALT: the centre of mass above sea level (the body's radius where it
+    /// has no sea). AGL: the vessel's lowest point above the ground, or above the water where the
+    /// sea covers the ground; on a body without terrain it is the same as ALT.
+    pub fn altitude(&self, vessel: &str, body: usize, agl: bool) -> f64 {
+        let fleet = &self.fleet;
+        let radius = fleet.ephemeris.bodies()[body].radius_meters;
+        let sea = fleet
+            .environment()
+            .body(body)
+            .and_then(|b| b.sea_level_meters);
+        let centre = fleet
+            .frames()
+            .transform(fleet.vessel_frame(vessel), fleet.body_frames(body).0)
+            .apply_point(fleet.centre_of_mass_local(vessel))
+            .length();
+        let alt = centre - radius - sea.unwrap_or(0.0);
+        match (agl, self.terrains.get(&body)) {
+            (true, Some(terrain)) => {
+                let ground = fleet.clearance(vessel, body);
+                let site = fleet.body_fixed_state(vessel, body).position.normalize();
+                let water = sea.map_or(0.0, |s| (s - terrain.height(site)).max(0.0));
+                ground - water
+            }
+            _ => alt,
+        }
+    }
     /// Gravitational navigation reference; distinct from launch identity and terrain proximity.
     pub fn navigation_body(&self, vessel: &str) -> usize {
         let query = self.fleet.vessel_anchor_frame(vessel);

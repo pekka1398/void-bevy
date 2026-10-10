@@ -13,7 +13,8 @@ use void_vessels::VesselControl;
 
 pub mod durable;
 
-pub const FORMAT_VERSION: u32 = 1;
+/// Recording schema; bump when `Action` or the recording layout changes.
+pub const FORMAT_VERSION: u32 = 2;
 /// Changes to simulation rules must bump this, even if the JSON schema remains readable.
 pub const MODEL_VERSION: u32 = 32;
 
