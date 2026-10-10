@@ -1,17 +1,18 @@
 //! Crew transactions retain local precision at real stellar separation.
+mod common;
+use common::{daylight_terrain_site, stellar_neighborhood};
 use glam::{DMat3, DQuat, DVec3};
 use void_assembly::crew_rover;
 use void_fleet_flight::{
     checkpoint::FlightCheckpoint,
     session::{Action, FlightSession, InitialWorld, Outcome, world_mark},
-    world::stellar_neighborhood,
 };
 use void_frames::{BodyId, SplitPosition, SystemId};
 
 fn make() -> FlightSession {
     let planet = void_landing::aurelia();
     let world = stellar_neighborhood(&planet);
-    let site = world.daylight_terrain_site("Sol/aurelia").unwrap();
+    let site = daylight_terrain_site(&world, "Sol/aurelia").unwrap();
     let mut initial = InitialWorld::new(&planet, &crew_rover(), site, true);
     initial.world = world;
     initial.launch_body = "Sol/aurelia".into();
@@ -123,11 +124,7 @@ fn round_trip(s: &mut FlightSession, carrier: String) {
 #[test]
 fn remote_ground_crew_transactions_keep_identity_and_split_momentum() {
     let mut s = make();
-    let site = s
-        .sim()
-        .world
-        .daylight_terrain_site("Beryl/aurelia")
-        .unwrap();
+    let site = daylight_terrain_site(&s.sim().world, "Beryl/aurelia").unwrap();
     let Outcome::Spawned(carrier) = s.execute(Action::LaunchGroundAt {
         body: "Beryl/aurelia".into(),
         craft: crew_rover(),

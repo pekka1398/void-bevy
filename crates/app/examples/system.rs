@@ -11,7 +11,6 @@ use glam::{DQuat, DVec3};
 use void_frames::{BodyId, FrameId, FrameTree, Motion, SystemId};
 use void_orbit::{Ephemeris, EphemerisOptions, SystemSpec, build_system, suggested_step_seconds};
 
-const SYSTEM: &str = include_str!("../../orbit/systems/sol.json");
 const HOME: &str = "aurelia";
 /// Probe site on the home planet, degrees.
 const PROBE_LATITUDE: f64 = 12.0;
@@ -142,7 +141,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let system = build_system(&SystemSpec::from_json(SYSTEM));
+    let system = build_system(&SystemSpec::sol());
     let step_seconds = suggested_step_seconds(&system.bodies, 256.0);
     let mut ephemeris = Ephemeris::new(
         &system,

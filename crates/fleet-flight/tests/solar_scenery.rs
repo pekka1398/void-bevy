@@ -1,13 +1,15 @@
+mod common;
+use common::solar_world;
 use glam::DVec3;
 use void_fleet_flight::{
     presentation::ViewCommand,
     session::{Action, FlightSession, InitialWorld, world_mark},
-    world::{WorldDescription, solar_scenery},
+    world::WorldDescription,
 };
 fn initial() -> InitialWorld {
     let planet = void_landing::aurelia();
     InitialWorld {
-        world: solar_scenery(&planet),
+        world: solar_world(&planet),
         air_dynamics: void_vessels::AirDynamics::ForceAndTorque,
         launch_body: "aurelia".into(),
         craft: void_vessels::pod_tank("Scenery witness"),

@@ -1,6 +1,8 @@
 //! Trial convenience loads must name the common owner frame, not an ephemeral environment tree.
+mod common;
+use common::stellar_neighborhood;
 use glam::DVec3;
-use void_fleet_flight::{session::InitialWorld, world::stellar_neighborhood};
+use void_fleet_flight::session::InitialWorld;
 use void_frames::State;
 #[test]
 fn translated_air_load_requires_and_preserves_a_registered_common_frame() {

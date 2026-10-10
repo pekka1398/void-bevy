@@ -1,7 +1,6 @@
-use void_fleet_flight::{
-    session::{FlightSession, InitialWorld},
-    world::stellar_neighborhood,
-};
+mod common;
+use common::{daylight_terrain_site, stellar_neighborhood};
+use void_fleet_flight::session::{FlightSession, InitialWorld};
 use void_frames::State;
 use void_frames::{FrameSource, SystemId};
 
@@ -550,14 +549,10 @@ fn stellar_fixture_ground_ships_are_on_dry_actual_terrain_in_their_own_daylight(
     use glam::DVec3;
     use void_fleet_flight::session::{Action, Outcome};
     let mut initial = neighborhood_initial();
-    initial.launch_site = initial.world.daylight_terrain_site("Sol/aurelia").unwrap();
+    initial.launch_site = daylight_terrain_site(&initial.world, "Sol/aurelia").unwrap();
     let mut session = FlightSession::new(initial);
     let sol = session.sim().selected.clone();
-    let beryl_site = session
-        .sim()
-        .world
-        .daylight_terrain_site("Beryl/aurelia")
-        .unwrap();
+    let beryl_site = daylight_terrain_site(&session.sim().world, "Beryl/aurelia").unwrap();
     let Outcome::Spawned(beryl) = session.execute(Action::LaunchGroundAt {
         body: "Beryl/aurelia".into(),
         craft: void_assembly::demo_craft(),

@@ -25,6 +25,10 @@ impl SystemSpec {
     pub fn from_json(text: &str) -> Self {
         serde_json::from_str(text).unwrap_or_else(|e| panic!("system spec: {e}"))
     }
+    /// The authored Sol system the game is set in (`systems/sol.json`).
+    pub fn sol() -> Self {
+        Self::from_json(include_str!("../systems/sol.json"))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -1,4 +1,6 @@
 //! Accepted simulation time, checkpoint and durable journal all observe the same module state.
+mod common;
+use common::aurelia_selene;
 use glam::{DQuat, DVec3};
 use void_assembly::{
     Craft, ModuleState, ParachutePhase, add_part, definition, fresh_craft, full_resources,
@@ -201,7 +203,7 @@ fn an_open_parachute_slows_the_same_return_without_changing_mass() {
 #[test]
 fn second_body_parachute_state_and_optical_world_resume_together() {
     let planet = void_landing::aurelia();
-    let mut world = void_fleet_flight::world::aurelia_selene(&planet);
+    let mut world = aurelia_selene(&planet);
     let moon = world.bodies.get_mut("selene").unwrap();
     moon.air_density_scale = Some(0.2);
     moon.visual.atmosphere = true;

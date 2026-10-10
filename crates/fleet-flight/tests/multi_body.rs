@@ -1,8 +1,7 @@
+mod common;
+use common::aurelia_selene;
 use glam::DVec3;
-use void_fleet_flight::{
-    session::{Action, FlightSession, InitialWorld, world_mark},
-    world::aurelia_selene,
-};
+use void_fleet_flight::session::{Action, FlightSession, InitialWorld, world_mark};
 use void_vessels::{VesselMode, flat_site, pod_tank};
 fn initial() -> InitialWorld {
     let planet = void_landing::aurelia();
