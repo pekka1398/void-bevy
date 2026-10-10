@@ -2,6 +2,22 @@
 
 agent 在獨立的虛擬螢幕 `:7` 上操作遊戲，使用者用瀏覽器看同一個畫面。所有 xdotool 指令都只送到 `:7`，使用者的桌面是 `:1`。
 
+## 資源限制（AGENTS.md 第 4 條）
+
+agent 跑的編譯、遊戲、測試都放進同一個 `void-agent.slice`，合計共用一個上限。設定在重開機後會消失，所以每個 session 開始時先跑一次（重複跑沒關係）：
+
+```bash
+systemctl --user set-property --runtime void-agent.slice MemoryMax=11G MemorySwapMax=0 CPUWeight=20
+```
+
+之後每個重的指令前面都加上 `systemd-run --user --scope --quiet --slice=void-agent.slice --`，例如：
+
+```bash
+systemd-run --user --scope --quiet --slice=void-agent.slice -- cargo test -j 2 -p void-vessels
+```
+
+超過上限時程式會被系統終止。這時停下來告訴使用者，不要重試。用 `systemctl --user show -p MemoryPeak void-agent.slice` 可以看到目前為止的峰值。
+
 ## 啟動
 
 ```bash
@@ -14,8 +30,8 @@ nohup Xvnc :7 -geometry 1440x900 -depth 24 -localhost -SecurityTypes None \
 # 2. 瀏覽器用的轉接，一定要綁 127.0.0.1（VNC 沒密碼，綁到所有介面會讓區網的人連進來）
 nohup websockify --web /usr/share/novnc 127.0.0.1:6080 localhost:5907 > $S/ws.log 2>&1 &
 
-# 3. 遊戲，限制記憶體；從 worktree 目錄啟動，存檔會寫到這裡的 saves/
-cd <worktree> && DISPLAY=:7 nohup systemd-run --user --scope -p MemoryMax=10G -p MemorySwapMax=0 \
+# 3. 遊戲，放進 void-agent.slice；從 worktree 目錄啟動，存檔會寫到這裡的 saves/
+cd <worktree> && DISPLAY=:7 nohup systemd-run --user --scope --quiet --slice=void-agent.slice -- \
   <target>/debug/void-app > $S/game.log 2>&1 &
 
 # 4. 在使用者桌面開瀏覽器
