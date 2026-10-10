@@ -76,6 +76,16 @@ impl Fleet {
     /// Lowest point of the vessel (wheels at full travel included) along its parts frame's +Y,
     /// measured from the centre of mass. Negative below it.
     pub fn lowest_along_y(&self, id: &str) -> f64 {
+        self.lowest_along(id, DVec3::Y)
+    }
+    /// Lowest point of the vessel (wheels at full travel included) along `up`, a unit vector in
+    /// the vessel's parts-frame axes, measured from the centre of mass. Negative below it.
+    pub fn lowest_along(&self, id: &str, up: DVec3) -> f64 {
+        assert!(
+            (up.length() - 1.0).abs() < 1e-9,
+            "fleet: lowest-point axis must be unit"
+        );
+        let turn = DQuat::from_rotation_arc(up, DVec3::Y);
         let v = self.vessel(id);
         let centre = self.centre(&v.members);
         v.members
@@ -83,7 +93,8 @@ impl Fleet {
             .map(|p| {
                 let part = self.parts.part(p);
                 let mut pose = part.pose;
-                pose.position -= centre;
+                pose.position = turn * (pose.position - centre);
+                pose.rotation = turn * pose.rotation;
                 part_lowest_y(part.definition, &pose)
             })
             .fold(f64::INFINITY, f64::min)
