@@ -253,9 +253,10 @@ pub(super) fn readout(
                 .map(|(_, passes)| passes)
                 .unwrap_or_default();
             let gpu = if !gpu_timing_on(bench.as_deref()) {
-                "gpu    not measured (--features profiling, or --bench)".to_owned()
-            } else if let Some(reason) = gpu_timing_unavailable(&device) {
-                format!("gpu    not measured: {reason}")
+                "gpu    off · Tracy build or --bench".to_owned()
+            } else if gpu_timing_unavailable(&device).is_some() {
+                // The full reason goes into the bench report; the panel line stays one line.
+                "gpu    unavailable · adapter lacks timestamp queries".to_owned()
             } else if gpu.is_empty() {
                 "gpu    no data yet".to_owned()
             } else {
@@ -266,7 +267,7 @@ pub(super) fn readout(
                     gpu.values().sum::<f64>(),
                     passes
                         .iter()
-                        .take(3)
+                        .take(1)
                         .map(|(name, ms)| format!("{name} {ms:.2}"))
                         .collect::<Vec<_>>()
                         .join(" · ")
