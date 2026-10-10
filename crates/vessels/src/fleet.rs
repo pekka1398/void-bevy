@@ -37,6 +37,21 @@ pub use guidance::{GuidanceStatus, GuidedBurn};
 use wrenches::{GuidedAirSource, RigidFlightSource, SceneStepSource};
 
 type SceneGroup = (Option<usize>, Vec<String>, Vec<(u64, usize)>);
+
+/// Time to cover a nonnegative gap from `speed` under constant `acceleration`: the positive root
+/// of gap = speed t + acceleration t² / 2, written without subtracting `speed` from the square
+/// root, which cancels to zero when the acceleration is tiny next to the speed (a distant coast).
+fn band_crossing_seconds(gap: f64, speed: f64, acceleration: f64) -> f64 {
+    assert!(
+        gap.is_finite() && gap >= 0.0 && speed.is_finite() && speed >= 0.0,
+        "fleet: invalid band crossing gap {gap} or speed {speed}"
+    );
+    assert!(
+        acceleration.is_finite() && acceleration > 0.0,
+        "fleet: invalid band crossing acceleration {acceleration}"
+    );
+    2.0 * gap / (speed + (speed * speed + 2.0 * acceleration * gap).sqrt())
+}
 /// Explicit physics configurations; full air dynamics is accepted on its own before opting
 /// the main game in. ForceOnly retains the original no-spin air sampling and force pathway.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1983,7 +1998,7 @@ impl Fleet {
                 let speed = s.velocity.length();
                 let a = 1.2 * g.frame.body.gm / s.position.length_squared()
                     + self.propulsion_of(v).force.length() / self.mass(&v.members);
-                safe = safe.min(((-speed + (speed * speed + 2.0 * a * gap).sqrt()) / a).max(1e-3));
+                safe = safe.min(band_crossing_seconds(gap, speed, a).max(1e-3));
             }
         }
         safe
@@ -3705,4 +3720,24 @@ fn part_lowest_y(definition: &PartDefinition, pose: &PartPose) -> f64 {
         }
         _ => lowest,
     })
+}
+
+#[cfg(test)]
+mod band_crossing_tests {
+    use super::band_crossing_seconds;
+
+    #[test]
+    fn light_year_gap_keeps_its_time_under_tiny_acceleration() {
+        // The subtractive root rounds these to zero.
+        let (gap, speed) = (9.460_730_472_580_8e15, 1.0e12);
+        let seconds = band_crossing_seconds(gap, speed, 1.0e-12);
+        assert!((seconds - gap / speed).abs() <= gap / speed * 1e-14);
+    }
+
+    #[test]
+    fn matches_the_distance_it_bounds() {
+        let (speed, acceleration, t) = (30_000.0, 0.25, 100_000.0);
+        let gap = speed * t + 0.5 * acceleration * t * t;
+        assert!((band_crossing_seconds(gap, speed, acceleration) - t).abs() <= t * 1e-14);
+    }
 }
