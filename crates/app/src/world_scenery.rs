@@ -88,37 +88,23 @@ pub fn build_scenes(
         build_cloud_noise(DETAIL_SIZE, true),
         DETAIL_SIZE,
     ));
-    let mut resolve_textures = None;
-    for (id, d) in &world.bodies {
-        let body = world.body_index(id);
-        let radius = sim.fleet.ephemeris.bodies()[body].radius_meters + d.air_datum_meters;
-        let params = if let Some(profile) = &d.visual.scattering {
-            profile.parameters(radius)
-        } else {
-            // Explicit vacuum tables for mandatory ground/resolve bindings, never Earth air.
-            let mut p = void_scenery::earth_like_atmosphere(radius);
-            p.rayleigh_scattering = [0.0; 3];
-            p.ozone_absorption = [0.0; 3];
-            p.mie_scattering = 0.0;
-            p.mie_extinction = 0.0;
-            p
-        };
-        let trans = build_transmittance_table(&params);
-        let multiple = build_multiple_scattering_table(&params, &trans, 64, 20);
-        let irradiance = build_irradiance_table(&params, &trans, &multiple, 128, 24);
-        let trans = images.add(table_image(
-            &trans,
-            TRANSMITTANCE_WIDTH,
-            TRANSMITTANCE_HEIGHT,
-        ));
-        let irradiance = images.add(table_image(
-            &irradiance,
-            IRRADIANCE_WIDTH,
-            IRRADIANCE_HEIGHT,
-        ));
-        let textures = AirTextures {
-            transmittance: trans.clone(),
-            irradiance: irradiance.clone(),
+    // Airless bodies share one set of tables: transmittance 1 and sky irradiance 0 whatever the
+    // radius, and multiple scattering is only drawn times the air's zero scattering.
+    let mut build_textures = |params: &void_scenery::AtmosphereParams| {
+        let trans = build_transmittance_table(params);
+        let multiple = build_multiple_scattering_table(params, &trans, 64, 20);
+        let irradiance = build_irradiance_table(params, &trans, &multiple, 128, 24);
+        AirTextures {
+            transmittance: images.add(table_image(
+                &trans,
+                TRANSMITTANCE_WIDTH,
+                TRANSMITTANCE_HEIGHT,
+            )),
+            irradiance: images.add(table_image(
+                &irradiance,
+                IRRADIANCE_WIDTH,
+                IRRADIANCE_HEIGHT,
+            )),
             multiple: images.add(table_image(
                 &multiple,
                 MULTIPLE_SCATTERING_SIZE,
@@ -127,10 +113,34 @@ pub fn build_scenes(
             weather: weather.clone(),
             shape: shape.clone(),
             detail: detail.clone(),
+        }
+    };
+    let mut vacuum = None;
+    let mut resolve_textures = None;
+    for (id, d) in &world.bodies {
+        let body = world.body_index(id);
+        let radius = sim.fleet.ephemeris.bodies()[body].radius_meters + d.air_datum_meters;
+        let (params, textures) = if let Some(profile) = &d.visual.scattering {
+            let params = profile.parameters(radius);
+            let textures = build_textures(&params);
+            (params, textures)
+        } else {
+            // Explicit vacuum tables for mandatory ground/resolve bindings, never Earth air.
+            let mut p = void_scenery::earth_like_atmosphere(radius);
+            p.rayleigh_scattering = [0.0; 3];
+            p.ozone_absorption = [0.0; 3];
+            p.mie_scattering = 0.0;
+            p.mie_extinction = 0.0;
+            let textures = vacuum.get_or_insert_with(|| build_textures(&p)).clone();
+            (p, textures)
         };
         if resolve_textures.is_none() {
             resolve_textures = Some(textures.clone());
         }
+        let (trans, irradiance) = (
+            textures.transmittance.clone(),
+            textures.irradiance.clone(),
+        );
         let mut air = AirSettings::new(&params);
         air.enabled = f32::from(u8::from(d.visual.atmosphere));
         air.clouds_enabled = f32::from(u8::from(d.visual.clouds));

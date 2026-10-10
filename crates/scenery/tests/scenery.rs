@@ -30,6 +30,9 @@ fn airless_tables_and_sky_have_finite_vacuum_limits() {
             .chain(&irradiance)
             .all(|v| v.is_finite())
     );
+    // Constants whatever the radius, so the game shares one set among all airless bodies. The
+    // multiple-scattering table holds ground bounce here, but it is only drawn times the zero
+    // scattering of the air.
     for texel in trans.as_chunks::<4>().0 {
         assert_eq!(&texel[..3], &[1.0; 3]);
     }
