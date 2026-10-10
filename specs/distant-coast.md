@@ -1,7 +1,7 @@
 # 遠距離滑行用長時間段
 
 branch：`feature/distant-coast`
-參考：tag 前的 `work/interstellar-integration`（之後會改成 `archive/interstellar-integration`）
+參考：tag `archive/interstellar-integration`
 
 ## 目標
 
