@@ -2140,7 +2140,7 @@ fn draw_map(
     camera_view: Res<CameraView>,
     forecast: Res<Forecast>,
     mut plots: ResMut<MapPlots>,
-    camera: Single<(&Camera, &GlobalTransform), With<MainCamera>>,
+    camera: Single<(&Camera, &Transform, Has<ChildOf>), With<MainCamera>>,
     mut markers: Query<(
         &crate::map::MapMarker,
         &mut Node,
@@ -2248,10 +2248,14 @@ fn draw_map(
         sim.presentation.focus_body,
         &plots.coast.apsides,
     );
-    let (camera, transform) = *camera;
+    let (camera, transform, parented) = *camera;
+    assert!(!parented, "map camera must remain a root entity");
+    // The camera's Transform was set this frame in Update; its GlobalTransform still holds the
+    // previous frame's pose until PostUpdate propagates it. Project labels with the drawn pose.
+    let current = GlobalTransform::from(*transform);
     crate::map::place_map_labels(
         camera,
-        transform,
+        &current,
         &mut markers,
         &mut texts,
         &wanted,

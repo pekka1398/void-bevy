@@ -184,7 +184,7 @@ fn solar_renderer_switches_bodies_and_reuses_assets_after_checkpoint_restore() {
         assert_eq!(before.velocity, after.velocity);
         let world = &app.world().resource::<Ground>().0;
         assert_eq!(world.active, sim(&app).observation_body());
-        assert_eq!(world.bodies.len(), 5);
+        assert_eq!(world.bodies.len(), 53);
         assert_eq!(world.atmospheres.len(), 3);
     }
     for _ in 0..3 {

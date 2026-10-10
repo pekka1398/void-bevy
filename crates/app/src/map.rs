@@ -12,7 +12,18 @@ use void_view::{LabelKind, MapLabel};
 
 pub const PATH_COLOR: &str = "#4fc8ff";
 pub const VESSEL_COLOR: &str = "#7dffb0";
-const LABEL_HEIGHT: f32 = 13.0;
+fn body_label_font_size(body: &CelestialBody) -> f32 {
+    if body.parent_index.is_none() {
+        18.0
+    } else if matches!(
+        body.id.rsplit('/').next().unwrap(),
+        "cinder" | "vesper" | "aurelia" | "ares" | "velvet" | "halo" | "azure" | "abyss"
+    ) {
+        18.0
+    } else {
+        11.0
+    }
+}
 
 /// A CSS hex colour; invalid input is logged and shown in diagnostic magenta.
 pub fn color(hex: &str) -> Color {
@@ -31,15 +42,12 @@ pub struct MapMarker {
     pub kind: LabelKind,
     pub slot: usize,
     pub text: Entity,
+    pub font_size: f32,
 }
 
 /// One marker per body, one for the vessel and two for apsides, hidden until placed.
 pub fn spawn_map_labels(commands: &mut Commands, bodies: &[CelestialBody]) {
-    let font = TextFont {
-        font_size: FontSize::Px(12.0),
-        ..default()
-    };
-    let mut kinds: Vec<(LabelKind, usize, String, Color)> = bodies
+    let mut kinds: Vec<(LabelKind, usize, String, Color, f32)> = bodies
         .iter()
         .map(|b| {
             let kind = if b.parent_index.is_none() && b.index == 0 {
@@ -47,18 +55,39 @@ pub fn spawn_map_labels(commands: &mut Commands, bodies: &[CelestialBody]) {
             } else {
                 LabelKind::Body(b.index)
             };
-            (kind, 0, b.name.clone(), color(&b.color))
+            (
+                kind,
+                0,
+                b.name.clone(),
+                color(&b.color),
+                body_label_font_size(b),
+            )
         })
         .collect();
-    kinds.push((LabelKind::Vessel, 0, "Vessel".into(), color(VESSEL_COLOR)));
+    kinds.push((
+        LabelKind::Vessel,
+        0,
+        "Vessel".into(),
+        color(VESSEL_COLOR),
+        12.0,
+    ));
     for slot in 0..2 {
-        kinds.push((LabelKind::Apsis, slot, String::new(), color(PATH_COLOR)));
+        kinds.push((
+            LabelKind::Apsis,
+            slot,
+            String::new(),
+            color(PATH_COLOR),
+            12.0,
+        ));
     }
-    for (kind, slot, name, dot) in kinds {
+    for (kind, slot, name, dot, font_size) in kinds {
         let text = commands
             .spawn((
                 Text::new(name),
-                font.clone(),
+                TextFont {
+                    font_size: FontSize::Px(font_size),
+                    ..default()
+                },
                 TextShadow {
                     offset: Vec2::ONE,
                     color: Color::BLACK.with_alpha(0.8),
@@ -89,9 +118,12 @@ pub fn spawn_map_labels(commands: &mut Commands, bodies: &[CelestialBody]) {
             })
             .id();
         commands.entity(marker).add_child(text);
-        commands
-            .entity(marker)
-            .insert(MapMarker { kind, slot, text });
+        commands.entity(marker).insert(MapMarker {
+            kind,
+            slot,
+            text,
+            font_size,
+        });
     }
 }
 
@@ -106,7 +138,7 @@ pub fn place_map_labels(
     map_weight: f64,
     render: &dyn Fn(DVec3) -> Vec3,
 ) {
-    let mut shown: Vec<(Vec2, f32)> = Vec::new();
+    let mut shown: Vec<(Vec2, Vec2)> = Vec::new();
     let mut placed: Vec<(LabelKind, usize, Vec2, bool, String)> = Vec::new();
     let mut apsis_slot = 0;
     let size = camera.logical_viewport_size().unwrap_or(Vec2::ONE);
@@ -130,26 +162,28 @@ pub fn place_map_labels(
         if map_weight <= 0.0 || !ahead || !on_screen {
             continue;
         }
-        let width = markers
+        let extent = markers
             .iter()
             .find(|(m, ..)| m.kind == label.kind && m.slot == slot)
-            .map_or(60.0, |(.., computed)| {
-                computed.size().x * computed.inverse_scale_factor()
+            .map_or(Vec2::new(60.0, 14.0), |(marker, .., computed)| {
+                let measured = computed.unrounded_size() * computed.inverse_scale_factor();
+                // Before the first UI layout, keep the expected line height for placement.
+                Vec2::new(measured.x, measured.y.max(marker.font_size * 1.2))
             });
         let crowded = shown.iter().any(|(p, w)| {
-            (p.y - at.y).abs() < LABEL_HEIGHT
+            (p.y - at.y).abs() < (w.y + extent.y) * 0.5
                 && if at.x >= p.x {
-                    at.x - p.x < *w
+                    at.x - p.x < w.x
                 } else {
-                    p.x - at.x < width
+                    p.x - at.x < extent.x
                 }
         });
         if !crowded {
-            shown.push((at, width));
+            shown.push((at, extent));
         }
         placed.push((label.kind, slot, at, crowded, label.text.clone()));
     }
-    for (marker, mut node, mut visibility, _) in markers.iter_mut() {
+    for (marker, mut node, mut visibility, computed) in markers.iter_mut() {
         let found = placed
             .iter()
             .find(|(kind, slot, ..)| *kind == marker.kind && *slot == marker.slot);
@@ -163,8 +197,14 @@ pub fn place_map_labels(
         } else {
             Visibility::Inherited
         };
-        node.left = px(at.x - 3.0);
-        node.top = px(at.y - 7.0);
+        // Rounded layout bounds depend on the fractional position of both edges.
+        // Feeding them back into centering can alternate the anchor by a pixel.
+        let inverse_scale = computed.inverse_scale_factor();
+        let height = (computed.unrounded_size().y * inverse_scale).max(marker.font_size * 1.2);
+        let anchor = Vec2::new(at.x - 3.0, at.y - height * 0.5);
+        let anchor = (anchor / inverse_scale).round() * inverse_scale;
+        node.left = px(anchor.x);
+        node.top = px(anchor.y);
         if let Ok((mut t, mut v)) = texts.get_mut(marker.text) {
             if t.0 != *text {
                 t.0.clone_from(text);
@@ -197,4 +237,88 @@ pub fn label_click(
         }
     }
     (over, clicked)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn label_anchor_stays_fixed_when_rounded_layout_bounds_change() {
+        use bevy::camera::{CameraProjection, ComputedCameraValues, RenderTargetInfo};
+        let mut app = App::new();
+        let camera = Camera {
+            computed: ComputedCameraValues {
+                target_info: Some(RenderTargetInfo {
+                    physical_size: UVec2::new(1280, 720),
+                    scale_factor: 1.0,
+                }),
+                clip_from_view: PerspectiveProjection {
+                    aspect_ratio: 1280.0 / 720.0,
+                    ..default()
+                }
+                .get_clip_from_view(),
+                ..default()
+            },
+            ..default()
+        };
+        let label = MapLabel {
+            kind: LabelKind::Star,
+            text: "Sol".into(),
+            relative: DVec3::new(0.0, 0.0, -100.0),
+            color: "#ffd27a".into(),
+            priority: 1.0,
+        };
+        app.add_systems(
+            Update,
+            move |mut markers: Query<(&MapMarker, &mut Node, &mut Visibility, &ComputedNode)>,
+                  mut texts: Query<(&mut Text, &mut Visibility), Without<MapMarker>>| {
+                place_map_labels(
+                    &camera,
+                    &GlobalTransform::IDENTITY,
+                    &mut markers,
+                    &mut texts,
+                    std::slice::from_ref(&label),
+                    1.0,
+                    &|p| p.as_vec3(),
+                );
+            },
+        );
+        let text = app
+            .world_mut()
+            .spawn((Text::new("Sol"), Visibility::Inherited))
+            .id();
+        let marker = app
+            .world_mut()
+            .spawn((
+                MapMarker {
+                    kind: LabelKind::Star,
+                    slot: 0,
+                    text,
+                    font_size: 22.0,
+                },
+                Node::default(),
+                Visibility::Inherited,
+                ComputedNode::default(),
+            ))
+            .id();
+        for scale in [1.0_f32, 1.25, 2.0] {
+            let mut previous = None;
+            for rounded_height in [(26.4 * scale).floor(), (26.4 * scale).ceil()].repeat(3) {
+                *app.world_mut().get_mut::<ComputedNode>(marker).unwrap() = ComputedNode {
+                    size: Vec2::new(100.0 * scale, rounded_height),
+                    unrounded_size: Vec2::new(100.0, 26.4) * scale,
+                    inverse_scale_factor: scale.recip(),
+                    ..default()
+                };
+                app.update();
+                let node = app.world().get::<Node>(marker).unwrap();
+                let position = (node.left, node.top);
+                if let Some(previous) = previous {
+                    assert_eq!(position, previous);
+                }
+                previous = Some(position);
+            }
+        }
+    }
 }

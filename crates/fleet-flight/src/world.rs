@@ -563,10 +563,13 @@ pub fn main_game(craft: &void_assembly::Craft) -> crate::session::InitialWorld {
             },
         },
     )]);
-    for id in [
-        "sol", "cinder", "vesper", "ares", "selene", "velvet", "halo", "azure", "abyss",
-    ] {
-        bodies.insert(id.into(), solar_body(id, body(id)));
+    for b in system.bodies.iter().filter(|b| b.id != "aurelia") {
+        let description = if AUTHORED_SCENERY.contains(&b.id.as_str()) {
+            solar_body(&b.id, b)
+        } else {
+            small_body(b)
+        };
+        bodies.insert(b.id.clone(), description);
     }
     crate::session::InitialWorld {
         air_dynamics: void_vessels::AirDynamics::ForceAndTorque,
@@ -579,6 +582,71 @@ pub fn main_game(craft: &void_assembly::Craft) -> crate::session::InitialWorld {
         launch_body: "aurelia".into(),
         craft: craft.clone(),
         launch_site: site,
+    }
+}
+
+/// Sol's bodies besides Aurelia with their own surface, air or rings in `solar_body`; every other
+/// body is a `small_body`.
+const AUTHORED_SCENERY: [&str; 9] = [
+    "sol", "cinder", "vesper", "ares", "selene", "velvet", "halo", "azure", "abyss",
+];
+
+/// A moon, dwarf planet, asteroid or comet: a sphere with small crater relief (1% of the radius,
+/// at most 2.5 km) in a palette for its kind. No measured irregular shape, Titan's air, or a
+/// comet's coma and tail.
+fn small_body(body: &void_orbit::CelestialBody) -> BodyDescription {
+    // The stable ID seeds the craters, independent of the body's index.
+    let seed = body
+        .id
+        .bytes()
+        .fold(0_u32, |s, b| s.wrapping_mul(31).wrapping_add(u32::from(b)));
+    let height = (body.radius_meters * 0.01).min(2500.0);
+    let (low, high) = match body.id.as_str() {
+        "ember" => ([0.30, 0.12, 0.025], [0.85, 0.70, 0.22]),
+        "rime" | "enceladus" | "tethys" | "miranda" | "triton" => {
+            ([0.25, 0.27, 0.28], [0.83, 0.81, 0.73])
+        }
+        "haze" => ([0.26, 0.12, 0.025], [0.65, 0.42, 0.13]),
+        "pluto" => ([0.20, 0.09, 0.055], [0.73, 0.68, 0.61]),
+        "halley" | "67p" | "encke" | "halebopp" | "bennu" | "ryugu" => {
+            ([0.025, 0.025, 0.03], [0.13, 0.12, 0.11])
+        }
+        "eris" | "haumea" | "makemake" => ([0.25, 0.23, 0.22], [0.78, 0.74, 0.67]),
+        _ => ([0.12, 0.12, 0.13], [0.48, 0.46, 0.43]),
+    };
+    BodyDescription {
+        label: format!(
+            "{} · {:.2} km RADIUS",
+            body.name,
+            body.radius_meters / 1000.0
+        ),
+        terrain: Some(TerrainConfig::Cratered(void_terrain::CrateredOptions {
+            name: format!("{} cratered sphere", body.id),
+            radius_meters: body.radius_meters,
+            max_height_meters: height,
+            crater_count: 24,
+            crater_radius_radians: 0.12,
+            roughness: 0.35,
+            seed,
+            low_color: low,
+            high_color: high,
+        })),
+        air_density_scale: None,
+        air_datum_meters: 0.0,
+        sea_level_meters: None,
+        visual: VisualSettings {
+            surface: void_scenery::solar::SurfaceRecipe::SolidSurface,
+            rings: None,
+            surface_color: None,
+            atmosphere: false,
+            scattering: None,
+            clouds: false,
+            cloud_profile: None,
+            ocean: false,
+            color_datum_meters: 0.0,
+            rock_height_meters: height * 2.0,
+            snow_height_meters: 1.0e9,
+        },
     }
 }
 

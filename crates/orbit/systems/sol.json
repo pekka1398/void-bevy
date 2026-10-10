@@ -1,397 +1,1373 @@
 {
- "name": "Sol analogue",
- "root": {
-  "id": "sol",
-  "name": "Sol",
-  "massKg": 1.98847e+30,
-  "radiusMeters": 695700000,
-  "color": "#ffd27a",
-  "gravityField": {
-   "j2": 2.2e-7,
-   "referenceRadiusMeters": 695700000
-  },
-  "rotation": {
-   "periodSeconds": 2192832,
-   "obliquityRadians": 0.12656650926193705,
-   "poleLongitudeRadians": -0.2484333172783543,
-   "angleAtEpochRadians": 0
-  },
-  "children": [
-   {
-    "id": "cinder",
-    "name": "Cinder",
-    "massKg": 3.3011e+23,
-    "radiusMeters": 2439700,
-    "color": "#a39485",
+  "name": "Sol analogue",
+  "root": {
+    "id": "sol",
+    "name": "Sol",
+    "massKg": 1.98847e+30,
+    "radiusMeters": 695700000,
+    "color": "#ffd27a",
     "gravityField": {
-     "j2": 0.0000503,
-     "referenceRadiusMeters": 2440000
+      "j2": 2.2e-07,
+      "referenceRadiusMeters": 695700000
     },
     "rotation": {
-     "periodSeconds": 5067014.4,
-     "obliquityRadians": 0.12281754338387718,
-     "poleLongitudeRadians": -0.7289315203118193,
-     "angleAtEpochRadians": 0
+      "periodSeconds": 2192832,
+      "obliquityRadians": 0.12656650926193705,
+      "poleLongitudeRadians": -0.2484333172783543,
+      "angleAtEpochRadians": 0
     },
-    "orbit": {
-     "semiMajorAxisMeters": 57909036552.2286,
-     "eccentricity": 0.20563,
-     "inclinationRadians": 0.12226031410220278,
-     "longitudeOfAscendingNodeRadians": 0.8435350807813795,
-     "argumentOfPeriapsisRadians": 0.5083096913508285,
-     "meanAnomalyRadians": 3.0507657193160083
-    },
-    "orbitPlane": "ecliptic",
-    "children": []
-   },
-   {
-    "id": "vesper",
-    "name": "Vesper",
-    "massKg": 4.8675e+24,
-    "radiusMeters": 6051800,
-    "color": "#e8d3a0",
-    "gravityField": {
-     "j2": 0.000004458,
-     "referenceRadiusMeters": 6051800
-    },
-    "rotation": {
-     "periodSeconds": 20997152.64,
-     "obliquityRadians": 3.1199678721601547,
-     "poleLongitudeRadians": -2.614734683588967,
-     "angleAtEpochRadians": 0
-    },
-    "orbit": {
-     "semiMajorAxisMeters": 108209474537.37917,
-     "eccentricity": 0.00677672,
-     "inclinationRadians": 0.05924827411109566,
-     "longitudeOfAscendingNodeRadians": 1.3383157224083446,
-     "argumentOfPeriapsisRadians": 0.9585806336304324,
-     "meanAnomalyRadians": 0.8792381000505897
-    },
-    "orbitPlane": "ecliptic",
-    "children": []
-   },
-   {
-    "id": "aurelia",
-    "name": "Aurelia",
-    "massKg": 5.9722e+24,
-    "radiusMeters": 6371000,
-    "color": "#3f7fd6",
-    "gravityField": {
-     "j2": 0.00108262668,
-     "referenceRadiusMeters": 6378137
-    },
-    "rotation": {
-     "periodSeconds": 86164.2,
-     "obliquityRadians": 0.40910517666747087,
-     "poleLongitudeRadians": 1.5707963267948966,
-     "angleAtEpochRadians": 0
-    },
-    "orbit": {
-     "semiMajorAxisMeters": 149598261150.4425,
-     "eccentricity": 0.01671,
-     "inclinationRadians": 8.726646259971648e-7,
-     "longitudeOfAscendingNodeRadians": 6.086661233405025,
-     "argumentOfPeriapsisRadians": 1.9933405387027237,
-     "meanAnomalyRadians": 6.259047403624505
-    },
-    "orbitPlane": "ecliptic",
     "children": [
-     {
-      "id": "selene",
-      "name": "Selene",
-      "massKg": 7.342e+22,
-      "radiusMeters": 1737400,
-      "color": "#b8b8b0",
-      "gravityField": {
-       "j2": 0.0002033,
-       "referenceRadiusMeters": 1738000
+      {
+        "id": "cinder",
+        "name": "Cinder",
+        "massKg": 3.3011e+23,
+        "radiusMeters": 2439700,
+        "color": "#a39485",
+        "gravityField": {
+          "j2": 5.03e-05,
+          "referenceRadiusMeters": 2440000
+        },
+        "rotation": {
+          "periodSeconds": 5067014.4,
+          "obliquityRadians": 0.12281754338387718,
+          "poleLongitudeRadians": -0.7289315203118193,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 57909036552.2286,
+          "eccentricity": 0.20563,
+          "inclinationRadians": 0.12226031410220278,
+          "longitudeOfAscendingNodeRadians": 0.8435350807813795,
+          "argumentOfPeriapsisRadians": 0.5083096913508285,
+          "meanAnomalyRadians": 3.0507657193160083
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
       },
-      "rotation": {
-       "kind": "locked",
-       "periodSeconds": 2360591.5104,
-       "obliquityToOrbitRadians": 0.1165879940332212
+      {
+        "id": "vesper",
+        "name": "Vesper",
+        "massKg": 4.8675e+24,
+        "radiusMeters": 6051800,
+        "color": "#e8d3a0",
+        "gravityField": {
+          "j2": 4.458e-06,
+          "referenceRadiusMeters": 6051800
+        },
+        "rotation": {
+          "periodSeconds": 20997152.64,
+          "obliquityRadians": 3.1199678721601547,
+          "poleLongitudeRadians": -2.614734683588967,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 108209474537.37917,
+          "eccentricity": 0.00677672,
+          "inclinationRadians": 0.05924827411109566,
+          "longitudeOfAscendingNodeRadians": 1.3383157224083446,
+          "argumentOfPeriapsisRadians": 0.9585806336304324,
+          "meanAnomalyRadians": 0.8792381000505897
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
       },
-      "orbit": {
-       "semiMajorAxisMeters": 381486900,
-       "eccentricity": 0.0549,
-       "inclinationRadians": 0.08979719001510825,
-       "longitudeOfAscendingNodeRadians": 2.1830578283945075,
-       "argumentOfPeriapsisRadians": 5.5527650152199595,
-       "meanAnomalyRadians": 2.3609068791727297
+      {
+        "id": "aurelia",
+        "name": "Aurelia",
+        "massKg": 5.9722e+24,
+        "radiusMeters": 6371000,
+        "color": "#3f7fd6",
+        "gravityField": {
+          "j2": 0.00108262668,
+          "referenceRadiusMeters": 6378137
+        },
+        "rotation": {
+          "periodSeconds": 86164.2,
+          "obliquityRadians": 0.40910517666747087,
+          "poleLongitudeRadians": 1.5707963267948966,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 149598261150.4425,
+          "eccentricity": 0.01671,
+          "inclinationRadians": 8.726646259971648e-07,
+          "longitudeOfAscendingNodeRadians": 6.086661233405025,
+          "argumentOfPeriapsisRadians": 1.9933405387027237,
+          "meanAnomalyRadians": 6.259047403624505
+        },
+        "orbitPlane": "ecliptic",
+        "children": [
+          {
+            "id": "selene",
+            "name": "Selene (Moon)",
+            "massKg": 7.342e+22,
+            "radiusMeters": 1737400,
+            "color": "#b8b8b0",
+            "gravityField": {
+              "j2": 0.0002033,
+              "referenceRadiusMeters": 1738000
+            },
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 2360591.5104,
+              "obliquityToOrbitRadians": 0.1165879940332212
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 381486900,
+              "eccentricity": 0.0549,
+              "inclinationRadians": 0.08979719001510825,
+              "longitudeOfAscendingNodeRadians": 2.1830578283945075,
+              "argumentOfPeriapsisRadians": 5.5527650152199595,
+              "meanAnomalyRadians": 2.3609068791727297
+            },
+            "orbitPlane": "ecliptic",
+            "children": []
+          }
+        ]
       },
-      "orbitPlane": "ecliptic",
-      "children": []
-     }
+      {
+        "id": "bennu",
+        "name": "Bennu",
+        "massKg": 73272103441.55943,
+        "radiusMeters": 242.22,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 15465.819599999999,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 168505699049.45242,
+          "eccentricity": 0.2037450762416414,
+          "inclinationRadians": 0.10532963896354676,
+          "longitudeOfAscendingNodeRadians": 0.03596890055795232,
+          "argumentOfPeriapsisRadians": 1.1558104524212345,
+          "meanAnomalyRadians": 1.7750688247331547
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "ryugu",
+        "name": "Ryugu",
+        "massKg": 449485339286.5169,
+        "radiusMeters": 448.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 27477.432,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 178158936508.60522,
+          "eccentricity": 0.1910730046480051,
+          "inclinationRadians": 0.1023887367667122,
+          "longitudeOfAscendingNodeRadians": 4.385832857761985,
+          "argumentOfPeriapsisRadians": 3.693273668849455,
+          "meanAnomalyRadians": 1.0880500208642008
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "eros",
+        "name": "Eros",
+        "massKg": 6686843564119084.0,
+        "radiusMeters": 8420.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 18972.0,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 218150154988.97488,
+          "eccentricity": 0.2228779627700761,
+          "inclinationRadians": 0.1889937477972571,
+          "longitudeOfAscendingNodeRadians": 5.31047790816104,
+          "argumentOfPeriapsisRadians": 3.1227104934097074,
+          "meanAnomalyRadians": 1.0910307103090324
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "ares",
+        "name": "Ares",
+        "massKg": 6.4171e+23,
+        "radiusMeters": 3389500,
+        "color": "#c1583a",
+        "gravityField": {
+          "j2": 0.00196045,
+          "referenceRadiusMeters": 3396200
+        },
+        "rotation": {
+          "periodSeconds": 88642.44,
+          "obliquityRadians": 0.44338045023493733,
+          "poleLongitudeRadians": -0.08999616274981276,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 227939134030.3053,
+          "eccentricity": 0.0934,
+          "inclinationRadians": 0.0322885911618951,
+          "longitudeOfAscendingNodeRadians": 0.8649502707033498,
+          "argumentOfPeriapsisRadians": 5.000403213548794,
+          "meanAnomalyRadians": 0.33880331439713923
+        },
+        "orbitPlane": "ecliptic",
+        "children": [
+          {
+            "id": "phobos",
+            "name": "Phobos",
+            "massKg": 1.061834199841182e+16,
+            "radiusMeters": 11080.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 27535.68,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 9375000.0,
+              "eccentricity": 0.015,
+              "inclinationRadians": 0.019198621771937627,
+              "longitudeOfAscendingNodeRadians": 2.9530970943744053,
+              "argumentOfPeriapsisRadians": 3.775147172063735,
+              "meanAnomalyRadians": 3.3108895910332428
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "deimos",
+            "name": "Deimos",
+            "massKg": 1441349654645431.0,
+            "radiusMeters": 6200.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 109080.0,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 23457000.0,
+              "eccentricity": 0.0,
+              "inclinationRadians": 0.031415926535897934,
+              "longitudeOfAscendingNodeRadians": 0.9477137838329209,
+              "argumentOfPeriapsisRadians": 0.0,
+              "meanAnomalyRadians": 3.5779249665883754
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          }
+        ]
+      },
+      {
+        "id": "encke",
+        "name": "Encke",
+        "massKg": 28952917895483.53,
+        "radiusMeters": 2400.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 39898.8,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 331938394471.9187,
+          "eccentricity": 0.8469532425568865,
+          "inclinationRadians": 0.1978696698408464,
+          "longitudeOfAscendingNodeRadians": 5.829819725162589,
+          "argumentOfPeriapsisRadians": 3.2686882486368,
+          "meanAnomalyRadians": 5.801625445862924
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "vesta",
+        "name": "Vesta",
+        "massKg": 2.590276793071933e+20,
+        "radiusMeters": 261385.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 19231.65947592,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 353255320326.53925,
+          "eccentricity": 0.09020374382834395,
+          "inclinationRadians": 0.12468502227860503,
+          "longitudeOfAscendingNodeRadians": 1.8099290060510291,
+          "argumentOfPeriapsisRadians": 2.643626618040368,
+          "meanAnomalyRadians": 1.4170355437494468
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "ceres",
+        "name": "Ceres",
+        "massKg": 9.383515874323901e+20,
+        "radiusMeters": 469700.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 32667.012000000002,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 413720779525.95984,
+          "eccentricity": 0.07969229514816586,
+          "inclinationRadians": 0.18479594643471184,
+          "longitudeOfAscendingNodeRadians": 1.4006027582207703,
+          "argumentOfPeriapsisRadians": 1.279225366215336,
+          "meanAnomalyRadians": 4.789521125434311
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "pallas",
+        "name": "Pallas",
+        "massKg": 2.0421617248250754e+20,
+        "radiusMeters": 256500.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 28127.59704,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 414320130784.3597,
+          "eccentricity": 0.2307000995648547,
+          "inclinationRadians": 0.609692258581441,
+          "longitudeOfAscendingNodeRadians": 3.017440740051268,
+          "argumentOfPeriapsisRadians": 5.427448911733716,
+          "meanAnomalyRadians": 4.43749355249143
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "hygiea",
+        "name": "Hygiea",
+        "massKg": 1.048799125001873e+20,
+        "radiusMeters": 203560.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 49780.799999999996,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 471379006111.9591,
+          "eccentricity": 0.1067092741240963,
+          "inclinationRadians": 0.0668379063692244,
+          "longitudeOfAscendingNodeRadians": 4.941374306395722,
+          "argumentOfPeriapsisRadians": 5.4528316289533105,
+          "meanAnomalyRadians": 4.398830531285782
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "67p",
+        "name": "67P",
+        "massKg": 9921639722517.717,
+        "radiusMeters": 1700.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 45940.644,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 517945151555.5412,
+          "eccentricity": 0.6409081308996354,
+          "inclinationRadians": 0.12287632697162729,
+          "longitudeOfAscendingNodeRadians": 0.875030834690061,
+          "argumentOfPeriapsisRadians": 0.223371595797203,
+          "meanAnomalyRadians": 0.1546349050578048
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "velvet",
+        "name": "Velvet",
+        "massKg": 1.89813e+27,
+        "radiusMeters": 69911000,
+        "color": "#c9a27a",
+        "gravityField": {
+          "j2": 0.014736,
+          "referenceRadiusMeters": 71492000
+        },
+        "rotation": {
+          "periodSeconds": 35730,
+          "obliquityRadians": 0.03868522514254324,
+          "poleLongitudeRadians": -1.9579501751867592,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 778567158271.08,
+          "eccentricity": 0.0489,
+          "inclinationRadians": 0.022741640153486113,
+          "longitudeOfAscendingNodeRadians": 1.7534275797235832,
+          "argumentOfPeriapsisRadians": 4.7798808625593106,
+          "meanAnomalyRadians": 0.3494149162492648
+        },
+        "orbitPlane": "ecliptic",
+        "children": [
+          {
+            "id": "amalthea",
+            "name": "Amalthea",
+            "massKg": 2.4655769144329743e+18,
+            "radiusMeters": 83500.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 43192.915199999996,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 181400000.0,
+              "eccentricity": 0.003,
+              "inclinationRadians": 0.006981317007977318,
+              "longitudeOfAscendingNodeRadians": 4.9375364538919575,
+              "argumentOfPeriapsisRadians": 3.1433379828417873,
+              "meanAnomalyRadians": 5.420992656694388
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "ember",
+            "name": "Ember (Io)",
+            "massKg": 8.9319e+22,
+            "radiusMeters": 1821600,
+            "color": "#e8c35a",
+            "gravityField": {
+              "j2": 0.0018459,
+              "referenceRadiusMeters": 1821600
+            },
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 152853.5232,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 421700000,
+              "eccentricity": 0.0041,
+              "inclinationRadians": 0.0008726646259971648,
+              "longitudeOfAscendingNodeRadians": 0.7661995416255106,
+              "argumentOfPeriapsisRadians": 1.467821900927231,
+              "meanAnomalyRadians": 5.969026041820607
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "rime",
+            "name": "Rime (Europa)",
+            "massKg": 4.7998e+22,
+            "radiusMeters": 1560800,
+            "color": "#cfc6b4",
+            "gravityField": {
+              "j2": 0.0004355,
+              "referenceRadiusMeters": 1560800
+            },
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 306822.0384,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 670900000,
+              "eccentricity": 0.009,
+              "inclinationRadians": 0.008203047484373348,
+              "longitudeOfAscendingNodeRadians": 3.824016391119576,
+              "argumentOfPeriapsisRadians": 1.552819435499355,
+              "meanAnomalyRadians": 2.9845130209103035
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "hollow",
+            "name": "Hollow (Ganymede)",
+            "massKg": 1.4819e+23,
+            "radiusMeters": 2634100,
+            "color": "#9c8f80",
+            "gravityField": {
+              "j2": 0.00012733,
+              "referenceRadiusMeters": 2634100
+            },
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 618153.3792,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 1070400000,
+              "eccentricity": 0.0013,
+              "inclinationRadians": 0.003490658503988659,
+              "longitudeOfAscendingNodeRadians": 1.1091567396423965,
+              "argumentOfPeriapsisRadians": 3.3580134808370903,
+              "meanAnomalyRadians": 5.541420375081996
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "umber",
+            "name": "Umber (Callisto)",
+            "massKg": 1.075938e+23,
+            "radiusMeters": 2410300,
+            "color": "#6f6558",
+            "gravityField": {
+              "j2": 3.27e-05,
+              "referenceRadiusMeters": 2410300
+            },
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 1441931.1552000002,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 1882700000,
+              "eccentricity": 0.0074,
+              "inclinationRadians": 0.003351032163829113,
+              "longitudeOfAscendingNodeRadians": 5.215881563000014,
+              "argumentOfPeriapsisRadians": 0.9187936781273749,
+              "meanAnomalyRadians": 3.166166889457873
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          }
+        ]
+      },
+      {
+        "id": "halo",
+        "name": "Halo",
+        "massKg": 5.6834e+26,
+        "radiusMeters": 60268000,
+        "color": "#d9c38a",
+        "gravityField": {
+          "j2": 0.016298,
+          "referenceRadiusMeters": 60330000
+        },
+        "rotation": {
+          "periodSeconds": 38361.96,
+          "obliquityRadians": 0.4896027936567866,
+          "poleLongitudeRadians": 1.3880169445835935,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 1426666414179.921,
+          "eccentricity": 0.05386179,
+          "inclinationRadians": 0.04338874330931084,
+          "longitudeOfAscendingNodeRadians": 1.9837835429754036,
+          "argumentOfPeriapsisRadians": 5.915557074367245,
+          "meanAnomalyRadians": 5.538896034175403
+        },
+        "orbitPlane": "ecliptic",
+        "children": [
+          {
+            "id": "mimas",
+            "name": "Mimas",
+            "massKg": 3.750940173501342e+19,
+            "radiusMeters": 198200.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 81425.2608,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 186000000.0,
+              "eccentricity": 0.02,
+              "inclinationRadians": 0.027925268031909273,
+              "longitudeOfAscendingNodeRadians": 1.1554079648202462,
+              "argumentOfPeriapsisRadians": 2.7995081201989045,
+              "meanAnomalyRadians": 4.80489143074039
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "enceladus",
+            "name": "Enceladus",
+            "massKg": 1.0803185352771078e+20,
+            "radiusMeters": 252100.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 118386.8352,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 238400000.0,
+              "eccentricity": 0.005,
+              "inclinationRadians": 0.0,
+              "longitudeOfAscendingNodeRadians": 0.0,
+              "argumentOfPeriapsisRadians": 2.0856684561332237,
+              "meanAnomalyRadians": 0.9948376736367679
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "tethys",
+            "name": "Tethys",
+            "massKg": 6.174959171748349e+20,
+            "radiusMeters": 531100.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 163106.09279999998,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 295000000.0,
+              "eccentricity": 0.001,
+              "inclinationRadians": 0.019198621771937627,
+              "longitudeOfAscendingNodeRadians": 4.76474885794452,
+              "argumentOfPeriapsisRadians": 5.852088981936987,
+              "meanAnomalyRadians": 0.0
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "dione",
+            "name": "Dione",
+            "massKg": 1.0954867177082242e+21,
+            "radiusMeters": 561400.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 236469.5424,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 377700000.0,
+              "eccentricity": 0.002,
+              "inclinationRadians": 0.0,
+              "longitudeOfAscendingNodeRadians": 0.0,
+              "argumentOfPeriapsisRadians": 2.0245819323134224,
+              "meanAnomalyRadians": 3.7000980142279785
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "rhea",
+            "name": "Rhea",
+            "massKg": 2.3064853243036725e+21,
+            "radiusMeters": 763500.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 390312.2592,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 527200000.0,
+              "eccentricity": 0.001,
+              "inclinationRadians": 0.005235987755982988,
+              "longitudeOfAscendingNodeRadians": 2.333505209916418,
+              "argumentOfPeriapsisRadians": 0.773180858633488,
+              "meanAnomalyRadians": 0.5497787143782138
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "haze",
+            "name": "Haze (Titan)",
+            "massKg": 1.3452e+23,
+            "radiusMeters": 2574700,
+            "color": "#d8a44a",
+            "gravityField": {
+              "j2": 3.3089e-05,
+              "referenceRadiusMeters": 2575000
+            },
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 1377684.3743999999,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 1221870000,
+              "eccentricity": 0.0288,
+              "inclinationRadians": 0.006083170574901036,
+              "longitudeOfAscendingNodeRadians": 0.4897393881096089,
+              "argumentOfPeriapsisRadians": 3.150877805210403,
+              "meanAnomalyRadians": 2.8502972014319394
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "hyperion",
+            "name": "Hyperion",
+            "massKg": 5.550994111742055e+18,
+            "radiusMeters": 135000.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "periodSeconds": 86400,
+              "obliquityRadians": 0,
+              "poleLongitudeRadians": 0,
+              "angleAtEpochRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 1481500000.0,
+              "eccentricity": 0.105,
+              "inclinationRadians": 0.010471975511965976,
+              "longitudeOfAscendingNodeRadians": 1.520181778487061,
+              "argumentOfPeriapsisRadians": 3.735004599267865,
+              "meanAnomalyRadians": 2.1450096507010312
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "iapetus",
+            "name": "Iapetus",
+            "massKg": 1.805659170250064e+21,
+            "radiusMeters": 734300.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 6854198.5728,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 3561700000.0,
+              "eccentricity": 0.028,
+              "inclinationRadians": 0.13264502315156904,
+              "longitudeOfAscendingNodeRadians": 1.509709802975095,
+              "argumentOfPeriapsisRadians": 4.4418629463255686,
+              "meanAnomalyRadians": 1.3055062804917585
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "phoebe",
+            "name": "Phoebe",
+            "massKg": 8.312332379425559e+18,
+            "radiusMeters": 106500.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "periodSeconds": 86400,
+              "obliquityRadians": 0,
+              "poleLongitudeRadians": 0,
+              "angleAtEpochRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 12929400000.0,
+              "eccentricity": 0.164,
+              "inclinationRadians": 3.057816849494065,
+              "longitudeOfAscendingNodeRadians": 3.363249468593073,
+              "argumentOfPeriapsisRadians": 4.194026192542374,
+              "meanAnomalyRadians": 5.375614096142535
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          }
+        ]
+      },
+      {
+        "id": "halley",
+        "name": "Halley",
+        "massKg": 348454985160667.9,
+        "radiusMeters": 5500.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 86400,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 2682085627823.348,
+          "eccentricity": 0.9679359956953211,
+          "inclinationRadians": 2.8307587648210633,
+          "longitudeOfAscendingNodeRadians": 1.0314712132091741,
+          "argumentOfPeriapsisRadians": 1.9589825361944566,
+          "meanAnomalyRadians": 4.788875192352163
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "azure",
+        "name": "Azure",
+        "massKg": 8.681e+25,
+        "radiusMeters": 25559000,
+        "color": "#9fd8e0",
+        "gravityField": {
+          "j2": 0.00334343,
+          "referenceRadiusMeters": 25559000
+        },
+        "rotation": {
+          "periodSeconds": 62063.99999999999,
+          "obliquityRadians": 1.7055671343561096,
+          "poleLongitudeRadians": 1.355190208001112,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 2870658170655.7324,
+          "eccentricity": 0.04725744,
+          "inclinationRadians": 0.013485074058964219,
+          "longitudeOfAscendingNodeRadians": 1.2918390439753027,
+          "argumentOfPeriapsisRadians": 1.6918759478238066,
+          "meanAnomalyRadians": 2.4833212746064897
+        },
+        "orbitPlane": "ecliptic",
+        "children": [
+          {
+            "id": "miranda",
+            "name": "Miranda",
+            "massKg": 6.442623196440077e+19,
+            "radiusMeters": 235800.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 122124.58559999999,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 129846000.0,
+              "eccentricity": 0.001,
+              "inclinationRadians": 0.07679448708775051,
+              "longitudeOfAscendingNodeRadians": 1.7610372152622786,
+              "argumentOfPeriapsisRadians": 2.7017696820872223,
+              "meanAnomalyRadians": 1.2740903539558606
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "ariel",
+            "name": "Ariel",
+            "massKg": 1.2510675276808056e+21,
+            "radiusMeters": 578900.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 217760.74560000002,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 190929000.0,
+              "eccentricity": 0.001,
+              "inclinationRadians": 0.0,
+              "longitudeOfAscendingNodeRadians": 0.0,
+              "argumentOfPeriapsisRadians": 0.16755160819145562,
+              "meanAnomalyRadians": 3.3772121026090276
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "umbriel",
+            "name": "Umbriel",
+            "massKg": 1.27504007910942e+21,
+            "radiusMeters": 584700.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 358056.8928,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 265986000.0,
+              "eccentricity": 0.004,
+              "inclinationRadians": 0.0017453292519943296,
+              "longitudeOfAscendingNodeRadians": 3.0508355324860883,
+              "argumentOfPeriapsisRadians": 3.2009338481576006,
+              "meanAnomalyRadians": 4.4156830075456535
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "titania",
+            "name": "Titania",
+            "massKg": 3.3996074494703567e+21,
+            "radiusMeters": 788900.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 752187.0816,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 436298000.0,
+              "eccentricity": 0.002,
+              "inclinationRadians": 0.0017453292519943296,
+              "longitudeOfAscendingNodeRadians": 0.5148721293383273,
+              "argumentOfPeriapsisRadians": 3.2114058236695664,
+              "meanAnomalyRadians": 1.1885692206081384
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "oberon",
+            "name": "Oberon",
+            "massKg": 3.075978005184065e+21,
+            "radiusMeters": 761400.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 1163223.6768,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 583511000.0,
+              "eccentricity": 0.002,
+              "inclinationRadians": 0.0017453292519943296,
+              "longitudeOfAscendingNodeRadians": 1.340412865531645,
+              "argumentOfPeriapsisRadians": 2.3073252711365035,
+              "meanAnomalyRadians": 2.506292805863857
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          }
+        ]
+      },
+      {
+        "id": "abyss",
+        "name": "Abyss",
+        "massKg": 1.02413e+26,
+        "radiusMeters": 24764000,
+        "color": "#3f5fd0",
+        "gravityField": {
+          "j2": 0.003411,
+          "referenceRadiusMeters": 25225000
+        },
+        "rotation": {
+          "periodSeconds": 57996,
+          "obliquityRadians": 0.48915271111858477,
+          "poleLongitudeRadians": -0.7114823273986132,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 4498396417009.467,
+          "eccentricity": 0.00859048,
+          "inclinationRadians": 0.030893086454925476,
+          "longitudeOfAscendingNodeRadians": 2.300068641354461,
+          "argumentOfPeriapsisRadians": 4.767899814813145,
+          "meanAnomalyRadians": 4.536376156304037
+        },
+        "orbitPlane": "ecliptic",
+        "children": [
+          {
+            "id": "proteus",
+            "name": "Proteus",
+            "massKg": 3.870698050731912e+19,
+            "radiusMeters": 208000.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 96968.01599999999,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 117600000.0,
+              "eccentricity": 0.0,
+              "inclinationRadians": 0.0,
+              "longitudeOfAscendingNodeRadians": 0.0,
+              "argumentOfPeriapsisRadians": 0.0,
+              "meanAnomalyRadians": 4.831071369520305
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "triton",
+            "name": "Triton",
+            "massKg": 2.1402925550244972e+22,
+            "radiusMeters": 1352600.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 507772.2816,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 354800000.0,
+              "eccentricity": 0.0,
+              "inclinationRadians": 2.7454029133870805,
+              "longitudeOfAscendingNodeRadians": 3.1084313978019007,
+              "argumentOfPeriapsisRadians": 0.0,
+              "meanAnomalyRadians": 1.0995574287564276
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "nereid",
+            "name": "Nereid",
+            "massKg": 2.0579526276115538e+19,
+            "radiusMeters": 170000.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "periodSeconds": 86400,
+              "obliquityRadians": 0,
+              "poleLongitudeRadians": 0,
+              "angleAtEpochRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 5513900000.0,
+              "eccentricity": 0.751,
+              "inclinationRadians": 0.0890117918517108,
+              "longitudeOfAscendingNodeRadians": 5.576326960121883,
+              "argumentOfPeriapsisRadians": 5.18013721991917,
+              "meanAnomalyRadians": 5.558873667601939
+            },
+            "orbitPlane": "ecliptic",
+            "children": []
+          }
+        ]
+      },
+      {
+        "id": "orcus",
+        "name": "Orcus",
+        "massKg": 3.817035074111598e+20,
+        "radiusMeters": 450000.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 47476.8,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 5890695215561.186,
+          "eccentricity": 0.2205240628250881,
+          "inclinationRadians": 0.3587840216298353,
+          "longitudeOfAscendingNodeRadians": 4.684557121424581,
+          "argumentOfPeriapsisRadians": 1.284012307577642,
+          "meanAnomalyRadians": 3.300370340755221
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "pluto",
+        "name": "Pluto",
+        "massKg": 1.303e+22,
+        "radiusMeters": 1188300,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 551854.08,
+          "obliquityRadians": 2.087413785385218,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 5906423130977.399,
+          "eccentricity": 0.2488,
+          "inclinationRadians": 0.29949849964222697,
+          "longitudeOfAscendingNodeRadians": 1.9250807116572257,
+          "argumentOfPeriapsisRadians": 1.9867781007152252,
+          "meanAnomalyRadians": 0.25359634031477607
+        },
+        "orbitPlane": "ecliptic",
+        "children": [
+          {
+            "id": "charon",
+            "name": "Charon",
+            "massKg": 1.5896798166099818e+21,
+            "radiusMeters": 606000.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "kind": "locked",
+              "periodSeconds": 551855.9808,
+              "obliquityToOrbitRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 19600000.0,
+              "eccentricity": 0.0,
+              "inclinationRadians": 0.0,
+              "longitudeOfAscendingNodeRadians": 0.0,
+              "argumentOfPeriapsisRadians": 0.0,
+              "meanAnomalyRadians": 5.307546255314756
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "styx",
+            "name": "Styx",
+            "massKg": 588977413114604.9,
+            "radiusMeters": 5200.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "periodSeconds": 86400,
+              "obliquityRadians": 0,
+              "poleLongitudeRadians": 0,
+              "angleAtEpochRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 43200000.0,
+              "eccentricity": 0.025,
+              "inclinationRadians": 0.0,
+              "longitudeOfAscendingNodeRadians": 0.0,
+              "argumentOfPeriapsisRadians": 5.6286868376817125,
+              "meanAnomalyRadians": 6.250024051391694
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "nix",
+            "name": "Nix",
+            "massKg": 2.247426696432585e+16,
+            "radiusMeters": 18000.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "periodSeconds": 86400,
+              "obliquityRadians": 0,
+              "poleLongitudeRadians": 0,
+              "angleAtEpochRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 49300000.0,
+              "eccentricity": 0.015,
+              "inclinationRadians": 0.0,
+              "longitudeOfAscendingNodeRadians": 0.0,
+              "argumentOfPeriapsisRadians": 0.5480333851262195,
+              "meanAnomalyRadians": 5.902703530244822
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "kerberos",
+            "name": "Kerberos",
+            "massKg": 904778684233860.4,
+            "radiusMeters": 6000.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "periodSeconds": 86400,
+              "obliquityRadians": 0,
+              "poleLongitudeRadians": 0,
+              "angleAtEpochRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 58300000.0,
+              "eccentricity": 0.01,
+              "inclinationRadians": 0.006981317007977318,
+              "longitudeOfAscendingNodeRadians": 5.485569839018178,
+              "argumentOfPeriapsisRadians": 0.5602506898901798,
+              "meanAnomalyRadians": 4.818854064756344
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          },
+          {
+            "id": "hydra",
+            "name": "Hydra",
+            "massKg": 2.99656892857678e+16,
+            "radiusMeters": 18500.0,
+            "color": "#a6a09b",
+            "rotation": {
+              "periodSeconds": 86400,
+              "obliquityRadians": 0,
+              "poleLongitudeRadians": 0,
+              "angleAtEpochRadians": 0
+            },
+            "orbit": {
+              "semiMajorAxisMeters": 65200000.0,
+              "eccentricity": 0.009,
+              "inclinationRadians": 0.005235987755982988,
+              "longitudeOfAscendingNodeRadians": 1.9949113350295187,
+              "argumentOfPeriapsisRadians": 2.4312436480281012,
+              "meanAnomalyRadians": 5.846852994181004
+            },
+            "orbitPlane": "parent-equator",
+            "children": []
+          }
+        ]
+      },
+      {
+        "id": "haumea",
+        "name": "Haumea",
+        "massKg": 4.006e+21,
+        "radiusMeters": 715000.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 14091.84,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 6441727731105.824,
+          "eccentricity": 0.1944430148898797,
+          "inclinationRadians": 0.49233074704852925,
+          "longitudeOfAscendingNodeRadians": 2.12556766253848,
+          "argumentOfPeriapsisRadians": 4.2008425279546,
+          "meanAnomalyRadians": 3.895756612060132
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "quaoar",
+        "name": "Quaoar",
+        "massKg": 6.969099703213356e+20,
+        "radiusMeters": 550000.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 31824.0,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 6456072110210.255,
+          "eccentricity": 0.03520023677935285,
+          "inclinationRadians": 0.13947931016598164,
+          "longitudeOfAscendingNodeRadians": 3.2972607485279077,
+          "argumentOfPeriapsisRadians": 2.8485353091616465,
+          "meanAnomalyRadians": 5.111175028305158
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "makemake",
+        "name": "Makemake",
+        "massKg": 3.1e+21,
+        "radiusMeters": 714000.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 80956.8,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 6817314568492.872,
+          "eccentricity": 0.1588889953992523,
+          "inclinationRadians": 0.5066316626480796,
+          "longitudeOfAscendingNodeRadians": 1.383955929997169,
+          "argumentOfPeriapsisRadians": 5.185238352013096,
+          "meanAnomalyRadians": 2.965977558015793
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "gonggong",
+        "name": "Gonggong",
+        "massKg": 9.743476827512795e+20,
+        "radiusMeters": 615000.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 80640.0,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 10003110806198.326,
+          "eccentricity": 0.5042510000302973,
+          "inclinationRadians": 0.5392904586392391,
+          "longitudeOfAscendingNodeRadians": 5.8789376544161085,
+          "argumentOfPeriapsisRadians": 3.606256616688339,
+          "meanAnomalyRadians": 1.9489139080996827
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "eris",
+        "name": "Eris",
+        "massKg": 1.66e+22,
+        "radiusMeters": 1200000.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 93225.59999999999,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 10162773801275.848,
+          "eccentricity": 0.4382385347971672,
+          "inclinationRadians": 0.7666503243428172,
+          "longitudeOfAscendingNodeRadians": 0.6284017906755512,
+          "argumentOfPeriapsisRadians": 2.631867911834593,
+          "meanAnomalyRadians": 3.6961611496472027
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "halebopp",
+        "name": "Hale-Bopp",
+        "massKg": 5.654866776461627e+16,
+        "radiusMeters": 30000.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 86400,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 26543656424294.68,
+          "eccentricity": 0.9949810027633206,
+          "inclinationRadians": 1.558362500801931,
+          "longitudeOfAscendingNodeRadians": 4.934629108791646,
+          "argumentOfPeriapsisRadians": 2.2761653331924747,
+          "meanAnomalyRadians": 0.06769061128730591
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      },
+      {
+        "id": "sedna",
+        "name": "Sedna",
+        "massKg": 5.235987755982988e+20,
+        "radiusMeters": 500000.0,
+        "color": "#a6a09b",
+        "rotation": {
+          "periodSeconds": 36982.799999999996,
+          "obliquityRadians": 0,
+          "poleLongitudeRadians": 0,
+          "angleAtEpochRadians": 0
+        },
+        "orbit": {
+          "semiMajorAxisMeters": 81339283783013.88,
+          "eccentricity": 0.8598824585187618,
+          "inclinationRadians": 0.2081353274153791,
+          "longitudeOfAscendingNodeRadians": 2.5221083908000392,
+          "argumentOfPeriapsisRadians": 5.429697880677966,
+          "meanAnomalyRadians": 6.258675550764866
+        },
+        "orbitPlane": "ecliptic",
+        "children": []
+      }
     ]
-   },
-   {
-    "id": "ares",
-    "name": "Ares",
-    "massKg": 6.4171e+23,
-    "radiusMeters": 3389500,
-    "color": "#c1583a",
-    "gravityField": {
-     "j2": 0.00196045,
-     "referenceRadiusMeters": 3396200
-    },
-    "rotation": {
-     "periodSeconds": 88642.44,
-     "obliquityRadians": 0.44338045023493733,
-     "poleLongitudeRadians": -0.08999616274981276,
-     "angleAtEpochRadians": 0
-    },
-    "orbit": {
-     "semiMajorAxisMeters": 227939134030.3053,
-     "eccentricity": 0.0934,
-     "inclinationRadians": 0.0322885911618951,
-     "longitudeOfAscendingNodeRadians": 0.8649502707033498,
-     "argumentOfPeriapsisRadians": 5.000403213548794,
-     "meanAnomalyRadians": 0.33880331439713923
-    },
-    "orbitPlane": "ecliptic",
-    "children": []
-   },
-   {
-    "id": "velvet",
-    "name": "Velvet",
-    "massKg": 1.89813e+27,
-    "radiusMeters": 69911000,
-    "color": "#c9a27a",
-    "gravityField": {
-     "j2": 0.014736,
-     "referenceRadiusMeters": 71492000
-    },
-    "rotation": {
-     "periodSeconds": 35730,
-     "obliquityRadians": 0.03868522514254324,
-     "poleLongitudeRadians": -1.9579501751867592,
-     "angleAtEpochRadians": 0
-    },
-    "orbit": {
-     "semiMajorAxisMeters": 778567158271.08,
-     "eccentricity": 0.0489,
-     "inclinationRadians": 0.022741640153486113,
-     "longitudeOfAscendingNodeRadians": 1.7534275797235832,
-     "argumentOfPeriapsisRadians": 4.7798808625593106,
-     "meanAnomalyRadians": 0.3494149162492648
-    },
-    "orbitPlane": "ecliptic",
-    "children": [
-     {
-      "id": "ember",
-      "name": "Ember",
-      "massKg": 8.9319e+22,
-      "radiusMeters": 1821600,
-      "color": "#e8c35a",
-      "gravityField": {
-       "j2": 0.0018459,
-       "referenceRadiusMeters": 1821600
-      },
-      "rotation": {
-       "kind": "locked",
-       "periodSeconds": 152853.5232,
-       "obliquityToOrbitRadians": 0
-      },
-      "orbit": {
-       "semiMajorAxisMeters": 421700000,
-       "eccentricity": 0.0041,
-       "inclinationRadians": 0.0008726646259971648,
-       "longitudeOfAscendingNodeRadians": 0.7661995416255106,
-       "argumentOfPeriapsisRadians": 1.467821900927231,
-       "meanAnomalyRadians": 5.969026041820607
-      },
-      "orbitPlane": "parent-equator",
-      "children": []
-     },
-     {
-      "id": "rime",
-      "name": "Rime",
-      "massKg": 4.7998e+22,
-      "radiusMeters": 1560800,
-      "color": "#cfc6b4",
-      "gravityField": {
-       "j2": 0.0004355,
-       "referenceRadiusMeters": 1560800
-      },
-      "rotation": {
-       "kind": "locked",
-       "periodSeconds": 306822.0384,
-       "obliquityToOrbitRadians": 0
-      },
-      "orbit": {
-       "semiMajorAxisMeters": 670900000,
-       "eccentricity": 0.009,
-       "inclinationRadians": 0.008203047484373348,
-       "longitudeOfAscendingNodeRadians": 3.824016391119576,
-       "argumentOfPeriapsisRadians": 1.552819435499355,
-       "meanAnomalyRadians": 2.9845130209103035
-      },
-      "orbitPlane": "parent-equator",
-      "children": []
-     },
-     {
-      "id": "hollow",
-      "name": "Hollow",
-      "massKg": 1.4819e+23,
-      "radiusMeters": 2634100,
-      "color": "#9c8f80",
-      "gravityField": {
-       "j2": 0.00012733,
-       "referenceRadiusMeters": 2634100
-      },
-      "rotation": {
-       "kind": "locked",
-       "periodSeconds": 618153.3792,
-       "obliquityToOrbitRadians": 0
-      },
-      "orbit": {
-       "semiMajorAxisMeters": 1070400000,
-       "eccentricity": 0.0013,
-       "inclinationRadians": 0.003490658503988659,
-       "longitudeOfAscendingNodeRadians": 1.1091567396423965,
-       "argumentOfPeriapsisRadians": 3.3580134808370903,
-       "meanAnomalyRadians": 5.541420375081996
-      },
-      "orbitPlane": "parent-equator",
-      "children": []
-     },
-     {
-      "id": "umber",
-      "name": "Umber",
-      "massKg": 1.075938e+23,
-      "radiusMeters": 2410300,
-      "color": "#6f6558",
-      "gravityField": {
-       "j2": 0.0000327,
-       "referenceRadiusMeters": 2410300
-      },
-      "rotation": {
-       "kind": "locked",
-       "periodSeconds": 1441931.1552000002,
-       "obliquityToOrbitRadians": 0
-      },
-      "orbit": {
-       "semiMajorAxisMeters": 1882700000,
-       "eccentricity": 0.0074,
-       "inclinationRadians": 0.003351032163829113,
-       "longitudeOfAscendingNodeRadians": 5.215881563000014,
-       "argumentOfPeriapsisRadians": 0.9187936781273749,
-       "meanAnomalyRadians": 3.166166889457873
-      },
-      "orbitPlane": "parent-equator",
-      "children": []
-     }
-    ]
-   },
-   {
-    "id": "halo",
-    "name": "Halo",
-    "massKg": 5.6834e+26,
-    "radiusMeters": 60268000,
-    "color": "#d9c38a",
-    "gravityField": {
-     "j2": 0.016298,
-     "referenceRadiusMeters": 60330000
-    },
-    "rotation": {
-     "periodSeconds": 38361.96,
-     "obliquityRadians": 0.4896027936567866,
-     "poleLongitudeRadians": 1.3880169445835935,
-     "angleAtEpochRadians": 0
-    },
-    "orbit": {
-     "semiMajorAxisMeters": 1426666414179.921,
-     "eccentricity": 0.05386179,
-     "inclinationRadians": 0.04338874330931084,
-     "longitudeOfAscendingNodeRadians": 1.9837835429754036,
-     "argumentOfPeriapsisRadians": 5.915557074367245,
-     "meanAnomalyRadians": 5.538896034175403
-    },
-    "orbitPlane": "ecliptic",
-    "children": [
-     {
-      "id": "haze",
-      "name": "Haze",
-      "massKg": 1.3452e+23,
-      "radiusMeters": 2574700,
-      "color": "#d8a44a",
-      "gravityField": {
-       "j2": 0.000033089,
-       "referenceRadiusMeters": 2575000
-      },
-      "rotation": {
-       "kind": "locked",
-       "periodSeconds": 1377684.3743999999,
-       "obliquityToOrbitRadians": 0
-      },
-      "orbit": {
-       "semiMajorAxisMeters": 1221870000,
-       "eccentricity": 0.0288,
-       "inclinationRadians": 0.006083170574901036,
-       "longitudeOfAscendingNodeRadians": 0.4897393881096089,
-       "argumentOfPeriapsisRadians": 3.150877805210403,
-       "meanAnomalyRadians": 2.8502972014319394
-      },
-      "orbitPlane": "parent-equator",
-      "children": []
-     }
-    ]
-   },
-   {
-    "id": "azure",
-    "name": "Azure",
-    "massKg": 8.681e+25,
-    "radiusMeters": 25559000,
-    "color": "#9fd8e0",
-    "gravityField": {
-     "j2": 0.00334343,
-     "referenceRadiusMeters": 25559000
-    },
-    "rotation": {
-     "periodSeconds": 62063.99999999999,
-     "obliquityRadians": 1.7055671343561096,
-     "poleLongitudeRadians": 1.355190208001112,
-     "angleAtEpochRadians": 0
-    },
-    "orbit": {
-     "semiMajorAxisMeters": 2870658170655.7324,
-     "eccentricity": 0.04725744,
-     "inclinationRadians": 0.013485074058964219,
-     "longitudeOfAscendingNodeRadians": 1.2918390439753027,
-     "argumentOfPeriapsisRadians": 1.6918759478238066,
-     "meanAnomalyRadians": 2.4833212746064897
-    },
-    "orbitPlane": "ecliptic",
-    "children": []
-   },
-   {
-    "id": "abyss",
-    "name": "Abyss",
-    "massKg": 1.02413e+26,
-    "radiusMeters": 24764000,
-    "color": "#3f5fd0",
-    "gravityField": {
-     "j2": 0.003411,
-     "referenceRadiusMeters": 25225000
-    },
-    "rotation": {
-     "periodSeconds": 57996,
-     "obliquityRadians": 0.48915271111858477,
-     "poleLongitudeRadians": -0.7114823273986132,
-     "angleAtEpochRadians": 0
-    },
-    "orbit": {
-     "semiMajorAxisMeters": 4498396417009.467,
-     "eccentricity": 0.00859048,
-     "inclinationRadians": 0.030893086454925476,
-     "longitudeOfAscendingNodeRadians": 2.300068641354461,
-     "argumentOfPeriapsisRadians": 4.767899814813145,
-     "meanAnomalyRadians": 4.536376156304037
-    },
-    "orbitPlane": "ecliptic",
-    "children": []
-   }
-  ]
- }
+  }
 }
