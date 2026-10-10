@@ -1917,7 +1917,7 @@ fn diagnostics_text(
             String::new()
         };
     format!(
-        "VOID{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels\n{}\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN craft beside launch site | O orbital craft | R reset | , . warp | K altitude | L speed\nF1 near/orbit/far | Home ship | Alt+F10/F11 exposure\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}{}\n{}\n{}\n{}{} | Water {:.0} N\n{}\n{}",
+        "VOID{}\n{} ({}) | {:?} | {} | {}x\nT+{:.2}s {} {:.1}m {} {:.1}m/s | {}\nmass {:.1}kg fuel {:.1}kg throttle {:.0}% force {:.1}kN SAS {:?}\nPe {:.1}km Ap {:.1}km | {} vessels | rails chunk ≤{:.0}s\n{}\nTab vessel | Shift+Tab body focus | click map labels | 1–4/G plot frame | J body | Shift+J pair\nN craft beside launch site | O orbital craft | R reset | , . warp | K altitude | L speed\nF1 near/orbit/far | Home ship | Alt+F10/F11 exposure\nF2 wire | F3 boundaries | F4 actual colliders | F5 terrain\nF6 save | F7 load (paused) | F8 finish recording | F9 finish CPU profile\n{}{}\n{}\n{}\n{}{} | Water {:.0} N\n{}\n{}",
         stellar_status,
         selected.name,
         sim.selected,
@@ -1942,6 +1942,7 @@ fn diagnostics_text(
         (orbital.periapsis_radius_meters - body.radius_meters) / 1000.0,
         (orbital.apoapsis_radius_meters - body.radius_meters) / 1000.0,
         f.vessel_ids().len(),
+        f.rails_coast_chunk_seconds(),
         pilot_description(sim),
         notice.0,
         aircraft_data,

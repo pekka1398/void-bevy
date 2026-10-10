@@ -1,10 +1,13 @@
 //! Worlds and sites only the tests use. The game's own world is `world::main_game`.
 #![allow(dead_code)]
-use glam::DVec3;
+use glam::{DQuat, DVec3};
 use void_fleet_flight::world::{
     NeighborSystem, StellarConfiguration, SystemPlacement, WorldDescription, main_game,
 };
+use void_fleet_flight::{FleetFlight, session::InitialWorld};
+use void_frames::{SplitPosition, SystemId};
 use void_landing::LandingPlanet;
+use void_vessels::{Fleet, FleetOptions};
 
 /// `planet` on its own, with the main game's other Sol bodies around it.
 pub fn solar_world(planet: &LandingPlanet) -> WorldDescription {
@@ -144,4 +147,64 @@ pub fn daylight_terrain_site(world: &WorldDescription, id: &str) -> Result<DVec3
     }
     best.map(|(_, direction)| direction)
         .ok_or_else(|| format!("no dry, sufficiently level daylight terrain site on {id}"))
+}
+
+/// A rocket coasting at 1000 km/s, two light-years out from Sol in the stellar neighbourhood.
+pub fn distant_coast() -> (FleetFlight, InitialWorld) {
+    let planet = void_testkit::aurelia();
+    let craft = void_assembly::rcs_flight_rocket();
+    let mut initial = InitialWorld::new(&planet, &craft, void_testkit::flat_site(&planet), true)
+        .with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque);
+    initial.world = stellar_neighborhood(&planet);
+    initial.launch_body = "Sol/aurelia".into();
+    initial.launch_site = daylight_terrain_site(&initial.world, &initial.launch_body).unwrap();
+    let mut sim = initial.build();
+    let built = sim.world.build();
+    // Replace the initial fleet with the declared cruise-only fleet. The world,
+    // environment and authoritative part representation remain the usual ones.
+    sim.fleet = Fleet::new(
+        built.ephemeris,
+        built.environment,
+        0.0,
+        built.grounds,
+        FleetOptions {
+            air_dynamics: initial.air_dynamics,
+            ..Default::default()
+        },
+    );
+    sim.coupled_world = built.coupled_world;
+    sim.selected = sim.fleet.launch_at_split(
+        &craft,
+        SystemId(0),
+        SplitPosition::at(DVec3::new(2.0 * void_multiscale::LIGHT_YEAR, 0.0, 0.0)),
+        DVec3::new(1_000_000.0, 0.0, 0.0),
+        DQuat::IDENTITY,
+        DVec3::ZERO,
+    );
+    sim.presentation.paused = true;
+    sim.presentation.speed_surface = false;
+    sim.presentation.altitude_agl = false;
+    (sim, initial)
+}
+
+/// `distant_coast` plus a pod resting, asleep, on daylight terrain at home.
+pub fn distant_coast_with_ground_craft() -> (FleetFlight, InitialWorld, String) {
+    let (mut sim, initial) = distant_coast();
+    let ground = sim.fleet.launch_landed(
+        &void_testkit::pod_tank("Sleeping home craft"),
+        sim.home,
+        initial.launch_site,
+    );
+    // Actual contact physics establishes sleep; do not force a sleeping flag.
+    sim.fleet.advance(30.0);
+    assert!(
+        sim.fleet.rails_blocker().is_none(),
+        "home craft did not settle for the fixture"
+    );
+    assert_eq!(
+        sim.fleet.snapshot(&ground).mode,
+        void_vessels::VesselMode::Ground
+    );
+    assert_eq!(sim.fleet.rails_coast_chunk_seconds(), 1000.0);
+    (sim, initial, ground)
 }

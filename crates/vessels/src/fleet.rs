@@ -29,6 +29,7 @@ use void_terrain::Terrain;
 mod eva;
 mod guidance;
 mod placement;
+mod rails;
 mod thermal;
 mod vehicles;
 pub use eva::CrewSeat;
@@ -38,20 +39,26 @@ use wrenches::{GuidedAirSource, RigidFlightSource, SceneStepSource};
 
 type SceneGroup = (Option<usize>, Vec<String>, Vec<(u64, usize)>);
 
-/// Time to cover a nonnegative gap from `speed` under constant `acceleration`: the positive root
-/// of gap = speed t + acceleration t² / 2, written without subtracting `speed` from the square
-/// root, which cancels to zero when the acceleration is tiny next to the speed (a distant coast).
+/// Time to cover a nonnegative gap under a conservative speed/acceleration bound.
 fn band_crossing_seconds(gap: f64, speed: f64, acceleration: f64) -> f64 {
-    assert!(
-        gap.is_finite() && gap >= 0.0 && speed.is_finite() && speed >= 0.0,
-        "fleet: invalid band crossing gap {gap} or speed {speed}"
-    );
-    assert!(
-        acceleration.is_finite() && acceleration > 0.0,
-        "fleet: invalid band crossing acceleration {acceleration}"
-    );
-    2.0 * gap / (speed + (speed * speed + 2.0 * acceleration * gap).sqrt())
+    assert!(gap.is_finite() && gap >= 0.0);
+    assert!(speed.is_finite() && speed >= 0.0);
+    assert!(acceleration.is_finite() && acceleration >= 0.0);
+    if gap == 0.0 {
+        return 0.0;
+    }
+    if acceleration == 0.0 {
+        return if speed == 0.0 {
+            f64::INFINITY
+        } else {
+            gap / speed
+        };
+    }
+    // Rationalize the positive quadratic root: subtracting speed from the
+    // square root loses the entire result when acceleration is very small.
+    gap / (0.5 * speed + 0.5 * (speed * speed + 2.0 * acceleration * gap).sqrt())
 }
+
 /// Explicit physics configurations; full air dynamics is accepted on its own before opting
 /// the main game in. ForceOnly retains the original no-spin air sampling and force pathway.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +77,8 @@ pub struct FleetOptions {
     pub follow_meters: f64,
     pub flight_chunk_seconds: f64,
     pub rails_chunk_seconds: f64,
+    /// Maximum coast segment when every vessel passes the distant swept-volume guards.
+    pub distant_coast_chunk_seconds: f64,
     pub steering_torque: f64,
 }
 impl Default for FleetOptions {
@@ -89,6 +98,7 @@ impl Default for FleetOptions {
             follow_meters: 250.0,
             flight_chunk_seconds: 1.0,
             rails_chunk_seconds: 10.0,
+            distant_coast_chunk_seconds: 1000.0,
             steering_torque: 6000.0,
         }
     }
@@ -407,6 +417,8 @@ impl Fleet {
                 && options.follow_meters > 0.0
                 && options.recenter_meters > options.encounter.pack_meters
                 && options.rails_chunk_seconds > 0.0
+                && options.distant_coast_chunk_seconds >= options.rails_chunk_seconds
+                && options.distant_coast_chunk_seconds >= options.flight_chunk_seconds
                 && options.steering_torque > 0.0,
             "fleet: invalid options"
         );
@@ -416,6 +428,7 @@ impl Fleet {
                 options.recenter_meters,
                 options.flight_chunk_seconds,
                 options.rails_chunk_seconds,
+                options.distant_coast_chunk_seconds,
                 options.steering_torque
             ]
             .iter()
@@ -3609,11 +3622,7 @@ impl Fleet {
                 done = false;
                 break;
             }
-            let chunk = if has_atmosphere(&self.environment) {
-                self.options.flight_chunk_seconds
-            } else {
-                self.options.rails_chunk_seconds
-            };
+            let chunk = self.rails_coast_chunk_seconds();
             let end = target
                 .min(self.time + chunk)
                 .min(self.time + self.band_safe_seconds());
@@ -3727,17 +3736,33 @@ mod band_crossing_tests {
     use super::band_crossing_seconds;
 
     #[test]
-    fn light_year_gap_keeps_its_time_under_tiny_acceleration() {
-        // The subtractive root rounds these to zero.
-        let (gap, speed) = (9.460_730_472_580_8e15, 1.0e12);
-        let seconds = band_crossing_seconds(gap, speed, 1.0e-12);
-        assert!((seconds - gap / speed).abs() <= gap / speed * 1e-14);
+    fn light_year_gap_retains_time_with_tiny_acceleration() {
+        let gap = 9.460_730_472_580_8e15;
+        let speed = 1.0e12;
+        let acceleration = 1.0e-12;
+        // The old subtractive root rounds to zero for these finite inputs.
+        let seconds = band_crossing_seconds(gap, speed, acceleration);
+        let expected = gap / speed;
+        assert!((seconds - expected).abs() <= expected * 1e-14);
+        assert!(seconds > 1e-3);
     }
 
     #[test]
-    fn matches_the_distance_it_bounds() {
-        let (speed, acceleration, t) = (30_000.0, 0.25, 100_000.0);
-        let gap = speed * t + 0.5 * acceleration * t * t;
-        assert!((band_crossing_seconds(gap, speed, acceleration) - t).abs() <= t * 1e-14);
+    fn acceleration_and_speed_satisfy_distance_bound() {
+        let speed = 30_000.0;
+        let acceleration = 0.25;
+        let expected = 100_000.0;
+        let gap = speed * expected + 0.5 * acceleration * expected * expected;
+        let seconds = band_crossing_seconds(gap, speed, acceleration);
+        assert!((seconds - expected).abs() <= expected * 1e-14);
+    }
+
+    #[test]
+    fn zero_speed_acceleration_and_gap_have_explicit_limits() {
+        assert_eq!(band_crossing_seconds(0.0, 0.0, 0.0), 0.0);
+        assert_eq!(band_crossing_seconds(0.0, 3.0, 2.0), 0.0);
+        assert_eq!(band_crossing_seconds(12.0, 3.0, 0.0), 4.0);
+        assert_eq!(band_crossing_seconds(12.0, 0.0, 0.0), f64::INFINITY);
+        assert_eq!(band_crossing_seconds(18.0, 0.0, 4.0), 3.0);
     }
 }
