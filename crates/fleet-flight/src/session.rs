@@ -152,6 +152,16 @@ pub enum Action {
     ExecuteManeuver,
     AbortManeuver,
     Stage,
+    // The four Launch* actions below add a vessel in an exact, arbitrary state: position,
+    // velocity and, where given, attitude and spin. The game's UI never issues them; the
+    // in-game ways to add or move a vessel are LaunchOrbitAt (key O), LaunchGround (key N) and
+    // Place/PlaceNear (DEV "place ship"). Tests use them to set up situations Place cannot
+    // express: two craft a few metres apart for docking, a crew member beside a hatch, a tumbling
+    // body, a vessel in another star system. They are kept as general tools, not test fixtures,
+    // and are journalled like every Action, so recordings and saves replay them.
+    /// A vessel in the ephemeris's current origin system (the home system unless the fleet has
+    /// moved its origin): `position` and `velocity` relative to that system's barycentre in its
+    /// inertial axes; `rotation` and `angular_velocity` in the same axes.
     LaunchState {
         craft: Craft,
         position: DVec3,
@@ -159,8 +169,9 @@ pub enum Action {
         rotation: glam::DQuat,
         angular_velocity: DVec3,
     },
-    /// Explicit SYSTEM-barycentre-relative split position/velocity initial state,
-    /// not a propulsion or teleport action. Galaxy coordinates must be converted first.
+    /// A vessel in the named star system: a split position and a velocity relative to that
+    /// system's barycentre, not galaxy coordinates (convert those first). Attitude and spin as in
+    /// LaunchState. The only Launch* that reaches another system.
     LaunchSplitState {
         craft: Craft,
         system: void_frames::SystemId,
@@ -169,22 +180,28 @@ pub enum Action {
         rotation: glam::DQuat,
         angular_velocity: DVec3,
     },
+    /// A vessel in free flight near `body`: position and velocity in the body's rotating,
+    /// body-fixed frame (velocity relative to the ground). It starts upright over that point.
     LaunchFlightAt {
         body: String,
         craft: Craft,
         position: DVec3,
         velocity: DVec3,
     },
+    /// A vessel landed on `body` at `site`, a unit direction in the body-fixed frame.
     LaunchGroundAt {
         body: String,
         craft: Craft,
         site: DVec3,
     },
+    /// A vessel in a circular orbit 400 km above `body`'s radius, `offset` metres from the
+    /// default point. Key O in the game.
     LaunchOrbitAt {
         body: String,
         craft: Craft,
         offset: DVec3,
     },
+    /// A vessel landed on the home body at `site`. Key N in the game.
     LaunchGround {
         craft: Craft,
         site: DVec3,

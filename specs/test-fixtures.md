@@ -27,9 +27,8 @@ branch：`cleanup/test-fixtures`
    - 寫在 `src/` 裡的單元測試可以直接用 testkit，因為 testkit 不依賴 app 和 vessels。
 
 3. **只給測試用的 Action 和固定場景**
-   - `Action` 裡只有測試在用的 `LaunchState`、`LaunchSplitState`、`LaunchFlightAt`、`LaunchGroundAt` 刪掉。
+   - `Action` 裡只有測試在用的 `LaunchState`、`LaunchSplitState`、`LaunchFlightAt`、`LaunchGroundAt` 保留（使用者決定）：它們是「在指定狀態生船」的通用工具，`Place` 表達不了任意姿態、角速度和其他恆星系。在 `session.rs` 用註解說明它們是什麼、遊戲本身怎麼生船和移動船、測試拿它們做什麼。
    - 同時刪掉 `LaunchOrbit` 和 `launch_orbital`：它們固定在 home 星球。遊戲按 O 用的是 `LaunchOrbitAt`，所以 `LaunchOrbitAt` 留著。
-   - 用到它們的測試，改成用遊戲本身的 `Place`／`PlaceNear` 設定船的狀態。有表達不了的情境就回報，不保留舊的 Action。
    - 錄影格式改了，所以 `FORMAT_VERSION` 要升。
 
 ## 不做的事
