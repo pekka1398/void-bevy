@@ -1,3 +1,7 @@
+// The `dev` feature links Bevy as a shared library, which a shipped executable must not depend on.
+#[cfg(all(feature = "dev", not(debug_assertions)))]
+compile_error!("release builds link Bevy statically: cargo build --release -p void-app --no-default-features");
+
 pub mod air;
 pub mod fleet_game;
 pub mod flight;
