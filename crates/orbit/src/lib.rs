@@ -11,7 +11,6 @@ mod hermite;
 mod kepler;
 mod propagator;
 mod reference_frames;
-mod simulation;
 mod system;
 mod trajectory;
 
@@ -36,10 +35,6 @@ pub use propagator::{
 };
 pub use reference_frames::{
     FrameEvaluator, FrameSpec, PlotFrameState, direction_to_frame, to_frame,
-};
-pub use simulation::{
-    AdvanceReport, AttitudeMode, EngineSpec, ImpactRecord, STANDARD_GRAVITY, Simulation,
-    SimulationOptions, StartPlane, VesselStartSpec,
 };
 pub use system::{
     BodySpec, BuiltSystem, CelestialBody, GRAVITATIONAL_CONSTANT, GravityField, LockedRotationSpec,

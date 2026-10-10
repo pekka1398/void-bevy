@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use glam::DVec3;
 use void_lod::{
-    DemoTerrain, FACE_EDGES, LodView, PlanetLod, PlanetLodOptions, TileKey, TileMeshData,
-    TileMeshOptions, build_tile_mesh, cube_to_sphere, neighbor_key, sphere_to_cube, stitch_edges,
-    tile_containing, tiles_around,
+    FACE_EDGES, LodView, PlanetLod, PlanetLodOptions, TileKey, TileMeshData, TileMeshOptions,
+    build_tile_mesh, cube_to_sphere, neighbor_key, sphere_to_cube, stitch_edges, tile_containing,
+    tiles_around,
 };
 
 fn directions() -> Vec<DVec3> {
@@ -79,10 +79,15 @@ fn tiles_around_a_point_include_its_own() {
 
 #[test]
 fn a_mesh_has_unit_normals_and_heights_within_its_bounds() {
-    let terrain = DemoTerrain::preset("normal");
+    // Smooth bumps, a few kilometres high: enough relief to stitch.
+    let terrain = |d: DVec3, _cell: f64| void_lod::SurfaceSample {
+        height_meters: 2000.0 * (d.x * 23.0).sin() * (d.y * 17.0).cos()
+            + 800.0 * (d.z * 41.0).sin(),
+        color: [0.5, 0.5, 0.5],
+    };
     let n = 33;
     let options = TileMeshOptions {
-        radius_meters: terrain.radius_meters,
+        radius_meters: 6_371_000.0,
         resolution: n,
     };
     let key = tile_containing(DVec3::new(0.3, -0.6, 0.74).normalize(), 5);

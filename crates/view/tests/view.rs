@@ -5,8 +5,8 @@ use std::f64::consts::PI;
 
 use glam::DVec3;
 use void_orbit::{
-    EngineSpec, Simulation, SimulationOptions, StartPlane, SystemSpec, Tolerances, VesselStartSpec,
-    body_orientation, osculating_orbit,
+    Ephemeris, EphemerisOptions, SystemSpec, body_orientation, build_system, osculating_orbit,
+    suggested_step_seconds,
 };
 use void_view::{
     FLIGHT_MAX_DISTANCE, FocusGeometry, FocusKind, MAP_MIN_DISTANCE, MIN_ANGLE_FROM_UP,
@@ -14,32 +14,19 @@ use void_view::{
     ellipse_points_in_time, frame_to_ecliptic, orbit_in_surface_frame, rotate, view_state,
 };
 
-fn sol_simulation() -> Simulation {
+fn sol() -> (void_orbit::BuiltSystem, Ephemeris) {
     let path = format!("{}/../orbit/systems/sol.json", env!("CARGO_MANIFEST_DIR"));
-    Simulation::new(SimulationOptions {
-        system: SystemSpec::from_json(&std::fs::read_to_string(&path).expect(&path)),
-        steps_per_orbit: 256.0,
-        tolerances: Tolerances {
-            position_meters: 1e-4,
-            velocity_meters_per_second: 1e-7,
+    let system = build_system(&SystemSpec::from_json(
+        &std::fs::read_to_string(&path).expect(&path),
+    ));
+    let ephemeris = Ephemeris::new(
+        &system,
+        EphemerisOptions {
+            step_seconds: suggested_step_seconds(&system.bodies, 256.0),
+            chunk_steps: 2048,
         },
-        vessel_start: VesselStartSpec {
-            home_body_id: "aurelia".into(),
-            altitude_meters: 100e3,
-            plane: StartPlane::Equatorial {
-                inclination_radians: 0.0,
-            },
-        },
-        engine: EngineSpec {
-            thrust_newtons: 250e3,
-            specific_impulse_seconds: 350.0,
-            dry_mass_kg: 10e3,
-            fuel_mass_kg: 30e3,
-        },
-        retention_seconds: 86_400.0,
-        prediction_horizon_seconds: 3.0 * 3600.0,
-        plan_coast_seconds: 86_400.0,
-    })
+    );
+    (system, ephemeris)
 }
 
 const DEG: f64 = PI / 180.0;
@@ -256,13 +243,17 @@ fn osculating_ellipses() {
 fn path_frames_and_surface_orbits() {
     // Path frames through the map's own steps (PathCache, then the turn by the axes now). Samples
     // span a day of Aurelia's spin; "now" is the end.
-    let mut sim = sol_simulation();
-    let home_index = sim.body_index("aurelia");
-    let home = sim.system.bodies[home_index].clone();
+    let (system, mut eph) = sol();
+    let home_index = system
+        .bodies
+        .iter()
+        .position(|b| b.id == "aurelia")
+        .unwrap();
+    let home = system.bodies[home_index].clone();
     let day = home.rotation.period_seconds;
     let now = day;
-    sim.ephemeris.extend_to(now);
-    let eph = &sim.ephemeris;
+    eph.extend_to(now);
+    let eph = &eph;
     let centre = |t: f64| eph.body_position(home_index, t);
     let ground = DVec3::new(0.6, -0.5, 0.62) * home.radius_meters;
     let on_ground =

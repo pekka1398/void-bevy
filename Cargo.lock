@@ -5574,8 +5574,6 @@ name = "void-lod"
 version = "0.0.0"
 dependencies = [
  "glam 0.32.1",
- "serde",
- "serde_json",
 ]
 
 [[package]]
