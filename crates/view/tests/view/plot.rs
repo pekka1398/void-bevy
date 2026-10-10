@@ -110,7 +110,7 @@ fn numerical_nodes_and_apsides_share_plot_placement() {
 #[test]
 fn all_four_plot_modes_transform_each_future_sample_and_body_consistently() {
     let system = void_orbit::build_system(&void_orbit::SystemSpec::from_json(include_str!(
-        "../../orbit/systems/sol.json"
+        "../../../orbit/systems/sol.json"
     )));
     let mut eph = void_orbit::Ephemeris::new(
         &system,

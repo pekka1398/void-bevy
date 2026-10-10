@@ -5,7 +5,7 @@ use void_orbit::{
     build_system, find_nodes,
 };
 fn eph() -> Ephemeris {
-    let system = build_system(&SystemSpec::from_json(include_str!("../systems/sol.json")));
+    let system = build_system(&SystemSpec::from_json(include_str!("../../systems/sol.json")));
     let mut eph = Ephemeris::new(
         &system,
         EphemerisOptions {

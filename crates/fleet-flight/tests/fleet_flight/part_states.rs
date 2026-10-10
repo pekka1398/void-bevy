@@ -1,5 +1,5 @@
 //! Accepted simulation time, checkpoint and durable journal all observe the same module state.
-mod common;
+use crate::common;
 use common::aurelia_selene;
 use glam::{DQuat, DVec3};
 use void_assembly::{

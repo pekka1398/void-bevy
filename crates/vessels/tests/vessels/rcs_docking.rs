@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use common::{Setup, scene};
 use glam::{DMat3, DQuat, DVec3};
 use void_assembly::*;

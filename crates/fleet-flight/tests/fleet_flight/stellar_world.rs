@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use common::{daylight_terrain_site, stellar_neighborhood};
 use void_fleet_flight::session::{FlightSession, InitialWorld};
 use void_frames::State;

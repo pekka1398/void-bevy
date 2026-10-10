@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use glam::DVec3;
 use std::{
     cell::RefCell,
