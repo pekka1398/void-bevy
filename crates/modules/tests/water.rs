@@ -2,10 +2,10 @@ use glam::{DQuat, DVec3};
 use void_frames::{Motion, State};
 #[test]
 fn water_trial_frames_purity_and_spin_dissipation() {
-    let mut planet = void_landing::earth_size();
+    let mut planet = void_testkit::earth_size();
     planet.sea_level = Some(9000.);
-    let (e, home) = void_landing::planet_ephemeris(&planet);
-    let env = void_landing::planet_environment(&planet, &e, home, true);
+    let (e, home) = void_testkit::planet_ephemeris(&planet);
+    let env = void_testkit::planet_environment(&planet, &e, home, true);
     let mut graph = void_assembly::PartGraph::new();
     let ids = graph.add(
         &void_assembly::compile(&void_assembly::fresh_craft()).unwrap(),
@@ -78,14 +78,14 @@ fn water_trial_frames_purity_and_spin_dissipation() {
 }
 #[test]
 fn hydrostatic_projection_uses_shared_j2_body_gravity() {
-    let mut planet = void_landing::earth_size();
+    let mut planet = void_testkit::earth_size();
     planet.sea_level = Some(9000.);
     planet.system.root.gravity_field = Some(void_orbit::GravityField {
         j2: 0.03,
         reference_radius_meters: planet.terrain.radius_meters,
     });
-    let (e, home) = void_landing::planet_ephemeris(&planet);
-    let env = void_landing::planet_environment(&planet, &e, home, false);
+    let (e, home) = void_testkit::planet_ephemeris(&planet);
+    let env = void_testkit::planet_environment(&planet, &e, home, false);
     let mut graph = void_assembly::PartGraph::new();
     let ids = graph.add(
         &void_assembly::compile(&void_assembly::fresh_craft()).unwrap(),

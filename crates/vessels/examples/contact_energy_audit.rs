@@ -1,9 +1,9 @@
 use glam::{DMat3, DQuat, DVec3};
 use void_assembly::demo_craft;
-use void_landing::{
-    ContactFrame, ContactWorldOptions, PlanetFrame, level_for_tile_size, pebble, planet_ephemeris,
-};
+use void_landing::{ContactFrame, ContactWorldOptions, PlanetFrame, level_for_tile_size};
 use void_orbit::body_orientation;
+use void_testkit::*;
+use void_testkit::{pebble, planet_ephemeris};
 use void_vessels::*;
 fn main() {
     for step in [1.0 / 60.0, 1.0 / 120.0, 1.0 / 240.0] {

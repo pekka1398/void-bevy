@@ -84,7 +84,7 @@ fn circular_orbit_placement_stays_in_orbit_and_replays() {
 
 #[test]
 fn ocean_drop_floats_on_the_main_world_sea() {
-    let mut s = session(&void_assembly::reentry_capsule());
+    let mut s = session(&void_testkit::reentry_capsule());
     let (latitude, longitude) = s.sim().daylight_site("aurelia", SiteKind::Ocean).unwrap();
     let placement = Placement {
         body: "aurelia".into(),
@@ -133,7 +133,11 @@ fn landed_placement_rests_on_daylight_land() {
 fn place_near_target_matches_its_motion_and_refusals_leave_the_world() {
     let craft = void_assembly::rcs_flight_rocket();
     let mut s = session(&craft);
-    let Outcome::Spawned(target) = s.execute(Action::LaunchOrbit {
+    let Outcome::Spawned(target) = s.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = s.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft: craft.clone(),
         offset: DVec3::ZERO,
     }) else {

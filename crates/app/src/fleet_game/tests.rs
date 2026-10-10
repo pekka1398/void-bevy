@@ -73,7 +73,12 @@ fn press(app: &mut App, keys: &[KeyCode]) {
 }
 fn launch_orbit(app: &mut App) -> String {
     let craft = app.world().non_send::<Flight>().craft.clone();
-    let Outcome::Spawned(id) = session(app).execute(Action::LaunchOrbit {
+    let body = {
+        let sim = sim(app);
+        sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+    };
+    let Outcome::Spawned(id) = session(app).execute(Action::LaunchOrbitAt {
+        body,
         craft,
         offset: DVec3::ZERO,
     }) else {
@@ -508,7 +513,7 @@ fn sas_button_reports_the_core_refusal_for_a_passive_stage() {
 #[test]
 fn dev_panel_places_a_reentry_and_the_journal_and_save_reproduce_it() {
     use place::{PlaceClick as P, PlaceField as F};
-    let mut app = ui_app(void_assembly::reentry_capsule());
+    let mut app = ui_app(void_testkit::reentry_capsule());
     click(&mut app, Click::Place(P::Velocity)); // Surface -> Orbital
     click(&mut app, Click::Place(P::Velocity)); // Orbital -> Landed
     click(&mut app, Click::Place(P::Velocity)); // Landed -> Surface

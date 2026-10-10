@@ -2,6 +2,7 @@
 //! agreement with a flat N-body reference. The moving-origin adapter is checked in ephemeris.rs.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use void_testkit::*;
 
 use glam::DVec3;
 use void_frames::{CELL_METERS, SplitPosition};

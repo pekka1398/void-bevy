@@ -3,10 +3,10 @@ use void_fleet_flight::session::{Action, FlightSession, InitialWorld, Outcome, w
 #[test]
 fn loss_of_command_from_heating_refuses_controls_and_replays_without_panicking() {
     // A deliberately extreme 20 km/s thermal stress, not a nominal low-orbit reentry.
-    let planet = void_landing::earth_size();
-    let mut craft = void_assembly::reentry_capsule();
+    let planet = void_testkit::earth_size();
+    let mut craft = void_testkit::reentry_capsule();
     craft.parts.pop();
-    let initial = InitialWorld::new(&planet, &craft, void_vessels::flat_site(&planet), true)
+    let initial = InitialWorld::new(&planet, &craft, void_testkit::flat_site(&planet), true)
         .with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque);
     let mut s = FlightSession::new(initial).with_recording();
     let sim = s.sim();

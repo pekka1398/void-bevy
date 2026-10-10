@@ -4,10 +4,10 @@ use void_fleet_flight::{
     checkpoint::FlightCheckpoint,
     session::{Action, FlightSession, InitialWorld, world_mark},
 };
-use void_vessels::flat_site;
+use void_testkit::flat_site;
 
 fn make(air: bool) -> FlightSession {
-    let planet = void_landing::earth_size();
+    let planet = void_testkit::earth_size();
     FlightSession::new(InitialWorld::new(
         &planet,
         &demo_craft(),
@@ -74,7 +74,11 @@ fn awake_ground_pending_fuel_and_sas_continue_exactly_after_direct_restore() {
 fn mixed_ground_orbit_and_bubble_owner_caches_survive_direct_restore() {
     let mut original = make(true);
     for offset in [DVec3::ZERO, DVec3::Y * 30.0, DVec3::Y * 10_000.0] {
-        original.execute(Action::LaunchOrbit {
+        original.execute(Action::LaunchOrbitAt {
+            body: {
+                let sim = original.sim();
+                sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+            },
             craft: demo_craft(),
             offset,
         });
@@ -97,8 +101,8 @@ fn mixed_ground_orbit_and_bubble_owner_caches_survive_direct_restore() {
 }
 #[test]
 fn sleeping_save_load_can_resume_a_day_on_rails() {
-    let planet = void_landing::aurelia();
-    let craft = void_vessels::pod_tank("Resting checkpoint");
+    let planet = void_testkit::aurelia();
+    let craft = void_testkit::pod_tank("Resting checkpoint");
     let mut original = FlightSession::new(InitialWorld::new(
         &planet,
         &craft,
@@ -212,7 +216,7 @@ fn buffered_checkpoint_writes_complete_files_and_can_overwrite_and_resume() {
 /// 1e-14 s short every advance failed the restore's clock check after 50 s of ascent.
 #[test]
 fn a_save_mid_ascent_restores_and_flies_on() {
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let craft = void_assembly::flight_rocket();
     let mut original =
         FlightSession::new(InitialWorld::new(&planet, &craft, flat_site(&planet), true))

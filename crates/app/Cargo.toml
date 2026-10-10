@@ -29,3 +29,6 @@ half = "2.7"
 
 # Same Fontique version used by Bevy 0.19; register deterministic bundled CJK fallback.
 fontique = { version = "=0.9.0", default-features = false }
+
+[dev-dependencies]
+void-testkit.workspace = true

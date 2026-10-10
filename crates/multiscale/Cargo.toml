@@ -11,3 +11,6 @@ serde_json.workspace = true
 serde.workspace = true
 void-orbit.workspace = true
 void-frames.workspace = true
+
+[dev-dependencies]
+void-testkit.workspace = true

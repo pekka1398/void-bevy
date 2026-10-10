@@ -6,9 +6,9 @@ use void_fleet_flight::{
     warp::ManeuverWarp,
 };
 use void_orbit::{ManeuverSpec, ReferenceMode};
-use void_vessels::{flat_site, pod_tank};
+use void_testkit::{flat_site, pod_tank};
 fn fixture() -> FlightSession {
-    let planet = void_landing::earth_size();
+    let planet = void_testkit::earth_size();
     let mut s = FlightSession::new(InitialWorld::new(
         &planet,
         &pod_tank("Sleepable pod"),
@@ -20,7 +20,11 @@ fn fixture() -> FlightSession {
         seconds: 20.0,
         rails: false,
     });
-    let Outcome::Spawned(id) = s.execute(Action::LaunchOrbit {
+    let Outcome::Spawned(id) = s.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = s.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft: demo_craft(),
         offset: DVec3::ZERO,
     }) else {
@@ -111,7 +115,11 @@ fn encounter_stops_approach_without_passing_the_target() {
     let mut s = fixture();
     let target = s.sim().selected.clone();
     let start = s.sim().plans[&target].plan.burns()[0].start_time;
-    s.execute(Action::LaunchOrbit {
+    s.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = s.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft: pod_tank("Encounter neighbor"),
         offset: DVec3::Y * 2001.0,
     });

@@ -8,6 +8,7 @@ use std::{
 use void_frames::{BodyId, BodyStates, SplitPosition};
 use void_multiscale::*;
 use void_orbit::{EphemerisSource, Tolerances, VesselPropagator};
+use void_testkit::*;
 
 #[test]
 fn accelerating_origin_preserves_all_gravity_sources() {
@@ -125,7 +126,7 @@ fn split_probe_focus_keeps_metre_offsets_between_systems() {
 fn translated_source_subtracts_split_anchor_exactly_once_in_every_query() {
     use void_frames::{BodyId, BodyStates, SplitPosition, SystemId};
     use void_orbit::EphemerisSource;
-    let world = std::rc::Rc::new(std::cell::RefCell::new(void_multiscale::wide_world(
+    let world = std::rc::Rc::new(std::cell::RefCell::new(void_testkit::wide_world(
         SplitPosition::ORIGIN,
     )));
     let mut view = void_multiscale::FrameEphemeris::new(world.clone(), "Beryl");

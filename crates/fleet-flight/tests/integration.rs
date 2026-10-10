@@ -2,8 +2,10 @@ use glam::{DQuat, DVec3};
 use void_assembly::{Craft, demo_craft, export_craft, import_craft};
 use void_fleet_flight::FleetFlight;
 use void_frames::State;
-use void_landing::{PlanetFrame, earth_size};
-use void_vessels::{SasPhase, VesselControl, VesselMode, flat_site, pod_tank};
+use void_landing::PlanetFrame;
+use void_testkit::earth_size;
+use void_testkit::{flat_site, pod_tank};
+use void_vessels::{SasPhase, VesselControl, VesselMode};
 
 fn make(craft: &Craft, air: bool) -> FleetFlight {
     let planet = earth_size();
@@ -119,8 +121,8 @@ fn air_slows_ground_orbit_and_bubble_owners() {
 fn high_orbit_is_vacuum_and_coast_prediction_does_not_advance_fleet() {
     let craft = pod_tank("Orbit check");
     let (mut air, mut vacuum) = (make(&craft, true), make(&craft, false));
-    let a = air.launch_orbital(&craft, DVec3::ZERO);
-    let v = vacuum.launch_orbital(&craft, DVec3::ZERO);
+    let a = air.launch_orbital_at(air.home, &craft, DVec3::ZERO);
+    let v = vacuum.launch_orbital_at(vacuum.home, &craft, DVec3::ZERO);
     air.select(&a);
     vacuum.select(&v);
     let time = air.fleet.time();
@@ -140,7 +142,7 @@ fn air_coast_differential(step_seconds: f64) -> (f64, f64) {
         (make(&craft, true), make(&craft, true), make(&craft, true));
     for sim in [&mut orbit, &mut bubble, &mut rails] {
         // This differential concerns airborne owners only; omit the unrelated launch-pad ship.
-        let (ephemeris, _) = void_landing::planet_ephemeris(&sim.planet);
+        let (ephemeris, _) = void_testkit::planet_ephemeris(&sim.planet);
         // The same world: Aurelia's air at density scale 1.
         let environment = sim.fleet.environment().clone();
         sim.fleet = void_vessels::Fleet::new(
@@ -220,7 +222,7 @@ fn fleet_plan_uses_live_staged_engine_and_trait_ephemeris_without_spending_fuel(
     let craft = demo_craft();
     let mut sim = make(&craft, false);
     assert!(sim.new_plan(&sim.selected, 60.0).is_err()); // Ground ship is not ready.
-    let vessel = sim.launch_orbital(&craft, DVec3::ZERO);
+    let vessel = sim.launch_orbital_at(sim.home, &craft, DVec3::ZERO);
     sim.select(&vessel);
     assert!(sim.new_plan(&vessel, 60.0).is_err()); // Unstaged engines are not invented.
     sim.stage();

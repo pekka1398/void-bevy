@@ -28,7 +28,7 @@ fn wrench_reference_shift_and_frame_rotation_preserve_one_moment_arm() {
     assert_eq!(moved.torque, DVec3::X);
     assert_eq!(moved.about(reference), w);
     // FrameTree root itself has no dynamic/external source requirement.
-    let (e, _) = void_landing::planet_ephemeris(&void_landing::earth_size());
+    let (e, _) = void_testkit::planet_ephemeris(&void_testkit::earth_size());
     let at = tree.at(0.0, &e);
     let roundtrip = w.in_frame(&at, root).in_frame(&at, frame);
     assert!((roundtrip.force - w.force).length() < 1e-12);
@@ -43,9 +43,9 @@ fn wrench_reference_shift_and_frame_rotation_preserve_one_moment_arm() {
 }
 #[test]
 fn point_wind_damps_rotation_and_drag_power_is_nonpositive() {
-    let p = void_landing::earth_size();
-    let (e, home) = void_landing::planet_ephemeris(&p);
-    let env = void_landing::planet_environment(&p, &e, home, true);
+    let p = void_testkit::earth_size();
+    let (e, home) = void_testkit::planet_ephemeris(&p);
+    let env = void_testkit::planet_environment(&p, &e, home, true);
     let (g, ids) = graph("aero-stabilizer-pod");
     let source = vessel_air(&env, &g, &ids, DVec3::ZERO, DQuat::IDENTITY).unwrap();
     let frames = env.frames();
@@ -88,9 +88,9 @@ fn point_wind_damps_rotation_and_drag_power_is_nonpositive() {
 }
 #[test]
 fn symmetric_body_offsets_cancel_and_eccentric_chute_has_exact_moment() {
-    let p = void_landing::earth_size();
-    let (e, home) = void_landing::planet_ephemeris(&p);
-    let env = void_landing::planet_environment(&p, &e, home, true);
+    let p = void_testkit::earth_size();
+    let (e, home) = void_testkit::planet_ephemeris(&p);
+    let env = void_testkit::planet_environment(&p, &e, home, true);
     let frames = env.frames();
     let at = frames.tree.at(0.0, &e);
     let query = frames.surface[home];

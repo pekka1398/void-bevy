@@ -4,6 +4,7 @@ use glam::{DMat3, DQuat, DVec3};
 use void_assembly::demo_craft;
 use void_frames::State;
 use void_orbit::{AdvanceOutcome, VesselPropagator};
+use void_testkit::*;
 use void_vessels::*;
 fn state(s: &VesselSnapshot) -> State {
     State {
@@ -509,7 +510,7 @@ fn vessel_frames_follow_their_physics_owner() {
     check_landed(&s.fleet);
     s.fleet.advance(1.0);
     check_landed(&s.fleet);
-    let (ephemeris, _) = void_landing::planet_ephemeris(&void_landing::pebble());
+    let (ephemeris, _) = void_testkit::planet_ephemeris(&void_testkit::pebble());
     let environment = s.fleet.environment().clone();
     let restored = Fleet::from_checkpoint(ephemeris, environment, s.fleet.checkpoint());
     check_landed(&restored);
@@ -565,7 +566,7 @@ fn grounds_and_checkpoints_need_the_environments_terrain() {
         band_enter_meters: 200.0,
         band_exit_meters: 400.0,
     };
-    let fresh = || void_landing::planet_ephemeris(&void_landing::pebble()).0;
+    let fresh = || void_testkit::planet_ephemeris(&void_testkit::pebble()).0;
     assert!(panics(&mut || {
         let e = fresh();
         let gravity_only = std::sync::Arc::new(Environment::new(&e));
@@ -604,11 +605,11 @@ fn grounds_and_checkpoints_need_the_environments_terrain() {
 #[test]
 fn fleet_and_restore_reject_another_worlds_environment() {
     use std::sync::Arc;
-    let moon = void_landing::moon_size();
-    let (e, body) = void_landing::planet_ephemeris(&moon);
+    let moon = void_testkit::moon_size();
+    let (e, body) = void_testkit::planet_ephemeris(&moon);
     let environment =
         Arc::new(Environment::new(&e).with(body, BodyEnvironment::airless(moon.terrain)));
-    let fresh = || void_landing::planet_ephemeris(&void_landing::pebble()).0;
+    let fresh = || void_testkit::planet_ephemeris(&void_testkit::pebble()).0;
     let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         Fleet::new(
             fresh(),
@@ -679,7 +680,7 @@ fn the_part_graph_is_the_record_and_a_checkpoint_restores_it() {
         );
     }
     f.advance(0.5);
-    let (ephemeris, _) = void_landing::planet_ephemeris(&s.planet);
+    let (ephemeris, _) = void_testkit::planet_ephemeris(&s.planet);
     let restored = Fleet::from_checkpoint(
         ephemeris,
         s.fleet.environment().clone(),
@@ -756,7 +757,7 @@ fn parts_are_frames_under_their_vessel() {
         s.fleet.frame_tree().parent(s.fleet.part_frame("v1/p5")),
         Some(s.fleet.vessel_frame("v2"))
     );
-    let (ephemeris, _) = void_landing::planet_ephemeris(&s.planet);
+    let (ephemeris, _) = void_testkit::planet_ephemeris(&s.planet);
     let restored = Fleet::from_checkpoint(
         ephemeris,
         s.fleet.environment().clone(),
@@ -779,7 +780,7 @@ fn checkpoint_rejects_disconnected_members() {
             connections.remove(0);
         }
         let saved = serde_json::from_value(value).unwrap();
-        let e = void_landing::planet_ephemeris(&s.planet).0;
+        let e = void_testkit::planet_ephemeris(&s.planet).0;
         let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             Fleet::from_checkpoint(e, s.fleet.environment().clone(), saved);
         }));
@@ -791,7 +792,7 @@ fn checkpoint_rejects_disconnected_members() {
             .unwrap();
         assert!(message.contains("not one connected component"), "{message}");
     }
-    let e = void_landing::planet_ephemeris(&s.planet).0;
+    let e = void_testkit::planet_ephemeris(&s.planet).0;
     Fleet::from_checkpoint(e, s.fleet.environment().clone(), s.fleet.checkpoint());
 }
 
@@ -840,7 +841,7 @@ fn repeated_split_join_and_restore_preserve_graph_and_frames() {
         if i % 5 == 0 {
             let saved = scene.fleet.checkpoint();
             let before = serde_json::to_value(&saved).unwrap();
-            let eph = void_landing::planet_ephemeris(&scene.planet).0;
+            let eph = void_testkit::planet_ephemeris(&scene.planet).0;
             scene.fleet = Fleet::from_checkpoint(eph, scene.fleet.environment().clone(), saved);
             assert_eq!(
                 serde_json::to_value(scene.fleet.checkpoint()).unwrap(),

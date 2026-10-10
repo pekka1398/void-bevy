@@ -2,7 +2,8 @@
 
 use glam::DVec3;
 use void_frames::{BodyId, BodyStates, State};
-use void_landing::{PlanetFrame, aurelia, planet_ephemeris};
+use void_landing::PlanetFrame;
+use void_testkit::{aurelia, planet_ephemeris};
 
 #[test]
 fn ground_at_rest_moves_with_the_planets_spin() {

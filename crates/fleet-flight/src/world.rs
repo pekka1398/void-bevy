@@ -472,78 +472,6 @@ impl WorldDescription {
         qualify(&mut spec.root, system_id);
         spec
     }
-    /// Deterministic acceptance-fixture site on real dry terrain in this body's own daylight.
-    /// Does not change terrain or illumination, and does not modify ordinary launch defaults.
-    pub fn daylight_terrain_site(&self, id: &str) -> Result<DVec3, String> {
-        let body = self.body_index(id);
-        let built = self.build();
-        let terrain = built
-            .terrains
-            .get(&body)
-            .ok_or("daylight fixture needs authored solid terrain")?;
-        let source = built.ephemeris.as_ref();
-        let star = source
-            .bodies()
-            .iter()
-            .find(|b| {
-                b.parent_index.is_none() && source.system_of(b.index) == source.system_of(body)
-            })
-            .ok_or("daylight fixture needs its own stellar root")?;
-        if star.index == body {
-            return Err("daylight terrain fixture cannot launch on a stellar root".into());
-        }
-        let frames = void_orbit::SystemFrames::new(source);
-        let star_local = frames
-            .tree
-            .at(0.0, source)
-            .transform(frames.inertial[star.index], frames.surface[body])
-            .apply_point(DVec3::ZERO);
-        assert!(
-            star_local.is_finite() && star_local.length_squared() > 0.0,
-            "fixture: invalid stellar direction"
-        );
-        let sun = star_local.normalize();
-        let axis = if sun.z.abs() < 0.9 {
-            DVec3::Z
-        } else {
-            DVec3::X
-        };
-        let east = axis.cross(sun).normalize();
-        let north = sun.cross(east);
-        let sea = self.bodies[id].sea_level_meters;
-        let angle_step = std::f64::consts::PI * (3.0 - 5.0_f64.sqrt());
-        let reach = 12.0;
-        let mut best: Option<(f64, DVec3)> = None;
-        for i in 0..512 {
-            let mu = 0.35 + 0.65 * (i as f64 + 0.5) / 512.0;
-            let angle = i as f64 * angle_step;
-            let direction = (sun * mu
-                + (east * angle.cos() + north * angle.sin()) * (1.0 - mu * mu).sqrt())
-            .normalize();
-            let height = terrain.height(direction);
-            if sea.is_some_and(|sea| height <= sea + 20.0) {
-                continue;
-            }
-            let tangent = axis.cross(direction).normalize();
-            let other = direction.cross(tangent);
-            let radius = terrain.radius_meters + height;
-            let slope = [tangent, -tangent, other, -other]
-                .into_iter()
-                .map(|side| {
-                    (terrain.height((direction * radius + side * reach).normalize()) - height).abs()
-                        / reach
-                })
-                .fold(0.0_f64, f64::max);
-            if slope > 0.025 {
-                continue;
-            }
-            if best.is_none_or(|(score, _)| slope < score) {
-                best = Some((slope, direction));
-            }
-        }
-        best.map(|(_, direction)| direction)
-            .ok_or_else(|| format!("no dry, sufficiently level daylight terrain site on {id}"))
-    }
     pub fn validate_launch(&self, id: &str, site: DVec3) {
         self.body_index(id);
         self.landing_planet(id);
@@ -552,37 +480,6 @@ impl WorldDescription {
             "world: launch site must be unit direction"
         );
     }
-}
-
-/// Earth analogue and its real orbital moon, in the same ephemeris and collision world.
-pub fn aurelia_selene(planet: &LandingPlanet) -> WorldDescription {
-    assert_eq!(planet.body_id, "aurelia", "world: preset needs Aurelia");
-    let mut world = WorldDescription::single(planet, true);
-    let moon = void_landing::moon_size();
-    world.bodies.insert(
-        "selene".into(),
-        BodyDescription {
-            label: "SELENE · AIRLESS MOON".into(),
-            terrain: Some(moon.terrain_config),
-            air_density_scale: None,
-            air_datum_meters: 0.0,
-            sea_level_meters: None,
-            visual: VisualSettings {
-                surface: void_scenery::solar::SurfaceRecipe::SolidSurface,
-                rings: None,
-                surface_color: Some([0.25, 0.25, 0.25]),
-                atmosphere: false,
-                scattering: None,
-                clouds: false,
-                cloud_profile: None,
-                ocean: false,
-                color_datum_meters: 0.0,
-                rock_height_meters: 1.0,
-                snow_height_meters: 1.0e9,
-            },
-        },
-    );
-    world
 }
 
 fn unique_bodies<'de, D: serde::Deserializer<'de>>(
@@ -610,52 +507,90 @@ fn unique_bodies<'de, D: serde::Deserializer<'de>>(
     deserializer.deserialize_map(Unique)
 }
 
-/// The main game's world: Aurelia with layered terrain and sea in the authored solar system,
+/// The main game's world: the authored Sol system with Aurelia's layered terrain and sea,
 /// starting landed at the Aurelia launch site with full aerodynamic forces and torques.
 pub fn main_game(craft: &void_assembly::Craft) -> crate::session::InitialWorld {
-    let original = void_landing::aurelia();
+    let system_spec = SystemSpec::sol();
+    let system = build_system(&system_spec);
+    let body = |id: &str| {
+        system
+            .bodies
+            .iter()
+            .find(|b| b.id == id)
+            .unwrap_or_else(|| panic!("main game: Sol has no {id}"))
+    };
+    let aurelia = body("aurelia");
     let terrain_config = TerrainConfig::Layered(void_terrain::LayeredOptions {
-        radius_meters: original.terrain.radius_meters,
+        radius_meters: aurelia.radius_meters,
         ..void_terrain::DEFAULT_LAYERED
     });
-    let terrain = Arc::new(Terrain::from_config(&terrain_config));
     // Dry lowland on the layered terrain.
     let site = crate::placement::unit_site(0.3_f64.to_degrees(), 0.5_f64.to_degrees());
     assert!(
-        terrain.height(site) > void_terrain::SEA_LEVEL,
+        Terrain::from_config(&terrain_config).height(site) > void_terrain::SEA_LEVEL,
         "main game: launch site is underwater"
     );
-    let planet = LandingPlanet {
-        terrain_config,
-        terrain,
-        air_datum: void_terrain::SEA_LEVEL,
-        sea_level: Some(void_terrain::SEA_LEVEL),
-        ..original
-    };
-    let mut initial = crate::session::InitialWorld::new(&planet, craft, site, true)
-        .with_air_dynamics(void_vessels::AirDynamics::ForceAndTorque);
-    initial.world = solar_scenery(&planet);
-    initial
+    let sea = void_terrain::SEA_LEVEL;
+    let mut bodies = BTreeMap::from([(
+        "aurelia".to_string(),
+        BodyDescription {
+            label: format!(
+                "AURELIA · SOL SYSTEM · {:.0} km RADIUS · {:.2} m/s² · {:.1} h DAY",
+                aurelia.radius_meters / 1e3,
+                aurelia.gm / aurelia.radius_meters.powi(2),
+                aurelia.rotation.period_seconds / 3600.0
+            ),
+            terrain: Some(terrain_config),
+            air_density_scale: Some(1.0),
+            air_datum_meters: sea,
+            sea_level_meters: Some(sea),
+            visual: VisualSettings {
+                surface: void_scenery::solar::SurfaceRecipe::SolidSurface,
+                rings: None,
+                surface_color: None,
+                atmosphere: true,
+                scattering: Some(
+                    void_scenery::atmosphere_scene::AtmosphereProfile::EarthScaled {
+                        density_scale: 1.0,
+                    },
+                ),
+                clouds: true,
+                cloud_profile: Some(void_scenery::atmosphere_scene::CloudProfile::earth()),
+                ocean: true,
+                color_datum_meters: sea,
+                rock_height_meters: sea + 2600.0,
+                snow_height_meters: sea + 4800.0,
+            },
+        },
+    )]);
+    for id in [
+        "sol", "cinder", "vesper", "ares", "selene", "velvet", "halo", "azure", "abyss",
+    ] {
+        bodies.insert(id.into(), solar_body(id, body(id)));
+    }
+    crate::session::InitialWorld {
+        air_dynamics: void_vessels::AirDynamics::ForceAndTorque,
+        world: WorldDescription {
+            schema: 5,
+            system: system_spec,
+            stellar: None,
+            bodies,
+        },
+        launch_body: "aurelia".into(),
+        craft: craft.clone(),
+        launch_site: site,
+    }
 }
 
-/// Authored first-pass solar scenery used by the main-game Aurelia preset.
-/// Physical density is unchanged for Aurelia; other optical air is visual only.
-pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
+/// How the main game draws and grounds one of Sol's other bodies. Physical air is Aurelia's
+/// alone; the atmospheres here are visual only.
+fn solar_body(id: &str, body: &void_orbit::CelestialBody) -> BodyDescription {
     use void_scenery::{
         atmosphere_scene::{AtmosphereProfile, CloudProfile},
         solar::{RingRecipe, SurfaceRecipe},
     };
     use void_terrain::CrateredOptions;
-    let mut world = WorldDescription::single(planet, true);
-    let system = build_system(&world.system);
-    for id in [
-        "sol", "cinder", "vesper", "ares", "selene", "velvet", "halo", "azure", "abyss",
-    ] {
-        let body = system
-            .bodies
-            .iter()
-            .find(|b| b.id == id)
-            .expect("solar body");
+    {
         let mut visual = VisualSettings {
             surface: SurfaceRecipe::SolidSurface,
             rings: None,
@@ -685,31 +620,17 @@ pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
             "vesper" => Some(TerrainConfig::Volcanic(
                 void_terrain::VolcanicOptions::vesper(body.radius_meters),
             )),
-            "selene" => {
-                let (height, count, size, roughness, seed, low, high) = match id {
-                    "selene" => (
-                        8500.0,
-                        120,
-                        0.16,
-                        0.5,
-                        19,
-                        [0.07, 0.075, 0.08],
-                        [0.56, 0.55, 0.52],
-                    ),
-                    _ => unreachable!(),
-                };
-                Some(TerrainConfig::Cratered(CrateredOptions {
-                    name: format!("{id} impact terrain"),
-                    radius_meters: body.radius_meters,
-                    max_height_meters: height,
-                    crater_count: count,
-                    crater_radius_radians: size,
-                    roughness,
-                    seed,
-                    low_color: low,
-                    high_color: high,
-                }))
-            }
+            "selene" => Some(TerrainConfig::Cratered(CrateredOptions {
+                name: format!("{id} impact terrain"),
+                radius_meters: body.radius_meters,
+                max_height_meters: 8500.0,
+                crater_count: 120,
+                crater_radius_radians: 0.16,
+                roughness: 0.5,
+                seed: 19,
+                low_color: [0.07, 0.075, 0.08],
+                high_color: [0.56, 0.55, 0.52],
+            })),
             "sol" => {
                 visual.surface = SurfaceRecipe::EmissiveStar {
                     color: [1.0, 0.65, 0.28],
@@ -743,7 +664,7 @@ pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
                 }
                 None
             }
-            _ => unreachable!(),
+            other => panic!("main game: no scenery for {other}"),
         };
         if id == "vesper" || id == "ares" {
             let venus = id == "vesper";
@@ -771,68 +692,13 @@ pub fn solar_scenery(planet: &LandingPlanet) -> WorldDescription {
                 visual.cloud_profile = Some(CloudProfile::vesper());
             }
         }
-        world.bodies.insert(
-            id.into(),
-            BodyDescription {
-                label: format!("{} · SOLAR SCENERY", body.name),
-                terrain,
-                air_density_scale: None,
-                air_datum_meters: 0.0,
-                sea_level_meters: None,
-                visual,
-            },
-        );
-    }
-    world
-}
-
-/// Authored fictional neighborhood at real stellar separations. This is not a transfer
-/// fixture: the ordinary launch craft starts landed with its ordinary resources and speed.
-pub fn stellar_neighborhood(planet: &LandingPlanet) -> WorldDescription {
-    let mut world = solar_scenery(planet);
-    let home = SystemPlacement {
-        id: "Sol".into(),
-        origin: void_multiscale::default_galaxy(),
-        velocity: DVec3::new(220_000.0, 0.0, 0.0),
-    };
-    let mut neighbor_spec = world.system.clone();
-    neighbor_spec.root.children.retain(|b| b.id == "aurelia");
-    let neighbors = [
-        ("Beryl", DVec3::new(4.24, 0.0, 0.0), 0.8),
-        ("Cygnus", DVec3::new(-3.0, 5.0, 1.0), 1.1),
-    ]
-    .into_iter()
-    .map(|(id, light_years, mass)| {
-        let mut system = neighbor_spec.clone();
-        system.name = format!("{id} fictional stellar system");
-        system.root.name = format!("{id} Star");
-        system.root.mass_kg *= mass;
-        NeighborSystem {
-            placement: SystemPlacement {
-                id: id.into(),
-                origin: home
-                    .origin
-                    .translate(light_years * void_multiscale::LIGHT_YEAR),
-                velocity: home.velocity + DVec3::new(0.0, 100.0 * mass, 0.0),
-            },
-            system,
-        }
-    })
-    .collect::<Vec<_>>();
-    let original = world.bodies.clone();
-    world.bodies = original
-        .iter()
-        .map(|(id, d)| (format!("Sol/{id}"), d.clone()))
-        .collect();
-    for neighbor in &neighbors {
-        for id in ["sol", "aurelia", "selene"] {
-            let mut description = original[id].clone();
-            description.label = format!("{} · {id}", neighbor.placement.id);
-            world
-                .bodies
-                .insert(format!("{}/{id}", neighbor.placement.id), description);
+        BodyDescription {
+            label: format!("{} · SOLAR SCENERY", body.name),
+            terrain,
+            air_density_scale: None,
+            air_datum_meters: 0.0,
+            sea_level_meters: None,
+            visual,
         }
     }
-    world.stellar = Some(StellarConfiguration { home, neighbors });
-    world
 }

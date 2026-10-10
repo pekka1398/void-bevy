@@ -62,26 +62,16 @@ fn module_ids_resources_and_states_are_validated_before_mutation() {
     );
 }
 #[test]
-fn legacy_conversion_is_explicit_and_preserves_authored_mass() {
+fn version_one_craft_is_rejected() {
     // The demo craft written in the version 1 schema: one `fuelKg` per part.
-    let craft = demo_craft();
-    let mut old = serde_json::to_value(&craft).unwrap();
+    let mut old = serde_json::to_value(demo_craft()).unwrap();
     old["version"] = 1.into();
     for p in old["parts"].as_array_mut().unwrap() {
-        let fuel: f64 = p["resources"]
-            .as_object()
-            .unwrap()
-            .values()
-            .map(|v| v.as_f64().unwrap())
-            .sum();
         let p = p.as_object_mut().unwrap();
         p.remove("resources");
-        p.insert("fuelKg".into(), fuel.into());
+        p.insert("fuelKg".into(), 1.0.into());
     }
     assert!(import_craft(&old.to_string()).is_err());
-    let c = migrate_legacy_craft(old).unwrap();
-    assert_eq!(c, craft);
-    assert_eq!(import_craft(&export_craft(&c).unwrap()).unwrap(), c);
 }
 #[test]
 fn catalog_rejects_duplicate_module_identity_and_bad_ratings() {

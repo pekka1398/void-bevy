@@ -249,10 +249,6 @@ impl FleetFlight {
             horizon,
         )
     }
-    /// A repeatable orbital fixture for checking scale, warp and multi-vessel flight without launch.
-    pub fn launch_orbital(&mut self, craft: &Craft, offset: DVec3) -> String {
-        self.launch_orbital_at(self.home, craft, offset)
-    }
     pub fn launch_orbital_at(&mut self, body_index: usize, craft: &Craft, offset: DVec3) -> String {
         let frame = PlanetFrame::new(&self.fleet.ephemeris, body_index);
         let body = &frame.body;

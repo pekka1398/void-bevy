@@ -1,12 +1,15 @@
 //! A single durable world exercises Full air, RCS, docking, save and split continuation.
 use glam::{DQuat, DVec3};
-use void_assembly::{ResourceId, rendezvous_pod};
+use void_assembly::ResourceId;
 use void_fleet_flight::session::{
     Action, FlightSession, InitialWorld, Outcome, Recording, world_mark,
 };
 use void_frames::State;
-use void_landing::{PlanetFrame, earth_size};
-use void_vessels::{AirDynamics, RcsControl, VesselMode, flat_site};
+use void_landing::PlanetFrame;
+use void_testkit::earth_size;
+use void_testkit::flat_site;
+use void_testkit::rendezvous_pod;
+use void_vessels::{AirDynamics, RcsControl, VesselMode};
 
 fn advance(s: &mut FlightSession, seconds: f64) {
     assert_eq!(

@@ -5,9 +5,9 @@ use void_fleet_flight::{
     session::{Action, FlightSession, InitialWorld, Outcome, world_mark},
 };
 use void_orbit::{ManeuverSpec, ReferenceMode};
-use void_vessels::flat_site;
+use void_testkit::flat_site;
 fn fixture() -> FlightSession {
-    let planet = void_landing::earth_size();
+    let planet = void_testkit::earth_size();
     let craft = demo_craft();
     let mut session = FlightSession::new(InitialWorld::new(
         &planet,
@@ -16,7 +16,11 @@ fn fixture() -> FlightSession {
         false,
     ))
     .with_recording();
-    let Outcome::Spawned(id) = session.execute(Action::LaunchOrbit {
+    let Outcome::Spawned(id) = session.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = session.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft,
         offset: DVec3::ZERO,
     }) else {

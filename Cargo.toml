@@ -30,6 +30,7 @@ void-aero = { path = "crates/aero" }
 void-environment = { path = "crates/environment" }
 void-modules = { path = "crates/modules" }
 void-multiscale = { path = "crates/multiscale" }
+void-testkit = { path = "crates/testkit" }
 
 # Bevy is slow unoptimised; our own crates stay quick to rebuild.
 [profile.dev]

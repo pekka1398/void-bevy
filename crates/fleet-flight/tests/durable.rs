@@ -4,11 +4,11 @@ use void_fleet_flight::session::{
     Action, FlightSession, InitialWorld, Recording, durable::Recovery, world_mark,
 };
 fn fixture() -> FlightSession {
-    let planet = void_landing::pebble();
+    let planet = void_testkit::pebble();
     FlightSession::new(InitialWorld::new(
         &planet,
         &void_assembly::demo_craft(),
-        void_vessels::flat_site(&planet),
+        void_testkit::flat_site(&planet),
         false,
     ))
     .with_recording()
@@ -166,11 +166,11 @@ fn reset_and_foreign_world_load_stay_in_the_same_stream_and_save_the_current_wor
         initial: Box::new(initial),
     });
     s.mark();
-    let planet = void_landing::moon_size();
+    let planet = void_testkit::moon_size();
     let foreign = FlightSession::new(InitialWorld::new(
         &planet,
         &void_assembly::demo_craft(),
-        void_vessels::flat_site(&planet),
+        void_testkit::flat_site(&planet),
         false,
     ))
     .with_recording();

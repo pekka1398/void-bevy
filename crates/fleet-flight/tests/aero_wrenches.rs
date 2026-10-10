@@ -3,8 +3,9 @@ use glam::{DQuat, DVec3};
 use void_assembly::fresh_craft;
 use void_fleet_flight::session::{Action, FlightSession, InitialWorld, Outcome, world_mark};
 use void_frames::State;
-use void_landing::{PlanetFrame, earth_size};
-use void_vessels::flat_site;
+use void_landing::PlanetFrame;
+use void_testkit::earth_size;
+use void_testkit::flat_site;
 fn advance(s: &mut FlightSession, seconds: f64) {
     assert_eq!(
         s.execute(Action::Advance {

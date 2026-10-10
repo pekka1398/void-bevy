@@ -129,9 +129,9 @@ fn a_part_body_exposes_what_no_neighbour_covers() {
 
 #[test]
 fn a_vessel_feels_air_only_inside_an_atmosphere() {
-    let planet = void_landing::aurelia();
-    let (ephemeris, home) = void_landing::planet_ephemeris(&planet);
-    let environment = void_landing::planet_environment(&planet, &ephemeris, home, true);
+    let planet = void_testkit::aurelia();
+    let (ephemeris, home) = void_testkit::planet_ephemeris(&planet);
+    let environment = void_testkit::planet_environment(&planet, &ephemeris, home, true);
     assert!(has_atmosphere(&environment));
     let (graph, ids) = rocket();
     let air = vessel_air(&environment, &graph, &ids, DVec3::ZERO, DQuat::IDENTITY)
@@ -182,7 +182,7 @@ fn a_vessel_feels_air_only_inside_an_atmosphere() {
         DVec3::ZERO
     );
     // A world without air: no vessel air, vacuum everywhere.
-    let airless = void_landing::planet_environment(&planet, &ephemeris, home, false);
+    let airless = void_testkit::planet_environment(&planet, &ephemeris, home, false);
     assert!(!has_atmosphere(&airless));
     assert!(vessel_air(&airless, &graph, &ids, DVec3::ZERO, DQuat::IDENTITY).is_none());
     assert!(Conditions::at(&airless, &ephemeris, 0.0, low).air.is_none());
@@ -210,9 +210,9 @@ fn engines_reject_invalid_pressure_before_clamping_thrust() {
 fn vessel_air_samples_the_current_body_in_a_multi_atmosphere_world() {
     use std::sync::Arc;
     use void_environment::BodyEnvironment;
-    let planet = void_landing::aurelia();
-    let (ephemeris, home) = void_landing::planet_ephemeris(&planet);
-    let base = void_landing::planet_environment(&planet, &ephemeris, home, true);
+    let planet = void_testkit::aurelia();
+    let (ephemeris, home) = void_testkit::planet_ephemeris(&planet);
+    let base = void_testkit::planet_environment(&planet, &ephemeris, home, true);
     let other = (0..base.bodies().len()).find(|&b| b != home).unwrap();
     let environment = Arc::new(base.as_ref().clone().with(
         other,
@@ -257,9 +257,9 @@ fn vessel_air_samples_the_current_body_in_a_multi_atmosphere_world() {
 #[test]
 fn a_local_chute_feels_air_when_its_com_is_above_the_ceiling() {
     use void_assembly::{ModuleState, ParachutePhase, ParachuteState, PartPose, fresh_craft};
-    let p = void_landing::earth_size();
-    let (e, home) = void_landing::planet_ephemeris(&p);
-    let env = void_landing::planet_environment(&p, &e, home, true);
+    let p = void_testkit::earth_size();
+    let (e, home) = void_testkit::planet_ephemeris(&p);
+    let env = void_testkit::planet_environment(&p, &e, home, true);
     let mut c = fresh_craft();
     c.parts[0].definition_id = "parachute-pod".into();
     let mut g = PartGraph::new();
@@ -344,9 +344,9 @@ fn a_local_chute_feels_air_when_its_com_is_above_the_ceiling() {
 
 #[test]
 fn scene_air_at_rest_is_exactly_zero_at_a_distant_planet() {
-    let planet = void_landing::aurelia();
-    let (mut ephemeris, home) = void_landing::planet_ephemeris(&planet);
-    let environment = void_landing::planet_environment(&planet, &ephemeris, home, true);
+    let planet = void_testkit::aurelia();
+    let (mut ephemeris, home) = void_testkit::planet_ephemeris(&planet);
+    let environment = void_testkit::planet_environment(&planet, &ephemeris, home, true);
     let (graph, ids) = rocket();
     let frames = environment.frames();
     let surface = frames.surface[home];

@@ -1,13 +1,14 @@
 use glam::DVec3;
-use void_assembly::{ModuleState, VehicleControl, rover};
+use void_assembly::{ModuleState, VehicleControl};
 use void_fleet_flight::{
     FleetFlight,
     checkpoint::FlightCheckpoint,
     session::{Action, FlightSession, InitialWorld, world_mark},
 };
-use void_vessels::flat_site;
+use void_testkit::flat_site;
+use void_testkit::rover;
 fn make() -> FlightSession {
-    let planet = void_landing::earth_size();
+    let planet = void_testkit::earth_size();
     FlightSession::new(InitialWorld::new(
         &planet,
         &rover(),
@@ -91,7 +92,7 @@ fn fixture_uses_same_assembly_graph_mass_and_control_rejection() {
     let compiled = void_assembly::compile(&craft).unwrap();
     assert_eq!(compiled.parts.len(), 5);
     assert!((compiled.summary(None).mass_kg - 360.0).abs() < 1e-12);
-    let p = void_landing::pebble();
+    let p = void_testkit::pebble();
     let mut sim = FleetFlight::new(
         p.clone(),
         &void_assembly::demo_craft(),
@@ -190,7 +191,7 @@ fn passive_suspension_can_sleep_and_driver_input_wakes_without_sinking() {
 
 #[test]
 fn four_tires_park_on_real_inclined_terrain_and_roll_when_brake_released() {
-    let planet = void_landing::earth_size();
+    let planet = void_testkit::earth_size();
     let terrain = &planet.terrain;
     let site = (0..160)
         .find_map(|i| {
@@ -267,7 +268,7 @@ fn carrier_and_rotor_momentum(sim: &FleetFlight, id: &str) -> DVec3 {
 #[test]
 fn airborne_motor_steering_braking_and_gyro_conserve_total_momentum_and_continue_saved_journal() {
     use void_fleet_flight::session::Outcome;
-    let planet = void_landing::pebble();
+    let planet = void_testkit::pebble();
     let mut session = FlightSession::new(InitialWorld::new(
         &planet,
         &rover(),
@@ -276,7 +277,11 @@ fn airborne_motor_steering_braking_and_gyro_conserve_total_momentum_and_continue
     ))
     .with_recording();
     advance(&mut session, 5.0);
-    let Outcome::Spawned(id) = session.execute(Action::LaunchOrbit {
+    let Outcome::Spawned(id) = session.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = session.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft: rover(),
         offset: DVec3::ZERO,
     }) else {

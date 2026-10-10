@@ -5,9 +5,9 @@ use void_fleet_flight::{
     presentation::{Toggle, ViewCommand},
     session::{Action, FlightSession, InitialWorld, Playback, world_mark},
 };
-use void_vessels::flat_site;
+use void_testkit::flat_site;
 fn session() -> FlightSession {
-    let planet = void_landing::earth_size();
+    let planet = void_testkit::earth_size();
     FlightSession::new(InitialWorld::new(
         &planet,
         &demo_craft(),
@@ -144,7 +144,11 @@ fn switching_vessel_resets_body_focus_and_plain_camera_replays() {
     view(&mut s, ViewCommand::Zoom { pixels: 40.0 });
     assert_eq!(s.sim().presentation.yaw, 0.4 - 20.0 * 0.006);
     assert_eq!(s.sim().presentation.pitch, 0.25 - 4.0 * 0.006);
-    let ship = s.execute(Action::LaunchOrbit {
+    let ship = s.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = s.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft: demo_craft(),
         offset: DVec3::ZERO,
     });
@@ -250,7 +254,7 @@ fn plain_camera_can_focus_every_body_and_return_to_the_ship() {
 #[test]
 fn camera_tracks_the_upper_command_part_before_and_after_staging() {
     for main_camera in [true, false] {
-        let planet = void_landing::earth_size();
+        let planet = void_testkit::earth_size();
         let craft = void_assembly::flight_rocket();
         let mut s = FlightSession::new(InitialWorld::new(
             &planet,
@@ -295,7 +299,7 @@ fn camera_tracks_the_upper_command_part_before_and_after_staging() {
 #[test]
 fn all_plot_frames_survive_checkpoint_and_journal_without_changing_physics() {
     use void_orbit::FrameSpec;
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let mut original = FlightSession::new(InitialWorld::new(
         &planet,
         &demo_craft(),

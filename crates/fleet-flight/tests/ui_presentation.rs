@@ -1,20 +1,21 @@
+mod common;
+use common::solar_world;
 use void_fleet_flight::{
     checkpoint::FlightCheckpoint,
     presentation::{Presentation, Toggle, ViewCommand},
     session::{Action, FlightSession, InitialWorld, world_mark},
-    world::solar_scenery,
 };
 
 #[test]
 fn visual_controls_preserve_physics_and_roundtrip_checkpoint_and_journal() {
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let mut initial = InitialWorld::new(
         &planet,
-        &void_vessels::pod_tank("UI witness"),
-        void_vessels::flat_site(&planet),
+        &void_testkit::pod_tank("UI witness"),
+        void_testkit::flat_site(&planet),
         true,
     );
-    initial.world = solar_scenery(&planet);
+    initial.world = solar_world(&planet);
     let mut session = FlightSession::new(initial.clone()).with_recording();
     let physical_mark = |sim: &void_fleet_flight::FleetFlight| {
         let mut mark = world_mark(sim);

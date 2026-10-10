@@ -4,16 +4,20 @@ use void_fleet_flight::session::{Action, FlightSession, InitialWorld};
 
 #[test]
 fn main_game_verifies_recordings_without_a_window() {
-    let planet = void_landing::pebble();
+    let planet = void_testkit::pebble();
     let craft = void_assembly::demo_craft();
     let mut session = FlightSession::new(InitialWorld::new(
         &planet,
         &craft,
-        void_vessels::flat_site(&planet),
+        void_testkit::flat_site(&planet),
         false,
     ))
     .with_recording();
-    session.execute(Action::LaunchOrbit {
+    session.execute(Action::LaunchOrbitAt {
+        body: {
+            let sim = session.sim();
+            sim.fleet.ephemeris.bodies()[sim.home].id.clone()
+        },
         craft,
         offset: glam::DVec3::ZERO,
     });
@@ -42,12 +46,12 @@ fn main_game_verifies_recordings_without_a_window() {
 
 #[test]
 fn recovery_is_an_explicit_no_window_command_and_retains_uncommitted_input() {
-    let planet = void_landing::pebble();
+    let planet = void_testkit::pebble();
     let craft = void_assembly::demo_craft();
     let mut session = FlightSession::new(InitialWorld::new(
         &planet,
         &craft,
-        void_vessels::flat_site(&planet),
+        void_testkit::flat_site(&planet),
         false,
     ))
     .with_recording();

@@ -3,8 +3,9 @@ use common::{Setup, scene};
 use glam::DVec3;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use void_frames::State;
-use void_landing::{ContactFrame, ContactWorld, ContactWorldOptions, pebble};
+use void_landing::{ContactFrame, ContactWorld, ContactWorldOptions};
 use void_orbit::{AdvanceOutcome, PropagationRun, VesselPropagator, VesselState};
+use void_testkit::pebble;
 use void_vessels::FreeFallFrame;
 
 #[test]

@@ -1,13 +1,15 @@
 //! Trial convenience loads must name the common owner frame, not an ephemeral environment tree.
+mod common;
+use common::stellar_neighborhood;
 use glam::DVec3;
-use void_fleet_flight::{session::InitialWorld, world::stellar_neighborhood};
+use void_fleet_flight::session::InitialWorld;
 use void_frames::State;
 #[test]
 fn translated_air_load_requires_and_preserves_a_registered_common_frame() {
-    let planet = void_landing::aurelia();
+    let planet = void_testkit::aurelia();
     let mut craft = void_assembly::fresh_craft();
     craft.parts[0].definition_id = "aero-stabilizer-pod".into();
-    let mut initial = InitialWorld::new(&planet, &craft, void_vessels::flat_site(&planet), true);
+    let mut initial = InitialWorld::new(&planet, &craft, void_testkit::flat_site(&planet), true);
     initial.world = stellar_neighborhood(&planet);
     initial.launch_body = "Sol/aurelia".into();
     let mut sim = initial.build();

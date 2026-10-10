@@ -15,4 +15,5 @@ void-frames.workspace = true
 void-orbit.workspace = true
 
 [dev-dependencies]
+void-testkit.workspace = true
 void-landing.workspace = true

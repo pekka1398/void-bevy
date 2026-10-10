@@ -5,11 +5,12 @@ use void_fleet_flight::{
     checkpoint::FlightCheckpoint,
     session::{InitialWorld, world_mark},
 };
-use void_landing::earth_size;
 use void_orbit::{
     AttitudeLaw, Control, PropagationRun, ThrustControl, VesselPropagator, VesselState,
 };
-use void_vessels::{GuidanceStatus, VesselControl, VesselMode, flat_site};
+use void_testkit::earth_size;
+use void_testkit::flat_site;
+use void_vessels::{GuidanceStatus, VesselControl, VesselMode};
 
 fn fixture() -> (FleetFlight, InitialWorld, String) {
     let planet = earth_size();
@@ -18,7 +19,7 @@ fn fixture() -> (FleetFlight, InitialWorld, String) {
     let initial = InitialWorld::new(&planet, &craft, site, false);
     let mut sim = FleetFlight::new(planet, &craft, site, false);
     // Keep the ground craft alive: its fixed-step scene must not round the orbital burn times.
-    let id = sim.launch_orbital(&craft, DVec3::ZERO);
+    let id = sim.launch_orbital_at(sim.home, &craft, DVec3::ZERO);
     sim.select(&id);
     sim.stage();
     assert_eq!(sim.mode(), VesselMode::Orbit);

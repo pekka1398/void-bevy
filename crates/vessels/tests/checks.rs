@@ -1,6 +1,7 @@
 //! The fleet's checks: ownership hand-offs, contact, separation and joining, sleep and rails.
 
 use void_frames::State;
+use void_testkit::*;
 
 use glam::{DQuat, DVec3};
 use std::collections::HashMap;
@@ -8,11 +9,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use void_assembly::{Craft, demo_craft};
 use void_frames::{BodyId, BodyStates};
-use void_landing::{
-    ContactWorldOptions, LandingPlanet, PlanetFrame, aurelia, level_for_tile_size, pebble,
-    planet_ephemeris,
-};
+use void_landing::{ContactWorldOptions, LandingPlanet, PlanetFrame, level_for_tile_size};
 use void_orbit::{AdvanceOutcome, EphemerisSource, PropagationRun, VesselPropagator, VesselState};
+use void_testkit::{aurelia, pebble, planet_ephemeris};
 use void_vessels::*;
 
 fn check(name: &str, ok: bool, detail: String) {
